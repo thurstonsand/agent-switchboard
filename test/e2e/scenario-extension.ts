@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, Type } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -8,6 +8,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 //   tool <text>       run `echo <text>` through bash, then answer "tool done <text>"
 //   hold <name>       signal <name>.entered, wait for <name>.release, answer "released <name>"
 //   attention <name>  like hold, inside a glimpse attention span
+// Raw terminal input is appended to input.log as JSON lines; `/e2e-bg` asks the terminal for its background (OSC 11).
 // Signals live in $HOME/e2e-signals because HOME survives the sessions server's scrubbed environment.
 
 const signals = join(process.env.HOME ?? "", "e2e-signals");
@@ -49,6 +50,7 @@ export default function (pi: ExtensionAPI) {
 		const arg = rest.join(" ");
 		switch (verb) {
 			case "reply":
+				signal(`replied.${arg}`);
 				return fauxAssistantMessage(arg);
 			case "tool":
 				return fauxAssistantMessage(fauxToolCall("bash", { command: `echo ${arg}` }), { stopReason: "toolUse" });
@@ -80,6 +82,22 @@ export default function (pi: ExtensionAPI) {
 				pi.events.emit("glimpseui:attention:resolve", { attentionId });
 			}
 			return { content: [{ type: "text", text: `attention ${params.name} released` }], details: undefined };
+		},
+	});
+
+	pi.on("session_start", (_event, ctx) => {
+		mkdirSync(signals, { recursive: true });
+		appendFileSync(join(signals, "session_start"), "started\n");
+		ctx.ui.onTerminalInput((data) => {
+			appendFileSync(join(signals, "input.log"), `${JSON.stringify(data)}\n`);
+			return undefined;
+		});
+	});
+
+	pi.registerCommand("e2e-bg", {
+		description: "Query the terminal background",
+		handler: async () => {
+			process.stdout.write("\x1b]11;?\x1b\\");
 		},
 	});
 }

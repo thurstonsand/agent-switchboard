@@ -1,4 +1,5 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { Database } from "bun:sqlite";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -22,6 +23,22 @@ const tools = (() => {
 	return { node, tmux, piCli };
 })();
 
+export type LsEntry = {
+	id: string;
+	title: string | null;
+	project: string;
+	cwd: string;
+	branch: string | null;
+	open: boolean;
+	live: boolean;
+	activity: "idle" | "working" | "blocked";
+	unseen: boolean;
+	interrupted: boolean;
+	inactive: boolean;
+	activityAt: number;
+	archivedAt: number | null;
+};
+
 export type Scenario = {
 	name: string;
 	root: string;
@@ -33,6 +50,17 @@ export type Scenario = {
 	/** A plain directory to run sessions in. */
 	project: string;
 	tmux: (server: string, ...args: string[]) => string;
+	/** The real swb binary under this scenario's environment, run in the project dir; throws on a non-zero exit. */
+	swb: (...args: string[]) => string;
+	swbTry: (...args: string[]) => { code: number; out: string; err: string };
+	ls: () => LsEntry[];
+	/** A fresh read connection to the scenario's db; the caller closes it. */
+	db: () => Database;
+	query: <T>(sql: string, ...params: (string | number | null)[]) => T[];
+	screen: () => string;
+	keys: (...keys: string[]) => void;
+	signal: (name: string) => string;
+	servers: { sessions: string; ui: string; drive: string };
 	save: (file: string, content: string) => void;
 	cleanup: () => Promise<void>;
 };
@@ -49,7 +77,7 @@ export function scenario(phase: string, name: string): Scenario {
 	const agentDir = join(home, ".pi/agent");
 	for (const dir of [home, bin, project, agentDir, join(root, "tmux"), artifacts]) mkdirSync(dir, { recursive: true });
 
-	writeFileSync(join(bin, "pi"), `#!/bin/sh\nexec ${tools.node} ${tools.piCli} "$@"\n`);
+	writeFileSync(join(bin, "pi"), `#!/bin/sh\nPI_OFFLINE=1 exec ${tools.node} ${tools.piCli} "$@"\n`);
 	chmodSync(join(bin, "pi"), 0o755);
 	symlinkSync(tools.tmux, join(bin, "tmux"));
 	symlinkSync(join(repo, "dist/swb"), join(bin, "swb"));
@@ -58,6 +86,10 @@ export function scenario(phase: string, name: string): Scenario {
 	const profile = `export PATH=${path}\n`;
 	writeFileSync(join(home, ".zshenv"), profile);
 	writeFileSync(join(home, ".bash_profile"), profile);
+	writeFileSync(join(home, ".profile"), profile);
+	// pi 1.0.4 marks a freshly registered native provider usable at startup only if it has a stored
+	// credential; otherwise initial model selection races an async auth check and intermittently finds no model.
+	writeFileSync(join(agentDir, "auth.json"), JSON.stringify({ faux: { type: "api_key", key: "faux" } }));
 	writeFileSync(
 		join(agentDir, "settings.json"),
 		JSON.stringify({
@@ -88,6 +120,27 @@ export function scenario(phase: string, name: string): Scenario {
 		servers.add(`${env.TMUX_TMPDIR}\0${server}`);
 		return run([tools.tmux, "-L", server, ...args], env);
 	};
+	const named = { sessions: `swb-${instance}`, ui: `swb-ui-${instance}`, drive: `swb-drive-${instance}` };
+	for (const server of Object.values(named)) servers.add(`${env.TMUX_TMPDIR}\0${server}`);
+	const swbTry = (...args: string[]) => {
+		const result = Bun.spawnSync([join(bin, "swb"), ...args], { env, cwd: project, stdout: "pipe", stderr: "pipe" });
+		return { code: result.exitCode, out: result.stdout.toString(), err: result.stderr.toString() };
+	};
+	const swb = (...args: string[]) => {
+		const result = swbTry(...args);
+		if (result.code !== 0) throw new Error(`swb ${args.join(" ")} exited ${result.code}: ${result.err}`);
+		return result.out;
+	};
+	const dbFile = join(home, ".local/state/agent-switchboard/swb.db");
+	const db = () => new Database(dbFile, { readwrite: true, create: false });
+	const query = <T>(sql: string, ...params: (string | number | null)[]): T[] => {
+		const conn = db();
+		try {
+			return conn.prepare(sql).all(...params) as T[];
+		} finally {
+			conn.close();
+		}
+	};
 
 	return {
 		name,
@@ -99,6 +152,20 @@ export function scenario(phase: string, name: string): Scenario {
 		env,
 		project,
 		tmux,
+		swb,
+		swbTry,
+		ls: () => JSON.parse(swb("ls", "--json")) as LsEntry[],
+		db,
+		query,
+		screen: () => swb("drive", "capture"),
+		keys: (...keys) => {
+			swb("drive", "keys", ...keys);
+		},
+		signal: (name) => {
+			const file = join(home, "e2e-signals", name);
+			return existsSync(file) ? readFileSync(file, "utf8") : "";
+		},
+		servers: named,
 		save: (file, content) => writeFileSync(join(artifacts, file), content),
 		cleanup: async () => {
 			const pids: number[] = [];
@@ -151,4 +218,4 @@ export function release(s: Scenario, name: string): void {
 	writeFileSync(join(s.home, "e2e-signals", `${name}.release`), "");
 }
 
-export const budgets = { piReady: 15_000, settle: 10_000, deckReady: 5_000 };
+export const budgets = { piReady: 30_000, settle: 10_000, deckReady: 5_000 };
