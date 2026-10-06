@@ -1,0 +1,14 @@
+{
+	"name": "agent-switchboard",
+	"private": true,
+	"type": "module",
+	"workspaces": [
+		"packages/*"
+	],
+	"devDependencies": {
+		"@earendil-works/pi-ai": "1.0.4",
+		"@earendil-works/pi-coding-agent": "1.0.4",
+		"@types/bun": "1.4.2",
+		"typescript": "7.0.2"
+	}
+}

@@ -1,0 +1,10 @@
+{
+	"name": "@swb/cli",
+	"private": true,
+	"type": "module",
+	"dependencies": {
+		"@earendil-works/pi-tui": "1.0.4",
+		"@swb/shared": "workspace:*",
+		"smol-toml": "1.9.0"
+	}
+}

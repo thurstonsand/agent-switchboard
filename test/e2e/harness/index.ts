@@ -1,0 +1,154 @@
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+
+export const repo = resolve(import.meta.dir, "../../..");
+export const PI_VERSION = "1.0.4";
+
+function run(argv: string[], env?: Record<string, string>): string {
+	const result = Bun.spawnSync(argv, { env, stdout: "pipe", stderr: "pipe" });
+	if (result.exitCode !== 0) throw new Error(`${argv.join(" ")} exited ${result.exitCode}: ${result.stderr.toString()}`);
+	return result.stdout.toString().trim();
+}
+
+// Resolved once, before any scenario swaps HOME: the mise shims stop working under a disposable HOME.
+const tools = (() => {
+	const node = run(["mise", "which", "node"]);
+	const tmux = run(["mise", "which", "tmux"]);
+	const piCli =
+		process.env.SWB_E2E_PI_CLI ?? join(run(["mise", "x", "--", "npm", "root", "-g"]), "@earendil-works/pi-coding-agent/dist/bundle/cli.js");
+	const version = run([node, piCli, "--version"]);
+	if (version !== PI_VERSION) throw new Error(`e2e needs pi ${PI_VERSION}, found ${version} at ${piCli}`);
+	return { node, tmux, piCli };
+})();
+
+export type Scenario = {
+	name: string;
+	root: string;
+	home: string;
+	bin: string;
+	instance: string;
+	artifacts: string;
+	env: Record<string, string>;
+	/** A plain directory to run sessions in. */
+	project: string;
+	tmux: (server: string, ...args: string[]) => string;
+	save: (file: string, content: string) => void;
+	cleanup: () => Promise<void>;
+};
+
+const servers = new Set<string>();
+
+export function scenario(phase: string, name: string): Scenario {
+	const root = mkdtempSync(join(tmpdir(), "swb-e2e-"));
+	const home = join(root, "home");
+	const bin = join(root, "bin");
+	const project = join(root, "project");
+	const instance = `e2e-${root.slice(-6).toLowerCase()}`;
+	const artifacts = join(repo, "test/e2e/artifacts", phase, name);
+	const agentDir = join(home, ".pi/agent");
+	for (const dir of [home, bin, project, agentDir, join(root, "tmux"), artifacts]) mkdirSync(dir, { recursive: true });
+
+	writeFileSync(join(bin, "pi"), `#!/bin/sh\nexec ${tools.node} ${tools.piCli} "$@"\n`);
+	chmodSync(join(bin, "pi"), 0o755);
+	symlinkSync(tools.tmux, join(bin, "tmux"));
+	symlinkSync(join(repo, "dist/swb"), join(bin, "swb"));
+
+	const path = `${bin}:/usr/local/bin:/usr/bin:/bin`;
+	const profile = `export PATH=${path}\n`;
+	writeFileSync(join(home, ".zshenv"), profile);
+	writeFileSync(join(home, ".bash_profile"), profile);
+	writeFileSync(
+		join(agentDir, "settings.json"),
+		JSON.stringify({
+			packages: [join(repo, "dist/pi")],
+			extensions: [join(repo, "test/e2e/scenario-extension.ts")],
+			defaultProvider: "faux",
+			defaultModel: "faux-1",
+			quietStartup: true,
+			tuiMode: "regular",
+		}),
+	);
+
+	const env: Record<string, string> = {
+		PATH: path,
+		HOME: home,
+		SHELL: "/bin/sh",
+		TERM: "xterm-256color",
+		LANG: "C.UTF-8",
+		XDG_CONFIG_HOME: join(home, ".config"),
+		XDG_STATE_HOME: join(home, ".local/state"),
+		XDG_CACHE_HOME: join(home, ".cache"),
+		PI_CODING_AGENT_DIR: agentDir,
+		TMUX_TMPDIR: join(root, "tmux"),
+		SWB_INSTANCE: instance,
+	};
+
+	const tmux = (server: string, ...args: string[]) => {
+		servers.add(`${env.TMUX_TMPDIR}\0${server}`);
+		return run([tools.tmux, "-L", server, ...args], env);
+	};
+
+	return {
+		name,
+		root,
+		home,
+		bin,
+		instance,
+		artifacts,
+		env,
+		project,
+		tmux,
+		save: (file, content) => writeFileSync(join(artifacts, file), content),
+		cleanup: async () => {
+			const pids: number[] = [];
+			for (const key of [...servers]) {
+				const [tmpdir, server] = key.split("\0") as [string, string];
+				if (tmpdir !== env.TMUX_TMPDIR) continue;
+				servers.delete(key);
+				const probe = Bun.spawnSync([tools.tmux, "-L", server, "display", "-p", "#{pid}"], { env });
+				if (probe.exitCode !== 0) continue;
+				pids.push(Number(probe.stdout.toString().trim()));
+				const panes = Bun.spawnSync([tools.tmux, "-L", server, "list-panes", "-a", "-F", "#{pane_pid}"], { env });
+				pids.push(...panes.stdout.toString().trim().split("\n").filter(Boolean).map(Number));
+				Bun.spawnSync([tools.tmux, "-L", server, "kill-server"], { env });
+			}
+			await until(() => pids.every((pid) => !alive(pid)), 5000, `pids ${pids.join(",")} to die`);
+			rmSync(root, { recursive: true, force: true });
+		},
+	};
+}
+
+export function alive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+export async function until<T>(
+	probe: () => T | undefined | false | Promise<T | undefined | false>,
+	timeoutMs: number,
+	what: string,
+): Promise<T> {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		const value = await probe();
+		if (value) return value;
+		if (Date.now() > deadline) throw new Error(`timed out after ${timeoutMs} ms waiting for ${what}`);
+		await Bun.sleep(50);
+	}
+}
+
+export function capture(s: Scenario, server: string, target: string): string {
+	return s.tmux(server, "capture-pane", "-p", "-J", "-t", target);
+}
+
+export function release(s: Scenario, name: string): void {
+	mkdirSync(join(s.home, "e2e-signals"), { recursive: true });
+	writeFileSync(join(s.home, "e2e-signals", `${name}.release`), "");
+}
+
+export const budgets = { piReady: 15_000, settle: 10_000, deckReady: 5_000 };
