@@ -1,0 +1,30 @@
+ swb                    10 open │
+────────────────────────────────│
+ ▾ agent-switchboard            │
+▌  ○ Recorder footer sta… ⎇ now │
+   ◐ Deck mock round 2       1m │
+   ○ Schema v1 grilling      2h │
+ ▾ ansiblonomicon               │
+   ○ Fix fnox host routi…   13m │
+   ○ Retire uv.lock mask     5h │  Idle
+   ○ Pod042 herdr unit       7h │
+ ▾ harbor-deploy                │  Recorder footer status
+   ○ Flaky integration t…   now │  ~mock/agent-switchboard/.worktrees/recorder
+   ○ Canary rollback flag    2d │
+ ▾ pi-sessions                  │  you  what does the footer show when the db is locked? and in
+   ○ Search ranking rela…   41m │       the status line?
+   ○ Subagent report rac…    3h │
+ ▸ Inactive (1)                 │  pi   Done. I read the three files that matter and left the diff
+ ▸ Archived (3)                 │       unstaged for you to review: +24 −9.
+                                │
+                                │  w wake · ⏎ focus
+                                │
+                                │
+────────────────────────────────│
+ Recorder footer status         │
+ ○ idle · not running           │
+ ~mock/agent-switchboard/.workt…│
+ ▌ on view: summary             │
+                                │
+ ⏎ focus w wake a archive ? keys│
+ PROTO hover:lazy (H) · switch …│

@@ -1,0 +1,32 @@
+ [1mswb[0m [90m›[39m Archived                                                                                                        [7m unarchived b5792841
+[0m[90m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m   Migrate UniFi provider fork       [90mansiblonomicon   [39m   3h [90m│[39m [1mfnox activation receipt[0m
+[48;5;237m ▸ fnox activation receipt           [90mansiblonomicon   [39m   2d[49m [90m│[39m [2m~/c/p/ansiblonomicon[0m
+   Fix flaky canary test             [90mharbor-deploy    [39m   4d [90m│[39m [90mmain[39m [90m·[39m pi [90m·[39m sol [90m·[39m 3d old
+   Schema ticket grilling            [90magent-switchboard[39m   5d [90m│[39m [90m◌[39m [90mdormant[39m [90m·[39m resumes on open [90m·[39m no viewer
+   Mise bootstrap on a clean HOME    [90mansiblonomicon   [39m   7d [90m│[39m [33marchived 2d ago · unarchives on first turn[39m
+   Child bootstrap detection         [90mpi-sessions      [39m   9d [90m│[39m [90m0bec34f2 · @session:019a6513-aac4-7547-d8d2-958d0bec34f2[39m
+   Values schema lint in CI          [90mharbor-deploy    [39m  11d [90m│[39m [90m────────────────────────────────────────[39m
+   Ghostty AppleScript tab probe     [90magent-switchboard[39m  13d [90m│[39m [1myou[0m [90m3d[39m
+   Pod042 restic schedule            [90mansiblonomicon   [39m  15d [90m│[39m print a receipt after activation
+                                                            [90m│[39m [36magent[39m [90m3d
+[39m                                                            [90m│[39m Added. It lists every exported key without values.
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+[90m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m [1m⏎[0m [2mopen (unarchives on first turn)[0m  [1mU[0m [2munarchive[0m  [1mesc[0m [2mback[0m  [1m/[0m [2mfilter[0m  [1m?[0m [2mkeys[0m
+[30m[45m PROTOTYPE  1/4 adaptive A↔C→C  ·  140 cols, C≥110  ·  tick off  ·  last [36m◐[39m→[32m●[39m Roster TUI prototype

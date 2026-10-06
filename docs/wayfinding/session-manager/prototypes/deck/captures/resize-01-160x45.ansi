@@ -1,0 +1,45 @@
+ [1mswb[0m                   [90m10 open · 3 archived [36m│[39m
+[90m────────────────────────────────────────────[36m│[39m
+ ▾ [1magent-switchboard[0m                        [36m│[39m
+[48;2;211;207;183m▌  [90m○[39m Recorder footer status           [35m⎇[39m [90mnow[39m [36m[49m│[39m
+   [36m◐[39m Deck mock round 2[90m                   1m[39m [36m│[39m
+   [90m○[39m Schema v1 grilling[90m                  2h[39m [36m│[39m
+ ▾ [1mansiblonomicon[0m                           [36m│[39m
+   [90m○[39m Fix fnox host routing              [90m13m[39m [36m│[39m
+   [90m○[39m Retire uv.lock mask[90m                 5h[39m [36m│[39m
+   ○ Pod042 herdr unit[90m                   7h[39m [36m│[39m
+ ▾ [1mharbor-deploy[0m                            [36m│[39m
+   ○ Flaky integration test in eu-we…   [90mnow[39m [36m│[39m
+   ○ Canary rollback flag[90m                2d[39m [36m│[39m
+ ▾ [1mpi-sessions[0m                              [36m│[39m
+   [90m○[39m Search ranking relaxation for f…   [90m41m[39m [36m│[39m
+   [90m○[39m Subagent report race when the p…[90m    3h[39m [36m│[39m                       [1mIdle[0m
+ ▸ Inactive [90m(1)[39m                             [36m│[39m
+ ▸ Archived [90m(3)[39m                             [36m│[39m                       [1mRecorder footer status[0m
+                                            [36m│[39m                       [90m~mock/agent-switchboard/.worktrees/recorder[39m
+                                            [36m│[39m
+                                            [36m│[39m                       [90myou  [39mwhat does the footer show when the db is locked? and in the
+                                            [36m│[39m                            status line?
+                                            [36m│[39m
+                                            [90m│[39m                       [90mpi   [39mDone. I read the three files that matter and left the diff
+                                            [90m│[39m                            unstaged for you to review: +24 −9.
+                                            [90m│[39m
+                                            [90m│[39m                       [1mw[0m [2mwake[0m[90m · [1m[39m⏎[0m [2mfocus[0m
+                                            [90m│[39m
+                                            [90m│[39m
+                                            [90m│[39m
+                                            [90m│[39m
+                                            [90m│[39m
+                                            [90m│[39m
+                                            [90m│[39m
+                                            [90m│[39m
+                                            [90m│[39m
+                                            [90m│[39m
+[90m────────────────────────────────────────────│[39m
+ [1mRecorder footer status[0m                     [90m│[39m
+ [90m○[39m idle[90m · [39mnot running                       [90m│[39m
+ [90m~mock/agent-switchboard/.worktrees/recorde[39m…[90m│[39m
+ [90m▌[39m on view: summary                         [90m│[39m
+                                            [90m│[39m
+ [1m⏎[0m [2mfocus[0m [1mw[0m [2mwake[0m [1ma[0m [2marchive[0m [1m?[0m [2mkeys[0m            [90m│[39m
+[30m[45m PROTO hover:lazy (H) · switch 0.0ms · rend…[90m[49m│[39m

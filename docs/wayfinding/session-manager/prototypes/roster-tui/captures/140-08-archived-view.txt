@@ -1,0 +1,32 @@
+ swb › Archived                                                                                                                          10
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ▸ Migrate UniFi provider fork       ansiblonomicon      3h │ Migrate UniFi provider fork
+   Search ranking relaxation         pi-sessions         1d │ ~/c/p/ansiblonomicon
+   fnox activation receipt           ansiblonomicon      2d │ main · pi · opus · 8h old
+   Fix flaky canary test             harbor-deploy       4d │ ◌ dormant · resumes on open · no viewer
+   Schema ticket grilling            agent-switchboard   5d │ archived 3h ago · unarchives on first turn
+   Mise bootstrap on a clean HOME    ansiblonomicon      7d │ 216c25c7 · @session:019a97cd-aedc-735e-22a3-55f9216c25c7
+   Child bootstrap detection         pi-sessions         9d │ ────────────────────────────────────────
+   Values schema lint in CI          harbor-deploy      11d │ you 5h
+   Ghostty AppleScript tab probe     agent-switchboard  13d │ move to the upstream provider
+   Pod042 restic schedule            ansiblonomicon     15d │ agent 5h
+                                                            │ Migrated; the fork is no longer referenced.
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ⏎ open (unarchives on first turn)  U unarchive  esc back  / filter  ? keys
+ PROTOTYPE  1/4 adaptive A↔C→C  ·  140 cols, C≥110  ·  tick off  ·  last ◐→● Roster TUI prototype

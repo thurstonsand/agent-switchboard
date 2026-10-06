@@ -1,0 +1,24 @@
+ swb › Archived                                             unarchived b5792841
+────────────────────────────────────────────────────────────────────────────────
+   Migrate UniFi provider fork           ansiblonomicon                      3h
+ ▸ fnox activation receipt               ansiblonomicon                      2d
+   Fix flaky canary test                 harbor-deploy       ⎇ flaky         4d
+   Schema ticket grilling                agent-switchboard                   5d
+   Mise bootstrap on a clean HOME        ansiblonomicon                      7d
+   Child bootstrap detection             pi-sessions         ⎇ child-boot    9d
+   Values schema lint in CI              harbor-deploy                      11d
+   Ghostty AppleScript tab probe         agent-switchboard                  13d
+   Pod042 restic schedule                ansiblonomicon                     15d
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+ ⏎ open (unarchives on first turn)  U unarchive  esc back  / filter  ? keys
+ PROTOTYPE  1/4 adaptive A↔C→A  ·  80 cols, C≥110  ·  tick off  ·  last ◐→● Ros…

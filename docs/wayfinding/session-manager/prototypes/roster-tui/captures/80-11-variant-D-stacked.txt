@@ -1,0 +1,24 @@
+ swb                                          14 open · 3 inactive · 9 archived
+────────────────────────────────────────────────────────────────────────────────
+   ◐ Search ranking relaxation for fuzzy …   ⎇ fuzzy-rank  working        6m   ↑
+   ⚠ Subagent report race when the parent compacts mid-h…  interrupted    3h
+   ◌ Search ranking relaxation                             dormant        1d
+ ▾ harbor-deploy
+   ◆ Flaky integration test in eu-west   ⎇ flaky-eu        blocked       25m
+   ● Bump chart to 4.12 and regenerate th…   ⎇ chart-4.12  unseen         5h
+   ◌ Canary rollback flag                                  dormant        2d
+ ▾ Inactive (3)
+   ▾ pi-sessions
+   ▸ ○ Handoff prompt template   ⎇ handoff-v2              idle           4d   ↓
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ Handoff prompt template
+ ~/c/p/pi-sessions/.worktrees/handoff-v2
+ ⎇ handoff-v2 · pi · opus · 4d old
+ ○ idle · live in tmux · no viewer
+ 20c50b4c · @session:019a43cf-2c94-76e6-272e-e41c20c50b4c
+ ────────────────────────────────────────
+ agent 4d
+ Trimmed to 40 lines; the context block now comes first.
+────────────────────────────────────────────────────────────────────────────────
+ ⏎ open  a archive  u undo  y copy cmd  Y copy @session  / filter  ? keys
+ PROTOTYPE  4/4 D stacked  ·  80 cols, C≥110  ·  tick off  ·  last ◐→● Roster T…

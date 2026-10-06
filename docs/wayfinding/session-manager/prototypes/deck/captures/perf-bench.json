@@ -1,0 +1,24 @@
+{
+  "between": [
+    "Canary rollback flag",
+    "Flaky integration test in eu-west"
+  ],
+  "keyToStageRepaint": {
+    "n": 30,
+    "avgMs": 33.9,
+    "p50Ms": 34,
+    "maxMs": 42.7
+  },
+  "oneCapturePoll": {
+    "n": 20,
+    "avgMs": 11.8,
+    "p50Ms": 11.4,
+    "maxMs": 23.7
+  },
+  "tmuxProcessSpawn": {
+    "n": 20,
+    "avgMs": 11.5,
+    "p50Ms": 11.5,
+    "maxMs": 17.9
+  }
+}

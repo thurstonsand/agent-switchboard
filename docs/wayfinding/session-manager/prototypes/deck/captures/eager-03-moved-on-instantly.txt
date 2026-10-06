@@ -1,0 +1,40 @@
+ swb                 10 open · 3 archived │ pi v0.99.2 (mock)
+──────────────────────────────────────────│ escape interrupt · ctrl+c clear · ctrl+d exit · /quit · /long for a 30 s turn
+ ▾ agent-switchboard                      │
+   ◐ Deck mock round 2                now │
+   ○ Schema v1 grilling                2h │ fnox picks the wrong host on the work Mac, find out why
+   ⠦ Recorder footer status         ⎇  1d │
+ ▾ ansiblonomicon                         │
+▌  ○ Fix fnox host routing            12m │
+   ○ Retire uv.lock mask               5h │ $ fnox doctor --verbose
+   ⚠ Pod042 herdr unit                 7h │ host: personal (matched by hostname glob 'ML-*')
+ ▾ harbor-deploy                          │
+   ◆ Flaky integration test in eu-…   now │
+   ○ Canary rollback flag              2d │ Found it. The `ML-*` glob in `fnox.toml` matches the work Mac before the explicit work entry. I
+ ▾ pi-sessions                            │ moved the explicit entry first; `fnox doctor` now reports `host: work`.
+   ○ Search ranking relaxation for…   40m │
+   ○ Subagent report race when the…    3h │
+ ▸ Inactive (1)                           │
+ ▸ Archived (3)                           │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+──────────────────────────────────────────│
+ Fix fnox host routing                    │
+ ○ idle · live                            │
+ ~mock/ansiblonomicon                     │─────────────────────────────────────────────────────────────────────────────────────────────────
+ ▌ on view                                │
+                                          │─────────────────────────────────────────────────────────────────────────────────────────────────
+ ⏎ focus w wake a archive ? keys          │ ~mock/ansiblonomicon (main)
+ PROTO hover:eager (H) · switch 0.8ms · r…│ ↑17.1k ↓4.8k $0.12  ·  Fix fnox host routing  ·  claude-opus-5

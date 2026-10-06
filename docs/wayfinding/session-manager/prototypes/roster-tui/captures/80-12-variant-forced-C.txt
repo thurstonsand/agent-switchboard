@@ -1,0 +1,24 @@
+ swb                                          14 open · 3 inactive · 9 archived
+────────────────────────────────────────────────────────────────────────────────
+   ● Retire uv.lock mask     14m ↑ │ Handoff prompt template
+   ○ Ghostty quick termina…  40m ⧉ │ ~/c/p/pi-sessions/.worktrees/handoff-v2
+   ◌ Pod042 herdr unit        1d   │ ⎇ handoff-v2 · pi · opus · 4d old
+ ▾ pi-sessions                     │ ○ idle · live in tmux · no viewer
+   ◐ Search ranking relaxa…   6m   │ 20c50b4c · @session:019a43cf-2c94-76e6-272…
+   ⚠ Subagent report race …   3h   │ ────────────────────────────────────────
+   ◌ Search ranking relaxa…   1d   │ you 4d
+ ▾ harbor-deploy                   │ tighten the handoff prompt
+   ◆ Flaky integration tes…  25m   │ agent 4d
+   ● Bump chart to 4.12 an…   5h   │ Trimmed to 40 lines; the context block now
+   ◌ Canary rollback flag     2d   │ comes first.
+ ▾ Inactive (3)                    │
+   ▾ pi-sessions                   │
+   ▸ ○ Handoff prompt temp…   4d   │
+   ▾ ansiblonomicon                │
+     ◌ Tailscale ACL audit    5d   │
+   ▾ harbor-deploy                 │
+     ⚠ Region failover run…   9d   │
+ › Archived (9)                    │
+────────────────────────────────────────────────────────────────────────────────
+ ⏎ open  a archive  u undo  y copy cmd  Y copy @session  / filter  ? keys
+ PROTOTYPE  3/4 forced C  ·  80 cols, C≥110  ·  tick off  ·  last ◐→● Roster TU…

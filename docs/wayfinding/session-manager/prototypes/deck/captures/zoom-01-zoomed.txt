@@ -1,0 +1,40 @@
+ pi v0.99.2 (mock)
+ escape interrupt · ctrl+c clear · ctrl+d exit · /quit · /long for a 30 s turn
+
+
+ show a red footer when the recorder can't write
+
+
+
+ $ rg -n setStatus packages/pi/src
+ packages/pi/src/recorder.ts:88:  ctx.ui.setStatus("swb", status)
+
+
+ Done. A failed write sets `swb ✗ db locked` in pi's footer, and the next good write clears it.
+
+
+ what does the footer show when the db is locked?
+ and in the status line?
+
+
+
+ $ rg -n "what" src
+ src/main.ts:2:export function main(): void {
+
+
+ Done. I read the three files that matter and left the diff unstaged for you to review: +24 −9.
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ~mock/agent-switchboard/.worktrees/recorder (recorder)
+ ↑22.2k ↓6.6k $0.24  ·  Recorder footer status  ·  claude-opus-5

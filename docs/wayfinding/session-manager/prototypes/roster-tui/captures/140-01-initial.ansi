@@ -1,0 +1,32 @@
+ [1mswb[0m                                                                                                     [90m13 open · 3 inactive · 10 archived
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m ▾ [1mansiblonomicon[0m                                           [90m│[39m [1mFix fnox host routing[0m
+[48;5;237m ▸ [36m◐[39m Fix fnox host routing                           [90m now[39m  [49m [90m│[39m [2m~/c/p/ansiblonomicon[0m
+   [1m[33m◆[0m Plan sessions v2 TUI                            [90m  2m[39m [34m⧉[39m [90m│[39m [90mmain[39m [90m·[39m pi [90m·[39m opus [90m·[39m 3h old
+   [32m●[39m Retire uv.lock mask                             [90m 14m[39m   [90m│[39m [36m◐[39m [36mworking[39m [90m·[39m live in tmux [90m·[39m no viewer
+   ○ Ghostty quick terminal keybind for the dispatc… [90m 40m[39m [34m⧉[39m [90m│[39m [90m998a72e9 · @session:019a871d-b317-74a4-8f92-858c998a72e9[39m
+   [90m◌[39m Pod042 herdr unit                               [90m  1d[39m   [90m│[39m [90m────────────────────────────────────────[39m
+ ▾ [1magent-switchboard[0m                                        [90m│[39m [1myou[0m [90m2m[39m
+   [36m◐[39m Roster TUI prototype                            [90m  1m[39m [34m⧉[39m [90m│[39m fnox picks the wrong host on the work Mac, find out why
+   ○ Recorder footer status                          [90m  2h[39m   [90m│[39m [36magent[39m [90mnow[39m
+   [32m●[39m GhosttyKit viewer seam spike                    [90m  4d[39m   [90m│[39m Reading fnox's host resolution order…
+ ▾ [1mpi-sessions[0m                                              [90m│[39m
+   [36m◐[39m Search ranking relaxation for fuzzy titles      [90m  6m[39m   [90m│[39m
+   [31m⚠[39m Subagent report race when the parent compacts … [90m  3h[39m   [90m│[39m
+ ▾ [1mharbor-deploy[0m                                            [90m│[39m
+   [1m[33m◆[0m Flaky integration test in eu-west               [90m 25m[39m   [90m│[39m
+   [32m●[39m Bump chart to 4.12 and regenerate the values s… [90m  5h[39m   [90m│[39m
+   [90m◌[39m Canary rollback flag                            [90m  2d[39m   [90m│[39m
+ ▸ Inactive [90m(3)[39m                                             [90m│[39m
+ › Archived [90m(10)[39m                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+[90m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m [1m⏎[0m [2mopen[0m  [1ma[0m [2marchive[0m  [1mu[0m [2mundo[0m  [1my[0m [2mcopy cmd[0m  [1mY[0m [2mcopy @session[0m  [1m/[0m [2mfilter[0m  [1m?[0m [2mkeys[0m
+[30m[45m PROTOTYPE  1/4 adaptive A↔C→C  ·  140 cols, C≥110  ·  tick off  ·  v/V variant  ? keys

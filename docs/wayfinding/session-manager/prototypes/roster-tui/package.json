@@ -1,0 +1,11 @@
+{
+  "name": "swb-roster-tui-prototype",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run roster.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-tui": "1.0.0"
+  }
+}

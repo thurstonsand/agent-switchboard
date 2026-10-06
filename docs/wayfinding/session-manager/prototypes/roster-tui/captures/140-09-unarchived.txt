@@ -1,0 +1,32 @@
+ swb › Archived                                                                                                         unarchived b5792841
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Migrate UniFi provider fork       ansiblonomicon      3h │ fnox activation receipt
+ ▸ fnox activation receipt           ansiblonomicon      2d │ ~/c/p/ansiblonomicon
+   Fix flaky canary test             harbor-deploy       4d │ main · pi · sol · 3d old
+   Schema ticket grilling            agent-switchboard   5d │ ◌ dormant · resumes on open · no viewer
+   Mise bootstrap on a clean HOME    ansiblonomicon      7d │ archived 2d ago · unarchives on first turn
+   Child bootstrap detection         pi-sessions         9d │ 0bec34f2 · @session:019a6513-aac4-7547-d8d2-958d0bec34f2
+   Values schema lint in CI          harbor-deploy      11d │ ────────────────────────────────────────
+   Ghostty AppleScript tab probe     agent-switchboard  13d │ you 3d
+   Pod042 restic schedule            ansiblonomicon     15d │ print a receipt after activation
+                                                            │ agent 3d
+                                                            │ Added. It lists every exported key without values.
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ⏎ open (unarchives on first turn)  U unarchive  esc back  / filter  ? keys
+ PROTOTYPE  1/4 adaptive A↔C→C  ·  140 cols, C≥110  ·  tick off  ·  last ◐→● Roster TUI prototype

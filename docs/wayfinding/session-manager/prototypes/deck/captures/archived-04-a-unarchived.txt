@@ -1,0 +1,40 @@
+ swb                 11 open · 2 archived │
+──────────────────────────────────────────│
+ ▾ agent-switchboard                      │
+   ○ Recorder footer status         ⎇ now │
+   ◐ Deck mock round 2                now │
+   ○ Schema v1 grilling                2h │
+ ▾ ansiblonomicon                         │
+   ○ Fix fnox host routing            12m │
+   ○ Retire uv.lock mask               5h │
+   ○ Migrate UniFi provider fork       5h │
+   ⚠ Pod042 herdr unit                 7h │
+ ▾ harbor-deploy                          │
+   ◆ Flaky integration test in eu-…   now │
+   ○ Canary rollback flag              2d │              Archived
+ ▾ pi-sessions                            │
+   ○ Search ranking relaxation for…   40m │              Values schema lint in CI
+   ○ Subagent report race when the…    3h │              ~mock/harbor-deploy
+ ▸ Inactive (1)                           │              Archived 11d ago. A new prompt unarchives it.
+ ▾ Archived (2)                           │
+▌  ✓ Values schema lint in CI         11d │              you  lint values against the schema in CI
+   ✓ Ghostty AppleScript tab probe    12d │
+                                          │              pi   Added a lint job; it fails on unknown keys.
+                                          │
+                                          │              w wake · ⏎ focus · a unarchive
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+──────────────────────────────────────────│
+ Values schema lint in CI                 │
+ ○ idle · not running · archived          │
+ ~mock/harbor-deploy                      │
+ ▌ on view: summary                       │
+ unarchived “Migrate UniFi provider fork” │
+ ⏎ focus w wake a unarchive ? keys        │
+ PROTO hover:lazy (H) · switch 0.6ms · re…│

@@ -1,0 +1,3 @@
+node_modules/
+# Pins Artifactory tarball URLs; package.json already pins pi-tui exactly.
+bun.lock

@@ -1,0 +1,32 @@
+ [1mswb[0m                                                                                                      [90m14 open · 3 inactive · 9 archived
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m ▾ [1mansiblonomicon[0m                                           [90m│[39m [1magent-switchboard[0m
+   [32m●[39m Plan sessions v2 TUI                            [90m now[39m [34m⧉[39m [90m│[39m [2m~/code/personal/agent-switchboard[0m
+   [32m●[39m Fix fnox host routing                           [90m now[39m   [90m│[39m
+   [32m●[39m Retire uv.lock mask                             [90m 14m[39m   [90m│[39m [32m●[39m 3 [32munseen[39m
+   ○ Ghostty quick terminal keybind for the dispatc… [90m 40m[39m [34m⧉[39m [90m│[39m
+   [90m◌[39m Pod042 herdr unit                               [90m  1d[39m   [90m│[39m [2m⏎ collapse[0m
+[48;5;237m ▾ [1magent-switchboard[0m[48;5;237m                                       [49m [90m│[39m
+   [32m●[39m Recorder footer status                          [90m now[39m   [90m│[39m
+   [32m●[39m Roster TUI prototype                            [90m now[39m [34m⧉[39m [90m│[39m
+   [32m●[39m GhosttyKit viewer seam spike                    [90m  4d[39m   [90m│[39m
+ ▾ [1mpi-sessions[0m                                              [90m│[39m
+   [36m◐[39m Search ranking relaxation for fuzzy titles      [90m  6m[39m   [90m│[39m
+   [31m⚠[39m Subagent report race when the parent compacts … [90m  3h[39m   [90m│[39m
+   [90m◌[39m Search ranking relaxation                       [90m  1d[39m   [90m│[39m
+ ▾ [1mharbor-deploy[0m                                            [90m│[39m
+   [1m[33m◆[0m Flaky integration test in eu-west               [90m 25m[39m   [90m│[39m
+   [32m●[39m Bump chart to 4.12 and regenerate the values s… [90m  5h[39m   [90m│[39m
+   [90m◌[39m Canary rollback flag                            [90m  2d[39m   [90m│[39m
+ ▸ Inactive [90m(3)[39m                                             [90m│[39m
+ › Archived [90m(9)[39m                                             [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+[90m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m [1m⏎[0m [2mopen[0m  [1ma[0m [2marchive[0m  [1mu[0m [2mundo[0m  [1my[0m [2mcopy cmd[0m  [1mY[0m [2mcopy @session[0m  [1m/[0m [2mfilter[0m  [1m?[0m [2mkeys[0m
+[30m[45m PROTOTYPE  1/4 adaptive A↔C→C  ·  140 cols, C≥110  ·  tick on  ·  last [36m◐[39m→[32m●[39m Plan sessions v2 TUI

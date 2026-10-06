@@ -1,0 +1,24 @@
+ [1mswb[0m                                          [90m14 open · 3 i[7m[39m would open 5f5b6a27
+[0m[90m────────────────────────────────────────────────────────────────────────────────
+[39m ▾ [1magent-switchboard[0m               [90m│[39m [1mRecorder footer status[0m
+   [32m●[39m Roster TUI prototype   [90m now[39m [34m⧉[39m [90m│[39m [2m~/c/p/agent-switchboard/.worktrees/recorder
+[0m[48;5;237m ▸ ○ Recorder footer status [90m  2h[39m  [49m [90m│[39m [35m⎇ recorder[39m [90m·[39m pi [90m·[39m opus [90m·[39m 4h old
+   [32m●[39m GhosttyKit viewer sea… [90m  4d[39m   [90m│[39m ○ idle [90m·[39m live in tmux [90m·[39m no viewer
+ ▾ [1mansiblonomicon[0m                  [90m│[39m [90m5f5b6a27 · @session:019a944e-ad8b-7657-40f[39m…
+   [32m●[39m Fix fnox host routing  [90m now[39m   [90m│[39m [90m────────────────────────────────────────[39m
+   [1m[33m◆[0m Plan sessions v2 TUI   [90m  2m[39m [34m⧉[39m [90m│[39m [1myou[0m [90m2h[39m
+   [32m●[39m Retire uv.lock mask    [90m 14m[39m   [90m│[39m show a red footer when the recorder can't
+   ○ Ghostty quick termina… [90m 40m[39m [34m⧉[39m [90m│[39m write
+   [90m◌[39m Pod042 herdr unit      [90m  1d[39m   [90m│[39m [36magent[39m [90m2h[39m
+ ▾ [1mpi-sessions[0m                     [90m│[39m Done. A failed write sets `swb ✗ db locked`
+   [36m◐[39m Search ranking relaxa… [90m  6m[39m   [90m│[39m in pi's footer.
+   [31m⚠[39m Subagent report race … [90m  3h[39m   [90m│[39m
+   [90m◌[39m Search ranking relaxa… [90m  1d[39m   [90m│[39m
+ ▾ [1mharbor-deploy[0m                   [90m│[39m
+   [1m[33m◆[0m Flaky integration tes… [90m 25m[39m   [90m│[39m
+   [32m●[39m Bump chart to 4.12 an… [90m  5h[39m   [90m│[39m
+   [90m◌[39m Canary rollback flag   [90m  2d[39m   [90m│[39m
+ ▾ Inactive [90m(3)[39m                 [90m ↓[39m [90m│[39m
+[90m────────────────────────────────────────────────────────────────────────────────
+[39m [1m⏎[0m [2mopen[0m  [1ma[0m [2marchive[0m  [1mu[0m [2mundo[0m  [1my[0m [2mcopy cmd[0m  [1mY[0m [2mcopy @session[0m  [1m/[0m [2mfilter[0m  [1m?[0m [2mkeys[0m
+[30m[45m PROTOTYPE  3/4 forced C  ·  80 cols, C≥110  ·  tick off  ·  last [36m◐[39m→[32m●[39m Roster TU[49m…

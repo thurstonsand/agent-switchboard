@@ -1,0 +1,40 @@
+ swb                 10 open · 3 archived │ pi v0.99.2 (mock)
+──────────────────────────────────────────│ escape interrupt · ctrl+c clear · ctrl+d exit · /quit · /long for a 30 s turn
+ ▾ agent-switchboard                      │
+   ◐ Deck mock round 2                now │
+   ○ Schema v1 grilling                2h │ add a flag to roll back the canary
+   ○ Recorder footer status         ⎇  1d │
+ ▾ ansiblonomicon                         │
+   ● Fix fnox host routing            12m │ Added `--rollback-canary`. It reuses the previous release's values.
+   ○ Retire uv.lock mask               5h │
+   ⚠ Pod042 herdr unit                 7h │
+ ▾ harbor-deploy                          │
+   ◆ Flaky integration test in eu-…   now │
+▌  ○ Canary rollback flag              2d │
+ ▾ pi-sessions                            │
+   ○ Search ranking relaxation for…   40m │
+   ○ Subagent report race when the…    3h │
+ ▸ Inactive (1)                           │
+ ▸ Archived (3)                           │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+──────────────────────────────────────────│
+ Canary rollback flag                     │
+ ○ idle · live                            │
+ ~mock/harbor-deploy                      │─────────────────────────────────────────────────────────────────────────────────────────────────
+ ▌ on view                                │
+                                          │─────────────────────────────────────────────────────────────────────────────────────────────────
+ ⏎ focus w wake a archive ? keys          │ ~mock/harbor-deploy (main)
+ PROTO hover:lazy (H) · switch 0.4ms · re…│ ↑15.4k ↓4.2k $0.08  ·  Canary rollback flag  ·  gpt-5.6-sol

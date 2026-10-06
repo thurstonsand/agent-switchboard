@@ -1,0 +1,24 @@
+ swb                                         13 open · 3 inactive · 10 archived
+────────────────────────────────────────────────────────────────────────────────
+ ▾ ansiblonomicon
+   ◐ Fix fnox host routing                                 working       now
+   ◆ Plan sessions v2 TUI                                  blocked        2m  ⧉
+ ▸ ● Retire uv.lock mask   ⎇ uvlock                        unseen        14m
+   ○ Ghostty quick terminal keybind for the dispatcher w…  idle          40m  ⧉
+   ◌ Pod042 herdr unit                                     dormant        1d
+ ▾ agent-switchboard
+   ◐ Roster TUI prototype                                  working        1m  ⧉
+   ○ Recorder footer status   ⎇ recorder                   idle           2h
+   ● GhosttyKit viewer seam spike                          unseen         4d
+ ▾ pi-sessions
+   ◐ Search ranking relaxation for fuzzy …   ⎇ fuzzy-rank  working        6m
+   ⚠ Subagent report race when the parent compacts mid-h…  interrupted    3h
+ ▾ harbor-deploy
+   ◆ Flaky integration test in eu-west   ⎇ flaky-eu        blocked       25m
+   ● Bump chart to 4.12 and regenerate th…   ⎇ chart-4.12  unseen         5h
+   ◌ Canary rollback flag                                  dormant        2d
+ ▸ Inactive (3)
+ › Archived (10)
+────────────────────────────────────────────────────────────────────────────────
+ ⏎ open  a archive  u undo  y copy cmd  Y copy @session  / filter  ? keys
+ PROTOTYPE  1/4 adaptive A↔C→A  ·  80 cols, C≥110  ·  tick off  ·  v/V variant …

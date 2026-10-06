@@ -1,0 +1,40 @@
+ swb                 10 open · 3 archived │
+──────────────────────────────────────────│
+ ▾ agent-switchboard                      │
+   ○ Recorder footer status         ⎇ now │
+   ◐ Deck mock round 2                now │
+   ○ Schema v1 grilling                2h │
+ ▾ ansiblonomicon                         │
+▌  ○ Fix fnox host routing            12m │
+   ○ Retire uv.lock mask               5h │
+   ⚠ Pod042 herdr unit                 7h │
+ ▾ harbor-deploy                          │
+   ◆ Flaky integration test in eu-…   now │
+   ○ Canary rollback flag              2d │
+ ▾ pi-sessions                            │              Idle
+   ○ Search ranking relaxation for…   40m │
+   ○ Subagent report race when the…    3h │              Fix fnox host routing
+ ▸ Inactive (1)                           │              ~mock/ansiblonomicon
+ ▾ Archived (3)                           │
+   ✓ Migrate UniFi provider fork      now │              you  fnox picks the wrong host on the work Mac, find out why
+   ✓ Values schema lint in CI         11d │
+   ✓ Ghostty AppleScript tab probe    12d │              pi   Found it. The `ML-*` glob in `fnox.toml` matches the work Mac
+                                          │                   before the explicit work entry. I moved the explicit entry
+                                          │                   first; `fnox doctor` now reports `host: work`.
+                                          │
+                                          │              w wake · ⏎ focus
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+──────────────────────────────────────────│
+ Fix fnox host routing                    │
+ ○ idle · not running                     │
+ ~mock/ansiblonomicon                     │
+ ▌ on view: summary                       │
+ archived “Migrate UniFi provi…” u undo 2s│
+ ⏎ focus w wake a archive ? keys          │
+ PROTO hover:lazy (H) · switch 0.5ms · re…│

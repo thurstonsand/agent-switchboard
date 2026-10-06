@@ -1,0 +1,40 @@
+ swb                 10 open · 3 archived │ pi v0.99.2 (mock)
+──────────────────────────────────────────│ escape interrupt · ctrl+c clear · ctrl+d exit · /quit · /long for a 30 s turn
+ ▾ agent-switchboard                      │
+▌  ○ Recorder footer status         ⎇ now │
+   ◐ Deck mock round 2                now │ show a red footer when the recorder can't write
+   ○ Schema v1 grilling                2h │
+ ▾ ansiblonomicon                   ┌─ swb keys ─────────────────────────────────────────────────────┐
+   ○ Fix fnox host routing          │Roster (bare keys)                                              │
+   ○ Retire uv.lock mask            │  j/k ↑/↓     move; the right side follows instantly            │
+   ⚠ Pod042 herdr unit              │  g/G         top / bottom                                      │tatus)
+ ▾ harbor-deploy                    │  ⏎ or l      focus the session (wakes it, focuses once up)     │
+   ◆ Flaky integration test in eu-… │  h           jump to the session's header                      │
+   ○ Canary rollback flag           │  on a header: h/l collapse / expand, ⏎ space click toggle      │, and the next good write clears it.
+ ▾ pi-sessions                      │  w           wake (start) the session in the background        │
+   ○ Search ranking relaxation for… │  a           archive; on an archived row, unarchive            │
+   ○ Subagent report race when the… │  u           undo the last archive (5 s)                       │
+ ▸ Inactive (1)                     │  /           filter        esc  clear                          │
+ ▸ Archived (3)                     │  H           toggle hover: lazy ↔ eager (prototype)            │
+                                    │  q           quit the Deck (sessions keep running)             │
+                                    │                                                                │
+                                    │Deck prefix M-a (works from either pane)                        │
+                                    │  M-a h / l   focus the roster / the session                    │
+                                    │  M-a Tab     toggle focus roster ↔ session                     │
+                                    │  M-a e       swap the session ↔ its directory's editor         │
+                                    │  M-a z       zoom the session (focus mode)                     │ unstaged for you to review: +24 −9.
+                                    │  M-a ?       this help                                         │
+                                    │  M-a M-a     send a literal M-a through                        │
+                                    │                                                                │
+                                    │Any key closes this.                                            │
+                                    │                                                                │
+                                    │                                                                │
+                                    └────────────────────────────────────────────────────────────────┘
+──────────────────────────────────────────│
+ Recorder footer status                   │
+ ○ idle · live                            │
+ ~mock/agent-switchboard/.worktrees/recor…│─────────────────────────────────────────────────────────────────────────────────────────────────
+ ▌ on view                                │
+                                          │─────────────────────────────────────────────────────────────────────────────────────────────────
+ ⏎ focus w wake a archive ? keys          │ ~mock/agent-switchboard/.worktrees/recorder (recorder)
+ PROTO hover:lazy (H) · switch 0.6ms · re…│ ↑22.2k ↓6.6k $0.24  ·  Recorder footer status  ·  claude-opus-5

@@ -1,0 +1,24 @@
+ swb  /flak (esc clears)                     13 open · 3 inactive · 10 archived
+────────────────────────────────────────────────────────────────────────────────
+ ▾ harbor-deploy
+   ◆ Flaky integration test in eu-west   ⎇ flaky-eu        blocked       25m
+ › Archived (1)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+ ⏎ open  a archive  u undo  y copy cmd  Y copy @session  / filter  ? keys
+ PROTOTYPE  1/4 adaptive A↔C→A  ·  80 cols, C≥110  ·  tick off  ·  last ◐→● Ros…

@@ -1,0 +1,40 @@
+ swb                 10 open · 3 archived │ pi v0.99.2 (mock)
+──────────────────────────────────────────│ escape interrupt · ctrl+c clear · ctrl+d exit · /quit · /long for a 30 s turn
+ ▾ agent-switchboard                      │
+   ○ Recorder footer status         ⎇ now │
+   ◐ Deck mock round 2                now │ find out why the eu-west integration test flakes
+   ○ Schema v1 grilling                2h │
+ ▾ ansiblonomicon                         │
+   ○ Fix fnox host routing            12m │
+   ○ Retire uv.lock mask               5h │ $ kubectl -n staging get pods
+   ○ Pod042 herdr unit                 7h │ integration-eu-west-7c9  0/1  CrashLoopBackOff  14
+ ▾ harbor-deploy                          │
+▌  ● Flaky integration test in eu-…   now │
+   ○ Canary rollback flag              2d │ The pod is stuck in CrashLoopBackOff with a stale config map. Deleting it lets the deployment
+ ▾ pi-sessions                            │ recreate it.
+   ○ Search ranking relaxation for…   40m │
+   ○ Subagent report race when the…    3h │
+ ▸ Inactive (1)                           │ $ kubectl -n staging delete pod integration-eu-west-7c9
+ ▾ Archived (3)                           │ pod "integration-eu-west-7c9" deleted
+   ✓ Migrate UniFi provider fork      now │
+   ✓ Values schema lint in CI         11d │
+   ✓ Ghostty AppleScript tab probe    12d │ Deleted. The new pod is Running 1/1, and the eu-west test passed three runs in a row.
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+──────────────────────────────────────────│
+ Flaky integration test in eu-west        │
+ ● unseen · live                          │
+ ~mock/harbor-deploy                      │─────────────────────────────────────────────────────────────────────────────────────────────────
+ ▌ on view · terminal unfocused           │
+                                          │─────────────────────────────────────────────────────────────────────────────────────────────────
+ M-a h roster M-a e editor M-a z zoom M-a…│ ~mock/harbor-deploy (main)
+ PROTO hover:lazy (H) · switch 0.4ms · re…│ ↑20.5k ↓6.0k $0.20  ·  Flaky integration test in eu-west  ·  gpt-5.6-sol

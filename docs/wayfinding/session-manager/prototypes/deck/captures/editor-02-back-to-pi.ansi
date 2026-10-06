@@ -1,0 +1,40 @@
+ [1mswb[0m                 [90m10 open · 3 archived │[39m [1mpi[0m [90mv0.99.2 (mock)[39m
+[90m──────────────────────────────────────────│[39m [90mescape interrupt · ctrl+c clear · ctrl+d exit · /quit · /long for a 30 s turn[39m
+ ▾ [1magent-switchboard[0m                      [90m│[39m
+[36m[48;2;234;230;202m▌[39m  ○ Recorder footer status         [35m⎇[39m [90mnow[39m [90m[49m│[39m[48;2;48;48;48m
+[49m   [36m◐[39m Deck mock round 2                [90mnow[39m [90m│[39m[48;2;48;48;48m show a red footer when the recorder can't write
+[49m   ○ Schema v1 grilling[90m                2h[39m [90m│[39m[48;2;48;48;48m
+[49m ▾ [1mansiblonomicon[0m                         [90m│[39m
+   ○ Fix fnox host routing            [90m12m[39m [90m│[39m[48;2;28;40;30m
+[49m   [90m○[39m Retire uv.lock mask[90m               5h[39m [90m│[39m[48;2;28;40;30m [1m$ rg -n setStatus packages/pi/src[0m[48;2;28;40;30m
+[49m   [31m⚠[39m Pod042 herdr unit[90m                 7h[39m [90m│[39m[48;2;28;40;30m [90mpackages/pi/src/recorder.ts:88:  ctx.ui.setStatus("swb", status)[39m
+[49m ▾ [1mharbor-deploy[0m                          [90m│[39m[48;2;28;40;30m
+[49m   [2m[38;2;192;132;252m◆[0m Flaky integration test in eu-…   [90mnow[39m [90m│[39m
+   ○ Canary rollback flag[90m              2d[39m [90m│[39m Done. [7mA failed write sets `swb ✗ db [0mlocked` in pi's footer, and the next good write clears it.
+ ▾ [1mpi-sessions[0m                            [90m│[39m
+   [90m○[39m Search ranking relaxation for…   [90m40m[39m [90m│[39m[48;2;227;232;206m
+[49m   [90m○[39m Subagent report race when the…[90m    3h[39m [90m│[39m[48;2;227;232;206m what does the footer show when the db is locked?
+[49m ▸ Inactive [90m(1)[39m                           [90m│[39m[48;2;227;232;206m and in the status line?
+[49m ▸ Archived [90m(3)[39m                           [90m│[39m[48;2;227;232;206m
+[49m                                          [90m│[39m
+                                          [90m│[39m[48;2;237;234;192m
+[49m                                          [90m│[39m[48;2;237;234;192m [1m$ rg -n "what" src[0m[48;2;237;234;192m
+[49m                                          [36m│[39m[48;2;237;234;192m [90msrc/main.ts:2:export function main(): void {[39m
+[49m                                          [36m│[39m[48;2;237;234;192m
+[49m                                          [36m│[39m
+                                          [36m│[39m Done. I read the three files that matter and left the diff unstaged for you to review: +24 −9.
+                                          [36m│[39m
+                                          [36m│[39m
+                                          [36m│[39m
+                                          [36m│[39m
+                                          [36m│[39m
+                                          [36m│[39m
+                                          [36m│[39m
+[90m──────────────────────────────────────────[36m│[39m
+ [1mRecorder footer status[0m                   [36m│[39m
+ ○ idle[90m · [39mlive                            [36m│[39m
+ [90m~mock/agent-switchboard/.worktrees/recor[39m…[36m│[90m─────────────────────────────────────────────────────────────────────────────────────────────────
+[39m [36m▌[39m on view[36m · focused[39m                      [36m│[7m[39m [0m
+                                          [36m│[90m─────────────────────────────────────────────────────────────────────────────────────────────────
+[39m [1mM-a h[0m [2mroster[0m [1mM-a e[0m [2meditor[0m [1mM-a z[0m [2mzoom[0m [1mM-a[0m…[36m│[39m [90m~mock/agent-switchboard/.worktrees/recorder (recorder)[39m
+[30m[45m PROTO hover:lazy (H) · switch 0.6ms · re…[36m[49m│[39m [90m↑22.2k ↓6.6k $0.24[39m  [90m·[39m  [2mRecorder footer status[0m  [90m·[39m  [90mclaude-opus-5[39m

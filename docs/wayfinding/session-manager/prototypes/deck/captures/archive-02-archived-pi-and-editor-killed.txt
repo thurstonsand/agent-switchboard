@@ -1,0 +1,40 @@
+ swb                  9 open · 4 archived │ pi v0.99.2 (mock)
+──────────────────────────────────────────│ escape interrupt · ctrl+c clear · ctrl+d exit · /quit · /long for a 30 s turn
+ ▾ agent-switchboard                      │
+▌  ◐ Deck mock round 2                now │
+   ○ Schema v1 grilling                2h │ build round 2 of the Deck mocks, then run the whole e2e suite against it
+ ▾ ansiblonomicon                         │
+   ○ Fix fnox host routing            12m │
+   ○ Retire uv.lock mask               5h │ Starting with the harness: a hidden tmux server, `drive keys`, and `drive capture`.
+   ⚠ Pod042 herdr unit                 7h │
+ ▾ harbor-deploy                          │
+   ◆ Flaky integration test in eu-…   now │ $ bun run drive start --size 140x40
+   ○ Canary rollback flag              2d │ Deck ready in 412 ms
+ ▾ pi-sessions                            │
+   ○ Search ranking relaxation for…   40m │
+   ○ Subagent report race when the…    3h │
+ ▸ Inactive (1)                           │ $ mise run e2e
+ ▸ Archived (4)                           │ scenario 6/40 · ✓ 5 passed
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+──────────────────────────────────────────│
+ Deck mock round 2                        │ ⠼ Working… (esc to interrupt)
+ ◐ working · live                         │
+ ~mock/agent-switchboard                  │─────────────────────────────────────────────────────────────────────────────────────────────────
+ ▌ on view                                │
+ archived “Recorder footer sta…” u undo 5s│─────────────────────────────────────────────────────────────────────────────────────────────────
+ ⏎ focus w wake a archive ? keys          │ ~mock/agent-switchboard (main)
+ PROTO hover:lazy (H) · switch 1.0ms · re…│ ↑17.1k ↓4.8k $0.12  ·  Deck mock round 2  ·  claude-opus-5

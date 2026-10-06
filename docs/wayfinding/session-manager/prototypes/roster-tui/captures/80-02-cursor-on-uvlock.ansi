@@ -1,0 +1,24 @@
+ [1mswb[0m                                         [90m13 open · 3 inactive · 10 archived
+────────────────────────────────────────────────────────────────────────────────
+[39m ▾ [1mansiblonomicon[0m
+   [36m◐[39m Fix fnox host routing                                 [36mworking[39m       now
+   [1m[33m◆[0m Plan sessions v2 TUI                                  [33mblocked[39m        2m  [34m⧉[39m
+[48;5;237m ▸ [32m●[39m Retire uv.lock mask   [35m⎇ uvlock[39m                        [32munseen[39m        14m
+[49m   ○ Ghostty quick terminal keybind for the dispatcher w…  idle          40m  [34m⧉[39m
+   [90m◌[39m Pod042 herdr unit                                     [90mdormant[39m        1d
+ ▾ [1magent-switchboard
+[0m   [36m◐[39m Roster TUI prototype                                  [36mworking[39m        1m  [34m⧉[39m
+   ○ Recorder footer status   [35m⎇ recorder[39m                   idle           2h
+   [32m●[39m GhosttyKit viewer seam spike                          [32munseen[39m         4d
+ ▾ [1mpi-sessions[0m
+   [36m◐[39m Search ranking relaxation for fuzzy …   [35m⎇ fuzzy-rank[39m  [36mworking[39m        6m
+   [31m⚠[39m Subagent report race when the parent compacts mid-h…  [31minterrupted[39m    3h
+ ▾ [1mharbor-deploy[0m
+   [1m[33m◆[0m Flaky integration test in eu-west   [35m⎇ flaky-eu[39m        [33mblocked[39m       25m
+   [32m●[39m Bump chart to 4.12 and regenerate th…   [35m⎇ chart-4.12[39m  [32munseen[39m         5h
+   [90m◌[39m Canary rollback flag                                  [90mdormant[39m        2d
+ ▸ Inactive [90m(3)[39m
+ › Archived [90m(10)[39m
+[90m────────────────────────────────────────────────────────────────────────────────
+[39m [1m⏎[0m [2mopen[0m  [1ma[0m [2marchive[0m  [1mu[0m [2mundo[0m  [1my[0m [2mcopy cmd[0m  [1mY[0m [2mcopy @session[0m  [1m/[0m [2mfilter[0m  [1m?[0m [2mkeys[0m
+[30m[45m PROTOTYPE  1/4 adaptive A↔C→A  ·  80 cols, C≥110  ·  tick off  ·  v/V variant [39m[49m…

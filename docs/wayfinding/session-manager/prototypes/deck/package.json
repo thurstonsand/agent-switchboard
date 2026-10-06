@@ -1,0 +1,14 @@
+{
+  "name": "swb-deck-prototype",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deck": "bun run deck.ts",
+    "drive": "bun run drive.ts",
+    "reset": "bun run drive.ts reset",
+    "start": "bun run deck.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-tui": "1.0.0"
+  }
+}

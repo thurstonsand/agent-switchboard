@@ -1,0 +1,40 @@
+ swb                 10 open · 3 archived │
+──────────────────────────────────────────│
+ ▾ agent-switchboard                      │
+   ◐ Deck mock round 2                now │
+   ○ Schema v1 grilling                2h │
+   ○ Recorder footer status         ⎇  1d │
+ ▾ ansiblonomicon                         │
+   ● Fix fnox host routing            12m │
+   ○ Retire uv.lock mask               5h │
+   ⚠ Pod042 herdr unit                 7h │
+ ▾ harbor-deploy                          │
+   ◆ Flaky integration test in eu-…   now │
+▌  ⠹ Canary rollback flag              2d │
+ ▾ pi-sessions                            │
+   ○ Search ranking relaxation for…   40m │              ⠹ Starting pi…  0.4 s
+   ○ Subagent report race when the…    3h │
+ ▸ Inactive (1)                           │              Canary rollback flag
+ ▸ Archived (3)                           │              ~mock/harbor-deploy
+                                          │              Focus follows once it's up.
+                                          │
+                                          │              you  add a flag to roll back the canary
+                                          │
+                                          │              pi   Added `--rollback-canary`. It reuses the previous release's
+                                          │                   values.
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+──────────────────────────────────────────│
+ Canary rollback flag                     │
+ ⠹ starting                               │
+ ~mock/harbor-deploy                      │
+ ▌ on view: starting · focus when up      │
+                                          │
+ ⏎ focus w wake a archive ? keys          │
+ PROTO hover:lazy (H) · switch 0.5ms · re…│

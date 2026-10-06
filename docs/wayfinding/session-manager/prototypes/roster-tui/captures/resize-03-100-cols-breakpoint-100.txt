@@ -1,0 +1,28 @@
+ swb                                                             13 open · 3 inactive · 10 archived
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ ▾ ansiblonomicon                          │ Retire uv.lock mask
+   ◐ Fix fnox host routing           now   │ ~/c/p/ansiblonomicon/.worktrees/uvlock
+   ◆ Plan sessions v2 TUI             2m ⧉ │ ⎇ uvlock · pi · opus · 3h old
+ ▸ ● Retire uv.lock mask             14m   │ ● unseen · live in tmux · no viewer
+   ○ Ghostty quick terminal keybin…  40m ⧉ │ 5c5bd198 · @session:019aafe0-b1aa-7fbe-c3af-1fac5c5bd1…
+   ◌ Pod042 herdr unit                1d   │ ────────────────────────────────────────
+ ▾ agent-switchboard                       │ you 16m
+   ◐ Roster TUI prototype             1m ⧉ │ make the pull task handle the uv.lock mask on its own
+   ○ Recorder footer status           2h   │ agent 14m
+   ● GhosttyKit viewer seam spike     4d   │ Done. `mise run pull` now lifts the skip-worktree bit,
+ ▾ pi-sessions                             │ checks out the lock, re-syncs, and re-masks.
+   ◐ Search ranking relaxation for…   6m   │
+   ⚠ Subagent report race when the…   3h   │
+ ▾ harbor-deploy                           │
+   ◆ Flaky integration test in eu-…  25m   │
+   ● Bump chart to 4.12 and regene…   5h   │
+   ◌ Canary rollback flag             2d   │
+ ▸ Inactive (3)                            │
+ › Archived (10)                           │
+                                           │
+                                           │
+                                           │
+                                           │
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ ⏎ open  a archive  u undo  y copy cmd  Y copy @session  / filter  ? keys
+ PROTOTYPE  1/4 adaptive A↔C→C  ·  100 cols, C≥100  ·  tick off  ·  v/V variant  ? keys

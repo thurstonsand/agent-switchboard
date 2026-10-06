@@ -1,0 +1,24 @@
+ swb                                          14 open · 3 i would open 5f5b6a27
+────────────────────────────────────────────────────── copied swb open 5f5b6a27
+ ▾ agent-switchboard               │ Recorder footer status
+   ● Roster TUI prototype    now ⧉ │ ~/c/p/agent-switchboard/.worktrees/recorder
+ ▸ ○ Recorder footer status   2h   │ ⎇ recorder · pi · opus · 4h old
+   ● GhosttyKit viewer sea…   4d   │ ○ idle · live in tmux · no viewer
+ ▾ ansiblonomicon                  │ 5f5b6a27 · @session:019a944e-ad8b-7657-40f…
+   ● Fix fnox host routing   now   │ ────────────────────────────────────────
+   ◆ Plan sessions v2 TUI     2m ⧉ │ you 2h
+   ● Retire uv.lock mask     14m   │ show a red footer when the recorder can't
+   ○ Ghostty quick termina…  40m ⧉ │ write
+   ◌ Pod042 herdr unit        1d   │ agent 2h
+ ▾ pi-sessions                     │ Done. A failed write sets `swb ✗ db locked`
+   ◐ Search ranking relaxa…   6m   │ in pi's footer.
+   ⚠ Subagent report race …   3h   │
+   ◌ Search ranking relaxa…   1d   │
+ ▾ harbor-deploy                   │
+   ◆ Flaky integration tes…  25m   │
+   ● Bump chart to 4.12 an…   5h   │
+   ◌ Canary rollback flag     2d   │
+ ▾ Inactive (3)                  ↓ │
+────────────────────────────────────────────────────────────────────────────────
+ ⏎ open  a archive  u undo  y copy cmd  Y copy @session  / filter  ? keys
+ PROTOTYPE  3/4 forced C  ·  80 cols, C≥110  ·  tick off  ·  last ◐→● Roster TU…

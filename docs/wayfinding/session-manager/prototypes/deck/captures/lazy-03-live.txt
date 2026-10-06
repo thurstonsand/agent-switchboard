@@ -1,0 +1,40 @@
+ swb                 10 open · 3 archived │ pi v0.99.2 (mock)
+──────────────────────────────────────────│ escape interrupt · ctrl+c clear · ctrl+d exit · /quit · /long for a 30 s turn
+ ▾ agent-switchboard                      │
+   ◐ Deck mock round 2                now │
+▌  ○ Schema v1 grilling                2h │ grill me on the runtimes table
+   ○ Recorder footer status         ⎇  1d │
+ ▾ ansiblonomicon                         │
+   ● Fix fnox host routing            12m │ Three questions left. First: should `runtimes.tmux_session` survive a reboot, or be cleared at
+   ○ Retire uv.lock mask               5h │ boot?
+   ⚠ Pod042 herdr unit                 7h │
+ ▾ harbor-deploy                          │
+   ◆ Flaky integration test in eu-…   now │ cleared at boot
+   ○ Canary rollback flag              2d │
+ ▾ pi-sessions                            │
+   ○ Search ranking relaxation for…   40m │ Done. Updated ticket 03: the recorder truncates runtimes on its first write after boot. Two
+   ○ Subagent report race when the…    3h │ questions remain for next round.
+ ▸ Inactive (1)                           │
+ ▸ Archived (3)                           │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+──────────────────────────────────────────│
+ Schema v1 grilling                       │
+ ○ idle · live                            │
+ ~mock/agent-switchboard                  │─────────────────────────────────────────────────────────────────────────────────────────────────
+ ▌ on view                                │
+                                          │─────────────────────────────────────────────────────────────────────────────────────────────────
+ ⏎ focus w wake a archive ? keys          │ ~mock/agent-switchboard (main)
+ PROTO hover:lazy (H) · switch 0.5ms · re…│ ↑18.8k ↓5.4k $0.16  ·  Schema v1 grilling  ·  claude-opus-5

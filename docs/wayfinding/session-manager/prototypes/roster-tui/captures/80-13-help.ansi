@@ -1,0 +1,24 @@
+ [1mswb[0m                                          [90m14 open · 3 inactive · 9 archived
+────────────────────────────────────────────────────────────────────────────────
+[39m   [32m●[39m Reti[48;5;235m                                                              [49m
+   ○ Ghos[48;5;235m [1mswb keys (prototype)[0m[48;5;235m                                         [2m[49mff-v2[0m
+   [90m◌[39m Pod0[48;5;235m                                                              [49m
+ ▾ [1mpi-ses[0m[48;5;235m j/k ↑/↓   move          g/G   top / bottom                   [49m
+   [36m◐[39m Sear[48;5;235m ⏎ space   open · toggle a group · browse Archived            [90m[49m76e6-272[39m…
+   [31m⚠[39m Suba[48;5;235m h/l ←/→   collapse / expand a group                          [90m[49m──────[39m
+   [90m◌[39m Sear[48;5;235m a         archive        u     undo (5 s)                    [49m
+ ▾ [1mharbor[0m[48;5;235m U         unarchive (in Archived)                            [49m
+   [1m[33m◆[0m Flak[48;5;235m y         copy `swb open <id>`                               [49m
+   [32m●[39m Bump[48;5;235m Y         copy `@session:<uuid>`                             [49mlock now
+   [90m◌[39m Cana[48;5;235m /         filter         esc   clear filter · back           [49m
+ ▾ Inacti[48;5;235m q         quit                                               [49m
+   ▾ [1mpi-s[0m[48;5;235m                                                              [49m
+[48;5;237m   ▸ ○ Ha[48;5;235m [1mprototype only[0m[48;5;235m                                               [49m
+   ▾ [1mansi[0m[48;5;235m v/V       next / previous variant                            [49m
+     [90m◌[39m Ta[48;5;235m [ ]       breakpoint −5 / +5                                 [49m
+   ▾ [1mfalc[0m[48;5;235m t         toggle activity tick   .  one tick now             [49m
+     [31m⚠[39m Re[48;5;235m                                                              [49m
+ › Archiv[48;5;235m [2many key closes this[0m[48;5;235m                                          [49m
+[90m─────────[39m[48;5;235m                                                              [90m[49m─────────
+[39m [1m⏎[0m [2mopen[0m  [1ma[0m [2marchive[0m  [1mu[0m [2mundo[0m  [1my[0m [2mcopy cmd[0m  [1mY[0m [2mcopy @session[0m  [1m/[0m [2mfilter[0m  [1m?[0m [2mkeys[0m
+[30m[45m PROTOTYPE  3/4 forced C  ·  80 cols, C≥110  ·  tick off  ·  last [36m◐[39m→[32m●[39m Roster TU[49m…

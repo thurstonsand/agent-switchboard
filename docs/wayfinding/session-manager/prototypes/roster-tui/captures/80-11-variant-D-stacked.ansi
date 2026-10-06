@@ -1,0 +1,24 @@
+ [1mswb[0m                                          [90m14 open · 3 inactive · 9 archived
+────────────────────────────────────────────────────────────────────────────────
+[39m   [36m◐[39m Search ranking relaxation for fuzzy …   [35m⎇ fuzzy-rank[39m  [36mworking[39m        6m  [90m ↑
+[39m   [31m⚠[39m Subagent report race when the parent compacts mid-h…  [31minterrupted[39m    3h
+   [90m◌[39m Search ranking relaxation                             [90mdormant[39m        1d
+ ▾ [1mharbor-deploy[0m
+   [1m[33m◆[0m Flaky integration test in eu-west   [35m⎇ flaky-eu[39m        [33mblocked[39m       25m
+   [32m●[39m Bump chart to 4.12 and regenerate th…   [35m⎇ chart-4.12[39m  [32munseen[39m         5h
+   [90m◌[39m Canary rollback flag                                  [90mdormant[39m        2d
+ ▾ Inactive [90m(3)[39m
+   ▾ [1mpi-sessions[0m
+[48;5;237m   ▸ ○ Handoff prompt template   [35m⎇ handoff-v2[39m              idle           4d  [90m[49m ↓
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+[39m [1mHandoff prompt template[0m
+ [2m~/c/p/pi-sessions/.worktrees/handoff-v2
+[0m [35m⎇ handoff-v2[39m [90m·[39m pi [90m·[39m opus [90m·[39m 4d old
+ ○ idle [90m·[39m live in tmux [90m·[39m no viewer
+ [90m20c50b4c · @session:019a43cf-2c94-76e6-272e-e41c20c50b4c[39m
+ [90m────────────────────────────────────────[39m
+ [36magent[39m [90m4d[39m
+ Trimmed to 40 lines; the context block now comes first.
+[90m────────────────────────────────────────────────────────────────────────────────
+[39m [1m⏎[0m [2mopen[0m  [1ma[0m [2marchive[0m  [1mu[0m [2mundo[0m  [1my[0m [2mcopy cmd[0m  [1mY[0m [2mcopy @session[0m  [1m/[0m [2mfilter[0m  [1m?[0m [2mkeys[0m
+[30m[45m PROTOTYPE  4/4 D stacked  ·  80 cols, C≥110  ·  tick off  ·  last [36m◐[39m→[32m●[39m Roster T[49m…

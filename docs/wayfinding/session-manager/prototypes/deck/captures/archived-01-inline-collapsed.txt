@@ -1,0 +1,40 @@
+ swb                 10 open · 3 archived │
+──────────────────────────────────────────│
+ ▾ agent-switchboard                      │
+   ○ Recorder footer status         ⎇ now │
+   ◐ Deck mock round 2                now │
+▌  ○ Schema v1 grilling                2h │
+ ▾ ansiblonomicon                         │
+   ○ Fix fnox host routing            12m │
+   ○ Retire uv.lock mask               5h │
+   ⚠ Pod042 herdr unit                 7h │
+ ▾ harbor-deploy                          │
+   ◆ Flaky integration test in eu-…   now │
+   ○ Canary rollback flag              2d │
+ ▾ pi-sessions                            │              Idle
+   ○ Search ranking relaxation for…   40m │
+   ○ Subagent report race when the…    3h │              Schema v1 grilling
+ ▸ Inactive (1)                           │              ~mock/agent-switchboard
+ ▸ Archived (3)                           │
+                                          │              you  cleared at boot
+                                          │
+                                          │              pi   Done. Updated ticket 03: the recorder truncates runtimes on its
+                                          │                   first write after boot. Two questions remain for next round.
+                                          │
+                                          │              w wake · ⏎ focus
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+──────────────────────────────────────────│
+ Schema v1 grilling                       │
+ ○ idle · not running                     │
+ ~mock/agent-switchboard                  │
+ ▌ on view: summary                       │
+                                          │
+ ⏎ toggle h/l fold ? keys                 │
+ PROTO hover:lazy (H) · switch 0.6ms · re…│

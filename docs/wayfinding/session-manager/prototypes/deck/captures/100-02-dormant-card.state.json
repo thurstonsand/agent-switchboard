@@ -1,0 +1,372 @@
+{
+  "deck": "drive",
+  "size": {
+    "cols": 32,
+    "rows": 30
+  },
+  "focus": "roster",
+  "deckFocused": true,
+  "zoomed": false,
+  "filter": null,
+  "hover": {
+    "mode": "lazy",
+    "pending": null
+  },
+  "cursor": {
+    "kind": "session",
+    "title": "Deck mock round 2"
+  },
+  "stage": {
+    "title": "Deck mock round 2",
+    "mode": "session",
+    "kind": "live",
+    "notRunning": false,
+    "onStageMs": 346,
+    "pendingFocus": null,
+    "tmuxTarget": "agent-switchboard-4d88"
+  },
+  "toasts": [],
+  "undo": null,
+  "rows": [
+    {
+      "kind": "project",
+      "title": "agent-switchboard",
+      "collapsed": false
+    },
+    {
+      "kind": "session",
+      "title": "Recorder footer status",
+      "state": "dormant",
+      "archived": false,
+      "staged": false
+    },
+    {
+      "kind": "session",
+      "title": "Deck mock round 2",
+      "state": "working",
+      "archived": false,
+      "staged": true
+    },
+    {
+      "kind": "session",
+      "title": "Schema v1 grilling",
+      "state": "dormant",
+      "archived": false,
+      "staged": false
+    },
+    {
+      "kind": "project",
+      "title": "ansiblonomicon",
+      "collapsed": false
+    },
+    {
+      "kind": "session",
+      "title": "Fix fnox host routing",
+      "state": "dormant",
+      "archived": false,
+      "staged": false
+    },
+    {
+      "kind": "session",
+      "title": "Retire uv.lock mask",
+      "state": "dormant",
+      "archived": false,
+      "staged": false
+    },
+    {
+      "kind": "session",
+      "title": "Pod042 herdr unit",
+      "state": "idle",
+      "archived": false,
+      "staged": false
+    },
+    {
+      "kind": "project",
+      "title": "harbor-deploy",
+      "collapsed": false
+    },
+    {
+      "kind": "session",
+      "title": "Flaky integration test in eu-west",
+      "state": "idle",
+      "archived": false,
+      "staged": false
+    },
+    {
+      "kind": "session",
+      "title": "Canary rollback flag",
+      "state": "idle",
+      "archived": false,
+      "staged": false
+    },
+    {
+      "kind": "project",
+      "title": "pi-sessions",
+      "collapsed": false
+    },
+    {
+      "kind": "session",
+      "title": "Search ranking relaxation for fuzzy titles",
+      "state": "dormant",
+      "archived": false,
+      "staged": false
+    },
+    {
+      "kind": "session",
+      "title": "Subagent report race when the parent compacts mid-handoff",
+      "state": "dormant",
+      "archived": false,
+      "staged": false
+    },
+    {
+      "kind": "section",
+      "title": "Inactive",
+      "count": 1,
+      "expanded": false
+    },
+    {
+      "kind": "section",
+      "title": "Archived",
+      "count": 3,
+      "expanded": false
+    }
+  ],
+  "sessions": [
+    {
+      "title": "Deck mock round 2",
+      "state": "working",
+      "live": true,
+      "ready": true,
+      "activity": "working",
+      "unseen": false,
+      "archived": false,
+      "cwd": "~mock/agent-switchboard",
+      "theme": {
+        "appearance": "light",
+        "source": "background+palette",
+        "background": "#f9f5d7"
+      }
+    },
+    {
+      "title": "Schema v1 grilling",
+      "state": "dormant",
+      "live": false,
+      "ready": false,
+      "activity": "idle",
+      "unseen": false,
+      "archived": false,
+      "cwd": "~mock/agent-switchboard",
+      "theme": null
+    },
+    {
+      "title": "Recorder footer status",
+      "state": "dormant",
+      "live": false,
+      "ready": false,
+      "activity": "idle",
+      "unseen": false,
+      "archived": false,
+      "cwd": "~mock/agent-switchboard/.worktrees/recorder",
+      "theme": null
+    },
+    {
+      "title": "Fix fnox host routing",
+      "state": "dormant",
+      "live": false,
+      "ready": false,
+      "activity": "idle",
+      "unseen": false,
+      "archived": false,
+      "cwd": "~mock/ansiblonomicon",
+      "theme": null
+    },
+    {
+      "title": "Retire uv.lock mask",
+      "state": "dormant",
+      "live": false,
+      "ready": false,
+      "activity": "idle",
+      "unseen": false,
+      "archived": false,
+      "cwd": "~mock/ansiblonomicon",
+      "theme": null
+    },
+    {
+      "title": "Pod042 herdr unit",
+      "state": "idle",
+      "live": true,
+      "ready": true,
+      "activity": "idle",
+      "unseen": false,
+      "archived": false,
+      "cwd": "~mock/ansiblonomicon",
+      "theme": {
+        "appearance": "light",
+        "source": "background+palette",
+        "background": "#f9f5d7"
+      }
+    },
+    {
+      "title": "Flaky integration test in eu-west",
+      "state": "idle",
+      "live": true,
+      "ready": true,
+      "activity": "idle",
+      "unseen": false,
+      "archived": false,
+      "cwd": "~mock/harbor-deploy",
+      "theme": {
+        "appearance": "light",
+        "source": "background+palette",
+        "background": "#f9f5d7"
+      }
+    },
+    {
+      "title": "Canary rollback flag",
+      "state": "idle",
+      "live": true,
+      "ready": true,
+      "activity": "idle",
+      "unseen": false,
+      "archived": false,
+      "cwd": "~mock/harbor-deploy",
+      "theme": {
+        "appearance": "light",
+        "source": "background+palette",
+        "background": "#f9f5d7"
+      }
+    },
+    {
+      "title": "Region failover runbook",
+      "state": "dormant",
+      "live": false,
+      "ready": false,
+      "activity": "idle",
+      "unseen": false,
+      "archived": false,
+      "cwd": "~mock/harbor-deploy",
+      "theme": null
+    },
+    {
+      "title": "Search ranking relaxation for fuzzy titles",
+      "state": "dormant",
+      "live": false,
+      "ready": false,
+      "activity": "idle",
+      "unseen": false,
+      "archived": false,
+      "cwd": "~mock/pi-sessions",
+      "theme": null
+    },
+    {
+      "title": "Subagent report race when the parent compacts mid-handoff",
+      "state": "dormant",
+      "live": false,
+      "ready": false,
+      "activity": "idle",
+      "unseen": false,
+      "archived": false,
+      "cwd": "~mock/pi-sessions",
+      "theme": null
+    },
+    {
+      "title": "Migrate UniFi provider fork",
+      "state": "dormant",
+      "live": false,
+      "ready": false,
+      "activity": "idle",
+      "unseen": false,
+      "archived": true,
+      "cwd": "~mock/ansiblonomicon",
+      "theme": null
+    },
+    {
+      "title": "Ghostty AppleScript tab probe",
+      "state": "dormant",
+      "live": false,
+      "ready": false,
+      "activity": "idle",
+      "unseen": false,
+      "archived": true,
+      "cwd": "~mock/agent-switchboard",
+      "theme": null
+    },
+    {
+      "title": "Values schema lint in CI",
+      "state": "dormant",
+      "live": false,
+      "ready": false,
+      "activity": "idle",
+      "unseen": false,
+      "archived": true,
+      "cwd": "~mock/harbor-deploy",
+      "theme": null
+    }
+  ],
+  "editors": [
+    "~mock/agent-switchboard"
+  ],
+  "terminalColors": {
+    "foreground": {
+      "r": 60,
+      "g": 56,
+      "b": 54
+    },
+    "background": {
+      "r": 249,
+      "g": 245,
+      "b": 215
+    },
+    "palette": 16
+  },
+  "perf": {
+    "switchClient": {
+      "n": 1,
+      "lastMs": 0.95,
+      "avgMs": 0.95,
+      "maxMs": 0.95
+    },
+    "keyToSwitch": {
+      "n": 1,
+      "lastMs": 1.63,
+      "avgMs": 1.63,
+      "maxMs": 1.63
+    },
+    "render": {
+      "n": 16,
+      "lastMs": 0.84,
+      "avgMs": 1.43,
+      "maxMs": 7.92
+    },
+    "newSession": {
+      "n": 0,
+      "lastMs": 0,
+      "avgMs": 0,
+      "maxMs": 0
+    },
+    "startToReady": {
+      "n": 0,
+      "lastMs": 0,
+      "avgMs": 0,
+      "maxMs": 0
+    },
+    "uiCommand": {
+      "n": 0,
+      "lastMs": 0,
+      "avgMs": 0,
+      "maxMs": 0
+    },
+    "tickRowsChanged": {
+      "n": 14,
+      "lastMs": 0,
+      "avgMs": 0,
+      "maxMs": 0
+    },
+    "tickWriteBytes": {
+      "n": 14,
+      "lastMs": 22,
+      "avgMs": 22,
+      "maxMs": 22
+    }
+  }
+}

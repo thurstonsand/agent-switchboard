@@ -1,0 +1,40 @@
+ swb                 10 open · 3 archived │
+──────────────────────────────────────────│
+ ▾ agent-switchboard                      │
+   ◐ Deck mock round 2                now │
+   ○ Schema v1 grilling                2h │
+▌  ○ Recorder footer status         ⎇  1d │
+ ▾ ansiblonomicon                         │
+   ● Fix fnox host routing            12m │
+   ○ Retire uv.lock mask               5h │
+   ⚠ Pod042 herdr unit                 7h │
+ ▾ harbor-deploy                          │
+   ◆ Flaky integration test in eu-…   now │
+   ○ Canary rollback flag              2d │
+ ▾ pi-sessions                            │              Idle
+   ○ Search ranking relaxation for…   40m │
+   ○ Subagent report race when the…    3h │              Recorder footer status
+ ▸ Inactive (1)                           │              ~mock/agent-switchboard/.worktrees/recorder
+ ▸ Archived (3)                           │              Starting in 500 ms.
+                                          │
+                                          │              you  show a red footer when the recorder can't write
+                                          │
+                                          │              pi   Done. A failed write sets `swb ✗ db locked` in pi's footer, and
+                                          │                   the next good write clears it.
+                                          │
+                                          │              w wake · ⏎ focus
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+──────────────────────────────────────────│
+ Recorder footer status                   │
+ ○ idle · not running                     │
+ ~mock/agent-switchboard/.worktrees/recor…│
+ ▌ on view: summary                       │
+                                          │
+ ⏎ focus w wake a archive ? keys          │
+ PROTO hover:eager (H) · switch 0.9ms · r…│

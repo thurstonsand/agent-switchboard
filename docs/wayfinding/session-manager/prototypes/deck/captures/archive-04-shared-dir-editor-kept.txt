@@ -1,0 +1,40 @@
+ swb                  9 open · 4 archived │
+──────────────────────────────────────────│
+ ▾ agent-switchboard                      │
+   ○ Recorder footer status         ⎇ now │
+   ◐ Deck mock round 2                now │
+ ▾ ansiblonomicon                         │
+   ○ Fix fnox host routing            12m │
+   ○ Retire uv.lock mask               5h │
+   ⚠ Pod042 herdr unit                 7h │
+ ▾ harbor-deploy                          │
+   ◆ Flaky integration test in eu-…   now │
+   ○ Canary rollback flag              2d │
+ ▾ pi-sessions                            │
+   ○ Search ranking relaxation for…   40m │              Archived
+   ○ Subagent report race when the…    3h │
+ ▸ Inactive (1)                           │              Schema v1 grilling
+ ▸ Archived (4)                           │              ~mock/agent-switchboard
+                                          │              Archived now ago. A new prompt unarchives it.
+                                          │
+                                          │              you  cleared at boot
+                                          │
+                                          │              pi   Done. Updated ticket 03: the recorder truncates runtimes on its
+                                          │                   first write after boot. Two questions remain for next round.
+                                          │
+                                          │              w wake · ⏎ focus · a unarchive
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+──────────────────────────────────────────│
+ Schema v1 grilling                       │
+ ○ idle · not running · archived          │
+ ~mock/agent-switchboard                  │
+ ▌ on view: summary                       │
+ archived “Schema v1 grilling” u undo 5s  │
+ ⏎ toggle h/l fold ? keys                 │
+ PROTO hover:lazy (H) · switch 0.6ms · re…│

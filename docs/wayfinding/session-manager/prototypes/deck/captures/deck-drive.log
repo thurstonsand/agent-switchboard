@@ -1,0 +1,46 @@
+2026-10-06T19:43:17.632Z deck drive up; stage client /dev/ttys033
+2026-10-06T19:43:17.634Z terminal colors (start): fg {"r":60,"g":56,"b":54} bg {"r":249,"g":245,"b":215} palette 16/16
+2026-10-06T19:43:20.154Z visit Deck mock round 2
+2026-10-06T19:43:20.790Z visit Deck mock round 2
+2026-10-06T19:43:21.841Z start Schema v1 grilling as agent-switchboard-0378 (w)
+2026-10-06T19:43:24.593Z visit Schema v1 grilling
+2026-10-06T19:43:24.911Z visit Schema v1 grilling
+2026-10-06T19:43:25.422Z start Canary rollback flag as harbor-deploy-6978 (enter)
+2026-10-06T19:43:28.125Z visit Canary rollback flag
+2026-10-06T19:43:30.387Z click project open:harbor-deploy x1
+2026-10-06T19:43:31.383Z click project open:harbor-deploy x1
+2026-10-06T19:43:31.787Z click section inactive x1
+2026-10-06T19:43:32.820Z click section inactive x1
+2026-10-06T19:43:32.974Z visit Canary rollback flag
+2026-10-06T19:43:33.976Z visit Flaky integration test in eu-west
+2026-10-06T19:43:34.665Z toast info: hover: eager
+2026-10-06T19:43:34.825Z visit Flaky integration test in eu-west
+2026-10-06T19:43:35.852Z start Recorder footer status as agent-switchboard-d3e6 (hover)
+2026-10-06T19:43:37.509Z visit Fix fnox host routing
+2026-10-06T19:43:38.277Z visit Fix fnox host routing
+2026-10-06T19:43:38.419Z toast info: hover: lazy
+2026-10-06T19:43:39.324Z visit Recorder footer status
+2026-10-06T19:43:44.600Z editor recorder-edit-599b for /tmp/swb-mock-PROTOTYPE/code/agent-switchboard/.worktrees/recorder
+2026-10-06T19:43:44.604Z visit Recorder footer status
+2026-10-06T19:43:48.407Z visit Recorder footer status
+2026-10-06T19:43:51.365Z visit Recorder footer status
+2026-10-06T19:43:51.900Z toast error: turn running: wait for it to complete
+2026-10-06T19:43:52.891Z archive Recorder footer status; killed pi + its directory's editor
+2026-10-06T19:43:52.893Z switch-client agent-switchboard-4d88: can't find client: /dev/ttys033
+2026-10-06T19:43:54.752Z editor agent-switchboard-edit-0830 for /tmp/swb-mock-PROTOTYPE/code/agent-switchboard
+2026-10-06T19:43:56.466Z archive Schema v1 grilling; killed pi; editor kept (directory shared)
+2026-10-06T19:43:56.469Z switch-client __stage-drive: can't find client: /dev/ttys033
+2026-10-06T19:43:59.038Z unarchive Migrate UniFi provider fork
+2026-10-06T19:43:59.038Z toast info: unarchived “Migrate UniFi provider fork”
+2026-10-06T19:44:00.142Z archive Migrate UniFi provider fork; killed nothing
+2026-10-06T19:44:01.434Z not running: Fix fnox host routing
+2026-10-06T19:44:01.436Z switch-client __stage-drive: can't find client: /dev/ttys033
+2026-10-06T19:44:05.004Z start Pod042 herdr unit as ansiblonomicon-d8ad (w)
+2026-10-06T19:44:13.435Z visit Flaky integration test in eu-west
+2026-10-06T19:44:13.948Z visit Flaky integration test in eu-west
+2026-10-06T19:44:15.016Z terminal colors (997 dark): fg {"r":235,"g":219,"b":178} bg {"r":29,"g":32,"b":33} palette 16/16
+2026-10-06T19:44:15.049Z visit Canary rollback flag
+2026-10-06T19:44:18.372Z visit Canary rollback flag
+2026-10-06T19:44:20.594Z visit Flaky integration test in eu-west
+2026-10-06T19:44:21.216Z terminal colors (997 light): fg {"r":60,"g":56,"b":54} bg {"r":249,"g":245,"b":215} palette 16/16
+2026-10-06T19:44:25.270Z visit Flaky integration test in eu-west

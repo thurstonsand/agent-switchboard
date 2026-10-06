@@ -1,0 +1,40 @@
+ swb                 10 open · 3 archived │ pi v0.99.2 (mock)
+──────────────────────────────────────────│ escape interrupt · ctrl+c clear · ctrl+d exit · /quit · /long for a 30 s turn
+ ▾ agent-switchboard                      │
+   ◐ Deck mock round 2                now │
+   ○ Schema v1 grilling                2h │ show a red footer when the recorder can't write
+▌  ○ Recorder footer status         ⎇  1d │
+ ▾ ansiblonomicon                         │
+   ○ Fix fnox host routing            12m │
+   ○ Retire uv.lock mask               5h │ $ rg -n setStatus packages/pi/src
+   ⚠ Pod042 herdr unit                 7h │ packages/pi/src/recorder.ts:88:  ctx.ui.setStatus("swb", status)
+ ▾ harbor-deploy                          │
+   ◆ Flaky integration test in eu-…   now │
+   ○ Canary rollback flag              2d │ Done. A failed write sets `swb ✗ db locked` in pi's footer, and the next good write clears it.
+ ▾ pi-sessions                            │
+   ○ Search ranking relaxation for…   40m │
+   ○ Subagent report race when the…    3h │
+ ▸ Inactive (1)                           │
+ ▸ Archived (3)                           │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+──────────────────────────────────────────│
+ Recorder footer status                   │
+ ○ idle · live                            │─────────────────────────────────────────────────────────────────────────────────────────────────
+ ~mock/agent-switchboard/.worktrees/recor…│what does the footer show when the db is locked?
+ ▌ on view · focused                      │and in the status line?
+                                          │─────────────────────────────────────────────────────────────────────────────────────────────────
+ M-a h roster M-a e editor M-a z zoom M-a…│ ~mock/agent-switchboard/.worktrees/recorder (recorder)
+ PROTO hover:lazy (H) · switch 1.1ms · re…│ ↑17.1k ↓4.8k $0.12  ·  Recorder footer status  ·  claude-opus-5

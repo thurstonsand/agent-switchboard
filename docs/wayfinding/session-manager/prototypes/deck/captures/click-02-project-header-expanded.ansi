@@ -1,0 +1,40 @@
+ [1mswb[0m                 [90m10 open · 3 archived [36m│[39m [1mpi[0m [90mv0.99.2 (mock)[39m
+[90m──────────────────────────────────────────[36m│[39m [90mescape interrupt · ctrl+c clear · ctrl+d exit · /quit · /long for a 30 s turn[39m
+ ▾ [1magent-switchboard[0m                      [36m│[39m
+   [36m◐[39m Deck mock round 2                [90mnow[39m [36m│[39m[48;2;227;232;206m
+[49m   ○ Schema v1 grilling[90m                2h[39m [36m│[39m[48;2;227;232;206m add a flag to roll back the canary
+[49m   [90m○[39m Recorder footer status         [35m⎇[90m  1d[39m [36m│[39m[48;2;227;232;206m
+[49m ▾ [1mansiblonomicon[0m                         [36m│[39m
+   [32m●[39m Fix fnox host routing            [90m12m[39m [36m│[39m Added `--rollback-canary`. It reuses the previous release's values.
+   [90m○[39m Retire uv.lock mask[90m               5h[39m [36m│[39m
+   [31m⚠[39m Pod042 herdr unit[90m                 7h[39m [36m│[39m
+[48;2;211;207;183m ▾ [1mharbor-deploy[0m[48;2;211;207;183m                          [36m[49m│[39m
+   [2m[38;2;192;132;252m◆[0m Flaky integration test in eu-…   [90mnow[39m [36m│[39m
+▌  ○ Canary rollback flag[90m              2d[39m [36m│[39m
+ ▾ [1mpi-sessions[0m                            [36m│[39m
+   [90m○[39m Search ranking relaxation for…   [90m40m[39m [36m│[39m
+   [90m○[39m Subagent report race when the…[90m    3h[39m [36m│[39m
+ ▸ Inactive [90m(1)[39m                           [36m│[39m
+ ▸ Archived [90m(3)[39m                           [36m│[39m
+                                          [36m│[39m
+                                          [36m│[39m
+                                          [36m│[39m
+                                          [90m│[39m
+                                          [90m│[39m
+                                          [90m│[39m
+                                          [90m│[39m
+                                          [90m│[39m
+                                          [90m│[39m
+                                          [90m│[39m
+                                          [90m│[39m
+                                          [90m│[39m
+                                          [90m│[39m
+                                          [90m│[39m
+[90m──────────────────────────────────────────│[39m
+ [1mCanary rollback flag[0m                     [90m│[39m
+ ○ idle[90m · [39mlive                            [90m│[39m
+ [90m~mock/harbor-deploy[39m                      [90m│─────────────────────────────────────────────────────────────────────────────────────────────────
+[39m [90m▌[39m on view                                [90m│[7m[39m [0m
+                                          [90m│─────────────────────────────────────────────────────────────────────────────────────────────────
+[39m [1m⏎[0m [2mtoggle[0m [1mh/l[0m [2mfold[0m [1m?[0m [2mkeys[0m                 [90m│[39m [90m~mock/harbor-deploy (main)[39m
+[30m[45m PROTO hover:lazy (H) · switch 0.4ms · re…[90m[49m│[39m [90m↑15.4k ↓4.2k $0.08[39m  [90m·[39m  [2mCanary rollback flag[0m  [90m·[39m  [90mgpt-5.6-sol[39m

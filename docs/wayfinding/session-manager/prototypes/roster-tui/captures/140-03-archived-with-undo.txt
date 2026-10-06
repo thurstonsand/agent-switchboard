@@ -1,0 +1,32 @@
+ swb                                                                                                     12 open · 3 inactive · 11 archived
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ▾ ansiblonomicon                                           │ Ghostty quick terminal keybind for the dispatcher window and its focus-or-open
+   ◐ Fix fnox host routing                            now   │ fallback
+   ◆ Plan sessions v2 TUI                              2m ⧉ │ ~/c/p/ansiblonomicon
+ ▸ ○ Ghostty quick terminal keybind for the dispatc…  40m ⧉ │ main · pi · opus · 5h old
+   ◌ Pod042 herdr unit                                 1d   │ ○ idle · live in tmux · ⧉ viewer open
+ ▾ agent-switchboard                                        │ 31234d2d · @session:019a472d-b9fd-7039-a34e-a07131234d2d
+   ◐ Roster TUI prototype                              1m ⧉ │ ────────────────────────────────────────
+   ○ Recorder footer status                            2h   │ you 42m
+   ● GhosttyKit viewer seam spike                      4d   │ bind the quick terminal to swb
+ ▾ pi-sessions                                              │ agent 40m
+   ◐ Search ranking relaxation for fuzzy titles        6m   │ Bound. The quick terminal now runs `swb` and focuses an existing instance.
+   ⚠ Subagent report race when the parent compacts …   3h   │
+ ▾ harbor-deploy                                            │
+   ◆ Flaky integration test in eu-west                25m   │
+   ● Bump chart to 4.12 and regenerate the values s…   5h   │
+   ◌ Canary rollback flag                              2d   │
+ ▸ Inactive (3)                                             │
+ › Archived (11)                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+── archived “Retire uv.lock mask” · u undo 5s ─────────────────────────────────────────────────────────────────────────────────────────────
+ ⏎ open  a archive  u undo  y copy cmd  Y copy @session  / filter  ? keys
+ PROTOTYPE  1/4 adaptive A↔C→C  ·  140 cols, C≥110  ·  tick off  ·  v/V variant  ? keys

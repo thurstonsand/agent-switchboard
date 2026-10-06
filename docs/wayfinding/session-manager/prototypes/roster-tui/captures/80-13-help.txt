@@ -1,0 +1,24 @@
+ swb                                          14 open · 3 inactive · 9 archived
+────────────────────────────────────────────────────────────────────────────────
+   ● Reti
+   ○ Ghos swb keys (prototype)                                         ff-v2
+   ◌ Pod0
+ ▾ pi-ses j/k ↑/↓   move          g/G   top / bottom
+   ◐ Sear ⏎ space   open · toggle a group · browse Archived            76e6-272…
+   ⚠ Suba h/l ←/→   collapse / expand a group                          ──────
+   ◌ Sear a         archive        u     undo (5 s)
+ ▾ harbor U         unarchive (in Archived)
+   ◆ Flak y         copy `swb open <id>`
+   ● Bump Y         copy `@session:<uuid>`                             lock now
+   ◌ Cana /         filter         esc   clear filter · back
+ ▾ Inacti q         quit
+   ▾ pi-s
+   ▸ ○ Ha prototype only
+   ▾ ansi v/V       next / previous variant
+     ◌ Ta [ ]       breakpoint −5 / +5
+   ▾ falc t         toggle activity tick   .  one tick now
+     ⚠ Re
+ › Archiv any key closes this
+─────────                                                              ─────────
+ ⏎ open  a archive  u undo  y copy cmd  Y copy @session  / filter  ? keys
+ PROTOTYPE  3/4 forced C  ·  80 cols, C≥110  ·  tick off  ·  last ◐→● Roster TU…

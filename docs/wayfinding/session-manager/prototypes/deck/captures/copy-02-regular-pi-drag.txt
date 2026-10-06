@@ -1,0 +1,40 @@
+ swb                 10 open · 3 archived │ pi v0.99.2 (mock)
+──────────────────────────────────────────│ escape interrupt · ctrl+c clear · ctrl+d exit · /quit · /long for a 30 s turn
+ ▾ agent-switchboard                      │
+▌  ◐ Deck mock round 2                now │
+   ● Schema v1 grilling                2h │ build round 2 of the Deck mocks, then run the whole e2e suite against it
+   ○ Recorder footer status         ⎇  1d │
+ ▾ ansiblonomicon                         │
+   ● Fix fnox host routing            12m │ Starting with the harness: a hidden tmux server, `drive keys`, and `drive capture`.
+   ○ Retire uv.lock mask               5h │
+   ⚠ Pod042 herdr unit                 7h │
+ ▾ harbor-deploy                          │ $ bun run drive start --size 140x40
+   ◆ Flaky integration test in eu-…   now │ Deck ready in 412 ms
+   ○ Canary rollback flag              2d │
+ ▾ pi-sessions                            │
+   ○ Search ranking relaxation for…   40m │
+   ○ Subagent report race when the…    3h │ $ mise run e2e
+ ▸ Inactive (1)                           │ scenario 1/40 · deck starts
+ ▸ Archived (3)                           │
+                                          │
+                                          │ ⠼ Working… (esc to interrupt)
+                                          │
+                                          │─────────────────────────────────────────────────────────────────────────────────────────────────
+                                          │
+                                          │─────────────────────────────────────────────────────────────────────────────────────────────────
+                                          │ ~mock/agent-switchboard (main)
+                                          │ ↑17.1k ↓4.8k $0.12  ·  Deck mock round 2  ·  claude-opus-5
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+                                          │
+──────────────────────────────────────────│
+ Deck mock round 2                        │
+ ◐ working · live                         │
+ ~mock/agent-switchboard                  │
+ ▌ on view · focused                      │
+                                          │
+ M-a h roster M-a e editor M-a z zoom M-a…│
+ PROTO hover:lazy (H) · switch 0.4ms · re…│

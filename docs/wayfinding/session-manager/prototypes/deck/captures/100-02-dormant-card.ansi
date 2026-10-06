@@ -1,0 +1,30 @@
+ [1mswb[0m                    [90m10 open [36m│[39m [1mpi[0m [90mv0.99.2 (mock)[39m
+[90m────────────────────────────────[36m│[39m [90mescape interrupt · ctrl+c clear · ctrl+d exit · /quit · /long for
+[39m ▾ [1magent-switchboard[0m            [36m│[39m [90ma 30 s turn[39m
+   [90m○[39m Recorder footer sta… [35m⎇[39m [90mnow[39m [36m│[39m
+[48;2;211;207;183m▌  [36m◐[39m Deck mock round 2[90m       1m[39m [36m[49m│[39m[48;2;227;232;206m
+[49m   [90m○[39m Schema v1 grilling[90m      2h[39m [36m│[39m[48;2;227;232;206m build round 2 of the Deck mocks, then run the whole e2e suite
+[49m ▾ [1mansiblonomicon[0m               [36m│[39m[48;2;227;232;206m against it
+[49m   [90m○[39m Fix fnox host routi…   [90m13m[39m [36m│[39m[48;2;227;232;206m
+[49m   [90m○[39m Retire uv.lock mask[90m     5h[39m [36m│[39m
+   ○ Pod042 herdr unit[90m       7h[39m [36m│[39m Starting with the harness: a hidden tmux server, `drive keys`,
+ ▾ [1mharbor-deploy[0m                [36m│[39m and `drive capture`.
+   ○ Flaky integration t…   [90mnow[39m [36m│[39m
+   ○ Canary rollback flag[90m    2d[39m [36m│[39m[48;2;237;234;192m
+[49m ▾ [1mpi-sessions[0m                  [36m│[39m[48;2;237;234;192m [1m$ bun run drive start --size 140x40[0m[48;2;237;234;192m
+[49m   [90m○[39m Search ranking rela…   [90m41m[39m [36m│[39m[48;2;237;234;192m [90mDeck ready in 412 ms[39m
+[49m   [90m○[39m Subagent report rac…[90m    3h[39m [36m│[39m[48;2;237;234;192m
+[49m ▸ Inactive [90m(1)[39m                 [90m│[39m
+ ▸ Archived [90m(3)[39m                 [90m│[39m[48;2;237;234;192m
+[49m                                [90m│[39m[48;2;237;234;192m [1m$ mise run e2e[0m[48;2;237;234;192m
+[49m                                [90m│[39m[48;2;237;234;192m [90mscenario 13/40 · [32m✓[39m 12 passed
+[49m                                [90m│[39m[48;2;237;234;192m
+[49m                                [90m│[39m
+[90m────────────────────────────────│[39m
+ [1mDeck mock round 2[0m              [90m│[39m [36m⠧[39m [90mWorking… (esc to interrupt)[39m
+ [36m◐[39m [36mworking[90m · [39mlive               [90m│[39m
+ [90m~mock/agent-switchboard[39m        [90m│───────────────────────────────────────────────────────────────────
+[39m [90m▌[39m on view                      [90m│[7m[39m [0m
+                                [90m│───────────────────────────────────────────────────────────────────
+[39m [1m⏎[0m [2mfocus[0m [1mw[0m [2mwake[0m [1ma[0m [2marchive[0m [1m?[0m [2mkeys[0m[90m│[39m [90m~mock/agent-switchboard (main)[39m
+[30m[45m PROTO hover:lazy (H) · switch …[90m[49m│[39m [90m↑17.1k ↓4.8k $0.12[39m  [90m·[39m  [2mDeck mock round 2[0m  [90m·[39m  [90mclaude-opus-5[39m

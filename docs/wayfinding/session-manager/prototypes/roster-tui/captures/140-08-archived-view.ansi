@@ -1,0 +1,32 @@
+ [1mswb[0m [90m›[39m Archived                                                                                                                          [90m10
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m[48;5;237m ▸ Migrate UniFi provider fork       [90mansiblonomicon   [39m   3h[49m [90m│[39m [1mMigrate UniFi provider fork[0m
+   Search ranking relaxation         [90mpi-sessions      [39m   1d [90m│[39m [2m~/c/p/ansiblonomicon[0m
+   fnox activation receipt           [90mansiblonomicon   [39m   2d [90m│[39m [90mmain[39m [90m·[39m pi [90m·[39m opus [90m·[39m 8h old
+   Fix flaky canary test             [90mharbor-deploy    [39m   4d [90m│[39m [90m◌[39m [90mdormant[39m [90m·[39m resumes on open [90m·[39m no viewer
+   Schema ticket grilling            [90magent-switchboard[39m   5d [90m│[39m [33marchived 3h ago · unarchives on first turn[39m
+   Mise bootstrap on a clean HOME    [90mansiblonomicon   [39m   7d [90m│[39m [90m216c25c7 · @session:019a97cd-aedc-735e-22a3-55f9216c25c7[39m
+   Child bootstrap detection         [90mpi-sessions      [39m   9d [90m│[39m [90m────────────────────────────────────────[39m
+   Values schema lint in CI          [90mharbor-deploy    [39m  11d [90m│[39m [1myou[0m [90m5h[39m
+   Ghostty AppleScript tab probe     [90magent-switchboard[39m  13d [90m│[39m move to the upstream provider
+   Pod042 restic schedule            [90mansiblonomicon   [39m  15d [90m│[39m [36magent[39m [90m5h
+[39m                                                            [90m│[39m Migrated; the fork is no longer referenced.
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+                                                            [90m│[39m
+[90m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m [1m⏎[0m [2mopen (unarchives on first turn)[0m  [1mU[0m [2munarchive[0m  [1mesc[0m [2mback[0m  [1m/[0m [2mfilter[0m  [1m?[0m [2mkeys[0m
+[30m[45m PROTOTYPE  1/4 adaptive A↔C→C  ·  140 cols, C≥110  ·  tick off  ·  last [36m◐[39m→[32m●[39m Roster TUI prototype

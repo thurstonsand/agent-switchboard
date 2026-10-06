@@ -1,0 +1,378 @@
+{
+  "deck": "drive",
+  "size": {
+    "cols": 42,
+    "rows": 40
+  },
+  "focus": "stage",
+  "deckFocused": true,
+  "zoomed": false,
+  "filter": null,
+  "hover": {
+    "mode": "lazy",
+    "pending": null
+  },
+  "cursor": {
+    "kind": "session",
+    "title": "Recorder footer status"
+  },
+  "stage": {
+    "title": "Recorder footer status",
+    "mode": "session",
+    "kind": "live",
+    "notRunning": false,
+    "onStageMs": 1889,
+    "pendingFocus": null,
+    "tmuxTarget": "agent-switchboard-d3e6"
+  },
+  "toasts": [],
+  "undo": null,
+  "rows": [
+    {
+      "kind": "project",
+      "title": "agent-switchboard",
+      "collapsed": false
+    },
+    {
+      "kind": "session",
+      "title": "Recorder footer status",
+      "state": "working",
+      "archived": false,
+      "staged": true
+    },
+    {
+      "kind": "session",
+      "title": "Deck mock round 2",
+      "state": "working",
+      "archived": false,
+      "staged": false
+    },
+    {
+      "kind": "session",
+      "title": "Schema v1 grilling",
+      "state": "idle",
+      "archived": false,
+      "staged": false
+    },
+    {
+      "kind": "project",
+      "title": "ansiblonomicon",
+      "collapsed": false
+    },
+    {
+      "kind": "session",
+      "title": "Fix fnox host routing",
+      "state": "idle",
+      "archived": false,
+      "staged": false
+    },
+    {
+      "kind": "session",
+      "title": "Retire uv.lock mask",
+      "state": "dormant",
+      "archived": false,
+      "staged": false
+    },
+    {
+      "kind": "session",
+      "title": "Pod042 herdr unit",
+      "state": "interrupted",
+      "archived": false,
+      "staged": false
+    },
+    {
+      "kind": "project",
+      "title": "harbor-deploy",
+      "collapsed": false
+    },
+    {
+      "kind": "session",
+      "title": "Flaky integration test in eu-west",
+      "state": "blocked",
+      "archived": false,
+      "staged": false
+    },
+    {
+      "kind": "session",
+      "title": "Canary rollback flag",
+      "state": "idle",
+      "archived": false,
+      "staged": false
+    },
+    {
+      "kind": "project",
+      "title": "pi-sessions",
+      "collapsed": false
+    },
+    {
+      "kind": "session",
+      "title": "Search ranking relaxation for fuzzy titles",
+      "state": "dormant",
+      "archived": false,
+      "staged": false
+    },
+    {
+      "kind": "session",
+      "title": "Subagent report race when the parent compacts mid-handoff",
+      "state": "dormant",
+      "archived": false,
+      "staged": false
+    },
+    {
+      "kind": "section",
+      "title": "Inactive",
+      "count": 1,
+      "expanded": false
+    },
+    {
+      "kind": "section",
+      "title": "Archived",
+      "count": 3,
+      "expanded": false
+    }
+  ],
+  "sessions": [
+    {
+      "title": "Deck mock round 2",
+      "state": "working",
+      "live": true,
+      "ready": true,
+      "activity": "working",
+      "unseen": false,
+      "archived": false,
+      "cwd": "~mock/agent-switchboard",
+      "theme": {
+        "appearance": "light",
+        "source": "background+palette",
+        "background": "#f9f5d7"
+      }
+    },
+    {
+      "title": "Schema v1 grilling",
+      "state": "idle",
+      "live": true,
+      "ready": true,
+      "activity": "idle",
+      "unseen": false,
+      "archived": false,
+      "cwd": "~mock/agent-switchboard",
+      "theme": {
+        "appearance": "light",
+        "source": "background+palette",
+        "background": "#f9f5d7"
+      }
+    },
+    {
+      "title": "Recorder footer status",
+      "state": "working",
+      "live": true,
+      "ready": true,
+      "activity": "working",
+      "unseen": false,
+      "archived": false,
+      "cwd": "~mock/agent-switchboard/.worktrees/recorder",
+      "theme": {
+        "appearance": "light",
+        "source": "background+palette",
+        "background": "#f9f5d7"
+      }
+    },
+    {
+      "title": "Fix fnox host routing",
+      "state": "idle",
+      "live": true,
+      "ready": true,
+      "activity": "idle",
+      "unseen": false,
+      "archived": false,
+      "cwd": "~mock/ansiblonomicon",
+      "theme": {
+        "appearance": "light",
+        "source": "background+palette",
+        "background": "#f9f5d7"
+      }
+    },
+    {
+      "title": "Retire uv.lock mask",
+      "state": "dormant",
+      "live": false,
+      "ready": false,
+      "activity": "idle",
+      "unseen": false,
+      "archived": false,
+      "cwd": "~mock/ansiblonomicon",
+      "theme": null
+    },
+    {
+      "title": "Pod042 herdr unit",
+      "state": "interrupted",
+      "live": false,
+      "ready": false,
+      "activity": "working",
+      "unseen": false,
+      "archived": false,
+      "cwd": "~mock/ansiblonomicon",
+      "theme": null
+    },
+    {
+      "title": "Flaky integration test in eu-west",
+      "state": "blocked",
+      "live": true,
+      "ready": true,
+      "activity": "blocked",
+      "unseen": false,
+      "archived": false,
+      "cwd": "~mock/harbor-deploy",
+      "theme": {
+        "appearance": "light",
+        "source": "background+palette",
+        "background": "#f9f5d7"
+      }
+    },
+    {
+      "title": "Canary rollback flag",
+      "state": "idle",
+      "live": true,
+      "ready": true,
+      "activity": "idle",
+      "unseen": false,
+      "archived": false,
+      "cwd": "~mock/harbor-deploy",
+      "theme": {
+        "appearance": "light",
+        "source": "background+palette",
+        "background": "#f9f5d7"
+      }
+    },
+    {
+      "title": "Region failover runbook",
+      "state": "dormant",
+      "live": false,
+      "ready": false,
+      "activity": "idle",
+      "unseen": false,
+      "archived": false,
+      "cwd": "~mock/harbor-deploy",
+      "theme": null
+    },
+    {
+      "title": "Search ranking relaxation for fuzzy titles",
+      "state": "dormant",
+      "live": false,
+      "ready": false,
+      "activity": "idle",
+      "unseen": false,
+      "archived": false,
+      "cwd": "~mock/pi-sessions",
+      "theme": null
+    },
+    {
+      "title": "Subagent report race when the parent compacts mid-handoff",
+      "state": "dormant",
+      "live": false,
+      "ready": false,
+      "activity": "idle",
+      "unseen": false,
+      "archived": false,
+      "cwd": "~mock/pi-sessions",
+      "theme": null
+    },
+    {
+      "title": "Migrate UniFi provider fork",
+      "state": "dormant",
+      "live": false,
+      "ready": false,
+      "activity": "idle",
+      "unseen": false,
+      "archived": true,
+      "cwd": "~mock/ansiblonomicon",
+      "theme": null
+    },
+    {
+      "title": "Ghostty AppleScript tab probe",
+      "state": "dormant",
+      "live": false,
+      "ready": false,
+      "activity": "idle",
+      "unseen": false,
+      "archived": true,
+      "cwd": "~mock/agent-switchboard",
+      "theme": null
+    },
+    {
+      "title": "Values schema lint in CI",
+      "state": "dormant",
+      "live": false,
+      "ready": false,
+      "activity": "idle",
+      "unseen": false,
+      "archived": true,
+      "cwd": "~mock/harbor-deploy",
+      "theme": null
+    }
+  ],
+  "editors": [],
+  "terminalColors": {
+    "foreground": {
+      "r": 60,
+      "g": 56,
+      "b": 54
+    },
+    "background": {
+      "r": 249,
+      "g": 245,
+      "b": 215
+    },
+    "palette": 16
+  },
+  "perf": {
+    "switchClient": {
+      "n": 12,
+      "lastMs": 1.09,
+      "avgMs": 0.55,
+      "maxMs": 1.09
+    },
+    "keyToSwitch": {
+      "n": 9,
+      "lastMs": 2.56,
+      "avgMs": 1.9,
+      "maxMs": 2.9
+    },
+    "render": {
+      "n": 295,
+      "lastMs": 0.77,
+      "avgMs": 0.67,
+      "maxMs": 10.32
+    },
+    "newSession": {
+      "n": 3,
+      "lastMs": 3.21,
+      "avgMs": 2.41,
+      "maxMs": 3.21
+    },
+    "startToReady": {
+      "n": 3,
+      "lastMs": 1687,
+      "avgMs": 1698.33,
+      "maxMs": 1717
+    },
+    "uiCommand": {
+      "n": 10,
+      "lastMs": 11.52,
+      "avgMs": 13.01,
+      "maxMs": 16.7
+    },
+    "tickRowsChanged": {
+      "n": 223,
+      "lastMs": 0,
+      "avgMs": 0.8,
+      "maxMs": 4
+    },
+    "tickWriteBytes": {
+      "n": 223,
+      "lastMs": 22,
+      "avgMs": 102.73,
+      "maxMs": 395
+    }
+  }
+}

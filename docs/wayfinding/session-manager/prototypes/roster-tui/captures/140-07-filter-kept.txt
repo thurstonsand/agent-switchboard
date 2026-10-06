@@ -1,0 +1,32 @@
+ swb  /flak (esc clears)                                                                                 13 open · 3 inactive · 10 archived
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ▾ harbor-deploy                                            │ Archived
+   ◆ Flaky integration test in eu-west                25m   │ Flat, newest first by max(activity, archived).
+ › Archived (1)                                             │ A new turn unarchives.
+                                                            │
+                                                            │ 1 session
+                                                            │
+                                                            │ ⏎ browse
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ⏎ open  a archive  u undo  y copy cmd  Y copy @session  / filter  ? keys
+ PROTOTYPE  1/4 adaptive A↔C→C  ·  140 cols, C≥110  ·  tick off  ·  last ◐→● Roster TUI prototype

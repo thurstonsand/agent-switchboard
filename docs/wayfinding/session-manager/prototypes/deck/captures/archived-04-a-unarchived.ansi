@@ -1,0 +1,40 @@
+ [1mswb[0m                 [90m11 open · 2 archived [36m│[39m
+[90m──────────────────────────────────────────[36m│[39m
+ ▾ [1magent-switchboard[0m                      [36m│[39m
+   [90m○[39m Recorder footer status         [35m⎇[39m [90mnow[39m [36m│[39m
+   [36m◐[39m Deck mock round 2                [90mnow[39m [36m│[39m
+   [90m○[39m Schema v1 grilling[90m                2h[39m [36m│[39m
+ ▾ [1mansiblonomicon[0m                         [36m│[39m
+   ○ Fix fnox host routing            [90m12m[39m [36m│[39m
+   [90m○[39m Retire uv.lock mask[90m               5h[39m [36m│[39m
+   [90m○[39m Migrate UniFi provider fork[90m       5h[39m [36m│[39m
+   [31m⚠[39m Pod042 herdr unit[90m                 7h[39m [36m│[39m
+ ▾ [1mharbor-deploy[0m                          [36m│[39m
+   [1m[38;2;192;132;252m◆[0m Flaky integration test in eu-…   [90mnow[39m [36m│[39m
+   ○ Canary rollback flag[90m              2d[39m [36m│[39m              [1m[33mArchived[0m
+ ▾ [1mpi-sessions[0m                            [36m│[39m
+   [90m○[39m Search ranking relaxation for…   [90m40m[39m [36m│[39m              [1mValues schema lint in CI[0m
+   [90m○[39m Subagent report race when the…[90m    3h[39m [36m│[39m              [90m~mock/harbor-deploy[39m
+ ▸ Inactive [90m(1)[39m                           [36m│[39m              [2mArchived 11d ago. A new prompt unarchives it.[0m
+ ▾ Archived [90m(2)[39m                           [36m│[39m
+[48;2;211;207;183m▌  [90m✓[39m Values schema lint in CI         [90m11d[39m [36m[49m│[39m              [90myou  [39mlint values against the schema in CI
+   [90m✓[39m Ghostty AppleScript tab probe    [90m12d[39m [36m│[39m
+                                          [90m│[39m              [90mpi   [39mAdded a lint job; it fails on unknown keys.
+                                          [90m│[39m
+                                          [90m│[39m              [1mw[0m [2mwake[0m[90m · [1m[39m⏎[0m [2mfocus[0m[90m · [1m[39ma[0m [2munarchive[0m
+                                          [90m│[39m
+                                          [90m│[39m
+                                          [90m│[39m
+                                          [90m│[39m
+                                          [90m│[39m
+                                          [90m│[39m
+                                          [90m│[39m
+                                          [90m│[39m
+[90m──────────────────────────────────────────│[39m
+ [1mValues schema lint in CI[0m                 [90m│[39m
+ [90m○[39m idle[90m · [39mnot running[90m · [33marchived[39m          [90m│[39m
+ [90m~mock/harbor-deploy[39m                      [90m│[39m
+ [90m▌[39m on view: summary                       [90m│[39m
+ [32munarchived “Migrate UniFi provider fork”[39m [90m│[39m
+ [1m⏎[0m [2mfocus[0m [1mw[0m [2mwake[0m [1ma[0m [2munarchive[0m [1m?[0m [2mkeys[0m        [90m│[39m
+[30m[45m PROTO hover:lazy (H) · switch 0.6ms · re…[90m[49m│[39m

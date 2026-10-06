@@ -1,0 +1,24 @@
+ [1mswb[0m [90m›[39m Archived                                            [7m unarchived b5792841
+[0m[90m────────────────────────────────────────────────────────────────────────────────
+[39m   Migrate UniFi provider fork           ansiblonomicon                      3h
+[48;5;237m ▸ fnox activation receipt               ansiblonomicon                      2d
+[49m   Fix flaky canary test                 harbor-deploy       [35m⎇ flaky[39m         4d
+   Schema ticket grilling                agent-switchboard                   5d
+   Mise bootstrap on a clean HOME        ansiblonomicon                      7d
+   Child bootstrap detection             pi-sessions         [35m⎇ child-boot[39m    9d
+   Values schema lint in CI              harbor-deploy                      11d
+   Ghostty AppleScript tab probe         agent-switchboard                  13d
+   Pod042 restic schedule                ansiblonomicon                     15d
+
+
+
+
+
+
+
+
+
+
+[90m────────────────────────────────────────────────────────────────────────────────
+[39m [1m⏎[0m [2mopen (unarchives on first turn)[0m  [1mU[0m [2munarchive[0m  [1mesc[0m [2mback[0m  [1m/[0m [2mfilter[0m  [1m?[0m [2mkeys[0m
+[30m[45m PROTOTYPE  1/4 adaptive A↔C→A  ·  80 cols, C≥110  ·  tick off  ·  last [36m◐[39m→[32m●[39m Ros[49m…
