@@ -14,12 +14,25 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "@earendil-works/pi-tui";
+import type { View } from "@swb/shared";
 import { loadConfig } from "../config.ts";
 import { displayName, projectName } from "../derive.ts";
 import { UsageError } from "../errors.ts";
 import { quote, SESSIONS, tmux, tmuxAsync, tmuxTry, UI } from "../tmux.ts";
 import { Control } from "./control.ts";
-import { deckPaths, HELP_POPUP, NARROW_BELOW, placeholderName, ROSTER_WIDTH, removeDeckFiles, writeAtomic, writeCard } from "./deck.ts";
+import {
+	deckEnv,
+	deckPaths,
+	HELP_POPUP,
+	NARROW_BELOW,
+	placeholderName,
+	ROSTER_WIDTH,
+	removeDeckFiles,
+	SPLIT_FROM,
+	stageScript,
+	writeAtomic,
+	writeCard,
+} from "./deck.ts";
 import type { Card, DeckState, Entry, FromWorker, Snapshot, State, StatSummary, ToWorker, Turn } from "./protocol.ts";
 import {
 	age,
@@ -97,6 +110,9 @@ let terminalFocused = true;
 let terminalFocusedAt = Date.now();
 let zoomed = false;
 let narrow = false;
+let deckWidth = 0;
+/** The pane id the keyboard is on. */
+let focusedPane = "";
 let ready = false;
 
 type Toast = { text: string; level: "info" | "error"; until: number };
@@ -114,7 +130,14 @@ function launchFor(id: string): Launch | undefined {
 
 function isUnseen(e: Entry): boolean {
 	if (!e.unseen) return false;
-	return !(stage.applied.kind === "live" && stage.applied.id === e.id && terminalFocused);
+	return !(piShown(stage.applied) && stage.applied.id === e.id && terminalFocused);
+}
+
+/** Views chosen in this Deck that the db doesn't reflect yet. */
+const localViews = new Map<string, View>();
+
+function viewOf(e: Entry): View {
+	return localViews.get(e.id) ?? e.view;
 }
 
 function stateOf(e: Entry): State {
@@ -165,9 +188,33 @@ const archivedKey = (e: Entry) => Math.max(e.activityAt, e.archivedAt ?? 0);
 
 // ── stage ───────────────────────────────────────────────────────────────
 
-type Applied =
-	| { kind: "live"; id: string; target: string }
-	| { kind: "loading" | "dormant" | "exited" | "failed" | "empty"; id: string | null; target: string; card: Card };
+type Applied = {
+	kind: "live" | "loading" | "dormant" | "exited" | "failed" | "empty";
+	id: string | null;
+	/** pi's tmux session, when live. */
+	host: string | null;
+	/** What the Stage shows when pi isn't live. */
+	card: Card | null;
+	/** What is showing, which can differ from the session's saved view. */
+	view: View;
+	/** The Stage's first pane. */
+	target: string;
+	/** The Stage's second pane, which only split has. */
+	side: string | null;
+};
+
+function onCard(kind: Applied["kind"], id: string | null, card: Card): Applied {
+	return { kind, id, host: null, card, view: "pi", target: placeholder, side: null };
+}
+
+function piShown(a: Applied): boolean {
+	return a.kind === "live" && a.view !== "editor";
+}
+
+/** A nested client of the sessions server in one of the Stage's panes. */
+type StageClient = { pane: string; tty: string; up: boolean };
+const main: StageClient = { pane: stagePane, tty: "", up: false };
+let side: (StageClient & { target: string }) | null = null;
 
 const EMPTY: Card = { tone: "empty", headline: "", title: "", path: "", lines: ["Nothing selected."], turns: [], keys: "", since: 0 };
 
@@ -179,15 +226,13 @@ const stage = {
 	ended: null as { id: string; failed: boolean } | null,
 	/** While `new` starts, the Stage holds on its loading card until the cursor is moved. */
 	holdForNew: false,
-	applied: { kind: "empty", id: null, target: placeholder, card: EMPTY } as Applied,
+	applied: onCard("empty", null, EMPTY),
 	cardJson: "",
 	liveSince: 0,
 	visited: false,
 	visitTimer: null as Timer | null,
 	hoverTimer: null as Timer | null,
 	keyAt: 0,
-	tty: "",
-	clientUp: false,
 };
 
 function card(e: Entry, tone: Card["tone"], headline: string, lines: string[], keys: string, since = stage.stagedAt): Card {
@@ -209,7 +254,8 @@ function newLaunch(): Launch | undefined {
 	return launches.find((launch) => launch.id === null);
 }
 
-function desired(): Applied {
+/** The Stage as pi view would have it. */
+function piStage(): Applied {
 	const pending = newLaunch();
 	if (stage.staged === null && pending) {
 		const loading: Card = {
@@ -222,62 +268,132 @@ function desired(): Applied {
 			keys: pending.keyboard ? key("esc", "back to the list") : "",
 			since: pending.since,
 		};
-		return { kind: "loading", id: null, target: placeholder, card: loading };
+		return onCard("loading", null, loading);
 	}
 	const e = stage.staged === null ? undefined : entries.get(stage.staged);
-	if (!e) return { kind: "empty", id: null, target: placeholder, card: EMPTY };
+	if (!e) return onCard("empty", null, EMPTY);
 	const wakeKeys = [key("w", "wake"), key("⏎", "focus")].join(gray(" · "));
 	if (stage.ended?.id === e.id && e.open) {
 		const failed = stage.ended.failed;
 		const headline = failed ? "Failed to start" : "pi exited";
 		const lines = [failed ? "pi quit before it was ready." : "pi exited while it was on view."];
-		return {
-			kind: failed ? "failed" : "exited",
-			id: e.id,
-			target: placeholder,
-			card: card(e, failed ? "failed" : "exited", headline, lines, wakeKeys),
-		};
+		return onCard(failed ? "failed" : "exited", e.id, card(e, failed ? "failed" : "exited", headline, lines, wakeKeys));
 	}
-	if (e.live && e.host) return { kind: "live", id: e.id, target: e.host };
+	if (e.live && e.host) return { kind: "live", id: e.id, host: e.host, card: null, view: "pi", target: e.host, side: null };
 	const launch = launchFor(e.id);
 	if (launch) {
 		const line = launch.keyboard ? "The keyboard follows once it's up." : "Move away any time; it keeps starting.";
 		const keys = launch.keyboard ? key("esc", "back to the list") : "";
-		return { kind: "loading", id: e.id, target: placeholder, card: card(e, "loading", "Starting pi…", [line], keys, launch.since) };
+		return onCard("loading", e.id, card(e, "loading", "Starting pi…", [line], keys, launch.since));
 	}
 	if (!e.open) {
 		const ago = age(e.archivedAt ?? 0, Date.now());
 		const lines = [`Archived ${ago === "now" ? "just now" : `${ago} ago`}. A new prompt unarchives it.`];
 		const keys = [wakeKeys, key("a", "unarchive")].join(gray(" · "));
-		return { kind: "dormant", id: e.id, target: placeholder, card: card(e, "archived", "Archived", lines, keys) };
+		return onCard("dormant", e.id, card(e, "archived", "Archived", lines, keys));
 	}
 	if (e.interrupted) {
 		const lines = ["pi exited mid-turn. Waking resumes it idle; the turn isn't continued."];
-		return { kind: "dormant", id: e.id, target: placeholder, card: card(e, "interrupted", "⚠ Interrupted", lines, wakeKeys) };
+		return onCard("dormant", e.id, card(e, "interrupted", "⚠ Interrupted", lines, wakeKeys));
 	}
-	return { kind: "dormant", id: e.id, target: placeholder, card: card(e, "dormant", "Idle", [], wakeKeys) };
+	return onCard("dormant", e.id, card(e, "dormant", "Idle", [], wakeKeys));
 }
 
-let switching = Promise.resolve();
-function switchStage(target: string, force: boolean): void {
+/** The session's own view, as far as it can show: split needs pi live and a wide Deck, and both need the Editor. */
+function desired(): Applied {
+	const d = piStage();
+	const e = d.id === null ? undefined : entries.get(d.id);
+	const editor = e?.open ? snapshot?.editors[e.cwd] : undefined;
+	if (!e || !editor) return d;
+	const view = viewOf(e);
+	if (view === "editor") return { ...d, view, target: editor };
+	if (view === "split" && d.host && deckWidth >= SPLIT_FROM) return { ...d, view, target: editor, side: d.host };
+	return d;
+}
+
+/** Directories whose Editor this staging already asked for, so an Editor that dies isn't restarted in a loop. */
+const editorsAsked = new Set<string>();
+/** Directories whose Editor died after this staging asked for it, already reported once. */
+const editorsLost = new Set<string>();
+const editorWaits = new Map<string, ((name: string | null) => void)[]>();
+
+/** Resolves to the directory's Editor once the worker reports it, or null if it couldn't start. */
+function requestEditor(dir: string): Promise<string | null> {
+	editorsAsked.add(dir);
+	const existing = snapshot?.editors[dir];
+	if (existing) return Promise.resolve(existing);
+	return new Promise((resolve) => {
+		const waits = editorWaits.get(dir);
+		if (waits) {
+			waits.push(resolve);
+			return;
+		}
+		editorWaits.set(dir, [resolve]);
+		post({ type: "editor", dir });
+	});
+}
+
+function settleEditorWaits(dir: string, name: string | null): void {
+	for (const resolve of editorWaits.get(dir) ?? []) resolve(name);
+	editorWaits.delete(dir);
+}
+
+/** Every change to the Stage's panes and clients, in order. */
+let stageOps = Promise.resolve();
+
+function switchStage(client: StageClient, target: string, force: boolean): void {
 	const keyAt = stage.keyAt;
 	stage.keyAt = 0;
-	switching = switching.then(async () => {
-		if (!stage.clientUp && !force) return;
+	stageOps = stageOps.then(async () => {
+		if (!client.up && !force) return;
 		const t0 = performance.now();
 		try {
-			await ctl.run(`switch-client -c ${quote(stage.tty)} -t ${quote(`=${target}`)}`);
+			await ctl.run(`switch-client -c ${quote(client.tty)} -t ${quote(`=${target}`)}`);
 			perf.switchClient.add(performance.now() - t0);
 			if (keyAt > 0) perf.keyToSwitch.add(performance.now() - keyAt);
 		} catch {
-			// The Stage client re-attaches to the target file whenever it drops.
+			// A Stage client re-attaches to its target file whenever it drops.
+		}
+	});
+}
+
+/** Creates, retargets, or kills the Stage's second pane to match what is applied. Leaving it keeps the keyboard on the Stage. */
+function syncSide(): void {
+	stageOps = stageOps.then(async () => {
+		const want = stage.applied.side;
+		try {
+			if (want === null) {
+				if (!side) return;
+				const { pane } = side;
+				side = null;
+				await tmuxAsync(UI, "kill-pane", "-t", pane);
+				if (focusedPane === pane) await tmuxAsync(UI, "select-pane", "-t", stagePane);
+				return;
+			}
+			if (side?.target === want) return;
+			writeAtomic(paths.side, want);
+			if (side) {
+				side.target = want;
+				if (side.up) await ctl.run(`switch-client -c ${quote(side.tty)} -t ${quote(`=${want}`)}`);
+				return;
+			}
+			const created = await tmuxAsync(
+				UI,
+				...["split-window", "-h", "-d", "-l", "35%", "-t", stagePane, "-P", "-F", "#{pane_id}\t#{pane_tty}"],
+				...deckEnv(),
+				stageScript(deck, paths.side),
+			);
+			const [pane, tty] = created.split("\t") as [string, string];
+			side = { pane, tty, up: false, target: want };
+		} catch (error) {
+			toast(`split: ${(error as Error).message}`, "error");
 		}
 	});
 }
 
 function apply(): void {
 	const d = desired();
-	if (d.kind !== "live") {
+	if (d.card && d.target === placeholder) {
 		const json = JSON.stringify(d.card);
 		if (json !== stage.cardJson) {
 			stage.cardJson = json;
@@ -286,13 +402,25 @@ function apply(): void {
 	}
 	const prev = stage.applied;
 	stage.applied = d;
-	const same = d.kind === "live" && prev.kind === "live" && prev.id === d.id;
-	if (prev.kind === "live" && !same) leaveLive(prev.id);
-	if (d.kind === "live" && !same) enterLive(d.id);
+	const was = piShown(prev) ? prev.id : null;
+	const now = piShown(d) ? d.id : null;
+	if (was !== now) {
+		if (was) leaveLive(was);
+		if (now) enterLive(now);
+	}
+	const e = d.id === null ? undefined : entries.get(d.id);
+	if (d.host && e?.open && viewOf(e) !== "pi" && snapshot && !snapshot.editors[e.cwd]) {
+		if (!editorsAsked.has(e.cwd)) void requestEditor(e.cwd);
+		else if (!editorWaits.has(e.cwd) && !editorsLost.has(e.cwd)) {
+			editorsLost.add(e.cwd);
+			toast(`editor for ${e.cwd} exited; showing pi`, "error");
+		}
+	}
 	tui.requestRender();
+	if (d.side !== prev.side || d.side !== (side?.target ?? null)) syncSide();
 	if (d.target === prev.target) return;
 	writeAtomic(paths.target, d.target);
-	switchStage(d.target, false);
+	switchStage(main, d.target, false);
 }
 
 function enterLive(id: string): void {
@@ -316,7 +444,7 @@ function armVisit(id: string): void {
 	const wait = Math.max(0, VISIT_MS - (Date.now() - Math.max(stage.liveSince, terminalFocusedAt)));
 	stage.visitTimer = setTimeout(() => {
 		stage.visitTimer = null;
-		if (stage.applied.kind !== "live" || stage.applied.id !== id || !terminalFocused) return;
+		if (!piShown(stage.applied) || stage.applied.id !== id || !terminalFocused) return;
 		stage.visited = true;
 		post({ type: "visit", id });
 		tui.requestRender();
@@ -328,6 +456,8 @@ function stageSession(id: string): void {
 	stage.staged = id;
 	stage.stagedAt = Date.now();
 	if (stage.ended?.id !== id) stage.ended = null;
+	editorsAsked.clear();
+	editorsLost.clear();
 	const e = entries.get(id);
 	if (e && !e.live && e.transcript) post({ type: "transcript", id, path: e.transcript });
 	scheduleHover();
@@ -401,24 +531,25 @@ function settleLaunches(): void {
 
 /** Whatever the Stage's host now runs is what's selected: `/new` or `/resume` inside pi moves the selection with it. */
 function followHost(): void {
-	const applied = stage.applied;
-	if (applied.kind !== "live") return;
-	const e = entries.get(applied.id);
-	if (e?.live && e.host === applied.target) return;
-	const moved = [...entries.values()].find((x) => x.live && x.host === applied.target);
+	const { id, host } = stage.applied;
+	if (id === null || host === null) return;
+	const e = entries.get(id);
+	if (e?.live && e.host === host) return;
+	const moved = [...entries.values()].find((x) => x.live && x.host === host);
 	if (moved) {
 		roster.selectedKey = moved.id;
 		stage.staged = moved.id;
 		stage.stagedAt = Date.now();
 		return;
 	}
-	stage.ended = { id: applied.id, failed: false };
+	stage.ended = { id, failed: false };
 	if (focus === "stage") void focusRoster();
 }
 
 function onSnapshot(next: Snapshot): void {
 	snapshot = next;
 	entries = new Map(next.entries.map((e) => [e.id, e]));
+	for (const [id, view] of localViews) if (entries.get(id)?.view === view) localViews.delete(id);
 	settleLaunches();
 	followHost();
 	roster.settlePin();
@@ -428,7 +559,7 @@ function onSnapshot(next: Snapshot): void {
 	roster.syncStage(false);
 	// A turn that lands while I'm already watching is seen as it lands.
 	const applied = stage.applied;
-	if (applied.kind === "live" && stage.visited && terminalFocused && entries.get(applied.id)?.unseen)
+	if (piShown(applied) && applied.id && stage.visited && terminalFocused && entries.get(applied.id)?.unseen)
 		post({ type: "visit", id: applied.id });
 }
 
@@ -482,6 +613,15 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
 			apply();
 			break;
 		}
+		case "editor":
+			settleEditorWaits(message.dir, message.name);
+			if (message.text) toast(`editor: ${message.text}`, "error");
+			break;
+		case "viewFailed":
+			localViews.delete(message.id);
+			toast(`view: ${message.text}`, "error");
+			apply();
+			break;
 		case "error":
 			toast(message.text, "error");
 			break;
@@ -861,8 +1001,9 @@ class Roster implements Component {
 		if (stage.staged === e.id) {
 			const kind = stage.applied.kind;
 			const what = kind === "live" ? "" : kind === "loading" ? ": starting" : `: ${kind}`;
+			const view = stage.applied.view === "pi" ? "" : ` · ${stage.applied.view}`;
 			const focused = !terminalFocused ? gray(" · terminal unfocused") : focus === "stage" ? cyan(" · focused") : "";
-			onView = `${focus === "stage" ? cyan("▌") : gray("▌")} on view${what}${zoomed ? " · zoomed" : ""}${focused}`;
+			onView = `${focus === "stage" ? cyan("▌") : gray("▌")} on view${what}${view}${zoomed ? " · zoomed" : ""}${focused}`;
 		}
 		return [` ${bold(displayName(e))}`, ` ${facts.join(gray(" · "))}`, ` ${gray(where)}`, ` ${onView}`].map((line) =>
 			truncateToWidth(line, width, "…"),
@@ -907,8 +1048,10 @@ function rowLine(row: Row, width: number, now: number): string {
 
 // ── Deck actions ────────────────────────────────────────────────────────
 
+/** In split, the keyboard goes to pi. */
 async function focusStage(): Promise<void> {
-	await tmuxAsync(UI, "select-pane", ...(narrow ? ["-Z"] : []), "-t", stagePane);
+	await stageOps;
+	await tmuxAsync(UI, "select-pane", ...(narrow ? ["-Z"] : []), "-t", side?.pane ?? stagePane);
 }
 
 async function focusRoster(): Promise<void> {
@@ -922,11 +1065,12 @@ async function showHelp(): Promise<void> {
 
 /** Below NARROW_BELOW columns the roster stands alone, and focus moves zoom along. */
 async function layout(): Promise<void> {
-	const [width, zoomFlag, active] = (
-		await tmuxAsync(UI, "display", "-p", "-t", stagePane, "#{window_width}\t#{window_zoomed_flag}\t#{pane_active}")
-	).split("\t");
+	deckWidth = Number(await tmuxAsync(UI, "display", "-p", "-t", stagePane, "#{window_width}"));
+	apply();
+	await stageOps;
+	const [zoomFlag, active] = (await tmuxAsync(UI, "display", "-p", "-t", stagePane, "#{window_zoomed_flag}\t#{pane_active}")).split("\t");
 	const wasNarrow = narrow;
-	narrow = Number(width) < NARROW_BELOW;
+	narrow = deckWidth < NARROW_BELOW;
 	if (narrow !== wasNarrow) {
 		if (narrow) await tmuxAsync(UI, "set", "-t", deck, "@swb_narrow", "1");
 		else await tmuxAsync(UI, "set", "-u", "-t", deck, "@swb_narrow");
@@ -952,7 +1096,8 @@ process.on("SIGTERM", cleanup);
 async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 	switch (cmd) {
 		case "focus":
-			focus = argv[0] === stagePane ? "stage" : "roster";
+			focusedPane = argv[0] ?? "";
+			focus = focusedPane === rosterPane ? "roster" : "stage";
 			if (focus === "roster") for (const launch of launches) launch.keyboard = false;
 			zoomed = (await tmuxAsync(UI, "display", "-p", "-t", stagePane, "#{window_zoomed_flag}")) === "1";
 			apply();
@@ -963,17 +1108,21 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 			terminalFocused = focused;
 			if (focused) {
 				terminalFocusedAt = Date.now();
-				if (stage.applied.kind === "live") armVisit(stage.applied.id);
+				if (piShown(stage.applied) && stage.applied.id) armVisit(stage.applied.id);
 			} else {
 				if (stage.visitTimer) clearTimeout(stage.visitTimer);
 				stage.visitTimer = null;
-				if (stage.applied.kind === "live" && stage.visited) post({ type: "visit", id: stage.applied.id });
+				if (piShown(stage.applied) && stage.applied.id && stage.visited) post({ type: "visit", id: stage.applied.id });
 				stage.visited = false;
 			}
 			break;
 		}
 		case "layout":
 			await layout();
+			break;
+		case "view-swap":
+		case "view-split":
+			await changeView(cmd === "view-swap");
 			break;
 		case "esc":
 			for (const launch of launches) launch.keyboard = false;
@@ -986,11 +1135,48 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 	tui.requestRender();
 }
 
+/**
+ * `e` swaps pi and the Editor by what's showing, so an Editor that died comes back, and does nothing in split. `v` enters split with the keyboard on the pane matching the
+ * old view, and leaves it for whichever pane had the keyboard.
+ */
+async function changeView(swap: boolean): Promise<void> {
+	const e = stage.applied.id === null ? undefined : entries.get(stage.applied.id);
+	if (!e?.open) {
+		toast("no open session on view", "info");
+		return;
+	}
+	const saved = viewOf(e);
+	if (swap && saved === "split") return;
+	const showing = stage.applied.view;
+	const onStage = focus === "stage";
+	let next: View;
+	if (swap) next = showing === "editor" ? "pi" : "editor";
+	else if (saved !== "split") next = "split";
+	else next = showing === "split" && onStage && focusedPane === stagePane ? "editor" : "pi";
+	if (next !== "pi") {
+		editorsAsked.delete(e.cwd);
+		editorsLost.delete(e.cwd);
+		if ((await requestEditor(e.cwd)) === null || stage.applied.id !== e.id) return;
+	}
+	if (next === "split" && deckWidth < SPLIT_FROM) toast(`split needs ${SPLIT_FROM} columns; showing pi`, "info");
+	if (!narrow) await tmuxAsync(UI, "if", "-F", "#{window_zoomed_flag}", `resize-pane -Z -t ${quote(stagePane)}`);
+	localViews.set(e.id, next);
+	post({ type: "view", id: e.id, view: next });
+	apply();
+	await stageOps;
+	if (onStage) {
+		const pane = next === "split" && showing === "pi" && side ? side.pane : stagePane;
+		await tmuxAsync(UI, "select-pane", ...(narrow ? ["-Z"] : []), "-t", pane);
+	}
+	zoomed = (await tmuxAsync(UI, "display", "-p", "-t", stagePane, "#{window_zoomed_flag}")) === "1";
+}
+
 // ── view state ──────────────────────────────────────────────────────────
 
 function viewState(): DeckState {
 	const cursorRow = roster.selected();
 	const applied = stage.applied;
+	const staged = applied.id === null ? undefined : entries.get(applied.id);
 	return {
 		deck,
 		ready,
@@ -998,15 +1184,15 @@ function viewState(): DeckState {
 		cursor: cursorRow?.kind === "session" ? cursorRow.entry.id : null,
 		mode: roster.filtering ? "filter" : "roster",
 		filter: roster.query(),
-		focus,
+		focus: focus === "roster" ? "roster" : focusedPane === stagePane && applied.view !== "pi" ? "editor" : "stage",
 		staged: {
 			id: applied.id,
-			host: applied.kind === "live" ? applied.target : null,
+			host: applied.host,
 			kind: applied.kind,
-			view: "pi",
-			savedView: applied.id ? (entries.get(applied.id)?.view ?? "pi") : "pi",
+			view: applied.view,
+			savedView: staged ? viewOf(staged) : "pi",
 		},
-		layout: { width: tui.terminal.columns, rosterOnly: narrow, split: false, zoomed },
+		layout: { width: deckWidth, rosterOnly: narrow, split: side !== null, zoomed },
 		waking: launches.map((launch) => ({ id: launch.id, keyboardWaiting: launch.keyboard })),
 		rows: roster.rows().map((row) =>
 			row.kind === "session"
@@ -1055,7 +1241,8 @@ tui.onTerminalColorSchemeChange((scheme) => void queryColors(scheme));
 tui.setTerminalColorSchemeNotifications(true);
 void queryColors(null);
 
-stage.tty = tmux(UI, "display", "-p", "-t", stagePane, "#{pane_tty}");
+main.tty = tmux(UI, "display", "-p", "-t", stagePane, "#{pane_tty}");
+focusedPane = rosterPane;
 rmSync(paths.sock, { force: true });
 Bun.serve({
 	unix: paths.sock,
@@ -1084,15 +1271,20 @@ void layout();
 
 // Ready once the first snapshot is in and the Stage's nested client is attached to the sessions server.
 setInterval(() => {
-	if (!stage.clientUp) {
+	if (!main.up || (side && !side.up)) {
 		const clients = tmuxTry(SESSIONS, "list-clients", "-F", "#{client_tty}");
-		if (clients.ok && clients.out.split("\n").includes(stage.tty)) {
-			stage.clientUp = true;
-			switchStage(stage.applied.target, true);
+		const ttys = clients.ok ? clients.out.split("\n") : [];
+		if (!main.up && ttys.includes(main.tty)) {
+			main.up = true;
+			switchStage(main, stage.applied.target, true);
+		}
+		if (side && !side.up && ttys.includes(side.tty)) {
+			side.up = true;
+			switchStage(side, side.target, true);
 		}
 	}
 	const wasReady = ready;
-	ready = snapshot !== null && stage.clientUp;
+	ready = snapshot !== null && main.up;
 	if (ready && !wasReady && args.select) reveal(args.select);
 	const now = Date.now();
 	if (toasts.some((t) => t.until <= now) || launches.length > 0 || [...entries.values()].some((e) => e.activity === "blocked"))

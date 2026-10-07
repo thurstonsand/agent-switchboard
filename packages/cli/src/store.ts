@@ -1,4 +1,4 @@
-import { Db, dbPath, SCHEMA_VERSION } from "@swb/shared";
+import { Db, dbPath, SCHEMA_VERSION, type View } from "@swb/shared";
 import { SwbError } from "./errors.ts";
 
 const MIGRATIONS: string[] = [
@@ -40,6 +40,10 @@ export function markVisited(db: Db, id: string): void {
 		id,
 		Date.now(),
 	);
+}
+
+export function setView(db: Db, id: string, view: View): void {
+	db.run("INSERT INTO marks (session_id, view) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET view = excluded.view", id, view);
 }
 
 /** Opens the db and brings it to this binary's schema; refuses a db from a newer swb. */

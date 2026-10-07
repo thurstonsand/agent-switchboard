@@ -1,10 +1,10 @@
 /// <reference lib="webworker" />
 import { statSync } from "node:fs";
-import { bootId, type Db } from "@swb/shared";
+import { bootId, type Db, type View } from "@swb/shared";
 import type { Config } from "../config.ts";
 import { derive, type RuntimeRecord, runtimeLive, runtimeRecords, type SessionRow, sessionRows, type World } from "../derive.ts";
-import { archive, launch, unarchive, wake } from "../sessions.ts";
-import { markVisited, openStore } from "../store.ts";
+import { archive, ensureEditor, launch, unarchive, wake } from "../sessions.ts";
+import { markVisited, openStore, setView } from "../store.ts";
 import { listSessions, quote, SESSIONS, tmuxTry } from "../tmux.ts";
 import { ensurePlaceholder, placeholderName } from "./deck.ts";
 import type { Entry, FromWorker, Snapshot, ToWorker, Turn } from "./protocol.ts";
@@ -28,6 +28,8 @@ let runtimes: RuntimeRecord[] = [];
 let background: string | null = null;
 let mirroredServer = "";
 const transcripts = new Map<string, { mtimeMs: number; turns: Turn[] }>();
+/** Views chosen before a session's first prompt, written once it has a row to mark. */
+const pendingViews = new Map<string, View>();
 
 function post(message: FromWorker): void {
 	self.postMessage(message);
@@ -39,13 +41,19 @@ function readDb(): void {
 	dataVersion = version;
 	rows = sessionRows(db);
 	runtimes = runtimeRecords(db);
+	for (const [id, view] of pendingViews) {
+		if (!rows.some((row) => row.session_id === id)) continue;
+		pendingViews.delete(id);
+		setView(db, id, view);
+		rows = sessionRows(db);
+	}
 }
 
 type Polled = { snapshot: Snapshot; attached: Map<string, boolean>; names: Set<string>; serverPid: string };
 
 function snapshot(): Polled {
 	readDb();
-	const listed = listSessions(SESSIONS, "#{@swb_kind}", "#{?session_attached,1,0}", "#{pid}");
+	const listed = listSessions(SESSIONS, "#{@swb_kind}", "#{?session_attached,1,0}", "#{pid}", "#{@swb_dir}");
 	const attached = new Map(listed.filter(([, kind]) => kind === "pi").map(([name, , count]) => [name as string, count === "1"]));
 	const w: World = { now: Date.now(), bootId: boot, hosts: new Set(attached.keys()), inactiveAfterMs: config.inactiveAfterMs };
 	const known = new Set(rows.map((row) => row.session_id));
@@ -82,7 +90,12 @@ function snapshot(): Polled {
 		});
 	}
 	return {
-		snapshot: { entries, hosts: [...attached.keys()], serverUp: listed.length > 0 },
+		snapshot: {
+			entries,
+			hosts: [...attached.keys()],
+			editors: Object.fromEntries(listed.filter(([, kind]) => kind === "editor").map(([name, , , , dir]) => [dir, name])),
+			serverUp: listed.length > 0,
+		},
 		attached,
 		names: new Set(listed.map(([name]) => name as string)),
 		serverPid: listed[0]?.[3] ?? "",
@@ -118,7 +131,7 @@ function mirror(serverPid: string): void {
 	if (result.ok) mirroredServer = key;
 }
 
-function tick(): void {
+function tick(): Set<string> {
 	const { snapshot: snap, attached, names, serverPid } = snapshot();
 	if (snap.serverUp) {
 		if (!names.has(placeholderName(deck))) ensurePlaceholder(deck);
@@ -126,9 +139,10 @@ function tick(): void {
 		reap(snap, attached);
 	}
 	const json = JSON.stringify(snap);
-	if (json === lastJson) return;
+	if (json === lastJson) return names;
 	lastJson = json;
 	post({ type: "snapshot", snapshot: snap });
+	return names;
 }
 
 function transcript(id: string, path: string): void {
@@ -189,6 +203,29 @@ function handle(message: ToWorker): void {
 		case "background":
 			background = message.color;
 			break;
+		case "view":
+			try {
+				readDb();
+				if (rows.some((row) => row.session_id === message.id)) setView(db, message.id, message.view);
+				else pendingViews.set(message.id, message.view);
+			} catch (error) {
+				post({ type: "viewFailed", id: message.id, text: (error as Error).message });
+			}
+			break;
+		case "editor": {
+			let name: string;
+			try {
+				name = ensureEditor(db, message.dir, config.editor);
+			} catch (error) {
+				post({ type: "editor", dir: message.dir, name: null, text: (error as Error).message });
+				break;
+			}
+			lastJson = "";
+			dataVersion = -1;
+			const up = tick().has(name);
+			post({ type: "editor", dir: message.dir, name: up ? name : null, text: up ? null : `${config.editor} exited at once` });
+			return;
+		}
 	}
 	// A launch settles only against a snapshot taken after it, so one always follows, changed or not. Writes on
 	// this connection don't move data_version, so that snapshot re-reads the db.

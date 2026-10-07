@@ -126,7 +126,7 @@ export function launch(cwd: string, resume: string | null): string {
 		`SWB_TMUX_SESSION=${name}`,
 		"-e",
 		"PI_IMAGE_PROTOCOL=none",
-		`env -u TMUX -u TMUX_PANE ${shell} -lic ${quote(pi)}`,
+		`exec env -u TMUX -u TMUX_PANE ${shell} -lic ${quote(pi)}`,
 		";",
 		"set",
 		"-t",
@@ -136,6 +136,40 @@ export function launch(cwd: string, resume: string | null): string {
 		...(resume ? [";", "set", "-t", name, "@swb_launch_id", resume] : []),
 	);
 	return name;
+}
+
+/** The Editor for a directory, started if missing. Two Decks asking at once serialize on the db's write lock. */
+export function ensureEditor(db: Db, dir: string, editor: string): string {
+	ensureSessionsServer();
+	return db.tx(() => {
+		const existing = listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_dir}").find(([, kind, d]) => kind === "editor" && d === dir);
+		if (existing) return existing[0] as string;
+		const name = `${basename(dir).replaceAll(/[.:]/g, "_")}-edit-${randomHex(2)}`;
+		const shell = process.env.SHELL || "/bin/sh";
+		tmux(
+			SESSIONS,
+			"new-session",
+			"-d",
+			"-s",
+			name,
+			"-c",
+			dir,
+			`exec env -u TMUX -u TMUX_PANE ${shell} -lic ${quote(`exec ${editor}`)}`,
+			";",
+			"set",
+			"-t",
+			name,
+			"@swb_kind",
+			"editor",
+			";",
+			"set",
+			"-t",
+			name,
+			"@swb_dir",
+			dir,
+		);
+		return name;
+	});
 }
 
 /**
@@ -196,17 +230,18 @@ export function unarchive(db: Db, id: string): void {
 
 /** Kills each editor whose directory no open session uses any more. */
 export function gc(db: Db): void {
-	const editors = listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_dir}").filter(([, kind]) => kind === "editor");
+	const listed = listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_dir}");
+	const editors = listed.filter(([, kind]) => kind === "editor");
 	if (editors.length === 0) return;
-	const used = new Set(
-		db
-			.all(
-				`SELECT s.cwd FROM sessions s LEFT JOIN marks m USING (session_id)
-				 WHERE m.archived_at IS NULL OR m.archived_at < s.last_prompt_at
-				 UNION SELECT cwd FROM runtimes WHERE session_id NOT IN (SELECT session_id FROM sessions)`,
-			)
-			.map((row) => row.cwd as string),
+	const hosts = new Set(listed.map(([name]) => name as string));
+	const open = db.all(
+		`SELECT s.cwd FROM sessions s LEFT JOIN marks m USING (session_id)
+		 WHERE m.archived_at IS NULL OR m.archived_at < s.last_prompt_at`,
 	);
+	const provisional = db
+		.all("SELECT cwd, tmux_session FROM runtimes WHERE session_id NOT IN (SELECT session_id FROM sessions)")
+		.filter((row) => hosts.has(row.tmux_session as string));
+	const used = new Set([...open, ...provisional].map((row) => row.cwd as string));
 	for (const [name, , dir] of editors) {
 		if (!used.has(dir as string)) tmuxTry(SESSIONS, "kill-session", "-t", `=${name}`);
 	}

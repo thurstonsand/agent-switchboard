@@ -15,6 +15,8 @@ export type Snapshot = {
 	entries: Entry[];
 	/** Every pi tmux session on the sessions server, recorded or still starting. */
 	hosts: string[];
+	/** Each directory's Editor, by its tmux session. */
+	editors: Record<string, string>;
 	serverUp: boolean;
 };
 
@@ -52,7 +54,7 @@ export type DeckState = {
 	cursor: string | null;
 	mode: "filter" | "roster";
 	filter: string;
-	focus: "roster" | "stage";
+	focus: "roster" | "stage" | "editor";
 	staged: {
 		id: string | null;
 		host: string | null;
@@ -68,7 +70,8 @@ export type DeckState = {
 	perf: { render: StatSummary; switchClient: StatSummary; keyToSwitch: StatSummary; keyToFrame: StatSummary };
 };
 
-export type DeckPaths = { sock: string; card: string; target: string };
+/** `side` is the target file of the Stage's second pane, which exists only while split is showing. */
+export type DeckPaths = { sock: string; card: string; target: string; side: string };
 
 export type ToWorker =
 	| { type: "init"; deck: string; paths: DeckPaths; config: Config }
@@ -78,7 +81,9 @@ export type ToWorker =
 	| { type: "archive"; id: string }
 	| { type: "unarchive"; id: string }
 	| { type: "transcript"; id: string; path: string }
-	| { type: "background"; color: string };
+	| { type: "background"; color: string }
+	| { type: "view"; id: string; view: View }
+	| { type: "editor"; dir: string };
 
 export type FromWorker =
 	| { type: "snapshot"; snapshot: Snapshot }
@@ -87,4 +92,6 @@ export type FromWorker =
 	| { type: "transcript"; id: string; turns: Turn[] | null; error: string | null }
 	| { type: "launchFailed"; id: string | null; text: string }
 	| { type: "toggled"; error: string | null }
+	| { type: "editor"; dir: string; name: string | null; text: string | null }
+	| { type: "viewFailed"; id: string; text: string }
 	| { type: "error"; text: string };

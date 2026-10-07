@@ -8,10 +8,11 @@ import { openStore } from "../store.ts";
 import { cleanEnv, listSessions, quote, SESSIONS, tmux, tmuxBin, tmuxTry, UI } from "../tmux.ts";
 import type { Card, DeckPaths, DeckState } from "./protocol.ts";
 
-export const HELP_POPUP = ["-w", "62", "-h", "24", "-T", " swb keys ", `${SWB} __help`];
+export const HELP_POPUP = ["-w", "62", "-h", "26", "-T", " swb keys ", `${SWB} __help`];
 
 export const ROSTER_WIDTH = 42;
 export const NARROW_BELOW = 100;
+export const SPLIT_FROM = 160;
 
 export function decksDir(): string {
 	return join(stateDir(), "decks");
@@ -19,7 +20,12 @@ export function decksDir(): string {
 
 export function deckPaths(deck: string): DeckPaths {
 	const dir = decksDir();
-	return { sock: join(dir, `${deck}.sock`), card: join(dir, `${deck}.card.json`), target: join(dir, `${deck}.target`) };
+	return {
+		sock: join(dir, `${deck}.sock`),
+		card: join(dir, `${deck}.card.json`),
+		target: join(dir, `${deck}.target`),
+		side: join(dir, `${deck}.side`),
+	};
 }
 
 export function placeholderName(deck: string): string {
@@ -64,12 +70,14 @@ function uiConf(config: Config): string {
 		`set -g prefix ${prefix}`,
 		"set -g prefix2 None",
 		"unbind -aq -T prefix",
-		// Panes by index: {left} and {right} stop resolving while a pane is zoomed. A narrow Deck shows one pane at a
-		// time, so its moves carry the zoom along.
-		"bind Tab if -F '#{@swb_narrow}' 'select-pane -Z -t :.+' 'select-pane -t :.+'",
-		"bind h if -F '#{@swb_narrow}' 'select-pane -Z -t :.0' 'select-pane -t :.0'",
-		"bind l if -F '#{@swb_narrow}' 'select-pane -Z -t :.1' 'select-pane -t :.1'",
-		`bind z if -F '#{@swb_narrow}' 'select-pane -Z -t :.0' "if -F '#{window_zoomed_flag}' 'resize-pane -Z' 'select-pane -t :.1 ; resize-pane -Z -t :.1'" \\; ${layout}`,
+		// Panes by index (roster, then the Stage's one or two, pi last): {left} and {right} stop resolving while a pane is
+		// zoomed. A narrow Deck shows one pane at a time and never splits, so its moves carry the zoom along.
+		"bind Tab if -F '#{@swb_narrow}' { select-pane -Z -t :.+ } { if -F '#{pane_index}' { select-pane -t :.0 } { if -F '#{==:#{window_panes},3}' { select-pane -t :.2 } { select-pane -t :.1 } } }",
+		"bind h if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { if -F '#{pane_index}' { select-pane -t :.- } }",
+		"bind l if -F '#{@swb_narrow}' { select-pane -Z -t :.1 } { if -F '#{e|<:#{pane_index},#{e|-:#{window_panes},1}}' { select-pane -t :.+ } }",
+		`bind z if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { if -F '#{||:#{window_zoomed_flag},#{pane_index}}' { resize-pane -Z } { if -F '#{==:#{window_panes},3}' { select-pane -t :.2 ; resize-pane -Z -t :.2 } { select-pane -t :.1 ; resize-pane -Z -t :.1 } } } \\; ${layout}`,
+		`bind e ${notify("__deck #{session_name} view-swap")}`,
+		`bind v ${notify("__deck #{session_name} view-split")}`,
 		`bind ? display-popup -E ${HELP_POPUP.map(quote).join(" ")}`,
 		`bind ${prefix} send-keys ${prefix}`,
 		// A Deck is created detached; destroy-unattached set globally would kill it before its client attaches.
@@ -119,7 +127,7 @@ export function ensurePlaceholder(deck: string): void {
 	);
 }
 
-const PASSED_ENV = [
+const DECK_ENV = [
 	"PATH",
 	"HOME",
 	"SHELL",
@@ -134,19 +142,24 @@ const PASSED_ENV = [
 	"DISPLAY",
 ];
 
+/** `-e` flags carrying what Deck panes need from this environment. */
+export function deckEnv(): string[] {
+	return DECK_ENV.flatMap((name) => (process.env[name] ? ["-e", `${name}=${process.env[name]}`] : []));
+}
+
 /**
- * The Stage pane: a nested client of the sessions server. It waits for the Deck's own client first, because a
+ * A Stage pane: a nested client of the sessions server. It waits for the Deck's own client first, because a
  * nested client that attaches before the real terminal has no colors to inherit. Whenever it drops, it re-attaches
  * to the Deck's current target, else the placeholder.
  */
-function stageScript(deck: string, paths: DeckPaths): string {
+export function stageScript(deck: string, targetPath: string): string {
 	const ui = `${quote(tmuxBin())} -L ${quote(UI)}`;
 	const sessions = `${quote(tmuxBin())} -L ${quote(SESSIONS)}`;
 	return [
 		"unset TMUX TMUX_PANE",
 		`until ${ui} list-clients -t ${quote(`=${deck}`)} 2>/dev/null | grep -q .; do sleep 0.05; done`,
 		"while :; do",
-		`  t=$(cat ${quote(paths.target)} 2>/dev/null)`,
+		`  t=$(cat ${quote(targetPath)} 2>/dev/null)`,
 		`  ${sessions} attach -t "=$t" >/dev/null 2>&1 || ${sessions} attach -t ${quote(`=${placeholderName(deck)}`)} >/dev/null 2>&1 || sleep 0.2`,
 		"done",
 	].join("\n");
@@ -180,7 +193,7 @@ export async function openDeck(intent: DeckIntent): Promise<void> {
 
 	const cols = process.stdout.columns;
 	const rows = process.stdout.rows;
-	const env = PASSED_ENV.flatMap((name) => (process.env[name] ? ["-e", `${name}=${process.env[name]}`] : []));
+	const env = deckEnv();
 	const stage = tmux(
 		UI,
 		"new-session",
@@ -195,7 +208,7 @@ export async function openDeck(intent: DeckIntent): Promise<void> {
 		"-F",
 		"#{pane_id}",
 		...env,
-		stageScript(deck, paths),
+		stageScript(deck, paths.target),
 	);
 	const roster = [SWB, "__roster", "--deck", deck, "--stage", stage];
 	if (intent.select) roster.push("--select", intent.select);
@@ -251,7 +264,7 @@ export function liveDecks(): string[] {
 
 export function removeDeckFiles(deck: string): void {
 	const paths = deckPaths(deck);
-	for (const path of [paths.sock, paths.card, paths.target]) rmSync(path, { force: true });
+	for (const path of [paths.sock, paths.card, paths.target, paths.side]) rmSync(path, { force: true });
 }
 
 export async function fetchState(deck: string): Promise<DeckState> {

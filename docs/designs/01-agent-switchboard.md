@@ -638,13 +638,13 @@ Two settings exist so tests needn't mock anything. Both are real user-facing key
 - `inactive_after = "72h"`, so a test can set `"2s"`.
 - `clipboard = "pbcopy"`, so a test can point it at a file.
 
-- [ ] Phase 0: Scaffold and e2e harness
+- [x] Phase 0: Scaffold and e2e harness
   - Goal: the repo builds a compiled `swb`, and the e2e harness drives a real scripted pi in a private tmux server.
   - Files: root `package.json` (Bun workspaces), `packages/{cli,pi,shared}/package.json`, `tsconfig*.json`, `biome.json`, `mise.toml` (tools: bun, tmux checks, vhs, `conda:ttyd`, ffmpeg; tasks `check`, `lint`, `fix`, `typecheck`, `build`, `install`, `e2e`, `dist:pi`), `.github/workflows/ci.yml`, `renovate.json` (`security:minimumReleaseAgeNpm`, as in wt), `test/e2e/harness/` (disposable env, deadline polling, artifact retention, server cleanup, PID-death checks), and `test/e2e/scenario-extension.ts` (faux provider: plain reply, tool call, held turn, attention span; borrowed from pi-sessions' smoke extension).
   - Work: pin and check `pi --version` against 0.99.2 before any scenario. Resolve the real pi executable, not the mise shim. The work Mac's npm mirror trails upstream: if a dependency won't resolve there, pin the newest version it has and note it, rather than stopping.
   - Validation: `mise run check`. Run `mise run e2e` with one harness scenario: pi starts, a scripted reply renders, the capture is saved, and the server and PIDs are gone afterwards.
 
-- [ ] Phase 1: Store, recorder, and the sessions server
+- [x] Phase 1: Store, recorder, and the sessions server
   - Goal: a managed pi records its lifecycle into the db, and `swb ls --json` derives its state.
   - Files: `packages/shared/` (schema v1, paths, connection policy, derivations), `packages/pi/` (the recorder), and in `packages/cli/src/`: `db/`, `tmux.ts` (the one module for every tmux call), `sessions.ts` (launch with the env token, scrubbed server env, the embedded sessions-server config including `prefix None` and the `M-Enter` correction), and `commands/{ls,migrate,new,visit,detached,gc}.ts`.
   - Work: `swb new` temporarily attaches the current terminal straight to the new pi session; Phase 2 replaces that with the Deck. Add `swb drive start/keys/capture/stop` over arbitrary `swb` args; `drive state` waits for Phase 2.
@@ -664,7 +664,7 @@ Two settings exist so tests needn't mock anything. Both are real user-facing key
     - Alt+Enter arrives as CSI-u and Shift+Enter still works
     - with a user `tmux.conf` that binds `-n M-z` and sets `window-style`, pi still receives `alt+z`, and its OSC 11 reply is the harness terminal's background
 
-- [ ] Phase 2: The Deck
+- [x] Phase 2: The Deck
   - Goal: `swb` opens a Deck with a live roster and a Stage that switches between sessions and wakes dormant ones, without blocking.
   - Files: `packages/cli/src/deck/` (roster app, the db-and-transcript worker, control-mode clients on the `swb-ctl` sessions, placeholder renderer with the dormant card, the transcript adapter, stage control, Deck socket, UI-server config and prefix bindings), `commands/{deck,open}.ts`, and the rewrite of `commands/new.ts`.
   - Work:
@@ -690,7 +690,7 @@ Two settings exist so tests needn't mock anything. Both are real user-facing key
     - the sessions server killed under an open Deck recovers on the next `w` or Enter
     - a drag in regular-mode pi reaches `drive clipboard` through both layers; a drag in fullscreen pi puts the text on the macOS clipboard (saved and restored around the test)
 
-- [ ] Phase 3: Attention and lifecycle surfaces
+- [x] Phase 3: Attention and lifecycle surfaces
   - Goal: Visits, Unseen, Inactive, Archived, and every archive surface.
   - Files: `deck/` (`a` toggle, the inline Archived section, filter, copy, Inactive section), `commands/{archive,unarchive}.ts`, and the recorder's `/archive`.
   - Validation, as e2e scenarios:
@@ -702,7 +702,7 @@ Two settings exist so tests needn't mock anything. Both are real user-facing key
     - Inactive with `inactive_after = "2s"`, never for blocked or unseen sessions
     - `y`/`Y` copy
 
-- [ ] Phase 4: Editors and settings
+- [x] Phase 4: Editors and settings
   - Goal: per-directory editors, the three views, and every setting.
   - Files: the `view-swap` and `view-split` Deck commands, `gc` rules, and `config.ts` (strict TOML parse and validation).
   - Validation, as e2e scenarios:
