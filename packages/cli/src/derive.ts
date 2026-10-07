@@ -73,6 +73,29 @@ export function sessionRows(db: Db): SessionRow[] {
 		}));
 }
 
+/** Every runtime the recorder registered, including ones whose session has no row yet. */
+export type RuntimeRecord = {
+	tmux_session: string;
+	session_id: string;
+	cwd: string;
+	project_root: string;
+	boot_id: string;
+	pid: number;
+	started_at: number;
+};
+
+export function runtimeRecords(db: Db): RuntimeRecord[] {
+	return db.all("SELECT tmux_session, session_id, cwd, project_root, boot_id, pid, started_at FROM runtimes").map((r) => ({
+		tmux_session: r.tmux_session as string,
+		session_id: r.session_id as string,
+		cwd: r.cwd as string,
+		project_root: r.project_root as string,
+		boot_id: r.boot_id as string,
+		pid: r.pid as number,
+		started_at: r.started_at as number,
+	}));
+}
+
 export function derive(row: SessionRow, w: World): SessionState {
 	const live = row.runtime !== null && runtimeLive(row.runtime, w);
 	const open = row.archived_at === null || row.archived_at < row.last_prompt_at;

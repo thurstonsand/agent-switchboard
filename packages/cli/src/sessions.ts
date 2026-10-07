@@ -1,16 +1,20 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { dbPath, projectRoot, stateDir } from "@swb/shared";
+import { bootId, type Db, dbPath, pidAlive, projectRoot, stateDir } from "@swb/shared";
 import { SwbError } from "./errors.ts";
-import { cleanEnv, quote, SESSIONS, tmux, tmuxBin, tmuxTry } from "./tmux.ts";
+import { cleanEnv, listSessions, quote, SESSIONS, tmux, tmuxBin, tmuxTry } from "./tmux.ts";
 
 export const SWB = process.execPath;
 
-/** A hook line; its output is dropped, because a failed `run-shell -b` paints its error over the pane. */
-function hook(name: string, command: string): string {
+/** Runs an swb command from tmux; its output and exit status are dropped, because `run-shell -b` paints either over the pane. */
+export function notify(command: string): string {
 	if (!/^[A-Za-z0-9/._+@-]+$/.test(SWB))
 		throw new SwbError(`swb's path ${SWB} has characters tmux hooks can't quote; move it somewhere plainer`);
-	return `set-hook -g ${name}[0] 'run-shell -b "${SWB} ${command} >/dev/null 2>&1"'`;
+	return `run-shell -b "${SWB} ${command} >/dev/null 2>&1 || true"`;
+}
+
+export function hook(name: string, command: string): string {
+	return `set-hook -g ${name}[0] '${notify(command)}'`;
 }
 
 /** The whole config of the sessions server: the user's tmux config never loads here. */
@@ -61,12 +65,21 @@ export function ensureServer(server: string, conf: string, start: (confPath: str
 	const current = tmuxTry(server, "show", "-gqv", "@swb_conf_version");
 	if (current.ok && current.out === version) return;
 	writeFileSync(path, `${conf}\nset -g @swb_conf_version ${version}\n`);
-	if (current.ok) tmux(server, "source-file", path);
-	else start(path);
+	if (current.ok) {
+		tmux(server, "source-file", path);
+		return;
+	}
+	try {
+		start(path);
+	} catch (error) {
+		// Another swb started the server between the check and the start.
+		if (!tmuxTry(server, "show", "-gqv", "@swb_conf_version").ok) throw error;
+		tmux(server, "source-file", path);
+	}
 }
 
 /** Starts the server from a scrubbed environment, so project credentials from mise or direnv stay out of it. */
-function startScrubbed(server: string, args: string[]): void {
+export function startScrubbed(server: string, args: string[]): void {
 	const script = [
 		'if command -v mise >/dev/null 2>&1; then eval "$(mise -C / hook-env -s bash 2>/dev/null)"; fi',
 		'if command -v direnv >/dev/null 2>&1; then exec direnv exec / "$@"; fi',
@@ -86,14 +99,14 @@ export function ensureSessionsServer(): void {
 	);
 }
 
-function hex4(): string {
-	return crypto.getRandomValues(new Uint16Array(1))[0]?.toString(16).padStart(4, "0") as string;
+export function randomHex(bytes: number): string {
+	return [...crypto.getRandomValues(new Uint8Array(bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /** Starts a managed pi in the background and returns its tmux session; pi comes up on its own time. */
 export function launch(cwd: string, resume: string | null): string {
 	ensureSessionsServer();
-	const name = `${basename(projectRoot(cwd)).replaceAll(/[.:]/g, "_")}-${hex4()}`;
+	const name = `${basename(projectRoot(cwd)).replaceAll(/[.:]/g, "_")}-${randomHex(2)}`;
 	const shell = process.env.SHELL || "/bin/sh";
 	const pi = resume ? `exec pi --session-id ${resume}` : "exec pi";
 	tmux(
@@ -122,4 +135,26 @@ export function launch(cwd: string, resume: string | null): string {
 		...(resume ? [";", "set", "-t", name, "@swb_launch_id", resume] : []),
 	);
 	return name;
+}
+
+/**
+ * The tmux session hosting a session, starting pi on it if nothing does. Two Decks waking one session at once
+ * serialize on the db's write lock, so only one pi ever starts: the second finds the first's live runtime, or its
+ * launch still in flight (tagged with the id, no runtime row yet). Unlike a tmux wait-for lock, the kernel releases
+ * it when a waker dies mid-launch.
+ */
+export function wake(db: Db, id: string): string {
+	ensureSessionsServer();
+	return db.tx(() => {
+		const hosts = listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_launch_id}");
+		const runtime = db.get("SELECT tmux_session, boot_id, pid FROM runtimes WHERE session_id = ?", id);
+		if (runtime && runtime.boot_id === bootId() && pidAlive(runtime.pid as number) && hosts.some(([name]) => name === runtime.tmux_session))
+			return runtime.tmux_session as string;
+		const recorded = new Set(db.all("SELECT tmux_session FROM runtimes").map((row) => row.tmux_session as string));
+		const inFlight = hosts.find(([name, kind, launchId]) => kind === "pi" && launchId === id && !recorded.has(name as string));
+		if (inFlight) return inFlight[0] as string;
+		const session = db.get("SELECT cwd FROM sessions WHERE session_id = ?", id);
+		if (!session) throw new SwbError(`no session ${id}`);
+		return launch(session.cwd as string, id);
+	});
 }

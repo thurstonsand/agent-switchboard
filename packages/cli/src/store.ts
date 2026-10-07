@@ -34,6 +34,14 @@ const MIGRATIONS: string[] = [
 
 if (MIGRATIONS.length !== SCHEMA_VERSION) throw new Error(`${MIGRATIONS.length} migrations for schema v${SCHEMA_VERSION}`);
 
+export function markVisited(db: Db, id: string): void {
+	db.run(
+		"INSERT INTO marks (session_id, visited_at) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET visited_at = excluded.visited_at",
+		id,
+		Date.now(),
+	);
+}
+
 /** Opens the db and brings it to this binary's schema; refuses a db from a newer swb. */
 export function openStore(): Db {
 	const db = new Db(dbPath(), { create: true });

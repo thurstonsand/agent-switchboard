@@ -56,6 +56,7 @@ export type Scenario = {
 	ls: () => LsEntry[];
 	/** A fresh read connection to the scenario's db; the caller closes it. */
 	db: () => Database;
+	dbFile: string;
 	query: <T>(sql: string, ...params: (string | number | null)[]) => T[];
 	screen: () => string;
 	keys: (...keys: string[]) => void;
@@ -156,6 +157,7 @@ export function scenario(phase: string, name: string): Scenario {
 		swbTry,
 		ls: () => JSON.parse(swb("ls", "--json")) as LsEntry[],
 		db,
+		dbFile,
 		query,
 		screen: () => swb("drive", "capture"),
 		keys: (...keys) => {

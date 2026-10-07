@@ -1,20 +1,27 @@
+import { deckCommand, deckNotify, help } from "./commands/deck.ts";
 import { detached } from "./commands/detached.ts";
 import { drive } from "./commands/drive.ts";
 import { gc } from "./commands/gc.ts";
 import { LS_HELP, ls } from "./commands/ls.ts";
 import { migrate } from "./commands/migrate.ts";
 import { newSession } from "./commands/new.ts";
+import { open } from "./commands/open.ts";
 import { visit } from "./commands/visit.ts";
+import { openDeck } from "./deck/deck.ts";
 import { SwbError, UsageError } from "./errors.ts";
 import { VERSION } from "./version.ts";
 
 const USAGE = `swb: Agent Switchboard
 
-  swb new [--cwd DIR]          start a new managed pi session
+  swb                          open a Deck
+  swb new [--cwd DIR]          open a Deck on a new pi session
+  swb open ID                  open a Deck on a session
   swb ls [--json]              list sessions with derived state
   swb drive start [--size COLSxROWS] [--theme light|dark] [-- swb-args]
   swb drive keys [--delay MS] [-l TEXT]… [KEY…] | capture [--ansi] | theme light|dark | focus in|out
-            | click X Y | drag X1 Y1 X2 Y2 | resize COLSxROWS | clipboard | stop
+            | click X Y | drag X1 Y1 X2 Y2 (0-based cells) | resize COLSxROWS | clipboard | stop
+  swb drive state | wait PATH=VALUE [--timeout MS]
+  swb deck state [--deck NAME] [--json]
   swb migrate                  create or upgrade the db
   swb --version`;
 
@@ -25,6 +32,8 @@ async function main(args: string[]): Promise<void> {
 		return;
 	}
 	switch (command) {
+		case undefined:
+			return openDeck({ select: null, newCwd: null });
 		case "--version":
 			console.log(VERSION);
 			return;
@@ -34,8 +43,12 @@ async function main(args: string[]): Promise<void> {
 			return;
 		case "new":
 			return newSession(rest);
+		case "open":
+			return open(rest);
 		case "ls":
 			return ls(rest);
+		case "deck":
+			return deckCommand(rest);
 		case "migrate":
 			return migrate();
 		case "drive":
@@ -46,8 +59,18 @@ async function main(args: string[]): Promise<void> {
 			return detached(rest);
 		case "gc":
 			return gc();
+		case "__deck":
+			return deckNotify(rest);
+		case "__roster":
+			await import("./deck/roster.ts");
+			return;
+		case "__placeholder":
+			await import("./deck/placeholder.ts");
+			return;
+		case "__help":
+			return help();
 		default:
-			throw new UsageError(`unknown command ${command ?? "(none)"}\n\n${USAGE}`);
+			throw new UsageError(`unknown command ${command}\n\n${USAGE}`);
 	}
 }
 

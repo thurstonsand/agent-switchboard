@@ -47,6 +47,13 @@ export function tmux(server: string, ...args: string[]): string {
 	return result.out;
 }
 
+export async function tmuxAsync(server: string, ...args: string[]): Promise<string> {
+	const proc = Bun.spawn([tmuxBin(), "-L", server, ...args], { env: cleanEnv(), stdout: "pipe", stderr: "pipe" });
+	const [code, out, err] = await Promise.all([proc.exited, new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+	if (code !== 0) throw new SwbError(`tmux -L ${server} ${args.join(" ")}: ${err.trim()}`);
+	return out.replace(/\n$/, "");
+}
+
 /** Session names on a server, with the given format fields, or none when the server is down. */
 export function listSessions(server: string, ...fields: string[]): string[][] {
 	const result = tmuxTry(server, "list-sessions", "-F", ["#{session_name}", ...fields].join("\t"));

@@ -17,7 +17,7 @@ run = "bun x tsc -p tsconfig.json --noEmit"
 
 [tasks.build]
 description = "Compile swb into dist/swb"
-run = "bun build --compile --minify --sourcemap packages/cli/src/main.ts --outfile dist/swb"
+run = "bun build --compile --minify --sourcemap packages/cli/src/main.ts packages/cli/src/deck/worker.ts --outfile dist/swb"
 
 [tasks."dist:pi"]
 description = "Bundle the pi recorder extension exactly as the release publishes it"

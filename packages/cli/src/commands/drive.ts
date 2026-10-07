@@ -2,9 +2,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { stateDir } from "@swb/shared";
+import { fetchState } from "../deck/deck.ts";
 import { SwbError, UsageError } from "../errors.ts";
 import { SWB } from "../sessions.ts";
-import { DRIVE, quote, tmux, tmuxTry } from "../tmux.ts";
+import { DRIVE, quote, tmux, tmuxTry, UI } from "../tmux.ts";
 
 // The harness stands in for a real terminal with Gruvbox Light Hard / Dark Hard. A detached tmux pane answers no color
 // queries; with these styles its server answers OSC 10/11 from window-style and OSC 4 from pane-colours, as Ghostty would.
@@ -93,6 +94,45 @@ function sgr(button: number, col: number, row: number, release = false): string 
 	return `\x1b[<${button};${col + 1};${row + 1}${release ? "m" : "M"}`;
 }
 
+const READY_MS = 15_000;
+
+/** The Deck the drive pane's terminal is attached to: its client on the UI server shares the pane's tty. */
+function drivenDeck(): string | null {
+	const tty = harness("display", "-p", "-t", PANE, "#{pane_tty}");
+	const clients = tmuxTry(UI, "list-clients", "-F", "#{client_tty}\t#{session_name}");
+	if (!clients.ok) return null;
+	const match = clients.out.split("\n").find((line) => line.split("\t")[0] === tty);
+	return match ? (match.split("\t")[1] as string) : null;
+}
+
+function requireDeck(): string {
+	const deck = drivenDeck();
+	if (!deck) throw new SwbError(`drive: no Deck on the driven terminal\n${harness("capture-pane", "-p", "-t", PANE)}`);
+	return deck;
+}
+
+async function waitReady(): Promise<void> {
+	const deadline = Date.now() + READY_MS;
+	while (Date.now() < deadline) {
+		const deck = drivenDeck();
+		if (deck) {
+			const state = await fetchState(deck).catch(() => null);
+			if (state?.ready === true) return;
+		}
+		await Bun.sleep(50);
+	}
+	throw new SwbError(`drive: the Deck wasn't ready within ${READY_MS / 1000} s\n${harness("capture-pane", "-p", "-t", PANE)}`);
+}
+
+function at(value: unknown, path: string): unknown {
+	let current = value;
+	for (const part of path.split(".")) {
+		if (current === null || typeof current !== "object") return undefined;
+		current = (current as Record<string, unknown>)[part];
+	}
+	return current;
+}
+
 async function raw(...sequences: string[]): Promise<void> {
 	for (const sequence of sequences) {
 		// As hex bytes: sent as keys, the ESC could be re-encoded under the harness's extended-keys mode.
@@ -122,7 +162,31 @@ export async function drive(args: string[]): Promise<void> {
 			writeFileSync(conf, [...HARNESS_CONF, ...themeLines, ""].join("\n"));
 			const command = [SWB, ...swbArgs].map(quote).join(" ");
 			harness("-f", conf, "new-session", "-d", "-s", "drive", "-x", match[1] as string, "-y", match[2] as string, command);
+			if (swbArgs.length === 0 || swbArgs[0] === "new" || swbArgs[0] === "open") await waitReady();
 			break;
+		}
+		case "state":
+			console.log(JSON.stringify(await fetchState(requireDeck())));
+			break;
+		case "wait": {
+			const { values, positionals } = parseArgs({
+				args: rest,
+				allowPositionals: true,
+				options: { timeout: { type: "string", default: "15000" } },
+			});
+			const expectation = positionals[0] ?? "";
+			const split = expectation.indexOf("=");
+			if (split < 1) throw new UsageError(`drive: wait takes PATH=VALUE, got ${expectation}`);
+			const path = expectation.slice(0, split);
+			const want = expectation.slice(split + 1);
+			const deadline = Date.now() + Number(values.timeout);
+			let seen: unknown;
+			while (Date.now() < deadline) {
+				seen = at(await fetchState(requireDeck()), path);
+				if (String(seen) === want) return;
+				await Bun.sleep(50);
+			}
+			throw new SwbError(`drive: ${path} is ${JSON.stringify(seen)}, not ${want}, after ${values.timeout} ms`);
 		}
 		case "keys": {
 			// In order, as typed: `-l TEXT` is literal text, anything else a tmux key name.
