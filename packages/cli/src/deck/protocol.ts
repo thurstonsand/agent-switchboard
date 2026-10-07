@@ -17,6 +17,8 @@ export type Snapshot = {
 	hosts: string[];
 	/** Each directory's Editor, by its tmux session. */
 	editors: Record<string, string>;
+	/** The last lines of each pi this Deck launched that died before it registered, by its tmux session. */
+	died: Record<string, string[]>;
 	serverUp: boolean;
 };
 
@@ -37,14 +39,13 @@ export type Card = {
 
 export type State = "loading" | "blocked" | "working" | "unseen" | "idle" | "dormant" | "interrupted" | "archived";
 
-export type StatSummary = { n: number; lastMs: number; avgMs: number; maxMs: number };
+export type StatSummary = { n: number; lastMs: number; avgMs: number; medianMs: number; maxMs: number };
 
 export type SessionStateRow = { kind: "session"; id: string; title: string; glyph: string; state: State; provisional: boolean };
 
-export type StateRow =
-	| SessionStateRow
-	| { kind: "header"; project: string; expanded: boolean }
-	| { kind: "section"; label: string; count: number; expanded: boolean };
+export type HeaderStateRow = { kind: "header"; project: string; expanded: boolean };
+
+export type StateRow = SessionStateRow | HeaderStateRow | { kind: "section"; label: string; count: number; expanded: boolean };
 
 /** What `GET /state` answers: the Deck as a driver sees it. */
 export type DeckState = {

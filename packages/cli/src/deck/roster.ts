@@ -78,15 +78,26 @@ class Stat {
 	last = 0;
 	sum = 0;
 	max = 0;
+	// The median is over the last 1000 samples; the other stats are lifetime.
+	samples: number[] = [];
 	add(ms: number): void {
 		this.n++;
 		this.last = ms;
 		this.sum += ms;
 		this.max = Math.max(this.max, ms);
+		this.samples.push(ms);
+		if (this.samples.length > 1000) this.samples.shift();
 	}
 	summary(): StatSummary {
 		const r = (x: number) => Math.round(x * 100) / 100;
-		return { n: this.n, lastMs: r(this.last), avgMs: r(this.n ? this.sum / this.n : 0), maxMs: r(this.max) };
+		const sorted = this.samples.toSorted((a, b) => a - b);
+		return {
+			n: this.n,
+			lastMs: r(this.last),
+			avgMs: r(this.n ? this.sum / this.n : 0),
+			medianMs: r(sorted[Math.floor(sorted.length / 2)] ?? 0),
+			maxMs: r(this.max),
+		};
 	}
 }
 const perf = { render: new Stat(), switchClient: new Stat(), keyToSwitch: new Stat(), keyToFrame: new Stat() };
@@ -223,7 +234,7 @@ const stage = {
 	staged: null as string | null,
 	stagedAt: 0,
 	/** A session whose pi quit or failed while on view: a card until `w` or Enter. */
-	ended: null as { id: string; failed: boolean } | null,
+	ended: null as { id: string; failed: boolean; lines: string[] } | null,
 	/** While `new` starts, the Stage holds on its loading card until the cursor is moved. */
 	holdForNew: false,
 	applied: onCard("empty", null, EMPTY),
@@ -276,7 +287,7 @@ function piStage(): Applied {
 	if (stage.ended?.id === e.id && e.open) {
 		const failed = stage.ended.failed;
 		const headline = failed ? "Failed to start" : "pi exited";
-		const lines = [failed ? "pi quit before it was ready." : "pi exited while it was on view."];
+		const lines = failed ? ["pi quit before it was ready:", ...stage.ended.lines] : ["pi exited while it was on view."];
 		return onCard(failed ? "failed" : "exited", e.id, card(e, failed ? "failed" : "exited", headline, lines, wakeKeys));
 	}
 	if (e.live && e.host) return { kind: "live", id: e.id, host: e.host, card: null, view: "pi", target: e.host, side: null };
@@ -521,9 +532,10 @@ function settleLaunches(): void {
 		}
 		if (hosts.has(launch.host)) continue;
 		launches.splice(launches.indexOf(launch), 1);
-		toast("pi failed to start", "error");
+		const lastWords = snapshot.died[launch.host] ?? [];
+		toast(lastWords.length > 0 ? `pi failed to start: ${lastWords.at(-1)}` : "pi failed to start", "error");
 		if (launch.id !== null) {
-			if (stage.staged === launch.id) stage.ended = { id: launch.id, failed: true };
+			if (stage.staged === launch.id) stage.ended = { id: launch.id, failed: true, lines: lastWords };
 		} else if (stage.staged === null) stage.staged = roster.cursorEntry()?.id ?? null;
 		if (focus === "stage") void focusRoster();
 	}
@@ -542,7 +554,7 @@ function followHost(): void {
 		stage.stagedAt = Date.now();
 		return;
 	}
-	stage.ended = { id, failed: false };
+	stage.ended = { id, failed: false, lines: [] };
 	if (focus === "stage") void focusRoster();
 }
 
@@ -1003,7 +1015,7 @@ class Roster implements Component {
 			const what = kind === "live" ? "" : kind === "loading" ? ": starting" : `: ${kind}`;
 			const view = stage.applied.view === "pi" ? "" : ` · ${stage.applied.view}`;
 			const focused = !terminalFocused ? gray(" · terminal unfocused") : focus === "stage" ? cyan(" · focused") : "";
-			onView = `${focus === "stage" ? cyan("▌") : gray("▌")} on view${what}${view}${zoomed ? " · zoomed" : ""}${focused}`;
+			onView = `${focus === "stage" ? cyan("▌") : gray("▌")} on view${what}${view}${zoomed && !narrow ? " · zoomed" : ""}${focused}`;
 		}
 		return [` ${bold(displayName(e))}`, ` ${facts.join(gray(" · "))}`, ` ${gray(where)}`, ` ${onView}`].map((line) =>
 			truncateToWidth(line, width, "…"),

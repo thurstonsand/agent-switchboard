@@ -133,6 +133,21 @@ export function launch(cwd: string, resume: string | null): string {
 		name,
 		"@swb_kind",
 		"pi",
+		// Kept until pi registers, so a pi that dies on startup leaves its last words for the Deck to show.
+		";",
+		"set",
+		"-p",
+		"-t",
+		`=${name}:`,
+		"remain-on-exit",
+		"on",
+		";",
+		"set",
+		"-p",
+		"-t",
+		`=${name}:`,
+		"remain-on-exit-format",
+		"",
 		...(resume ? [";", "set", "-t", name, "@swb_launch_id", resume] : []),
 	);
 	return name;

@@ -464,7 +464,7 @@ test("the sessions server killed under an open Deck recovers on the next w", asy
 	s.swb("drive", "start");
 	await cursorTo(s, a);
 	s.tmux(s.servers.sessions, "kill-server");
-	await Bun.sleep(1000);
+	await until(() => s.screen().includes("w wake"), budgets.settle, "the dormant card back on the Stage");
 	s.save("killed.txt", s.screen());
 	s.keys("w");
 	await waitState(s, "a live again", (x) => x.staged.id === a && x.staged.kind === "live", budgets.piReady);

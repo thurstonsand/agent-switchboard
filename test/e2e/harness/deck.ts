@@ -1,10 +1,14 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { DeckState, SessionStateRow } from "../../../packages/cli/src/deck/protocol.ts";
+import type { DeckState, HeaderStateRow, SessionStateRow } from "../../../packages/cli/src/deck/protocol.ts";
 import { budgets, type LsEntry, type Scenario, until } from "./index.ts";
 
 export function sessionRows(st: DeckState): SessionStateRow[] {
 	return st.rows.flatMap((row) => (row.kind === "session" ? [row] : []));
+}
+
+export function headerRows(st: DeckState): HeaderStateRow[] {
+	return st.rows.flatMap((row) => (row.kind === "header" ? [row] : []));
 }
 
 export function state(s: Scenario): DeckState {
@@ -79,4 +83,58 @@ export async function cursorTo(s: Scenario, id: string): Promise<void> {
 		s.keys(from === -1 || rowIndex(st, id) > from ? "j" : "k");
 		st = await waitState(s, `cursor off ${before}`, (x) => x.cursor !== before || x.cursor === id);
 	}
+}
+
+export type Terminal = {
+	server: string;
+	deck: () => string;
+	state: () => DeckState;
+	/** Waits until a ready Deck is attached to this terminal. */
+	ready: () => Promise<void>;
+	screen: () => string;
+	keys: (...keys: string[]) => void;
+};
+
+/** Another terminal beside the drive harness: its own tmux server running `command`; `state` reads the Deck attached there. */
+export function terminal(s: Scenario, name: string, command: string, size = "140x40"): Terminal {
+	const server = `term-${name}-${s.instance}`;
+	const [x, y] = size.split("x") as [string, string];
+	s.tmux(server, "new-session", "-d", "-s", "t", "-c", s.project, "-x", x, "-y", y, command);
+	s.tmux(server, "set", "-s", "escape-time", "0", ";", "set", "-g", "status", "off", ";", "set", "-g", "remain-on-exit", "on");
+	const deck = () => {
+		const tty = s.tmux(server, "display", "-p", "-t", "=t:", "#{pane_tty}");
+		const line = s
+			.tmux(s.servers.ui, "list-clients", "-F", "#{client_tty}\t#{session_name}")
+			.split("\n")
+			.find((l) => l.split("\t")[0] === tty);
+		if (!line) throw new Error(`no Deck on terminal ${name}`);
+		return line.split("\t")[1] as string;
+	};
+	const state = (): DeckState => JSON.parse(s.swb("deck", "state", "--deck", deck(), "--json"));
+	return {
+		server,
+		deck,
+		state,
+		ready: async () => {
+			await until(
+				() => {
+					try {
+						return state().ready;
+					} catch {
+						return false;
+					}
+				},
+				budgets.piReady,
+				`a ready Deck on terminal ${name}`,
+			);
+		},
+		screen: () => s.tmux(server, "capture-pane", "-p", "-t", "=t:"),
+		/** As `s.keys`: `-l TEXT` is literal text, anything else a tmux key name. */
+		keys: (...keys) => {
+			for (let i = 0; i < keys.length; i++) {
+				if (keys[i] === "-l") s.tmux(server, "send-keys", "-t", "=t:", "-l", keys[++i] as string);
+				else s.tmux(server, "send-keys", "-t", "=t:", keys[i] as string);
+			}
+		},
+	};
 }

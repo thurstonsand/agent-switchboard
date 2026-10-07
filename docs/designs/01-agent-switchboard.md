@@ -334,7 +334,7 @@ The Deck state, which `swb deck state --json` prints. Field names and types are 
 }
 ```
 
-`staged.kind` is one of `live`, `dormant`, `loading`, `exited`, `empty`; `focus` is `roster`, `stage`, or `editor`.
+`staged.kind` is one of `live`, `dormant`, `loading`, `exited`, `failed`, `empty`; `focus` is `roster`, `stage`, or `editor`.
 
 `swb ls --json` prints an array, one object per Session, with these fields and the derived states:
 
@@ -717,7 +717,7 @@ Two settings exist so tests needn't mock anything. Both are real user-facing key
     - a rebound prefix works, and `M-a M-a` delivers a literal `M-a` to pi
     - a bad config key fails loudly, naming the key
 
-- [ ] Phase 5: Real-world hardening
+- [x] Phase 5: Real-world hardening
   - Goal: prove the product against real pi-sessions behavior and its operating limits.
   - Work: install real pi-sessions into the disposable `PI_CODING_AGENT_DIR`. Then cover:
     - a managed session launching a subagent and a deferred handoff. Neither ever appears as a Session; the subagent's tmux session lands on the default-server equivalent, never on `swb`'s.

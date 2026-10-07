@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 export const repo = resolve(import.meta.dir, "../../..");
@@ -21,6 +21,21 @@ const tools = (() => {
 	const version = run([node, piCli, "--version"]);
 	if (version !== PI_VERSION) throw new Error(`e2e needs pi ${PI_VERSION}, found ${version} at ${piCli}`);
 	return { node, tmux, piCli };
+})();
+
+/** The host's own pi-sessions install, as its pi settings name it; null when it has none. */
+export const hostPiSessions = ((): string | null => {
+	if (process.env.SWB_E2E_PI_SESSIONS) return process.env.SWB_E2E_PI_SESSIONS;
+	const agentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi/agent");
+	const settings = join(agentDir, "settings.json");
+	if (!existsSync(settings)) return null;
+	const packages = (JSON.parse(readFileSync(settings, "utf8")) as { packages?: (string | { source: string })[] }).packages ?? [];
+	for (const entry of packages) {
+		const source = typeof entry === "string" ? entry : entry.source;
+		if (source === "npm:pi-sessions") return join(agentDir, "npm/node_modules/pi-sessions");
+		if (source.replace(/\/$/, "").endsWith("/pi-sessions")) return source.replace(/^~/, homedir());
+	}
+	return null;
 })();
 
 export type LsEntry = {
@@ -68,7 +83,8 @@ export type Scenario = {
 
 const servers = new Set<string>();
 
-export function scenario(phase: string, name: string): Scenario {
+/** `piSessions` installs the host's real pi-sessions; a scenario that asks for it on a host without one throws. */
+export function scenario(phase: string, name: string, options: { piSessions: boolean } = { piSessions: false }): Scenario {
 	const root = mkdtempSync(join(tmpdir(), "swb-e2e-"));
 	const home = join(root, "home");
 	const bin = join(root, "bin");
@@ -94,7 +110,11 @@ export function scenario(phase: string, name: string): Scenario {
 	writeFileSync(
 		join(agentDir, "settings.json"),
 		JSON.stringify({
-			packages: [join(repo, "dist/pi")],
+			packages: [join(repo, "dist/pi"), ...(options.piSessions ? [piSessionsPackage()] : [])],
+			...(options.piSessions
+				? // Only what subagents and handoffs need: the rest would spend faux turns on titles and indexing.
+					{ sessions: { autoTitle: { enable: false }, ask: { enable: false }, search: { enable: false } } }
+				: {}),
 			extensions: [join(repo, "test/e2e/scenario-extension.ts")],
 			defaultProvider: "faux",
 			defaultModel: "faux-1",
@@ -218,6 +238,12 @@ export function capture(s: Scenario, server: string, target: string): string {
 export function release(s: Scenario, name: string): void {
 	mkdirSync(join(s.home, "e2e-signals"), { recursive: true });
 	writeFileSync(join(s.home, "e2e-signals", `${name}.release`), "");
+}
+
+function piSessionsPackage(): string {
+	if (!hostPiSessions)
+		throw new Error("this scenario needs pi-sessions, and this host's pi settings install none (set SWB_E2E_PI_SESSIONS)");
+	return hostPiSessions;
 }
 
 export const budgets = { piReady: 30_000, settle: 10_000, deckReady: 5_000 };
