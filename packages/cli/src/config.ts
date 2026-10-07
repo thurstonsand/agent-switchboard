@@ -29,9 +29,9 @@ function string(key: string, value: unknown): string {
 }
 
 function defaultClipboard(): string {
-	if (process.platform === "darwin") return "pbcopy";
-	if (process.env.WAYLAND_DISPLAY) return "wl-copy";
-	return "xclip -selection clipboard";
+	if (Bun.which("wl-copy")) return "wl-copy";
+	if (Bun.which("xclip")) return "xclip -selection clipboard";
+	return "pbcopy";
 }
 
 export function loadConfig(): Config {

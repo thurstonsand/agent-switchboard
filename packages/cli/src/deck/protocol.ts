@@ -75,6 +75,8 @@ export type ToWorker =
 	| { type: "wake"; id: string }
 	| { type: "new"; cwd: string }
 	| { type: "visit"; id: string }
+	| { type: "archive"; id: string }
+	| { type: "unarchive"; id: string }
 	| { type: "transcript"; id: string; path: string }
 	| { type: "background"; color: string };
 
@@ -84,4 +86,5 @@ export type FromWorker =
 	| { type: "created"; host: string }
 	| { type: "transcript"; id: string; turns: Turn[] | null; error: string | null }
 	| { type: "launchFailed"; id: string | null; text: string }
+	| { type: "toggled"; error: string | null }
 	| { type: "error"; text: string };

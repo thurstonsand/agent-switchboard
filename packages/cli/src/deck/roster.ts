@@ -246,8 +246,10 @@ function desired(): Applied {
 		return { kind: "loading", id: e.id, target: placeholder, card: card(e, "loading", "Starting pi…", [line], keys, launch.since) };
 	}
 	if (!e.open) {
-		const lines = [`Archived ${age(e.archivedAt ?? 0, Date.now())} ago. A new prompt unarchives it.`];
-		return { kind: "dormant", id: e.id, target: placeholder, card: card(e, "archived", "Archived", lines, wakeKeys) };
+		const ago = age(e.archivedAt ?? 0, Date.now());
+		const lines = [`Archived ${ago === "now" ? "just now" : `${ago} ago`}. A new prompt unarchives it.`];
+		const keys = [wakeKeys, key("a", "unarchive")].join(gray(" · "));
+		return { kind: "dormant", id: e.id, target: placeholder, card: card(e, "archived", "Archived", lines, keys) };
 	}
 	if (e.interrupted) {
 		const lines = ["pi exited mid-turn. Waking resumes it idle; the turn isn't continued."];
@@ -419,10 +421,15 @@ function onSnapshot(next: Snapshot): void {
 	entries = new Map(next.entries.map((e) => [e.id, e]));
 	settleLaunches();
 	followHost();
+	roster.settlePin();
 	const e = stage.staged === null ? undefined : entries.get(stage.staged);
 	if (e && !e.live && e.transcript && !transcripts.has(e.id)) post({ type: "transcript", id: e.id, path: e.transcript });
 	apply();
 	roster.syncStage(false);
+	// A turn that lands while I'm already watching is seen as it lands.
+	const applied = stage.applied;
+	if (applied.kind === "live" && stage.visited && terminalFocused && entries.get(applied.id)?.unseen)
+		post({ type: "visit", id: applied.id });
 }
 
 // ── worker ──────────────────────────────────────────────────────────────
@@ -460,6 +467,14 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
 			transcripts.set(message.id, { turns: message.turns, error: message.error });
 			apply();
 			break;
+		case "toggled":
+			if (message.error === null) {
+				if (roster.pin) roster.pin.answered = true;
+				break;
+			}
+			roster.pin = null;
+			toast(message.error, "error");
+			break;
 		case "launchFailed": {
 			const index = launches.findIndex((launch) => launch.id === message.id && launch.host === null);
 			if (index !== -1) launches.splice(index, 1);
@@ -474,6 +489,12 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
 };
 
 // ── roster ──────────────────────────────────────────────────────────────
+
+async function clip(text: string): Promise<void> {
+	const proc = Bun.spawn(["/bin/sh", "-c", config.clipboard], { stdin: new Blob([text]), stdout: "ignore", stderr: "pipe" });
+	const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+	if (code !== 0) throw new Error(stderr.trim() || `${config.clipboard} exited ${code}`);
+}
 
 /** `swb open`: select a session wherever it is, opening the section and project that hide it. */
 function reveal(id: string): void {
@@ -524,6 +545,8 @@ function cursorLine(line: string, focused: boolean): string {
 class Roster implements Component {
 	selectedKey = "";
 	lastIndex = 0;
+	/** After `a`, the cursor keeps its index instead of chasing the session into its new section. */
+	pin: { index: number; answered: boolean } | null = null;
 	scrollTop = 0;
 	collapsed = new Set<string>();
 	expanded = new Set<SectionKey>();
@@ -650,6 +673,8 @@ class Roster implements Component {
 		else if (matchesKey(data, "left") || k === "h") this.left();
 		else if (matchesKey(data, "escape")) this.filter.setValue("");
 		else if (k === "w") this.wake();
+		else if (k === "a") this.toggleArchived();
+		else if (k === "y" || k === "Y") this.copy(k === "y");
 		else if (k === "n") this.newHere();
 		else if (k === "/") this.filtering = true;
 		else if (k === "?") void showHelp();
@@ -721,6 +746,40 @@ class Roster implements Component {
 		if (!e) return;
 		if (e.live) toast("already running", "info");
 		else wake(e.id, false);
+	}
+
+	toggleArchived(): void {
+		const row = this.selected();
+		if (row?.kind !== "session" || this.pin) return;
+		const e = row.entry;
+		if (e.provisional) {
+			toast("nothing to archive before the first prompt", "error");
+			return;
+		}
+		this.pin = { index: this.resolveCursor(this.rows()), answered: false };
+		post({ type: e.open ? "archive" : "unarchive", id: e.id });
+	}
+
+	/** Runs on every snapshot; the one that answers `a` puts the cursor back on its row's index. */
+	settlePin(): void {
+		if (!this.pin?.answered) return;
+		const rows = this.rows();
+		const index = Math.min(this.pin.index, rows.length - 1);
+		const row = rows[index];
+		this.pin = null;
+		if (!row) return;
+		this.selectedKey = row.key;
+		this.lastIndex = index;
+	}
+
+	copy(command: boolean): void {
+		const e = this.cursorEntry();
+		if (!e) return;
+		const text = command ? `swb open ${e.id}` : `@session:${e.id}`;
+		void clip(text).then(
+			() => toast(`copied ${text}`, "info"),
+			(error: Error) => toast(`copy failed: ${error.message}`, "error"),
+		);
 	}
 
 	newHere(): void {

@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { bootId, type Db, dbPath, pidAlive, projectRoot, stateDir } from "@swb/shared";
+import { bootId, type Db, dbPath, projectRoot, stateDir } from "@swb/shared";
+import { runtimeLive } from "./derive.ts";
 import { SwbError } from "./errors.ts";
 import { cleanEnv, listSessions, quote, SESSIONS, tmux, tmuxBin, tmuxTry } from "./tmux.ts";
 
@@ -147,9 +148,8 @@ export function wake(db: Db, id: string): string {
 	ensureSessionsServer();
 	return db.tx(() => {
 		const hosts = listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_launch_id}");
-		const runtime = db.get("SELECT tmux_session, boot_id, pid FROM runtimes WHERE session_id = ?", id);
-		if (runtime && runtime.boot_id === bootId() && pidAlive(runtime.pid as number) && hosts.some(([name]) => name === runtime.tmux_session))
-			return runtime.tmux_session as string;
+		const host = liveHost(db, id, new Set(hosts.map(([name]) => name as string)));
+		if (host) return host;
 		const recorded = new Set(db.all("SELECT tmux_session FROM runtimes").map((row) => row.tmux_session as string));
 		const inFlight = hosts.find(([name, kind, launchId]) => kind === "pi" && launchId === id && !recorded.has(name as string));
 		if (inFlight) return inFlight[0] as string;
@@ -157,4 +157,57 @@ export function wake(db: Db, id: string): string {
 		if (!session) throw new SwbError(`no session ${id}`);
 		return launch(session.cwd as string, id);
 	});
+}
+
+/** The tmux session a live pi hosts this session in, if any. */
+function liveHost(db: Db, id: string, hosts: Set<string>): string | null {
+	const row = db.get("SELECT tmux_session, boot_id, pid FROM runtimes WHERE session_id = ?", id);
+	if (!row) return null;
+	const runtime = { tmux_session: row.tmux_session as string, boot_id: row.boot_id as string, pid: row.pid as number };
+	return runtimeLive(runtime, bootId(), hosts) ? runtime.tmux_session : null;
+}
+
+/** Archives a session, refusing mid-turn; an idle live pi is killed, and editors nobody needs any more go with it. */
+export function archive(db: Db, id: string): void {
+	const hosts = new Set(listSessions(SESSIONS).map(([name]) => name as string));
+	const host = db.tx(() => {
+		const session = db.get("SELECT phase FROM sessions WHERE session_id = ?", id);
+		if (!session) throw new SwbError(`no session ${id}`);
+		const host = liveHost(db, id, hosts);
+		if (host && session.phase !== "idle") throw new SwbError("turn running: wait for it to complete");
+		db.run(
+			"INSERT INTO marks (session_id, archived_at) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET archived_at = excluded.archived_at",
+			id,
+			Date.now(),
+		);
+		return host;
+	});
+	if (host) tmuxTry(SESSIONS, "kill-session", "-t", `=${host}`);
+	gc(db);
+}
+
+/** Back to open; nothing restarts. */
+export function unarchive(db: Db, id: string): void {
+	db.tx(() => {
+		if (!db.get("SELECT 1 FROM sessions WHERE session_id = ?", id)) throw new SwbError(`no session ${id}`);
+		db.run("INSERT INTO marks (session_id, archived_at) VALUES (?, NULL) ON CONFLICT (session_id) DO UPDATE SET archived_at = NULL", id);
+	});
+}
+
+/** Kills each editor whose directory no open session uses any more. */
+export function gc(db: Db): void {
+	const editors = listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_dir}").filter(([, kind]) => kind === "editor");
+	if (editors.length === 0) return;
+	const used = new Set(
+		db
+			.all(
+				`SELECT s.cwd FROM sessions s LEFT JOIN marks m USING (session_id)
+				 WHERE m.archived_at IS NULL OR m.archived_at < s.last_prompt_at
+				 UNION SELECT cwd FROM runtimes WHERE session_id NOT IN (SELECT session_id FROM sessions)`,
+			)
+			.map((row) => row.cwd as string),
+	);
+	for (const [name, , dir] of editors) {
+		if (!used.has(dir as string)) tmuxTry(SESSIONS, "kill-session", "-t", `=${name}`);
+	}
 }

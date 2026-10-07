@@ -3,7 +3,7 @@ import { statSync } from "node:fs";
 import { bootId, type Db } from "@swb/shared";
 import type { Config } from "../config.ts";
 import { derive, type RuntimeRecord, runtimeLive, runtimeRecords, type SessionRow, sessionRows, type World } from "../derive.ts";
-import { launch, wake } from "../sessions.ts";
+import { archive, launch, unarchive, wake } from "../sessions.ts";
 import { markVisited, openStore } from "../store.ts";
 import { listSessions, quote, SESSIONS, tmuxTry } from "../tmux.ts";
 import { ensurePlaceholder, placeholderName } from "./deck.ts";
@@ -60,7 +60,7 @@ function snapshot(): Polled {
 		};
 	});
 	for (const runtime of runtimes) {
-		if (known.has(runtime.session_id) || !runtimeLive(runtime, w)) continue;
+		if (known.has(runtime.session_id) || !runtimeLive(runtime, w.bootId, w.hosts)) continue;
 		entries.push({
 			id: runtime.session_id,
 			title: null,
@@ -174,6 +174,15 @@ function handle(message: ToWorker): void {
 			readDb();
 			if (rows.some((row) => row.session_id === message.id)) markVisited(db, message.id);
 			break;
+		case "archive":
+		case "unarchive":
+			try {
+				(message.type === "archive" ? archive : unarchive)(db, message.id);
+				post({ type: "toggled", error: null });
+			} catch (error) {
+				post({ type: "toggled", error: (error as Error).message });
+			}
+			break;
 		case "transcript":
 			transcript(message.id, message.path);
 			return;
@@ -181,8 +190,10 @@ function handle(message: ToWorker): void {
 			background = message.color;
 			break;
 	}
-	// A launch settles only against a snapshot taken after it, so one always follows, changed or not.
+	// A launch settles only against a snapshot taken after it, so one always follows, changed or not. Writes on
+	// this connection don't move data_version, so that snapshot re-reads the db.
 	lastJson = "";
+	dataVersion = -1;
 	tick();
 }
 

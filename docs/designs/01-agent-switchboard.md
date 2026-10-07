@@ -157,7 +157,7 @@ hover = "lazy"             # "lazy": only `w` or Enter starts pi; "eager": resti
 editor = "$EDITOR"         # falls back to "nvim"
 inactive_after = "72h"     # open sessions idle this long move to Inactive
 reap_after = "30m"         # an idle live pi that nobody is viewing is stopped after this long
-clipboard = "pbcopy"       # command that receives copied text on stdin
+clipboard = "wl-copy"      # command that receives copied text on stdin; defaults to wl-copy, else xclip, else pbcopy
 
 [keys]
 prefix = "M-a"
@@ -416,7 +416,7 @@ The placeholder is `swb`'s own process, so it can bind `esc` on the loading card
 
 ```text
 roster loop: selected session S shown live, terminalFocused = true, for ≥ 1 s
-  db.tx: marks.visited_at = now                once per 1 s dwell, and again on leaving if the dwell completed
+  db.tx: marks.visited_at = now                once per 1 s dwell, again on leaving if the dwell completed, and again when a turn settles on it
 the dwell timer carries the selection it started for, so a stale timer never visits a later selection
 tmux client-focus-in / client-focus-out on the sessions server (plain attach viewers):
   swb visit --client <tty> --in|--out  → resolve client → session → visited_at = now

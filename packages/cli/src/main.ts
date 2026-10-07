@@ -1,3 +1,4 @@
+import { archive } from "./commands/archive.ts";
 import { deckCommand, deckNotify, help } from "./commands/deck.ts";
 import { detached } from "./commands/detached.ts";
 import { drive } from "./commands/drive.ts";
@@ -6,6 +7,7 @@ import { LS_HELP, ls } from "./commands/ls.ts";
 import { migrate } from "./commands/migrate.ts";
 import { newSession } from "./commands/new.ts";
 import { open } from "./commands/open.ts";
+import { unarchive } from "./commands/unarchive.ts";
 import { visit } from "./commands/visit.ts";
 import { openDeck } from "./deck/deck.ts";
 import { SwbError, UsageError } from "./errors.ts";
@@ -17,6 +19,8 @@ const USAGE = `swb: Agent Switchboard
   swb new [--cwd DIR]          open a Deck on a new pi session
   swb open ID                  open a Deck on a session
   swb ls [--json]              list sessions with derived state
+  swb archive ID               archive a session
+  swb unarchive ID             reopen an archived session
   swb drive start [--size COLSxROWS] [--theme light|dark] [-- swb-args]
   swb drive keys [--delay MS] [-l TEXT]… [KEY…] | capture [--ansi] | theme light|dark | focus in|out
             | click X Y | drag X1 Y1 X2 Y2 (0-based cells) | resize COLSxROWS | clipboard | stop
@@ -47,6 +51,10 @@ async function main(args: string[]): Promise<void> {
 			return open(rest);
 		case "ls":
 			return ls(rest);
+		case "archive":
+			return archive(rest);
+		case "unarchive":
+			return unarchive(rest);
 		case "deck":
 			return deckCommand(rest);
 		case "migrate":

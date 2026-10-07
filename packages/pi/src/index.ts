@@ -184,6 +184,28 @@ export default function (pi: ExtensionAPI) {
 		writeFor(ctx, (db, id) => db.run("UPDATE sessions SET title = ? WHERE session_id = ?", event.name ?? null, id));
 	});
 
+	pi.registerCommand("archive", {
+		description: "Archive this session in swb and quit",
+		handler: async (_args, ctx) => {
+			if (!ctx.isIdle()) {
+				ctx.ui.notify("swb: turn running: wait for it to complete", "error");
+				return;
+			}
+			let archived = false;
+			writeFor(ctx, (db, id) => {
+				if (!db.get("SELECT 1 FROM sessions WHERE session_id = ?", id)) return;
+				db.run(
+					"INSERT INTO marks (session_id, archived_at) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET archived_at = excluded.archived_at",
+					id,
+					Date.now(),
+				);
+				archived = true;
+			});
+			if (archived) ctx.shutdown();
+			else if (!proc.failure) ctx.ui.notify("swb: nothing to archive before the first prompt", "error");
+		},
+	});
+
 	pi.on("session_shutdown", (event, ctx) => {
 		if (event.reason !== "quit") return;
 		writeFor(ctx, (db) => db.run("DELETE FROM runtimes WHERE tmux_session = ?", proc.launch.tmuxSession));

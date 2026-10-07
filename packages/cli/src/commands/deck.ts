@@ -52,6 +52,8 @@ function keys(prefix: string): [string, string][] {
 		["space", "toggle a header"],
 		["w", "wake without focusing"],
 		["n", "new session in this project"],
+		["a", "archive; unarchive an archived one"],
+		["y Y", "copy swb open <id>; @session:<id>"],
 		["/", "filter; esc clears"],
 		["q", "close the Deck (sessions keep running)"],
 		["", ""],

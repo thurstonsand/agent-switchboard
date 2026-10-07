@@ -28,8 +28,8 @@ export function world(inactiveAfterMs: number): World {
 
 type RuntimeRow = { tmux_session: string; boot_id: string; pid: number };
 
-export function runtimeLive(runtime: RuntimeRow, w: World): boolean {
-	return runtime.boot_id === w.bootId && w.hosts.has(runtime.tmux_session) && pidAlive(runtime.pid);
+export function runtimeLive(runtime: RuntimeRow, boot: string, hosts: Set<string>): boolean {
+	return runtime.boot_id === boot && hosts.has(runtime.tmux_session) && pidAlive(runtime.pid);
 }
 
 export type SessionRow = {
@@ -97,7 +97,7 @@ export function runtimeRecords(db: Db): RuntimeRecord[] {
 }
 
 export function derive(row: SessionRow, w: World): SessionState {
-	const live = row.runtime !== null && runtimeLive(row.runtime, w);
+	const live = row.runtime !== null && runtimeLive(row.runtime, w.bootId, w.hosts);
 	const open = row.archived_at === null || row.archived_at < row.last_prompt_at;
 	const activityAt = Math.max(row.last_prompt_at, row.last_settled_at ?? 0);
 	const activity: Phase = live ? row.phase : "idle";
