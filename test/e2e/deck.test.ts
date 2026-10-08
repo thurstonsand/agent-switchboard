@@ -16,7 +16,7 @@ afterEach(async () => {
 
 test("w wakes a dormant session to live while the keyboard stays in the roster", async () => {
 	s = scenario("phase2", "wake");
-	const [id] = (await seed(s, ["one"])) as [string];
+	const [id] = (await seed(s, { turns: ["one"] })) as [string];
 	s.swb("drive", "start");
 	await cursorTo(s, id);
 	expect(state(s).staged).toMatchObject({ id, kind: "dormant" });
@@ -33,7 +33,7 @@ test("w wakes a dormant session to live while the keyboard stays in the roster",
 
 test("Enter on a dormant row holds the keyboard on the loading card and hands it to pi; Enter then esc backs out while pi still comes up", async () => {
 	s = scenario("phase2", "enter-wake");
-	const [a, b] = (await seed(s, ["alpha"], ["beta"])) as [string, string];
+	const [a, b] = (await seed(s, { turns: ["alpha"] }, { turns: ["beta"] })) as [string, string];
 	s.swb("drive", "start");
 	await cursorTo(s, a);
 	s.keys("Enter");
@@ -62,7 +62,7 @@ test("Enter on a dormant row holds the keyboard on the loading card and hands it
 
 test("moving the cursor while n's pi starts stages that row, and the pi landing doesn't take it back", async () => {
 	s = scenario("phase2", "new-then-move");
-	const [a, b] = (await seed(s, ["a"], ["b"])) as [string, string];
+	const [a, b] = (await seed(s, { turns: ["a"] }, { turns: ["b"] })) as [string, string];
 	s.swb("drive", "start");
 	await cursorTo(s, a);
 	const below = rowIndex(state(s), b) > rowIndex(state(s), a) ? "j" : "k";
@@ -85,7 +85,7 @@ test("moving the cursor while n's pi starts stages that row, and the pi landing 
 
 test("swb open selects an Inactive session, opening its section", async () => {
 	s = scenario("phase2", "open-inactive");
-	const [a] = (await seed(s, ["a"], ["b"])) as [string, string];
+	const [a] = (await seed(s, { turns: ["a"] }, { turns: ["b"] })) as [string, string];
 	config(s, 'inactive_after = "2s"');
 	s.swb("drive", "start");
 	await cursorTo(s, a);
@@ -105,7 +105,7 @@ test("swb open selects an Inactive session, opening its section", async () => {
 test("a dormant card shows the whole conversation, newest at the bottom, cropped from the top", async () => {
 	s = scenario("phase2", "dormant-card");
 	const turns = Array.from({ length: 12 }, (_, i) => `turn-${i}-${"lorem ipsum dolor sit amet ".repeat(4).trim().replaceAll(" ", "_")}`);
-	const [id] = (await seed(s, turns)) as [string];
+	const [id] = (await seed(s, { turns })) as [string];
 	s.swb("drive", "start");
 	await cursorTo(s, id);
 	await until(() => s.screen().includes("turn-11"), budgets.settle, "the newest turn on the card");
@@ -120,7 +120,7 @@ test("a dormant card shows the whole conversation, newest at the bottom, cropped
 
 test("an idle, unviewed pi is reaped after reap_after; the one on view is not", async () => {
 	s = scenario("phase2", "reap");
-	const [a, b] = (await seed(s, ["a"], ["b"])) as [string, string];
+	const [a, b] = (await seed(s, { turns: ["a"] }, { turns: ["b"] })) as [string, string];
 	config(s, 'reap_after = "2s"\n');
 	s.swb("drive", "start");
 	await cursorTo(s, a);
@@ -137,7 +137,7 @@ test("an idle, unviewed pi is reaped after reap_after; the one on view is not", 
 
 test("a live session on view for a second is Visited and stops being Unseen; a dormant one on view is not", async () => {
 	s = scenario("phase2", "visit");
-	const [a, b] = (await seed(s, ["a"], ["b"])) as [string, string];
+	const [a, b] = (await seed(s, { turns: ["a"] }, { turns: ["b"] })) as [string, string];
 	s.swb("drive", "start");
 	await cursorTo(s, b);
 	await Bun.sleep(1500);
@@ -248,7 +248,7 @@ const DARK_BG = "\x1b]11;rgb:1d1d/2020/2121\x1b\\";
 
 test("with the db writer lock held and a 50 MB transcript being parsed, the cursor still moves within 100 ms", async () => {
 	s = scenario("phase2", "slow-worker");
-	const [a, b] = (await seed(s, ["small"], ["huge"])) as [string, string];
+	const [a, b] = (await seed(s, { turns: ["small"] }, { turns: ["huge"] })) as [string, string];
 	const [{ transcript }] = s.query<{ transcript: string }>("SELECT transcript FROM sessions WHERE session_id = ?", b) as [
 		{ transcript: string },
 	];
@@ -311,7 +311,7 @@ test("with the db writer lock held and a 50 MB transcript being parsed, the curs
 
 test("the cursor keeps moving within 100 ms while a pi is loading", async () => {
 	s = scenario("phase2", "loading-latency");
-	const [a, b] = (await seed(s, ["a"], ["b"])) as [string, string];
+	const [a, b] = (await seed(s, { turns: ["a"] }, { turns: ["b"] })) as [string, string];
 	s.swb("drive", "start");
 	await cursorTo(s, b);
 	await cursorTo(s, a);
@@ -325,7 +325,7 @@ test("the cursor keeps moving within 100 ms while a pi is loading", async () => 
 
 test("switching between two live sessions takes at most 150 ms", async () => {
 	s = scenario("phase2", "switch");
-	const [a, b] = (await seed(s, ["a"], ["b"])) as [string, string];
+	const [a, b] = (await seed(s, { turns: ["a"] }, { turns: ["b"] })) as [string, string];
 	s.swb("drive", "start");
 	for (const id of [a, b]) {
 		await cursorTo(s, id);
@@ -358,7 +358,7 @@ test("the roster and a live pi report the harness terminal's background, and bot
 
 test("a pi woken with w and never viewed reports the terminal's background and re-themes while still unviewed", async () => {
 	s = scenario("phase2", "unviewed-theme");
-	const [a, b] = (await seed(s, ["a"], ["b"])) as [string, string];
+	const [a, b] = (await seed(s, { turns: ["a"] }, { turns: ["b"] })) as [string, string];
 	s.swb("drive", "start");
 	await cursorTo(s, a);
 	s.keys("w");
@@ -377,7 +377,7 @@ test("a pi woken with w and never viewed reports the terminal's background and r
 
 test("Enter, then a prompt typed in the Stage, shows working then idle in the roster", async () => {
 	s = scenario("phase2", "working");
-	const [a] = (await seed(s, ["a"])) as [string];
+	const [a] = (await seed(s, { turns: ["a"] })) as [string];
 	s.swb("drive", "start");
 	await cursorTo(s, a);
 	s.keys("Enter");
@@ -393,7 +393,7 @@ test("Enter, then a prompt typed in the Stage, shows working then idle in the ro
 
 test("two Decks waking one session start exactly one pi", async () => {
 	s = scenario("phase2", "two-decks");
-	const [a] = (await seed(s, ["a"])) as [string];
+	const [a] = (await seed(s, { turns: ["a"] })) as [string];
 	s.swb("drive", "start");
 	await cursorTo(s, a);
 	const other = `swb-other-${s.instance}`;
@@ -423,7 +423,7 @@ test("two Decks waking one session start exactly one pi", async () => {
 
 test("a Deck killed while its wake waits on the launch lock doesn't wedge later wakes", async () => {
 	s = scenario("phase2", "killed-waker");
-	const [a] = (await seed(s, ["a"])) as [string];
+	const [a] = (await seed(s, { turns: ["a"] })) as [string];
 	const holder = Bun.spawn(
 		[
 			process.execPath,
@@ -460,7 +460,7 @@ test("a Deck killed while its wake waits on the launch lock doesn't wedge later 
 
 test("the sessions server killed under an open Deck recovers on the next w", async () => {
 	s = scenario("phase2", "server-killed");
-	const [a] = (await seed(s, ["a"])) as [string];
+	const [a] = (await seed(s, { turns: ["a"] })) as [string];
 	s.swb("drive", "start");
 	await cursorTo(s, a);
 	s.tmux(s.servers.sessions, "kill-server");

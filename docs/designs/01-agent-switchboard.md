@@ -41,7 +41,6 @@ Scenarios this design must handle:
 
 - **Claude Code support**: deferred. The schema must not preclude it, but there's no recorder here.
 - **Cross-host rosters.** Each host stands alone.
-- **Linux builds**: macOS arm64 only. pod042 has no session tracking.
 - **Tracking unmanaged Pi**: bare `pi` is invisible to `swb`.
 - **PR badges**: later, but in scope for the product.
 - **A daemon**: nothing needs one long-lived owner yet.
@@ -119,7 +118,7 @@ The final visual spec comes from the Deck mock rounds (see [ticket 09](../wayfin
 - `j`/`k`/arrows move; `g`/`G` jump to the ends.
 - `Enter` focuses the Stage. On a dormant session it wakes pi and moves the keyboard to the loading card at once; pi gets the keyboard the moment it's ready. `esc` on the loading card hands the keyboard back to the roster without stopping the wake, exactly as if I had pressed `w`. `esc` is never bound once pi has the keyboard, because it means something to pi.
 - `a` toggles: it archives an open session and unarchives an archived one. There is no separate undo key. After `a` the cursor stays in place, on the row that followed, instead of chasing the session into its new section.
-- `n` starts a new session: in the selected session's cwd on a session row, or in the project root on a header.
+- `n` starts a new session: in the selected session's cwd on a session row, in the project root on a header, or where `swb` was run on a section row, as in an empty Deck.
 - `w` wakes a dormant session in the background and never takes the keyboard.
 - `/` filters; `y` copies `swb open <id>`; `Y` copies `@session:<uuid>`.
 - `l` on a session row is Enter, and on a collapsed header it expands. `h` on an expanded header collapses it; on a collapsed header or a session row it does nothing. Clicking, Enter, or space on a header toggles it. `q` quits the Deck.
@@ -171,7 +170,7 @@ Unknown keys or bad values are a startup error that names the key. Nothing is si
 
 Path: `${XDG_STATE_HOME:-~/.local/state}/agent-switchboard/swb.db`. Directory mode 0700, file mode 0600.
 
-Connection policy on every connection: WAL, `synchronous=FULL`, `busy_timeout=5000`, `foreign_keys=ON`. Read-then-write transactions use `BEGIN IMMEDIATE`. The driver is `bun:sqlite` everywhere, because the work Mac's pi is a compiled Bun binary and `swb` is too. `node:sqlite` is used only if the recorder runs under Node.
+Connection policy on every connection: WAL, `synchronous=FULL`, `busy_timeout=5000`, `foreign_keys=ON`. Read-then-write transactions use `BEGIN IMMEDIATE`. `swb` uses `bun:sqlite`. The recorder uses `node:sqlite`, because pi runs under Node on every host, the work Mac included.
 
 `bun:sqlite` is synchronous, and a write can wait out the 5 s busy timeout. So in the Deck, every db access and every transcript parse runs in one Bun Worker, and the TUI thread only exchanges messages with it. Short-lived commands (`swb archive`, `swb ls`, hooks) use the db directly.
 
@@ -521,7 +520,7 @@ Once `/new` exists, a tmux session can't keep a session's id as its name, so nam
 ### 12. Distribution: one tag, three artifacts
 
 A `vX.Y.Z` tag runs `.github/workflows/release.yml`:
-- it builds the arm64 `swb` binary as a GitHub release asset;
+- it builds `swb` for linux-x64 and darwin-arm64 as GitHub release assets;
 - it bundles `packages/pi` (with `shared` inlined and pi's host packages left external) into a generated `pi` branch;
 - it publishes the same bundle to npm as `@thurstonsand/pi-agent-switchboard`, through Trusted Publishing.
 
@@ -533,7 +532,7 @@ CI sets versions from the tag; nothing is bumped locally. Following pi-sessions'
 
 - TypeScript on Bun, with `@earendil-works/pi-tui` tracking latest (1.0.0 at time of writing).
 - Bun workspaces: `packages/cli`, `packages/pi`, `packages/shared`.
-- The CLI may take any dependency. The recorder takes as few as possible: pi's packages and `typebox` are `"*"` peer dependencies, and `bun:sqlite` is built in.
+- The CLI may take any dependency. The recorder takes as few as possible: pi's packages and `typebox` are `"*"` peer dependencies, and SQLite comes from the runtime: `node:sqlite` under pi's Node, `bun:sqlite` under Bun.
 
 ## Edge Cases & Failure Modes
 
@@ -632,7 +631,7 @@ Traps found during the spikes and mocks that the sections above don't already sp
 
 ## Implementation Plan
 
-One autonomous agent runs Phases 0–7 in order; Phase 8 happens after Thurston reviews and tags a release. Every phase leaves `main` green, under `mise run check` (lint, typecheck, build) and `mise run e2e`, and ends with a commit. There are **no unit tests**: every validation is an end-to-end scenario against the real built `swb`, real pi 0.99.2 with the faux provider, the real recorder, an isolated db, and private tmux servers (`SWB_INSTANCE=e2e-<rand>`, disposable `HOME`/`XDG_*`/`PI_CODING_AGENT_DIR`). Every phase also saves visual evidence (`swb drive capture` text, plus `--ansi`) under `test/e2e/artifacts/<phase>/`, which is gitignored and attached to the PR. Read [CONTEXT.md](../../CONTEXT.md), AGENTS.md, DEV.md, this doc, and the [e2e research](../wayfinding/session-manager/research/deterministic-pi-e2e.md) first.
+One autonomous agent runs Phases 0–7 in order; Phase 8 happens after Thurston reviews and tags a release. Every phase leaves `main` green, under `mise run check` (lint, typecheck, build) and `mise run e2e`, and ends with a commit. There are **no unit tests**: every validation is an end-to-end scenario against the real built `swb`, real pi 1.0.4 with the faux provider, the real recorder, an isolated db, and private tmux servers (`SWB_INSTANCE=e2e-<rand>`, disposable `HOME`/`XDG_*`/`PI_CODING_AGENT_DIR`). Every phase also saves visual evidence (`swb drive capture` text, plus `--ansi`) under `test/e2e/artifacts/<phase>/`, which is gitignored and attached to the PR. Read [CONTEXT.md](../../CONTEXT.md), AGENTS.md, DEV.md, this doc, and the [e2e research](../wayfinding/session-manager/research/deterministic-pi-e2e.md) first.
 
 Two settings exist so tests needn't mock anything. Both are real user-facing keys, not test hooks:
 - `inactive_after = "72h"`, so a test can set `"2s"`.
@@ -641,7 +640,7 @@ Two settings exist so tests needn't mock anything. Both are real user-facing key
 - [x] Phase 0: Scaffold and e2e harness
   - Goal: the repo builds a compiled `swb`, and the e2e harness drives a real scripted pi in a private tmux server.
   - Files: root `package.json` (Bun workspaces), `packages/{cli,pi,shared}/package.json`, `tsconfig*.json`, `biome.json`, `mise.toml` (tools: bun, tmux checks, vhs, `conda:ttyd`, ffmpeg; tasks `check`, `lint`, `fix`, `typecheck`, `build`, `install`, `e2e`, `dist:pi`), `.github/workflows/ci.yml`, `renovate.json` (`security:minimumReleaseAgeNpm`, as in wt), `test/e2e/harness/` (disposable env, deadline polling, artifact retention, server cleanup, PID-death checks), and `test/e2e/scenario-extension.ts` (faux provider: plain reply, tool call, held turn, attention span; borrowed from pi-sessions' smoke extension).
-  - Work: pin and check `pi --version` against 0.99.2 before any scenario. Resolve the real pi executable, not the mise shim. The work Mac's npm mirror trails upstream: if a dependency won't resolve there, pin the newest version it has and note it, rather than stopping.
+  - Work: pin and check `pi --version` against 1.0.4 before any scenario. Resolve the real pi executable, not the mise shim. The work Mac's npm mirror trails upstream: if a dependency won't resolve there, pin the newest version it has and note it, rather than stopping.
   - Validation: `mise run check`. Run `mise run e2e` with one harness scenario: pi starts, a scripted reply renders, the capture is saved, and the server and PIDs are gone afterwards.
 
 - [x] Phase 1: Store, recorder, and the sessions server
@@ -729,7 +728,7 @@ Two settings exist so tests needn't mock anything. Both are real user-facing key
     - pi failing to start, shown as "failed to start"
   - Validation: all of the above as e2e scenarios, plus a performance scenario asserting keypress-to-frame under 16 ms (median, from the TUI's own frame timing exposed in `GET /state`; the mock measured a 0.9 ms render and 38 ms key-to-Stage-repaint through three tmux layers) across 200 cursor moves.
 
-- [ ] Phase 6: Evidence recordings
+- [x] Phase 6: Evidence recordings
   - Goal: one reviewable recording per scenario.
   - Work: versioned VHS tapes under `test/e2e/tapes/`, driven by the same harness, for:
     - first turn to idle
@@ -758,15 +757,15 @@ Two settings exist so tests needn't mock anything. Both are real user-facing key
     Proven on the work Mac on 2026-10-06: a tape rendered a GIF and a PNG. Videos are the primary evidence; `drive capture` text and ANSI artifacts back them up.
   - Validation: `mise run evidence` renders every tape and exits non-zero if any harness assertion fails.
 
-- [ ] Phase 7: Release pipeline
+- [x] Phase 7: Release pipeline
   - Goal: one `vX.Y.Z` tag produces the binary, the `pi` branch, and the npm package.
-  - Files: `.github/workflows/release.yml`, `.agents/skills/npm-release/SKILL.md` (adapted from pi-sessions' skill, extended for the binary and the `pi` branch), `CHANGELOG.md`, `README.md`, and `LICENSE` (MIT).
+  - Files: `.github/workflows/release.yml`, `.agents/skills/npm-release/SKILL.md` (adapted from pi-sessions' skill, extended for the binary and the `pi` branch), `CHANGELOG.md`, `README.md`, `LICENSE` (MIT), `scripts/set-release-version.ts`, `scripts/extract-release-notes.sh`, and the `release:build` and `release:check` mise tasks.
   - Work:
     - `dist:pi` builds the bundle, keeping pi's host packages and `typebox` external.
-    - The release job builds `swb` for arm64, uploads it as a release asset, force-replaces the `pi` branch with the bundle, and publishes the same bundle to npm.
+    - The release job builds `swb` for linux-x64 and darwin-arm64, uploads them as release assets, force-replaces the `pi` branch with the bundle, and publishes the same bundle to npm.
     - CI sets versions from the tag.
   - Prerequisite (Thurston): npm Trusted Publishing configured for `@thurstonsand/pi-agent-switchboard`.
-  - Validation: `mise run release-check` builds everything into a scratch dir. One e2e scenario installs the `dist:pi` output as a pi package and passes Phase 1's first-turn scenario through it.
+  - Validation: `mise run release:check` builds everything into a scratch dir. One e2e scenario installs the `dist:pi` output as a pi package and passes Phase 1's first-turn scenario through it.
 
 - [ ] Phase 8: Install from ansiblonomicon (in that repo, after the run)
   - Not part of the autonomous run. Preconditions: Thurston has reviewed the work, npm Trusted Publishing is configured, and a `vX.Y.Z` tag has produced the GitHub release, the `pi` branch, and the npm package.

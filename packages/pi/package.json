@@ -4,6 +4,10 @@
 	"type": "module",
 	"description": "Records managed pi sessions for Agent Switchboard (swb)",
 	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/thurstonsand/agent-switchboard.git"
+	},
 	"keywords": [
 		"pi-package"
 	],

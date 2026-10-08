@@ -53,6 +53,8 @@ export type DeckState = {
 	ready: boolean;
 	terminalFocused: boolean;
 	cursor: string | null;
+	/** The cursor's index in `rows`, headers included. */
+	cursorRow: number;
 	mode: "filter" | "roster";
 	filter: string;
 	focus: "roster" | "stage" | "editor";

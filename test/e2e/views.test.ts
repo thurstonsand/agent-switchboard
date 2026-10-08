@@ -2,9 +2,9 @@ import { afterEach, expect, test } from "bun:test";
 import { join } from "node:path";
 import type { DeckState } from "../../packages/cli/src/deck/protocol.ts";
 import { config, cursorTo, entry, piSessions, reply, seed, state, waitState } from "./harness/deck.ts";
-import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
+import { budgets, git, type Scenario, scenario, until, which } from "./harness/index.ts";
 
-const NVIM = Bun.spawnSync(["mise", "which", "nvim"]).stdout.toString().trim();
+const NVIM = which("nvim");
 
 let s: Scenario;
 afterEach(async () => {
@@ -95,7 +95,7 @@ test("M-a e swaps the Stage to nvim in the session's directory, and back", async
 test("M-a v splits the editor at 65% beside pi; M-a h and l walk all three panes; the split follows the session", async () => {
 	s = scenario("phase4", "split");
 	config(s, 'editor = "cat -v"');
-	const [other] = (await seed(s, ["other"])) as [string];
+	const [other] = (await seed(s, { turns: ["other"] })) as [string];
 	const live = await started(s, "--size", "200x50", "--", "new");
 	const id = live.staged.id as string;
 
@@ -213,17 +213,10 @@ test("split shows pi below 160 columns and returns on widening, survives reopeni
 test("sessions in one directory share an editor, a worktree gets its own, and archiving the last one reaps it", async () => {
 	s = scenario("phase4", "editors");
 	config(s, 'editor = "cat -v"');
-	const git = (...args: string[]) => {
-		const result = Bun.spawnSync(["git", "-c", "user.name=e2e", "-c", "user.email=e2e@example.com", ...args], {
-			cwd: s.project,
-			env: s.env,
-		});
-		if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
-	};
 	const worktree = join(s.root, "project-wt");
-	git("init", "-q", "-b", "main");
-	git("commit", "-q", "--allow-empty", "-m", "init");
-	git("worktree", "add", "-q", "-b", "wt", worktree);
+	git(s, s.project, "init", "-q", "-b", "main");
+	git(s, s.project, "commit", "-q", "--allow-empty", "-m", "init");
+	git(s, s.project, "worktree", "add", "-q", "-b", "wt", worktree);
 
 	const ids: string[] = [];
 	for (const args of [["new"], ["new"], ["new", "--cwd", worktree]]) {
@@ -270,7 +263,7 @@ test("an editor that won't start says so, keeps pi on the Stage, and the key sti
 
 test("lazy hover starts nothing; eager hover starts pi 500 ms after the cursor lands", async () => {
 	s = scenario("phase4", "hover");
-	const [a, b] = (await seed(s, ["a"], ["b"])) as [string, string];
+	const [a, b] = (await seed(s, { turns: ["a"] }, { turns: ["b"] })) as [string, string];
 	s.swb("drive", "start");
 	await cursorTo(s, a);
 	await cursorTo(s, b);

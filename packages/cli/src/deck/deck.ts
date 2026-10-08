@@ -210,7 +210,7 @@ export async function openDeck(intent: DeckIntent): Promise<void> {
 		...env,
 		stageScript(deck, paths.target),
 	);
-	const roster = [SWB, "__roster", "--deck", deck, "--stage", stage];
+	const roster = [SWB, "__roster", "--deck", deck, "--stage", stage, "--here", process.cwd()];
 	if (intent.select) roster.push("--select", intent.select);
 	if (intent.newCwd) roster.push("--new", intent.newCwd);
 	const rosterPane = tmux(

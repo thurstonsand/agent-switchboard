@@ -6,37 +6,48 @@ import { join, resolve } from "node:path";
 export const repo = resolve(import.meta.dir, "../../..");
 export const PI_VERSION = "1.0.4";
 
-function run(argv: string[], env?: Record<string, string>): string {
-	const result = Bun.spawnSync(argv, { env, stdout: "pipe", stderr: "pipe" });
+function run(argv: string[], env?: Record<string, string>, cwd?: string): string {
+	const result = Bun.spawnSync(argv, { env, cwd, stdout: "pipe", stderr: "pipe" });
 	if (result.exitCode !== 0) throw new Error(`${argv.join(" ")} exited ${result.exitCode}: ${result.stderr.toString()}`);
 	return result.stdout.toString().trim();
 }
 
+/** A mise-managed tool's path, resolved before any scenario swaps HOME. */
+export function which(tool: string): string {
+	return run(["mise", "which", tool]);
+}
+
 // Resolved once, before any scenario swaps HOME: the mise shims stop working under a disposable HOME.
 const tools = (() => {
-	const node = run(["mise", "which", "node"]);
-	const tmux = run(["mise", "which", "tmux"]);
+	const node = which("node");
+	const tmux = which("tmux");
+	const wt = which("wt");
 	const piCli =
 		process.env.SWB_E2E_PI_CLI ?? join(run(["mise", "x", "--", "npm", "root", "-g"]), "@earendil-works/pi-coding-agent/dist/bundle/cli.js");
 	const version = run([node, piCli, "--version"]);
 	if (version !== PI_VERSION) throw new Error(`e2e needs pi ${PI_VERSION}, found ${version} at ${piCli}`);
-	return { node, tmux, piCli };
+	return { node, tmux, wt, piCli };
 })();
 
-/** The host's own pi-sessions install, as its pi settings name it; null when it has none. */
-export const hostPiSessions = ((): string | null => {
-	if (process.env.SWB_E2E_PI_SESSIONS) return process.env.SWB_E2E_PI_SESSIONS;
+export type HostPackage = "pi-sessions" | "@thurstonsand/pi-wt";
+const overrides: Record<HostPackage, string> = { "pi-sessions": "SWB_E2E_PI_SESSIONS", "@thurstonsand/pi-wt": "SWB_E2E_PI_WT" };
+
+/** The host's own install of a pi package, as its pi settings name it; null when it has none. */
+function hostPackage(name: HostPackage): string | null {
+	const override = process.env[overrides[name]];
+	if (override) return override;
 	const agentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi/agent");
 	const settings = join(agentDir, "settings.json");
 	if (!existsSync(settings)) return null;
 	const packages = (JSON.parse(readFileSync(settings, "utf8")) as { packages?: (string | { source: string })[] }).packages ?? [];
+	const repoName = name.slice(name.lastIndexOf("/") + 1);
 	for (const entry of packages) {
 		const source = typeof entry === "string" ? entry : entry.source;
-		if (source === "npm:pi-sessions") return join(agentDir, "npm/node_modules/pi-sessions");
-		if (source.replace(/\/$/, "").endsWith("/pi-sessions")) return source.replace(/^~/, homedir());
+		if (source === `npm:${name}`) return join(agentDir, "npm/node_modules", name);
+		if (source.replace(/\/$/, "").endsWith(`/${repoName}`)) return source.replace(/^~/, homedir());
 	}
 	return null;
-})();
+}
 
 export type LsEntry = {
 	id: string;
@@ -83,8 +94,15 @@ export type Scenario = {
 
 const servers = new Set<string>();
 
-/** `piSessions` installs the host's real pi-sessions; a scenario that asks for it on a host without one throws. */
-export function scenario(phase: string, name: string, options: { piSessions: boolean } = { piSessions: false }): Scenario {
+/**
+ * `packages` installs the host's real copies of those pi packages; a scenario that asks for one the host lacks throws.
+ * Without `recorder`, pi starts with no recorder until the scenario installs one.
+ */
+export function scenario(
+	phase: string,
+	name: string,
+	options: { packages: HostPackage[]; recorder: boolean } = { packages: [], recorder: true },
+): Scenario {
 	const root = mkdtempSync(join(tmpdir(), "swb-e2e-"));
 	const home = join(root, "home");
 	const bin = join(root, "bin");
@@ -92,12 +110,14 @@ export function scenario(phase: string, name: string, options: { piSessions: boo
 	const instance = `e2e-${root.slice(-6).toLowerCase()}`;
 	const artifacts = join(repo, "test/e2e/artifacts", phase, name);
 	const agentDir = join(home, ".pi/agent");
+	rmSync(artifacts, { recursive: true, force: true });
 	for (const dir of [home, bin, project, agentDir, join(root, "tmux"), artifacts]) mkdirSync(dir, { recursive: true });
 
 	writeFileSync(join(bin, "pi"), `#!/bin/sh\nPI_OFFLINE=1 exec ${tools.node} ${tools.piCli} "$@"\n`);
 	chmodSync(join(bin, "pi"), 0o755);
 	symlinkSync(tools.tmux, join(bin, "tmux"));
 	symlinkSync(join(repo, "dist/swb"), join(bin, "swb"));
+	symlinkSync(tools.wt, join(bin, "wt"));
 
 	const path = `${bin}:/usr/local/bin:/usr/bin:/bin`;
 	const profile = `export PATH=${path}\n`;
@@ -110,8 +130,8 @@ export function scenario(phase: string, name: string, options: { piSessions: boo
 	writeFileSync(
 		join(agentDir, "settings.json"),
 		JSON.stringify({
-			packages: [join(repo, "dist/pi"), ...(options.piSessions ? [piSessionsPackage()] : [])],
-			...(options.piSessions
+			packages: [...(options.recorder ? [join(repo, "dist/pi")] : []), ...options.packages.map(requireHostPackage)],
+			...(options.packages.includes("pi-sessions")
 				? // Only what subagents and handoffs need: the rest would spend faux turns on titles and indexing.
 					{ sessions: { autoTitle: { enable: false }, ask: { enable: false }, search: { enable: false } } }
 				: {}),
@@ -240,10 +260,14 @@ export function release(s: Scenario, name: string): void {
 	writeFileSync(join(s.home, "e2e-signals", `${name}.release`), "");
 }
 
-function piSessionsPackage(): string {
-	if (!hostPiSessions)
-		throw new Error("this scenario needs pi-sessions, and this host's pi settings install none (set SWB_E2E_PI_SESSIONS)");
-	return hostPiSessions;
+function requireHostPackage(name: HostPackage): string {
+	const path = hostPackage(name);
+	if (!path) throw new Error(`this scenario needs ${name}, and this host's pi settings install none (set ${overrides[name]})`);
+	return path;
+}
+
+export function git(s: Scenario, cwd: string, ...args: string[]): string {
+	return run(["git", "-c", "user.name=e2e", "-c", "user.email=e2e@example.com", ...args], s.env, cwd);
 }
 
 export const budgets = { piReady: 30_000, settle: 10_000, deckReady: 5_000 };

@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { copyFileSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
-import { budgets, type LsEntry, release, repo, type Scenario, scenario, until } from "./harness/index.ts";
+import { dirname, join } from "node:path";
+import { budgets, type LsEntry, release, repo, type Scenario, scenario, until, which } from "./harness/index.ts";
 
 let s: Scenario;
 afterEach(async () => {
@@ -34,8 +34,8 @@ async function waitFor(name: string): Promise<void> {
 	await until(() => s.signal(name) !== "", budgets.settle, name);
 }
 
-test("the first prompt turns a provisional runtime into a Session that works, settles, and takes its title", async () => {
-	s = scenario("phase1", "first-turn");
+/** Phase 1's first turn: a provisional runtime becomes a Session that works, settles, and takes its title. */
+async function firstTurn(): Promise<void> {
 	const runtime = await startManaged();
 	expect(s.ls()).toEqual([]);
 	expect(runtime.cwd).toBe(s.project);
@@ -53,6 +53,39 @@ test("the first prompt turns a provisional runtime into a Session that works, se
 	await prompt("/name Recorder smoke");
 	await until(() => entry(runtime.session_id).title === "Recorder smoke", budgets.settle, "the title");
 	s.save("screen.txt", s.screen());
+}
+
+test("the first prompt turns a provisional runtime into a Session that works, settles, and takes its title", async () => {
+	s = scenario("phase1", "first-turn");
+	await firstTurn();
+});
+
+test("the dist:pi bundle, packed and installed with pi install as npm publishes it, records the first turn", async () => {
+	s = scenario("phase7", "installed-bundle", { packages: [], recorder: false });
+	// pi install shells out to npm, which the scenario's PATH leaves out; node's own bin dir carries both.
+	const nodeBin = dirname(which("node"));
+	const withNode = { ...s.env, PATH: `${nodeBin}:${s.env.PATH}` };
+	const pack = Bun.spawnSync([join(nodeBin, "npm"), "pack", join(repo, "dist/pi"), "--pack-destination", s.root], {
+		env: withNode,
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	if (pack.exitCode !== 0) throw new Error(`npm pack: ${pack.stderr.toString()}`);
+	const tarball = join(s.root, pack.stdout.toString().trim());
+	const install = Bun.spawnSync([join(s.root, "bin/pi"), "install", `npm:${tarball}`], {
+		env: withNode,
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	s.save("pi-install.txt", install.stdout.toString() + install.stderr.toString());
+	if (install.exitCode !== 0) throw new Error(`pi install: ${install.stderr.toString()}`);
+	const settingsPath = join(s.env.PI_CODING_AGENT_DIR as string, "settings.json");
+	const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+	expect(settings.packages).toEqual([`npm:${tarball}`]);
+	// pi 1.0.4 installs an npm:<tarball> spec but never loads it; name the package as installing from the registry would.
+	settings.packages = ["npm:@thurstonsand/pi-agent-switchboard"];
+	writeFileSync(settingsPath, JSON.stringify(settings));
+	await firstTurn();
 });
 
 test("blocked during an attention span, working after it, idle only once the turn settles", async () => {

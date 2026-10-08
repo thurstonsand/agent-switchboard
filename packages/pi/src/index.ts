@@ -124,7 +124,16 @@ export default function (pi: ExtensionAPI) {
 				process.pid,
 				Date.now(),
 			);
-			db.run("UPDATE sessions SET phase = 'idle' WHERE session_id = ?", id);
+			const transcript = ctx.sessionManager.getSessionFile();
+			if (!transcript) throw new Error("pi is running without a session file");
+			// /mv and /wt switch to the same session id in another directory, with its transcript rewritten there.
+			db.run(
+				"UPDATE sessions SET phase = 'idle', cwd = ?, branch = ?, transcript = ? WHERE session_id = ?",
+				ctx.cwd,
+				branch(ctx.cwd),
+				transcript,
+				id,
+			);
 		});
 	});
 

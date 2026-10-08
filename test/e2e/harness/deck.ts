@@ -50,16 +50,20 @@ export async function reply(s: Scenario, text: string): Promise<void> {
 	await until(() => s.signal(`replied.${text}`) !== "", budgets.settle, `reply ${text}`);
 }
 
-/** Dormant, Unseen sessions with a conversation each: started in a Deck, prompted, then their pi killed while idle. */
-export async function seed(s: Scenario, ...conversations: string[][]): Promise<string[]> {
+/** Dormant, Unseen sessions with a conversation each, optionally titled: started in a Deck, prompted, then their pi killed while idle. */
+export async function seed(s: Scenario, ...conversations: { turns: string[]; title?: string }[]): Promise<string[]> {
 	const ids: string[] = [];
-	for (const turns of conversations) {
+	for (const { turns, title } of conversations) {
 		s.swb("drive", "start", "--", "new");
-		const st = await waitState(s, "the new pi live on the Stage", (x) => x.staged.kind === "live");
+		const st = await waitState(s, "the new pi live on the Stage", (x) => x.staged.kind === "live", budgets.piReady);
 		// Unfocused, so watching the turns land doesn't Visit them.
 		s.swb("drive", "focus", "out");
 		for (const turn of turns) await reply(s, turn);
 		const id = st.staged.id as string;
+		if (title) {
+			s.keys("-l", `/name ${title}`, "Enter");
+			await until(() => entry(s, id)?.title === title, budgets.settle, `${title} titled`);
+		}
 		await until(() => entry(s, id)?.activity === "idle" && entry(s, id).unseen === true, budgets.settle, "idle");
 		s.tmux(s.servers.sessions, "kill-session", "-t", `=${st.staged.host}`);
 		await until(() => !entry(s, id).live, budgets.settle, "dormant");
@@ -78,10 +82,9 @@ export async function cursorTo(s: Scenario, id: string): Promise<void> {
 	const deadline = Date.now() + budgets.settle;
 	for (let st = state(s); st.cursor !== id; ) {
 		if (Date.now() > deadline) throw new Error(`timed out waiting for cursor on ${id}`);
-		const from = st.rows.findIndex((row) => row.kind === "session" && row.id === st.cursor);
-		const before = st.cursor;
-		s.keys(from === -1 || rowIndex(st, id) > from ? "j" : "k");
-		st = await waitState(s, `cursor off ${before}`, (x) => x.cursor !== before || x.cursor === id);
+		const before = st.cursorRow;
+		s.keys(rowIndex(st, id) > before ? "j" : "k");
+		st = await waitState(s, `cursor off row ${before}`, (x) => x.cursorRow !== before || x.cursor === id);
 	}
 }
 

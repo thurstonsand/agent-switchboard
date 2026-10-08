@@ -14,7 +14,7 @@ afterEach(async () => {
 });
 
 test("a pi-sessions subagent and a deferred handoff never become Sessions, and the subagent runs on the default tmux server", async () => {
-	s = scenario("phase5", "subagents", { piSessions: true });
+	s = scenario("phase5", "subagents", { packages: ["pi-sessions"], recorder: true });
 	s.swb("drive", "start", "--", "new");
 	await waitState(s, "the parent live", (x) => x.staged.kind === "live" && x.focus === "stage", budgets.piReady);
 	await reply(s, "parent");
@@ -81,7 +81,7 @@ test("a Deck started inside another tmux works as in a bare terminal, M-a passin
 
 test("a narrow terminal shows one pane at a time: Enter shows pi, M-a h returns to the roster", async () => {
 	s = scenario("phase5", "narrow");
-	const [a] = (await seed(s, ["narrow-one"])) as [string];
+	const [a] = (await seed(s, { turns: ["narrow-one"] })) as [string];
 	s.swb("drive", "start", "--size", "60x20");
 	await waitState(s, "roster alone", (x) => x.layout.rosterOnly);
 	await cursorTo(s, a);
@@ -111,7 +111,7 @@ test("a narrow terminal shows one pane at a time: Enter shows pi, M-a h returns 
 
 test("three Decks stay in sync: a wake, an archive, and a new session in one show in the others", async () => {
 	s = scenario("phase5", "three-decks");
-	const [a, b] = (await seed(s, ["a"], ["b"])) as [string, string];
+	const [a, b] = (await seed(s, { turns: ["a"] }, { turns: ["b"] })) as [string, string];
 	s.swb("drive", "start");
 	const two = terminal(s, "two", "swb");
 	const three = terminal(s, "three", `swb open ${b}`);
@@ -147,7 +147,7 @@ test("three Decks stay in sync: a wake, an archive, and a new session in one sho
 
 test("a plain tmux attach shares a session with the Deck staging it, and detaching leaves it live", async () => {
 	s = scenario("phase5", "shared-viewer");
-	const [a] = (await seed(s, ["shared"])) as [string];
+	const [a] = (await seed(s, { turns: ["shared"] })) as [string];
 	s.swb("drive", "start");
 	await cursorTo(s, a);
 	s.keys("w");
@@ -176,7 +176,7 @@ test("a plain tmux attach shares a session with the Deck staging it, and detachi
 
 test("a pi that dies before it's ready shows Failed to start, and w retries once pi works again", async () => {
 	s = scenario("phase5", "failed-start");
-	const [a] = (await seed(s, ["fails"])) as [string];
+	const [a] = (await seed(s, { turns: ["fails"] })) as [string];
 	const pi = join(s.bin, "pi");
 	const script = readFileSync(pi, "utf8");
 	writeFileSync(pi, "#!/bin/sh\necho 'pi: broken on purpose' >&2\nexit 1\n");
@@ -201,7 +201,7 @@ test("a pi that dies before it's ready shows Failed to start, and w retries once
 
 test("200 cursor moves render at a median under 16 ms from key to frame", async () => {
 	s = scenario("phase5", "perf");
-	await seed(s, ["p1"], ["p2"], ["p3"]);
+	await seed(s, { turns: ["p1"] }, { turns: ["p2"] }, { turns: ["p3"] });
 	s.swb("drive", "start");
 	const before = state(s).perf.keyToFrame.n;
 	s.swb("drive", "keys", "--delay", "50", ...Array.from({ length: 200 }, (_, i) => (i % 4 < 2 ? "j" : "k")));
@@ -212,7 +212,7 @@ test("200 cursor moves render at a median under 16 ms from key to frame", async 
 
 test("roster navigation: h l space and a header click fold projects; g G jump; M-a Tab z ? and q", async () => {
 	s = scenario("phase5", "navigation");
-	await seed(s, ["here"]);
+	await seed(s, { turns: ["here"] });
 	const other = join(s.root, "other");
 	mkdirSync(other);
 	s.swb("drive", "start", "--", "new", "--cwd", other);
@@ -275,4 +275,28 @@ test("roster navigation: h l space and a header click fold projects; g G jump; M
 	s.keys("q");
 	await until(() => s.swbTry("drive", "state").code !== 0, budgets.settle, "the Deck closed");
 	expect(s.ls().find((e) => e.id === b)?.live).toBe(true);
+});
+
+test("n in an empty Deck, and on a section row, starts a session where swb was run", async () => {
+	s = scenario("phase6", "n-here");
+	s.swb("drive", "start");
+	await waitState(s, "an empty roster", (x) => x.ready && x.cursor === null);
+	s.keys("n");
+	const first = await waitState(s, "n's pi live", (x) => x.staged.kind === "live" && x.staged.id !== null, budgets.piReady);
+	s.keys("M-a", "h");
+	await waitState(s, "roster focus", (x) => x.focus === "roster");
+	s.keys("G");
+	await waitState(s, "cursor on the Archived section", (x) => x.rows[x.cursorRow]?.kind === "section");
+	s.keys("n");
+	const second = await waitState(
+		s,
+		"a second pi live",
+		(x) => x.staged.kind === "live" && x.staged.id !== null && x.staged.id !== first.staged.id,
+		budgets.piReady,
+	);
+	s.save("n-here.txt", s.screen());
+	const cwds = () => s.query<{ cwd: string }>("select cwd from runtimes order by started_at").map((r) => r.cwd);
+	await until(() => cwds().length === 2, budgets.settle, "both pis registered");
+	expect(cwds()).toEqual([s.project, s.project]);
+	expect(second.focus).toBe("stage");
 });

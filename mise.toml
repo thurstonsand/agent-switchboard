@@ -5,6 +5,9 @@ node = "24"
 "aqua:tmux/tmux-builds" = "3.7c"
 "aqua:charmbracelet/vhs" = "0.12.1"
 "conda:ttyd" = "1.7.7"
+"conda:ffmpeg" = "9.0.2"
+"github:thurstonsand/wt" = "1.15.1"
+neovim = "0.12.5"
 
 [tasks.lint]
 run = "biome check ."
@@ -27,6 +30,38 @@ run = [
   "! grep -q 'Bun\\.' dist/pi/index.js || (echo 'dist:pi: bundle references Bun.' >&2; exit 1)",
   "bun scripts/dist-pi-package.ts",
 ]
+
+[tasks."release:build"]
+description = "Build every release artifact into OUT: a swb binary per target, and the pi bundle packed for npm"
+depends = ["dist:pi"]
+usage = 'arg "<out>"'
+run = """
+set -eu
+out="$usage_out"
+mkdir -p "$out"
+for target in linux-x64 darwin-arm64; do
+  bun build --compile --minify --sourcemap --target="bun-$target" packages/cli/src/main.ts packages/cli/src/deck/worker.ts --outfile "$out/swb-$target"
+done
+cp -R dist/pi "$out/pi"
+npm pack ./dist/pi --pack-destination "$out"
+"""
+
+[tasks."release:check"]
+description = "Build every release artifact into a scratch dir and smoke-test this host's binary"
+run = """
+set -eu
+out="$(mktemp -d)"
+trap 'rm -rf "$out"' EXIT
+mise run release:build "$out"
+case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64) host=linux-x64 ;;
+  Darwin-arm64) host=darwin-arm64 ;;
+  *) echo "release:check: no release target for $(uname -s)-$(uname -m)" >&2; exit 1 ;;
+esac
+"$out/swb-$host" --version
+tar -tzf "$out"/thurstonsand-pi-agent-switchboard-*.tgz
+ls -l "$out"
+"""
 
 [tasks.check]
 description = "Full verification gate"

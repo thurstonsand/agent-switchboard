@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: CI
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: Release binaries, the pi branch, and the npm package
+    needs: ci
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v3
+      - run: bun install --frozen-lockfile
+
+      - name: Version and release notes from the tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          scripts/extract-release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
+          bun scripts/set-release-version.ts "$version"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "OUT=$RUNNER_TEMP/release" >> "$GITHUB_ENV"
+
+      - name: Build every artifact
+        run: mise run release:build "$OUT"
+
+      # Every step re-runs safely; the GitHub release, the one step that cannot, goes last.
+      - name: Replace the pi branch with the bundle
+        run: |
+          cd "$OUT/pi"
+          git init -q -b pi
+          git add .
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "pi-agent-switchboard $VERSION"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" pi
+
+      - name: Publish the bundle to npm
+        run: |
+          npm view "@thurstonsand/pi-agent-switchboard@$VERSION" version >/dev/null 2>&1 ||
+            npm publish "$OUT/thurstonsand-pi-agent-switchboard-$VERSION.tgz" --access public
+
+      - name: GitHub release with the swb binaries
+        run: |
+          gh release create "$GITHUB_REF_NAME" "$OUT/swb-linux-x64" "$OUT/swb-darwin-arm64" \
+            --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"

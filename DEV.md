@@ -11,15 +11,19 @@ mise trust && mise bootstrap
 Always prefer mise tasks over running tools directly.
 
 ```sh
-mise run check      # full verification gate
-mise run e2e        # real pi in a private tmux server, scripted by the faux provider
-mise run install    # build swb from this checkout into ~/.local/bin
-mise run dist:pi    # build the pi extension bundle exactly as the release publishes it
+mise run check          # full verification gate
+mise run e2e            # real pi in a private tmux server, scripted by the faux provider
+mise run install        # build swb from this checkout into ~/.local/bin
+mise run dist:pi        # build the pi extension bundle exactly as the release publishes it
+mise run release:check  # build every release artifact into a scratch dir and smoke-test this host's binary
+mise run evidence       # render the VHS tapes in test/e2e/tapes to test/e2e/artifacts/phase6/videos
 ```
+
+Some scenarios install the host's own pi-sessions and pi-wt, found through its pi settings; point `SWB_E2E_PI_SESSIONS` or `SWB_E2E_PI_WT` at a checkout when the settings don't name one.
 
 ## Layout
 
-- `packages/cli`: the `swb` CLI and TUI (pi-tui), compiled to one arm64 binary with `bun build --compile`. May take any dependency.
+- `packages/cli`: the `swb` CLI and TUI (pi-tui), compiled with `bun build --compile` to one binary per release target (linux-x64, darwin-arm64). May take any dependency.
 - `packages/pi`: the pi recorder extension. Use dependencies judiciously. Pi provides `@earendil-works/*` and `typebox` at runtime, so declare them as `"*"` peer dependencies and never bundle them.
 - `packages/shared`: schema version, row types, db path, connection policy, anything that should be shared between packages.
 - The `pi` branch is generated. The tag-driven release workflow overwrites it wholesale with the bundled extension. Never edit it by hand.

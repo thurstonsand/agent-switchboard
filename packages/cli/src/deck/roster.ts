@@ -60,10 +60,18 @@ const TOAST_MS = 3500;
 
 const { values: args } = parseArgs({
 	args: process.argv.slice(3),
-	options: { deck: { type: "string" }, stage: { type: "string" }, select: { type: "string" }, new: { type: "string" } },
+	options: {
+		deck: { type: "string" },
+		stage: { type: "string" },
+		select: { type: "string" },
+		new: { type: "string" },
+		here: { type: "string" },
+	},
 });
-if (!args.deck || !args.stage) throw new UsageError("__roster: --deck and --stage are required");
+if (!args.deck || !args.stage || !args.here) throw new UsageError("__roster: --deck, --stage, and --here are required");
 const deck = args.deck;
+/** Where swb was run: `n` starts there from a section row, including in an empty Deck. */
+const here = args.here;
 const stagePane = args.stage;
 if (!process.env.TMUX_PANE) throw new UsageError("__roster: runs only inside a Deck pane");
 const rosterPane = process.env.TMUX_PANE;
@@ -936,8 +944,7 @@ class Roster implements Component {
 
 	newHere(): void {
 		const row = this.selected();
-		if (!row || row.kind === "section") return;
-		newSession(row.kind === "session" ? row.entry.cwd : row.project);
+		newSession(!row || row.kind === "section" ? here : row.kind === "session" ? row.entry.cwd : row.project);
 	}
 
 	toggle(row: Row): void {
@@ -1186,7 +1193,9 @@ async function changeView(swap: boolean): Promise<void> {
 // ── view state ──────────────────────────────────────────────────────────
 
 function viewState(): DeckState {
-	const cursorRow = roster.selected();
+	const rows = roster.rows();
+	const index = roster.resolveCursor(rows);
+	const cursorRow = rows[index];
 	const applied = stage.applied;
 	const staged = applied.id === null ? undefined : entries.get(applied.id);
 	return {
@@ -1194,6 +1203,7 @@ function viewState(): DeckState {
 		ready,
 		terminalFocused,
 		cursor: cursorRow?.kind === "session" ? cursorRow.entry.id : null,
+		cursorRow: index,
 		mode: roster.filtering ? "filter" : "roster",
 		filter: roster.query(),
 		focus: focus === "roster" ? "roster" : focusedPane === stagePane && applied.view !== "pi" ? "editor" : "stage",
@@ -1206,7 +1216,7 @@ function viewState(): DeckState {
 		},
 		layout: { width: deckWidth, rosterOnly: narrow, split: side !== null, zoomed },
 		waking: launches.map((launch) => ({ id: launch.id, keyboardWaiting: launch.keyboard })),
-		rows: roster.rows().map((row) =>
+		rows: rows.map((row) =>
 			row.kind === "session"
 				? {
 						kind: "session",

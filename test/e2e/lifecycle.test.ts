@@ -78,7 +78,12 @@ test("archive is refused mid-turn from the roster, the CLI, and pi; once idle, s
 
 test("a archives an idle live session and kills its pi; a on an Archived row leaves it dormant and open; the cursor stays put", async () => {
 	s = scenario("phase3", "archive-toggle");
-	const [a, b, , d] = (await seed(s, ["a"], ["b"], ["c"], ["d"])) as [string, string, string, string];
+	const [a, b, , d] = (await seed(s, { turns: ["a"] }, { turns: ["b"] }, { turns: ["c"] }, { turns: ["d"] })) as [
+		string,
+		string,
+		string,
+		string,
+	];
 	s.swb("archive", d);
 	s.swb("drive", "start");
 	await cursorTo(s, b);
@@ -128,7 +133,7 @@ test("/archive archives and quits; before the first prompt it refuses", async ()
 
 test("a new prompt in an archived session unarchives it", async () => {
 	s = scenario("phase3", "prompt-unarchives");
-	const [id] = (await seed(s, ["before"])) as [string];
+	const [id] = (await seed(s, { turns: ["before"] })) as [string];
 	s.swb("archive", id);
 	expect(entry(s, id).open).toBe(false);
 	s.swb("drive", "start", "--", "open", id);
@@ -144,7 +149,7 @@ test("a new prompt in an archived session unarchives it", async () => {
 
 test("Inactive after inactive_after, never while blocked or unseen", async () => {
 	s = scenario("phase3", "inactive");
-	const [unseen] = (await seed(s, ["unseen"])) as [string];
+	const [unseen] = (await seed(s, { turns: ["unseen"] })) as [string];
 	config(s, 'inactive_after = "2s"\n');
 	const { id: blocked } = await liveSession("ready");
 	s.keys("-l", "attention b1", "Enter");
@@ -169,7 +174,7 @@ test("Inactive after inactive_after, never while blocked or unseen", async () =>
 
 test("y copies swb open <id> and Y copies @session:<id> through the clipboard command", async () => {
 	s = scenario("phase3", "copy");
-	const [id] = (await seed(s, ["copy me"])) as [string];
+	const [id] = (await seed(s, { turns: ["copy me"] })) as [string];
 	const file = join(s.root, "clipboard.txt");
 	config(s, `clipboard = "cat > ${file}"\n`);
 	s.swb("drive", "start");
