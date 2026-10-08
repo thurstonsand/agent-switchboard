@@ -68,6 +68,7 @@ Scenarios this design must handle:
 swb                          open a Deck (in the current terminal)
 swb new [--cwd DIR]          open a Deck with a new session selected
 swb open <id>                open a Deck with that session selected
+swb adopt <id>|<transcript>  track a session pi ran outside swb as dormant, then open a Deck on it
 swb ls [--json]              list sessions with derived state
 swb archive <id>             refuses while a turn is running; kills an idle live pi
 swb unarchive <id>
@@ -434,6 +435,13 @@ TUI `a` / swb archive <id> / pi /archive
   live → tmux kill-session <runtime.tmux_session>     SIGHUP → pi clean shutdown → runtime row deleted
   gc()                                                also triggered by the session-closed hook
 TUI `a` on an archived row / swb unarchive <id> → db.tx: marks.archived_at = null   nothing restarts; `w` or Enter resumes
+swb adopt <id>|<transcript>
+  find <agent dir>/sessions/*/*_<id>.jsonl, or take the path given
+  pi-sessions subagent (a handoff-bootstrap entry with `subagent`) → refuse: its parent owns it
+  already a row → refuse; cwd gone → refuse
+  db.tx: insert the row idle, created_at = header timestamp, last_prompt_at = last_settled_at = last entry
+  open a Deck on it; `w` or Enter starts it managed like any dormant session
+  swb can't see an unmanaged pi, so quitting the original before waking is on me
 gc()
   for each editor session E (@swb_dir = D):
     no open session has cwd = D → kill E

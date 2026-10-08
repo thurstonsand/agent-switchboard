@@ -27,6 +27,7 @@ Sessions run headless in a dedicated tmux server. `swb` opens a Deck: a roster o
 swb                          open a Deck
 swb new [--cwd DIR]          open a Deck on a new pi session
 swb open ID                  open a Deck on a session
+swb adopt ID|TRANSCRIPT      track a session pi ran outside swb, then open it; quit that pi first
 swb ls [--json]              list sessions with derived state
 swb archive ID               archive a session
 swb unarchive ID             reopen an archived session

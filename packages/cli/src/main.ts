@@ -1,3 +1,4 @@
+import { adopt } from "./commands/adopt.ts";
 import { archive } from "./commands/archive.ts";
 import { deckCommand, deckNotify, help } from "./commands/deck.ts";
 import { detached } from "./commands/detached.ts";
@@ -18,6 +19,7 @@ const USAGE = `swb: Agent Switchboard
   swb                          open a Deck
   swb new [--cwd DIR]          open a Deck on a new pi session
   swb open ID                  open a Deck on a session
+  swb adopt ID|TRANSCRIPT      track a session pi ran outside swb, then open it; quit that pi first
   swb ls [--json]              list sessions with derived state
   swb archive ID               archive a session
   swb unarchive ID             reopen an archived session
@@ -49,6 +51,8 @@ async function main(args: string[]): Promise<void> {
 			return newSession(rest);
 		case "open":
 			return open(rest);
+		case "adopt":
+			return adopt(rest);
 		case "ls":
 			return ls(rest);
 		case "archive":

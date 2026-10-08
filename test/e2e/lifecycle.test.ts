@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { config, cursorTo, entry, piSessions, reply, rowIndex, seed, sessionRows, state, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 
@@ -226,4 +226,50 @@ test("y copies swb open <id> and Y copies @session:<id> through the clipboard co
 	s.keys("Y");
 	await until(() => readFileSync(file, "utf8") === `@session:${id}`, budgets.settle, "Y copied");
 	s.save("copied-Y.txt", s.screen());
+});
+
+test("swb adopt tracks a session pi ran outside swb, wakes it managed, and refuses subagents and tracked sessions", async () => {
+	s = scenario("phase3", "adopt");
+	const outside = Bun.spawnSync([join(s.bin, "pi"), "-p", "reply outside"], { cwd: s.project, env: s.env, stdout: "pipe", stderr: "pipe" });
+	expect(outside.exitCode).toBe(0);
+	const sessions = join(s.env.PI_CODING_AGENT_DIR as string, "sessions");
+	const [transcript] = [...new Bun.Glob("*/*.jsonl").scanSync({ cwd: sessions, absolute: true })];
+	const id = (JSON.parse(readFileSync(transcript as string, "utf8").split("\n")[0] as string) as { id: string }).id;
+	expect(s.ls()).toHaveLength(0);
+
+	s.swb("drive", "start", "--", "adopt", id);
+	await waitState(s, "the adopted session on the Stage", (x) => x.cursor === id && x.staged.kind === "dormant");
+	expect(entry(s, id)).toMatchObject({ open: true, live: false, interrupted: false, unseen: false, cwd: s.project });
+	s.save("adopted-dormant.txt", s.screen());
+	s.keys("Enter");
+	await waitState(
+		s,
+		"the adopted session live with the keyboard",
+		(x) => x.staged.id === id && x.staged.kind === "live" && x.focus === "stage",
+		budgets.piReady,
+	);
+	await reply(s, "inside");
+	await until(() => entry(s, id).activity === "idle", budgets.settle, "idle");
+	expect(entry(s, id)).toMatchObject({ open: true, live: true });
+	const text = readFileSync(transcript as string, "utf8");
+	expect(text).toContain("outside");
+	expect(text).toContain("inside");
+	s.save("adopted-live.txt", `${s.screen()}\n${JSON.stringify(s.ls(), null, 2)}`);
+
+	expect(s.swbTry("adopt", id).err.trim()).toBe(`swb: adopt: ${id} is already tracked; swb open ${id}`);
+	const child = join(s.root, "child_x.jsonl");
+	writeFileSync(
+		child,
+		`${JSON.stringify({ type: "session", version: 3, id: "child-x", timestamp: new Date().toISOString(), cwd: s.project })}\n${JSON.stringify({ type: "custom", customType: "pi-sessions.handoff-bootstrap", data: { subagent: { depth: 1 } }, timestamp: new Date().toISOString() })}\n`,
+	);
+	expect(s.swbTry("adopt", child).err.trim()).toBe("swb: adopt: child-x is a pi-sessions subagent; its parent owns it");
+	expect(s.swbTry("adopt", "no-such-id").code).toBe(1);
+	const stray = join(s.root, "stray_y.jsonl");
+	writeFileSync(
+		stray,
+		`${JSON.stringify({ type: "session", version: 3, id: "stray-y", timestamp: new Date().toISOString(), cwd: s.project })}\n${JSON.stringify({ type: "message", timestamp: new Date().toISOString() })}\n`,
+	);
+	expect(s.swbTry("adopt", stray).err.trim()).toBe(
+		`swb: adopt: pi won't find stray-y from ${s.project}; move it to ${dirname(transcript as string)}`,
+	);
 });
