@@ -11,6 +11,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 //   subagent <name>   launch a real pi-sessions subagent whose task is `reply child <name>`; the child holds like
 //                     `hold child.<name>` before answering
 //   deferred <name>   prepare a deferred pi-sessions handoff whose task is `reply child <name>`
+//   archive <text>    call swb_archive, then answer "tool done <text>"
 // A pi that starts while start.hold exists signals start.entered and blocks until start.release.
 // pi-sessions' handoff extraction is answered with a fixed briefing.
 // Raw terminal input is appended to input.log as JSON lines; `/e2e-bg` asks the terminal for its background (OSC 11).
@@ -89,6 +90,8 @@ export default function (pi: ExtensionAPI) {
 					}),
 					{ stopReason: "toolUse" },
 				);
+			case "archive":
+				return fauxAssistantMessage(fauxToolCall("swb_archive", {}), { stopReason: "toolUse" });
 			case "attention":
 				return fauxAssistantMessage(fauxToolCall("e2e_attention", { name: arg }), { stopReason: "toolUse" });
 			default:

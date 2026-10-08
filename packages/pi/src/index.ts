@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bootId, branch, Db, pidAlive, projectRoot, type Row, SCHEMA_VERSION } from "@swb/shared";
+import { Type } from "typebox";
 
 type Launch = { readonly db: string; readonly tmuxSession: string };
 // Outlives /reload, which re-imports this module with a fresh module cache.
@@ -200,6 +201,20 @@ export default function (pi: ExtensionAPI) {
 		writeFor(ctx, (db, id) => db.run("UPDATE sessions SET title = ? WHERE session_id = ?", event.name ?? null, id));
 	});
 
+	const markArchived = (ctx: ExtensionContext): boolean => {
+		let archived = false;
+		writeFor(ctx, (db, id) => {
+			if (!db.get("SELECT 1 FROM sessions WHERE session_id = ?", id)) return;
+			db.run(
+				"INSERT INTO marks (session_id, archived_at) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET archived_at = excluded.archived_at",
+				id,
+				Date.now(),
+			);
+			archived = true;
+		});
+		return archived;
+	};
+
 	pi.registerCommand("archive", {
 		description: "Archive this session in swb and quit",
 		handler: async (_args, ctx) => {
@@ -207,18 +222,31 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify("swb: turn running: wait for it to complete", "error");
 				return;
 			}
-			let archived = false;
-			writeFor(ctx, (db, id) => {
-				if (!db.get("SELECT 1 FROM sessions WHERE session_id = ?", id)) return;
-				db.run(
-					"INSERT INTO marks (session_id, archived_at) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET archived_at = excluded.archived_at",
-					id,
-					Date.now(),
-				);
-				archived = true;
-			});
-			if (archived) ctx.shutdown();
+			if (markArchived(ctx)) ctx.shutdown();
 			else if (!proc.failure) ctx.ui.notify("swb: nothing to archive before the first prompt", "error");
+		},
+	});
+
+	pi.registerTool({
+		name: "swb_archive",
+		label: "Archive session",
+		description:
+			"Archive this session in Agent Switchboard. It leaves the user's roster of open sessions, and pi quits as soon as this turn ends. The user can restore it with `swb unarchive <id>`.",
+		promptSnippet: "Archive this session when the user asks",
+		promptGuidelines: [
+			"Use swb_archive only when the user asks to archive this session; never archive on your own initiative.",
+			"Call swb_archive as the last action of the turn, then end with a brief final message: pi quits once the turn ends.",
+		],
+		parameters: Type.Object({}),
+		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+			if (!markArchived(ctx)) {
+				throw new Error(proc.failure ? `swb: not recording: ${proc.failure}` : "swb: no session recorded yet");
+			}
+			ctx.shutdown();
+			return {
+				content: [{ type: "text", text: "Archived. pi quits when this turn ends." }],
+				details: undefined,
+			};
 		},
 	});
 

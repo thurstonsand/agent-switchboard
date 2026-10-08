@@ -304,6 +304,10 @@ Failure: the recorder shows a persistent red footer status (`swb: not recording:
 - Otherwise it writes `marks.archived_at` and calls `ctx.shutdown()`.
 - The tmux `session-closed` hook then runs `swb gc`, which reaps the editor.
 
+`swb_archive`, a tool registered only in managed processes, archives when the user asks the agent to:
+- It writes the same mark and calls `ctx.shutdown()` mid-turn; pi defers that until the turn settles, so the final message lands and the session is not Interrupted.
+- No confirmation, and no unarchive tool: `swb unarchive <id>` covers that.
+
 ### Drive contract
 
 - `swb drive start [--theme light|dark]` creates a harness tmux server, `swb-drive[-<instance>]`, whose single pane runs `swb [args]` at the given size (default 140x40). It waits until the Deck reports ready in its state.
