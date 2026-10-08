@@ -128,8 +128,9 @@ export default function (pi: ExtensionAPI) {
 			if (!transcript) throw new Error("pi is running without a session file");
 			// /mv and /wt switch to the same session id in another directory, with its transcript rewritten there.
 			db.run(
-				"UPDATE sessions SET phase = 'idle', cwd = ?, branch = ?, transcript = ? WHERE session_id = ?",
+				"UPDATE sessions SET phase = 'idle', cwd = ?, project_root = ?, branch = ?, transcript = ? WHERE session_id = ?",
 				ctx.cwd,
+				projectRoot(ctx.cwd),
 				branch(ctx.cwd),
 				transcript,
 				id,
@@ -178,14 +179,20 @@ export default function (pi: ExtensionAPI) {
 		proc.attention.clear();
 		writeFor(ctx, (db, id) => {
 			db.run(
-				"UPDATE sessions SET phase = 'idle', last_settled_at = ?, cwd = ?, branch = ?, title = ? WHERE session_id = ?",
+				"UPDATE sessions SET phase = 'idle', last_settled_at = ?, cwd = ?, project_root = ?, branch = ?, title = ? WHERE session_id = ?",
 				Date.now(),
 				ctx.cwd,
+				projectRoot(ctx.cwd),
 				branch(ctx.cwd),
 				ctx.sessionManager.getSessionName() ?? null,
 				id,
 			);
-			db.run("UPDATE runtimes SET cwd = ? WHERE tmux_session = ?", ctx.cwd, proc.launch.tmuxSession);
+			db.run(
+				"UPDATE runtimes SET cwd = ?, project_root = ? WHERE tmux_session = ?",
+				ctx.cwd,
+				projectRoot(ctx.cwd),
+				proc.launch.tmuxSession,
+			);
 		});
 	});
 

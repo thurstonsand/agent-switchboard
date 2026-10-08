@@ -1,7 +1,7 @@
 # pi-wt's /mv moves the session to another directory; swb follows it there.
 Source common.tape
 
-Type "# /mv moves the session's directory; swb follows it" Sleep 1s Enter
+Type "# /mv moves the session's directory; swb follows it to that project" Sleep 1s Enter
 Type "swb" Sleep 400ms Enter
 Wait+Screen /0 open/
 Sleep 1s

@@ -298,7 +298,7 @@ export const directors: Record<string, Director> = {
 		run: async (s) => {
 			await waitLs(s, "a session", (ls) => ls.length === 1);
 			const [moved] = await waitLs(s, "swb following the move", (ls) => ls[0]?.cwd === join(s.root, "elsewhere"));
-			expect(moved).toMatchObject({ project: s.project, open: true, live: true });
+			expect(moved).toMatchObject({ project: join(s.root, "elsewhere"), open: true, live: true });
 		},
 	},
 

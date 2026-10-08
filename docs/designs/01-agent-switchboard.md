@@ -182,7 +182,7 @@ CREATE TABLE sessions (
   session_id       TEXT PRIMARY KEY,
   tool             TEXT NOT NULL CHECK (tool IN ('pi')),
   cwd              TEXT NOT NULL,    -- current; rewritten when it changes (/wt, /mv)
-  project_root     TEXT NOT NULL,    -- parent of git common dir, else cwd; set once
+  project_root     TEXT NOT NULL,    -- parent of git common dir, else cwd; follows cwd
   transcript       TEXT NOT NULL,    -- the dormant card reads the conversation from here
   title            TEXT,             -- pi session name; null until titled
   branch           TEXT,             -- null outside git

@@ -58,7 +58,7 @@ async function wakesWhereItWent(id: string, cwd: string): Promise<void> {
 	expect(s.ls().map((e) => e.id)).toEqual([id]);
 }
 
-test("/mv to another directory: swb follows the session there, and it wakes there with its conversation", async () => {
+test("/mv to another directory: swb follows the session there, into that directory's project, and it wakes there with its conversation", async () => {
 	s = scenario("phase6", "mv", { packages: ["@thurstonsand/pi-wt"], recorder: true });
 	const elsewhere = join(s.root, "elsewhere");
 	mkdirSync(elsewhere);
@@ -66,7 +66,7 @@ test("/mv to another directory: swb follows the session there, and it wakes ther
 	expect(cwd).toBe(elsewhere);
 	expect(existsSync(from)).toBe(false);
 	await until(() => existsSync(transcript(id)), budgets.settle, "the transcript column pointing at the moved file");
-	expect(entry(s, id)).toMatchObject({ cwd: elsewhere, project: s.project, open: true, live: true });
+	expect(entry(s, id)).toMatchObject({ cwd: elsewhere, project: elsewhere, open: true, live: true });
 	await wakesWhereItWent(id, elsewhere);
 });
 
