@@ -177,6 +177,8 @@ test("swb refuses a db newer than itself, and a recorder started against a misma
 		`SWB_DB=${db}`,
 		"-e",
 		"SWB_TMUX_SESSION=stale-pi",
+		"-e",
+		`SWB_BIN=${s.bin}/swb`,
 		`${s.bin}/pi`,
 	);
 	const screen = await until(
@@ -342,6 +344,8 @@ function launchBeside(name: string, args: string): () => string {
 		`SWB_DB=${db}`,
 		"-e",
 		`SWB_TMUX_SESSION=${name}`,
+		"-e",
+		`SWB_BIN=${s.bin}/swb`,
 		`${s.bin}/pi ${args}`,
 	);
 	return () => s.tmux(s.servers.sessions, "capture-pane", "-p", "-t", name);

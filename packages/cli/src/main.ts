@@ -4,12 +4,14 @@ import { deckCommand, deckNotify, help } from "./commands/deck.ts";
 import { detached } from "./commands/detached.ts";
 import { drive } from "./commands/drive.ts";
 import { gc } from "./commands/gc.ts";
+import { launch } from "./commands/launch.ts";
 import { LS_HELP, ls } from "./commands/ls.ts";
 import { migrate } from "./commands/migrate.ts";
 import { newSession } from "./commands/new.ts";
 import { open } from "./commands/open.ts";
 import { unarchive } from "./commands/unarchive.ts";
 import { visit } from "./commands/visit.ts";
+import { wake } from "./commands/wake.ts";
 import { openDeck } from "./deck/deck.ts";
 import { SwbError, UsageError } from "./errors.ts";
 import { VERSION } from "./version.ts";
@@ -23,6 +25,9 @@ const USAGE = `swb: Agent Switchboard
   swb ls [--json]              list sessions with derived state
   swb archive ID               archive a session
   swb unarchive ID             reopen an archived session
+  swb launch --cwd DIR --session-id ID --model M
+                               start pi on a session in the background, managed (pi-sessions handoffs)
+  swb wake ID                  start a dormant session's pi in the background
   swb drive start [--size COLSxROWS] [--theme light|dark] [-- swb-args]
   swb drive keys [--delay MS] [-l TEXT]… [KEY…] | capture [--ansi] | theme light|dark | focus in|out
             | click X Y | drag X1 Y1 X2 Y2 (0-based cells) | resize COLSxROWS | clipboard | stop
@@ -59,6 +64,10 @@ async function main(args: string[]): Promise<void> {
 			return archive(rest);
 		case "unarchive":
 			return unarchive(rest);
+		case "launch":
+			return launch(rest);
+		case "wake":
+			return wake(rest);
 		case "deck":
 			return deckCommand(rest);
 		case "migrate":

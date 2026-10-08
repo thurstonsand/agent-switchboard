@@ -17,6 +17,6 @@ export function detached(args: string[]): void {
 		"SELECT r.session_id, s.session_id AS recorded FROM runtimes r LEFT JOIN sessions s USING (session_id) WHERE r.tmux_session = ?",
 		name,
 	);
-	const provisional = runtime ? runtime.recorded === null : !launchId;
+	const provisional = !launchId && (!runtime || runtime.recorded === null);
 	if (provisional) tmuxTry(SESSIONS, "kill-session", "-t", `=${name}`);
 }

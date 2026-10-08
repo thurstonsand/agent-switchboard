@@ -1,8 +1,10 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bootId, branch, Db, pidAlive, projectRoot, type Row, SCHEMA_VERSION } from "@swb/shared";
 import { Type } from "typebox";
 
-type Launch = { readonly db: string; readonly tmuxSession: string };
+type Launch = { readonly db: string; readonly tmuxSession: string; readonly bin: string };
 // Outlives /reload, which re-imports this module with a fresh module cache.
 type Process = { launch: Launch; failure?: string; db?: Db; attention: Set<string> };
 type Ui = ExtensionContext["ui"];
@@ -13,13 +15,55 @@ const store = globalThis as { [KEY]?: Process };
 function claim(): Process | undefined {
 	const env = process.env;
 	if (env.SWB_MANAGED === "1" && env.SWB_DB && env.SWB_TMUX_SESSION) {
-		store[KEY] = { launch: Object.freeze({ db: env.SWB_DB, tmuxSession: env.SWB_TMUX_SESSION }), attention: new Set() };
+		store[KEY] = {
+			launch: Object.freeze({ db: env.SWB_DB, tmuxSession: env.SWB_TMUX_SESSION, bin: env.SWB_BIN ?? "" }),
+			attention: new Set(),
+			...(env.SWB_BIN ? {} : { failure: "started by an swb older than this recorder; upgrade swb" }),
+		};
 	}
 	// Consumed so no child process (subagents, handoffs, bash) inherits management.
 	delete env.SWB_MANAGED;
 	delete env.SWB_DB;
 	delete env.SWB_TMUX_SESSION;
+	delete env.SWB_BIN;
 	return store[KEY];
+}
+
+type HostLaunchInput = { sessionId: string; sessionFile: string; cwd: string; title: string; model: string; resumeCommand: string };
+type HostSession = { sessionId: string; cwd: string; title: string };
+type Host = {
+	name: string;
+	launch(input: HostLaunchInput): Promise<{ success: true }>;
+	listSessions(): Promise<HostSession[]>;
+	wake(sessionId: string): Promise<void>;
+};
+
+const run = promisify(execFile);
+
+/** pi-sessions hands user-facing children, dormant discovery, and wakes to swb, so they stay managed. */
+function host(bin: string): Host {
+	const swb = async (...args: string[]): Promise<string> => {
+		try {
+			return (await run(bin, args, { timeout: 15_000 })).stdout;
+		} catch (error) {
+			const { stderr, message } = error as { stderr?: string; message: string };
+			throw new Error(stderr?.trim() || message);
+		}
+	};
+	return {
+		name: "swb",
+		async launch(input) {
+			await swb("launch", "--cwd", input.cwd, "--session-id", input.sessionId, "--model", input.model);
+			return { success: true };
+		},
+		async listSessions() {
+			const sessions = JSON.parse(await swb("ls", "--json")) as { id: string; cwd: string; title: string | null; open: boolean }[];
+			return sessions.filter((s) => s.open).map((s) => ({ sessionId: s.id, cwd: s.cwd, title: s.title ?? s.id }));
+		},
+		async wake(sessionId) {
+			await swb("wake", sessionId);
+		},
+	};
 }
 
 /** Another managed pi in this boot already hosts the session: two writers on one transcript would corrupt it. */
@@ -53,6 +97,9 @@ export default function (pi: ExtensionAPI) {
 	if (!claimed) return;
 	const proc: Process = claimed;
 	let ui: Ui | undefined;
+
+	if (proc.launch.bin)
+		pi.events.on("pi-sessions:hosts:v1", (request) => (request as { register(host: Host): void }).register(host(proc.launch.bin)));
 
 	const showFailure = () => ui?.setStatus("swb", ui.theme.fg("error", `swb: not recording: ${proc.failure}`));
 

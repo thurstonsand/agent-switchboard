@@ -31,7 +31,13 @@ swb adopt ID|TRANSCRIPT      track a session pi ran outside swb, then open it; q
 swb ls [--json]              list sessions with derived state
 swb archive ID               archive a session
 swb unarchive ID             reopen an archived session
+swb launch --cwd DIR --session-id ID --model M   start a session managed, in the background
+swb wake ID                  start a dormant session's pi in the background
 ```
+
+### With pi-sessions
+
+Inside a managed session, the recorder registers swb as a pi-sessions host, so `session_handoff` offers `launch: "swb"` in place of tmux and Ghostty splits. The child starts managed and lands on the roster. `session_reachable` lists dormant sessions too, and `session_send_message` to one wakes it first. Subagents still run in their parent's tmux and never become sessions.
 
 In the roster, `j`/`k` move, `Enter` focuses the session (waking it if it's dormant), `w` wakes it in the background, `n` starts a new session, `a` archives or unarchives, `/` filters, and `q` quits. `M-a` is the Deck's prefix from anywhere: `M-a h` returns to the roster, `M-a e` shows the editor, `M-a ?` lists the rest.
 

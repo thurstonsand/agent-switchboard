@@ -105,11 +105,11 @@ export function randomHex(bytes: number): string {
 }
 
 /** Starts a managed pi in the background and returns its tmux session; pi comes up on its own time. */
-export function launch(cwd: string, resume: string | null): string {
+export function launch(cwd: string, resume: string | null, piArgs: string[]): string {
 	ensureSessionsServer();
 	const name = `${basename(projectRoot(cwd)).replaceAll(/[.:]/g, "_")}-${randomHex(2)}`;
 	const shell = process.env.SHELL || "/bin/sh";
-	const pi = resume ? `exec pi --session-id ${resume}` : "exec pi";
+	const pi = ["exec pi", ...[...(resume ? ["--session-id", resume] : []), ...piArgs].map(quote)].join(" ");
 	tmux(
 		SESSIONS,
 		"new-session",
@@ -124,6 +124,8 @@ export function launch(cwd: string, resume: string | null): string {
 		`SWB_DB=${dbPath()}`,
 		"-e",
 		`SWB_TMUX_SESSION=${name}`,
+		"-e",
+		`SWB_BIN=${SWB}`,
 		"-e",
 		"PI_IMAGE_PROTOCOL=none",
 		`exec env -u TMUX -u TMUX_PANE ${shell} -lic ${quote(pi)}`,
@@ -196,7 +198,12 @@ export function ensureEditor(db: Db, dir: string, editor: string): string {
 export function wake(db: Db, id: string): string {
 	ensureSessionsServer();
 	return db.tx(() => {
-		const hosts = listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_launch_id}");
+		const listed = listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_launch_id}", "#{pane_dead}");
+		// A pi that quit cleanly with no Deck to reap it leaves a dead pane still tagged with its id.
+		for (const [name, kind, launchId, dead] of listed) {
+			if (kind === "pi" && launchId === id && dead === "1") tmuxTry(SESSIONS, "kill-session", "-t", `=${name}`);
+		}
+		const hosts = listed.filter(([, , , dead]) => dead !== "1");
 		const host = liveHost(db, id, new Set(hosts.map(([name]) => name as string)));
 		if (host) return host;
 		const recorded = new Set(db.all("SELECT tmux_session FROM runtimes").map((row) => row.tmux_session as string));
@@ -204,7 +211,7 @@ export function wake(db: Db, id: string): string {
 		if (inFlight) return inFlight[0] as string;
 		const session = db.get("SELECT cwd FROM sessions WHERE session_id = ?", id);
 		if (!session) throw new SwbError(`no session ${id}`);
-		return launch(session.cwd as string, id);
+		return launch(session.cwd as string, id, []);
 	});
 }
 

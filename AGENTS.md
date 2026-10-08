@@ -23,7 +23,7 @@ See @CONTEXT.md for project vocabulary.
 - `swb`: opens a Deck. The roster lists open sessions grouped by project, then Inactive, then Archived. Beside it, the Stage shows the selected session as pi, its directory's editor, or a split of both
 - `swb new`, `open`, `adopt`, `archive`, `unarchive`, `ls --json`: the scriptable surface
 - `swb drive` and `swb deck state`: an agent drives a Deck exactly as a human does, and captures its screen as text
-- The pi recorder extension: lifecycle, activity, and attention written to the shared db
+- The pi recorder extension: lifecycle, activity, and attention written to the shared db; it also registers swb as a pi-sessions host for handoffs, dormant discovery, and wake
 
 ## Developer notes
 

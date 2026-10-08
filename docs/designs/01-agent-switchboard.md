@@ -72,6 +72,8 @@ swb adopt <id>|<transcript>  track a session pi ran outside swb as dormant, then
 swb ls [--json]              list sessions with derived state
 swb archive <id>             refuses while a turn is running; kills an idle live pi
 swb unarchive <id>
+swb launch --cwd DIR --session-id ID --model M   pi-sessions host: start a handoff child managed
+swb wake <id>                                    pi-sessions host: start a dormant session's pi; refuses archived
 swb deck state [--deck ID] [--json]       a Deck's view state
 swb drive start [--size COLSxROWS] [-- swb-args]   run a Deck in a hidden harness terminal
 swb drive keys <tmux key names…>          type into it (`-l TEXT` for literal text)
@@ -442,6 +444,11 @@ swb adopt <id>|<transcript>
   db.tx: insert the row idle, created_at = header timestamp, last_prompt_at = last_settled_at = last entry
   open a Deck on it; `w` or Enter starts it managed like any dormant session
   swb can't see an unmanaged pi, so quitting the original before waking is on me
+  a transcript outside the directory `pi --session-id` searches from its cwd → refuse: waking would start it empty
+pi-sessions host (registered by the recorder on `pi-sessions:hosts:v1`, managed pi only)
+  launch(input) → swb launch --cwd --session-id --model     pi --session-id ID --approve --model M, tagged @swb_launch_id
+  listSessions() → swb ls --json, open only                  dormant reachability for session_reachable and messaging
+  wake(id) → swb wake ID                                     same wake() as the Deck: idempotent under the db write lock
 gc()
   for each editor session E (@swb_dir = D):
     no open session has cwd = D → kill E
@@ -497,7 +504,7 @@ Several Decks stay in sync because each one polls `data_version`, at about 4 µs
 
 ### 4. A consumed environment token marks managed pi
 
-`SWB_MANAGED` and `SWB_DB` are deleted at load, so subagents, handoffs, and any child pi are unmanaged by construction, and the recorder always writes the db that its launcher chose. The socket-based rule (ticket 01) leaked to children through `$TMUX`, and it couldn't follow `/new`. Hiding `$TMUX` from pi also keeps pi-sessions' tmux features off the sessions server. The cost: directional handoffs are unavailable in managed sessions until pi-sessions gains an `swb` backend.
+`SWB_MANAGED` and `SWB_DB` are deleted at load, so subagents, handoffs, and any child pi are unmanaged by construction, and the recorder always writes the db that its launcher chose. The socket-based rule (ticket 01) leaked to children through `$TMUX`, and it couldn't follow `/new`. Hiding `$TMUX` from pi also keeps pi-sessions' tmux features off the sessions server. Handoffs reach swb the other way round: the recorder registers swb as a pi-sessions host, and `swb launch` gives the child a fresh token. `SWB_BIN` travels with the token, so the host calls the same swb that launched it.
 
 ### 5. Waking pi happens in the background, and the TUI never waits
 

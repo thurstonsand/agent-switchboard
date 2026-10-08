@@ -215,7 +215,7 @@ function handle(message: ToWorker): void {
 			break;
 		case "new":
 			try {
-				const host = launch(message.cwd, null);
+				const host = launch(message.cwd, null, []);
 				launched.add(host);
 				post({ type: "created", host });
 			} catch (error) {

@@ -11,6 +11,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 //   subagent <name>   launch a real pi-sessions subagent whose task is `reply child <name>`; the child holds like
 //                     `hold child.<name>` before answering
 //   deferred <name>   prepare a deferred pi-sessions handoff whose task is `reply child <name>`
+//   handoff <name>    hand off to the swb host, with the task `reply child <name>`
+//   message <id> <n>  send session <id> a pi-sessions message, which it answers like `reply <n>`
 //   archive <text>    call swb_archive, then answer "tool done <text>"
 // A pi that starts while start.hold exists signals start.entered and blocks until start.release.
 // pi-sessions' handoff extraction is answered with a fixed briefing.
@@ -68,6 +70,11 @@ export default function (pi: ExtensionAPI) {
 				stopReason: "toolUse",
 			});
 		}
+		const relayed = /wake-reply (\S+)/.exec(prompt);
+		if (relayed && !prompt.startsWith("message ")) {
+			signal(`replied.${relayed[1]}`);
+			return fauxAssistantMessage(relayed[1] as string);
+		}
 		const child = /reply child (\S+)/.exec(prompt);
 		if (child && !prompt.startsWith("reply ")) {
 			signal(`child.${child[1]}.entered`);
@@ -88,13 +95,21 @@ export default function (pi: ExtensionAPI) {
 				return fauxAssistantMessage(`released ${arg}`);
 			case "subagent":
 			case "deferred":
+			case "handoff":
 				return fauxAssistantMessage(
 					fauxToolCall("session_handoff", {
 						title: `child ${arg}`,
 						goal: `reply child ${arg}`,
-						launch: verb === "subagent" ? "subagent" : "deferred",
+						launch: verb === "handoff" ? "swb" : verb,
 					}),
 					{ stopReason: "toolUse" },
+				);
+			case "message":
+				return fauxAssistantMessage(
+					fauxToolCall("session_send_message", { session: rest[0] as string, message: `wake-reply ${rest[1]}` }),
+					{
+						stopReason: "toolUse",
+					},
 				);
 			case "archive":
 				return fauxAssistantMessage(fauxToolCall("swb_archive", {}), { stopReason: "toolUse" });

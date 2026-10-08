@@ -45,6 +45,54 @@ test("a pi-sessions subagent and a deferred handoff never become Sessions, and t
 	s.save("deferred.txt", s.screen());
 });
 
+test("a pi-sessions handoff launches through swb as a managed Session, and messaging it while dormant wakes it", async () => {
+	s = scenario("phase5", "swb-host", { packages: ["pi-sessions"], recorder: true });
+	s.swb("drive", "start", "--", "new");
+	await waitState(s, "the parent live", (x) => x.staged.kind === "live" && x.focus === "stage", budgets.piReady);
+	await reply(s, "parent");
+	const [parent] = s.ls().map((e) => e.id) as [string];
+
+	s.keys("-l", "handoff h1", "Enter");
+	await until(() => s.signal("child.h1.entered") !== "", budgets.piReady, "the handoff child's first turn");
+	const child = await until(() => s.ls().find((e) => e.id !== parent), budgets.settle, "the child tracked");
+	expect(child).toMatchObject({ open: true, live: true, activity: "working", title: "child h1", cwd: s.project });
+	expect(piSessions(s)).toHaveLength(2);
+	await waitState(s, "the child on the Roster", (x) => sessionRows(x).some((r) => r.id === child.id));
+	s.save("handoff-running.txt", s.screen());
+	release(s, "child.h1");
+	await until(() => entry(s, child.id).activity === "idle", budgets.settle, "the child idle");
+
+	const host = s.query<{ tmux_session: string }>("select tmux_session from runtimes where session_id = ?", child.id)[0]?.tmux_session;
+	s.tmux(s.servers.sessions, "kill-session", "-t", `=${host}`);
+	await until(() => !entry(s, child.id).live, budgets.settle, "the child dormant");
+	s.keys("-l", `message ${child.id} w1`, "Enter");
+	await until(() => s.signal("replied.w1") !== "", budgets.piReady, "the woken child's reply");
+	expect(entry(s, child.id)).toMatchObject({ open: true, live: true });
+	expect(piSessions(s)).toHaveLength(2);
+	s.save("woken.txt", `${s.screen()}\n${JSON.stringify(s.ls(), null, 2)}`);
+
+	await until(() => entry(s, child.id).activity === "idle", budgets.settle, "the woken child idle");
+
+	// A clean quit with no Deck tracking the child leaves its dead pane behind; waking must not mistake it for a host.
+	const woken = s.query<{ tmux_session: string }>("select tmux_session from runtimes where session_id = ?", child.id)[0]
+		?.tmux_session as string;
+	s.tmux(s.servers.sessions, "send-keys", "-t", `=${woken}:`, "-l", "archive a1");
+	s.tmux(s.servers.sessions, "send-keys", "-t", `=${woken}:`, "Enter");
+	await until(() => !entry(s, child.id).open && !entry(s, child.id).live, budgets.settle, "the child archived and quit");
+	await until(
+		() => s.tmux(s.servers.sessions, "display", "-p", "-t", `=${woken}:`, "#{pane_dead}").trim() === "1",
+		budgets.settle,
+		"the child's pane left dead",
+	);
+	s.swb("unarchive", child.id);
+	s.keys("-l", `message ${child.id} w2`, "Enter");
+	await until(() => s.signal("replied.w2") !== "", budgets.piReady, "the child woken past its dead pane");
+	expect(entry(s, child.id)).toMatchObject({ open: true, live: true });
+	await until(() => entry(s, child.id).activity === "idle", budgets.settle, "the rewoken child idle");
+	s.swb("archive", child.id);
+	expect(s.swbTry("wake", child.id).err.trim()).toBe(`swb: wake: ${child.id} is archived; swb unarchive ${child.id}`);
+});
+
 test("a Deck started inside another tmux works as in a bare terminal, M-a passing through it", async () => {
 	s = scenario("phase5", "nested");
 	const outer = terminal(s, "outer", "swb new");
