@@ -141,6 +141,22 @@ async function raw(...sequences: string[]): Promise<void> {
 	}
 }
 
+/** kill-server returns before the server exits; a new-session in that window reaches the dying server and fails. */
+async function stopHarness(): Promise<void> {
+	const running = tmuxTry(DRIVE, "display", "-p", "#{pid}");
+	if (!running.ok) return;
+	tmux(DRIVE, "kill-server");
+	const pid = Number(running.out);
+	for (;;) {
+		try {
+			process.kill(pid, 0);
+		} catch {
+			return;
+		}
+		await Bun.sleep(10);
+	}
+}
+
 export async function drive(args: string[]): Promise<void> {
 	const [verb, ...rest] = args;
 	switch (verb) {
@@ -154,7 +170,7 @@ export async function drive(args: string[]): Promise<void> {
 			});
 			const match = /^(\d+)x(\d+)$/.exec(values.size);
 			if (!match) throw new UsageError(`drive: --size must be COLSxROWS, got ${values.size}`);
-			tmuxTry(DRIVE, "kill-server");
+			await stopHarness();
 			const dir = join(stateDir(), "drive");
 			mkdirSync(dir, { recursive: true, mode: 0o700 });
 			const conf = join(dir, `${DRIVE}.conf`);
@@ -233,7 +249,7 @@ export async function drive(args: string[]): Promise<void> {
 			break;
 		}
 		case "stop":
-			tmuxTry(DRIVE, "kill-server");
+			await stopHarness();
 			break;
 		default:
 			throw new UsageError(`drive: unknown verb ${verb ?? "(none)"}`);
