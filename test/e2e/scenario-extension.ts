@@ -11,6 +11,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 //   subagent <name>   launch a real pi-sessions subagent whose task is `reply child <name>`; the child holds like
 //                     `hold child.<name>` before answering
 //   deferred <name>   prepare a deferred pi-sessions handoff whose task is `reply child <name>`
+// A pi that starts while start.hold exists signals start.entered and blocks until start.release.
 // pi-sessions' handoff extraction is answered with a fixed briefing.
 // Raw terminal input is appended to input.log as JSON lines; `/e2e-bg` asks the terminal for its background (OSC 11).
 // Signals live in $HOME/e2e-signals because HOME survives the sessions server's scrubbed environment.
@@ -40,6 +41,11 @@ function text(message: Message): string {
 }
 
 export default function (pi: ExtensionAPI) {
+	if (existsSync(join(signals, "start.hold"))) {
+		signal("start.entered");
+		const sleeper = new Int32Array(new SharedArrayBuffer(4));
+		while (!existsSync(join(signals, "start.release"))) Atomics.wait(sleeper, 0, 0, 50);
+	}
 	const faux = fauxProvider({ tokensPerSecond: 10_000 });
 
 	const script = async (context: { messages: Message[] }, options: { signal?: AbortSignal } | undefined) => {

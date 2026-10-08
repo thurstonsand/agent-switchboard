@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 export const repo = resolve(import.meta.dir, "../../..");
@@ -40,11 +40,12 @@ function hostPackage(name: HostPackage): string | null {
 	const settings = join(agentDir, "settings.json");
 	if (!existsSync(settings)) return null;
 	const packages = (JSON.parse(readFileSync(settings, "utf8")) as { packages?: (string | { source: string })[] }).packages ?? [];
-	const repoName = name.slice(name.lastIndexOf("/") + 1);
 	for (const entry of packages) {
 		const source = typeof entry === "string" ? entry : entry.source;
 		if (source === `npm:${name}`) return join(agentDir, "npm/node_modules", name);
-		if (source.replace(/\/$/, "").endsWith(`/${repoName}`)) return source.replace(/^~/, homedir());
+		const dir = source.replace(/^~/, homedir());
+		const manifest = join(dir, "package.json");
+		if (existsSync(manifest) && JSON.parse(readFileSync(manifest, "utf8")).name === name) return dir;
 	}
 	return null;
 }
@@ -103,7 +104,9 @@ export function scenario(
 	name: string,
 	options: { packages: HostPackage[]; recorder: boolean } = { packages: [], recorder: true },
 ): Scenario {
-	const root = mkdtempSync(join(tmpdir(), "swb-e2e-"));
+	// Not tmpdir(): macOS's /var/folders/... pushes tmux sockets under root past the 104-byte sun_path limit.
+	// Resolved because /tmp is a symlink there, and swb records the real cwd.
+	const root = realpathSync(mkdtempSync("/tmp/swb-e2e-"));
 	const home = join(root, "home");
 	const bin = join(root, "bin");
 	const project = join(root, "project");

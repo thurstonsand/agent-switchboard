@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState, SessionStateRow } from "../../packages/cli/src/deck/protocol.ts";
 import { config, cursorTo, entry, piSessions, reply, rowIndex, seed, sessionRows, state, waitState } from "./harness/deck.ts";
@@ -66,13 +66,17 @@ test("moving the cursor while n's pi starts stages that row, and the pi landing 
 	s.swb("drive", "start");
 	await cursorTo(s, a);
 	const below = rowIndex(state(s), b) > rowIndex(state(s), a) ? "j" : "k";
+	mkdirSync(join(s.home, "e2e-signals"), { recursive: true });
+	writeFileSync(join(s.home, "e2e-signals", "start.hold"), "");
 	s.keys("n");
+	await until(() => s.signal("start.entered"), budgets.piReady, "the new pi held mid-start");
 	await waitState(s, "stage focus", (x) => x.focus === "stage");
 	s.keys("M-a", "h");
 	await waitState(s, "roster focus", (x) => x.focus === "roster");
 	s.keys(below);
 	const moved = await waitState(s, "b staged", (x) => x.cursor === b && x.staged.id === b);
 	expect(moved.waking.map((w) => w.id)).toEqual([null]);
+	release(s, "start");
 	const landed = await waitState(
 		s,
 		"the new pi's row",

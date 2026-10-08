@@ -29,7 +29,7 @@ export function dbPath(): string {
 }
 
 export function bootId(): string {
-	if (process.platform === "darwin") return execFileSync("sysctl", ["-n", "kern.bootsessionuuid"], { encoding: "utf8" }).trim();
+	if (process.platform === "darwin") return execFileSync("/usr/sbin/sysctl", ["-n", "kern.bootsessionuuid"], { encoding: "utf8" }).trim();
 	return readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
 }
 

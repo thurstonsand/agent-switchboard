@@ -9,6 +9,9 @@ node = "24"
 "github:thurstonsand/wt" = "1.15.1"
 neovim = "0.12.5"
 
+[tasks.bootstrap]
+run = "bun install --frozen-lockfile"
+
 [tasks.lint]
 run = "biome check ."
 
