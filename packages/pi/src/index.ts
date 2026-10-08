@@ -139,8 +139,10 @@ export default function (pi: ExtensionAPI) {
 		});
 	});
 
-	pi.on("message_start", (event, ctx) => {
-		if (event.message.role !== "user") return;
+	// Not the user message_start: a handoff child's first turn starts with a custom message.
+	// pi re-emits agent_start for retries, compaction, and queued messages within one turn; only a turn
+	// that starts from idle moves last_prompt_at, so swb_archive can't be undone by its own turn.
+	pi.on("agent_start", (_event, ctx) => {
 		writeFor(ctx, (db, id) => {
 			const transcript = ctx.sessionManager.getSessionFile();
 			if (!transcript) throw new Error("pi is running without a session file");
@@ -148,7 +150,8 @@ export default function (pi: ExtensionAPI) {
 			db.run(
 				`INSERT INTO sessions (session_id, tool, cwd, project_root, transcript, title, branch, phase, created_at, last_prompt_at)
 				 VALUES (?, 'pi', ?, ?, ?, ?, ?, 'working', ?, ?)
-				 ON CONFLICT (session_id) DO UPDATE SET phase = 'working', last_prompt_at = excluded.last_prompt_at`,
+				 ON CONFLICT (session_id) DO UPDATE SET phase = 'working',
+				   last_prompt_at = CASE WHEN sessions.phase = 'idle' THEN excluded.last_prompt_at ELSE sessions.last_prompt_at END`,
 				id,
 				ctx.cwd,
 				projectRoot(ctx.cwd),
@@ -159,10 +162,6 @@ export default function (pi: ExtensionAPI) {
 				now,
 			);
 		});
-	});
-
-	pi.on("agent_start", (_event, ctx) => {
-		writeFor(ctx, (db, id) => db.run("UPDATE sessions SET phase = 'working' WHERE session_id = ?", id));
 	});
 
 	const attention = (open: boolean) => (data: unknown) => {

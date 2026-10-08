@@ -14,6 +14,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 //   archive <text>    call swb_archive, then answer "tool done <text>"
 // A pi that starts while start.hold exists signals start.entered and blocks until start.release.
 // pi-sessions' handoff extraction is answered with a fixed briefing.
+// `archive flaky` fails its post-tool reply once with a retryable provider error.
+// `/e2e-kick <prompt>` starts a turn with a custom message, the way a pi-sessions handoff child kicks off.
 // Raw terminal input is appended to input.log as JSON lines; `/e2e-bg` asks the terminal for its background (OSC 11).
 // Signals live in $HOME/e2e-signals because HOME survives the sessions server's scrubbed environment.
 
@@ -54,6 +56,10 @@ export default function (pi: ExtensionAPI) {
 		if (!last) throw new Error("scenario: empty context");
 		if (last.role === "toolResult") {
 			const prompt = text(context.messages.findLast((message) => message.role === "user") as Message);
+			if (prompt === "archive flaky" && !existsSync(join(signals, "flaky.failed"))) {
+				signal("flaky.failed");
+				return fauxAssistantMessage("", { stopReason: "error", errorMessage: "503 service unavailable" });
+			}
 			return fauxAssistantMessage(`tool done ${prompt.split(" ").slice(1).join(" ")}`);
 		}
 		const prompt = text(last).trim();
@@ -126,6 +132,13 @@ export default function (pi: ExtensionAPI) {
 			appendFileSync(join(signals, "input.log"), `${JSON.stringify(data)}\n`);
 			return undefined;
 		});
+	});
+
+	pi.registerCommand("e2e-kick", {
+		description: "Start a turn with a custom message",
+		handler: async (args) => {
+			pi.sendMessage({ customType: "e2e-kick", content: args, display: true }, { triggerTurn: true });
+		},
 	});
 
 	pi.registerCommand("e2e-bg", {

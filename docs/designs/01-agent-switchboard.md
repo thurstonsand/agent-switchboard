@@ -187,15 +187,15 @@ CREATE TABLE sessions (
   title            TEXT,             -- pi session name; null until titled
   branch           TEXT,             -- null outside git
   phase            TEXT NOT NULL CHECK (phase IN ('idle','working','blocked')),
-  created_at       INTEGER NOT NULL, -- epoch ms, first user message
-  last_prompt_at   INTEGER NOT NULL,
+  created_at       INTEGER NOT NULL, -- epoch ms, first turn
+  last_prompt_at   INTEGER NOT NULL, -- start of the last turn begun from idle
   last_settled_at  INTEGER
 );
 -- recorder-owned: one row per managed pi process, written from its first session_start;
 -- deleted only when the process quits
 CREATE TABLE runtimes (
   tmux_session TEXT PRIMARY KEY,     -- given to the recorder by swb at launch
-  session_id   TEXT NOT NULL UNIQUE, -- the session it hosts now; no row in sessions until the first prompt
+  session_id   TEXT NOT NULL UNIQUE, -- the session it hosts now; no row in sessions until the first turn
   cwd          TEXT NOT NULL,        -- for a not-yet-prompted session's provisional roster row
   project_root TEXT NOT NULL,
   boot_id      TEXT NOT NULL,        -- kern.bootsessionuuid
@@ -214,7 +214,7 @@ CREATE TABLE marks (
 Derived, never stored:
 - **Archived**: `archived_at >= last_prompt_at`.
 - **Live**: a runtime row for the session with the current `boot_id`, `kill(pid, 0)` succeeds, and its `tmux_session` exists on the sessions server.
-- **Provisional**: a live runtime whose `session_id` has no `sessions` row yet: a new session before its first prompt. The roster shows it as a "new session" row in its project, so the Deck can select and show it; it is never persisted as a Session.
+- **Provisional**: a live runtime whose `session_id` has no `sessions` row yet: a new session before its first turn. The roster shows it as a "new session" row in its project, so the Deck can select and show it; it is never persisted as a Session.
 - **Interrupted**: not live and `phase != 'idle'`.
 - **Unseen**: open, `last_settled_at > coalesce(visited_at, 0)`, and not on the Stage of a focused Deck right now.
 - **Reapable**: live, `phase = 'idle'`, no client attached to its tmux session, and `max(coalesce(last_settled_at, 0), coalesce(visited_at, 0))` older than `reap_after`.
@@ -288,9 +288,8 @@ Events and the writes they make. Each write is synchronous and one transaction.
 
 | Event | Write |
 | --- | --- |
-| `session_start` (any reason) | upsert `runtimes` by `tmux_session` with the current `session_id`, `cwd`, `project_root`, and pid; if a `sessions` row exists, reconcile `phase='idle'`. No `sessions` row is created: rows begin at the first prompt |
-| user `message_start` | create the row if missing (with `project_root`, `created_at`, and `phase='working'`, because pi emits `agent_start` before the first user message), and set `last_prompt_at` |
-| `agent_start` | `phase='working'` on an existing row |
+| `session_start` (any reason) | upsert `runtimes` by `tmux_session` with the current `session_id`, `cwd`, `project_root`, and pid; if a `sessions` row exists, reconcile `phase='idle'`. No `sessions` row is created: rows begin at the first turn |
+| `agent_start` | create the row if missing (with `project_root` and `created_at`), set `phase='working'`, and set `last_prompt_at` only when the turn starts from idle: pi re-emits `agent_start` for retries, compaction, and queued messages inside one turn. Every turn counts, not only user messages: a pi-sessions handoff child's first turn starts with a custom message |
 | `glimpseui:attention:request` / `:resolve` | an id set: non-empty means `blocked`, empty means back to `working` |
 | `agent_settled` | `phase='idle'`, `last_settled_at`, plus `cwd`, `branch` (read HEAD), and `title` when changed |
 | `session_info_changed` | `title`, at once, so a rename while idle shows up |
@@ -306,6 +305,7 @@ Failure: the recorder shows a persistent red footer status (`swb: not recording:
 
 `swb_archive`, a tool registered only in managed processes, archives when the user asks the agent to:
 - It writes the same mark and calls `ctx.shutdown()` mid-turn; pi defers that until the turn settles, so the final message lands and the session is not Interrupted.
+- A retry, compaction, or queued message inside that turn doesn't reopen it; only a new turn from idle does.
 - No confirmation, and no unarchive tool: `swb unarchive <id>` covers that.
 
 ### Drive contract
@@ -411,7 +411,7 @@ a staged host's runtime changes session_id (/new, /resume, /fork inside pi)
     and the Stage client is left where it is
 ```
 
-A new session from `swb new` or `n` is ready, and selectable, as soon as its `session_start` writes the runtime row; it doesn't wait for a first prompt.
+A new session from `swb new` or `n` is ready, and selectable, as soon as its `session_start` writes the runtime row; it doesn't wait for a first turn.
 
 The placeholder is `swb`'s own process, so it can bind `esc` on the loading card without touching pi. Stage clients are the Stage panes' nested clients, found by tty from `list-clients` when each pane is created.
 
@@ -439,11 +439,11 @@ gc()
     no open session has cwd = D → kill E
 ```
 
-### Detach and never-prompted cleanup
+### Detach and never-started cleanup
 
 ```text
 client-detached hook → swb detached --session <name>
-  @swb_kind = pi, its runtime is provisional (never prompted), and no clients left → kill-session
+  @swb_kind = pi, its runtime is provisional (no turn yet), and no clients left → kill-session
 ```
 
 ### Views: editor swap and split
@@ -541,7 +541,7 @@ CI sets versions from the tag; nothing is bumped locally. Following pi-sessions'
 ## Edge Cases & Failure Modes
 
 - **Two Decks wake the same dormant session at once.** `sessions.launch` takes a tmux mutex (`wait-for -L swb-launch-<id>`). It starts nothing if the session has a live runtime, or if a tmux session with `@swb_launch_id=<id>` has no runtime row yet (a launch in flight). Otherwise it creates the session, then releases the mutex (`wait-for -U`). Only one pi ever starts per session.
-- **A prompt lands in the instant an archive kills pi.** Archive re-checks `phase` inside its transaction, but a prompt typed into another viewer can still arrive between that commit and `kill-session`. Accepted, and arguably not a race at all: the prompt's `message_start` lands after `archived_at`, so the session reopens as ⚠ Interrupted with its transcript intact, which is exactly what happened to it. A handshake through the recorder would close the window at the cost of a request protocol the product doesn't otherwise need. Reaping has the same window, with the same outcome.
+- **A prompt lands in the instant an archive kills pi.** Archive re-checks `phase` inside its transaction, but a prompt typed into another viewer can still arrive between that commit and `kill-session`. Accepted, and arguably not a race at all: the prompt's `agent_start` lands after `archived_at`, so the session reopens as ⚠ Interrupted with its transcript intact, which is exactly what happened to it. A handshake through the recorder would close the window at the cost of a request protocol the product doesn't otherwise need. Reaping has the same window, with the same outcome.
 - **pi quits while selected.** The Stage shows "pi exited", and does not restart pi until `w` or Enter.
 - **pi never becomes ready** (crash on start). The placeholder shows "failed to start" with the pane's last lines, captured before it disappears. Set `remain-on-exit` per pane for the launch window, then turn it off. The toast names the cause.
 - **The transcript is missing on resume.** That's the accepted `--session-id` risk: pi creates an empty session. The roster keeps showing the row. The dormant card shows "transcript not found" with the path.
@@ -652,7 +652,7 @@ Two settings exist so tests needn't mock anything. Both are real user-facing key
   - Files: `packages/shared/` (schema v1, paths, connection policy, derivations), `packages/pi/` (the recorder), and in `packages/cli/src/`: `db/`, `tmux.ts` (the one module for every tmux call), `sessions.ts` (launch with the env token, scrubbed server env, the embedded sessions-server config including `prefix None` and the `M-Enter` correction), and `commands/{ls,migrate,new,visit,detached,gc}.ts`.
   - Work: `swb new` temporarily attaches the current terminal straight to the new pi session; Phase 2 replaces that with the Deck. Add `swb drive start/keys/capture/stop` over arbitrary `swb` args; `drive state` waits for Phase 2.
   - Validation, as e2e scenarios:
-    - `session_start` writes a provisional runtime before any prompt; the first prompt creates the row as working
+    - `session_start` writes a provisional runtime before any turn; the first turn creates the row as working
     - working, then idle on `agent_settled` only
     - `/name` while idle updates the title at once
     - `/reload` keeps recording, and a failed recorder stays failed across it
@@ -661,7 +661,7 @@ Two settings exist so tests needn't mock anything. Both are real user-facing key
     - a migration under a running recorder turns its footer red at the next write
     - re-running `swb` against a server started with an older embedded config re-sources it, and the hooks call the new path
     - `kill-server` turns the idle session dormant and the held one interrupted
-    - a never-prompted session is killed on last detach
+    - a session with no turn yet is killed on last detach
     - a `user_version` mismatch shows the red footer
     - bare pi (no token) writes nothing
     - Alt+Enter arrives as CSI-u and Shift+Enter still works

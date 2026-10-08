@@ -76,6 +76,22 @@ test("archive is refused mid-turn from the roster, the CLI, and pi; once idle, s
 	s.save("archived.txt", `${s.screen()}\n${JSON.stringify(s.ls(), null, 2)}`);
 });
 
+test("a first turn started by a custom message, as a handoff child's is, is tracked; killed mid-turn it is Interrupted", async () => {
+	s = scenario("phase3", "custom-kickoff");
+	s.swb("drive", "start", "--", "new");
+	const st = await waitState(s, "the new pi live with the keyboard", (x) => x.staged.kind === "live" && x.focus === "stage");
+	const id = st.staged.id as string;
+	s.keys("-l", "/e2e-kick hold k1", "Enter");
+	await until(() => s.signal("k1.entered") !== "", budgets.settle, "the kicked-off turn");
+	await until(() => entry(s, id)?.activity === "working", budgets.settle, "a working row");
+	s.save("kicked-off.txt", s.screen());
+	const { pid } = s.query("SELECT pid FROM runtimes WHERE session_id = ?", id)[0] as { pid: number };
+	process.kill(pid, "SIGKILL");
+	await until(() => entry(s, id)?.interrupted, budgets.settle, "interrupted");
+	expect(entry(s, id)).toMatchObject({ open: true, live: false, interrupted: true });
+	s.save("kicked-off-killed.txt", `${s.screen()}\n${JSON.stringify(s.ls(), null, 2)}`);
+});
+
 test("swb_archive archives from inside a turn, and pi quits only once the turn's final message lands", async () => {
 	s = scenario("phase3", "archive-tool");
 	const { id, host } = await liveSession("ready");
@@ -86,6 +102,18 @@ test("swb_archive archives from inside a turn, and pi quits only once the turn's
 	expect(readFileSync(transcript, "utf8")).toContain("tool done now");
 	expect(s.query("SELECT tmux_session FROM runtimes")).toHaveLength(0);
 	s.save("archived-by-tool.txt", `${s.screen()}\n${JSON.stringify(s.ls(), null, 2)}`);
+});
+
+test("a provider retry inside the archiving turn does not reopen the session", async () => {
+	s = scenario("phase3", "archive-retry");
+	const { id, host } = await liveSession("ready");
+	s.keys("-l", "archive flaky", "Enter");
+	await until(() => !piSessions(s).includes(host), budgets.settle, "pi quit");
+	expect(existsSync(join(s.env.HOME as string, "e2e-signals", "flaky.failed"))).toBe(true);
+	expect(entry(s, id)).toMatchObject({ open: false, live: false, interrupted: false });
+	const { transcript } = s.query("SELECT transcript FROM sessions WHERE session_id = ?", id)[0] as { transcript: string };
+	expect(readFileSync(transcript, "utf8")).toContain("tool done flaky");
+	s.save("archived-through-retry.txt", `${s.screen()}\n${JSON.stringify(s.ls(), null, 2)}`);
 });
 
 test("a archives an idle live session and kills its pi; a on an Archived row leaves it dormant and open; the cursor stays put", async () => {
