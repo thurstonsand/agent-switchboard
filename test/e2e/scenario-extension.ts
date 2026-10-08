@@ -13,6 +13,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 //   deferred <name>   prepare a deferred pi-sessions handoff whose task is `reply child <name>`
 //   handoff <name>    hand off to the swb host, with the task `reply child <name>`
 //   message <id> <n>  send session <id> a pi-sessions message, which it answers like `reply <n>`
+//   reach <n>         find the first dormant session through session_reachable and message it like `message`
 //   archive <text>    call swb_archive, then answer "tool done <text>"
 // A pi that starts while start.hold exists signals start.entered and blocks until start.release.
 // pi-sessions' handoff extraction is answered with a fixed briefing.
@@ -58,6 +59,15 @@ export default function (pi: ExtensionAPI) {
 		if (!last) throw new Error("scenario: empty context");
 		if (last.role === "toolResult") {
 			const prompt = text(context.messages.findLast((message) => message.role === "user") as Message);
+			if ((last as { toolName?: string }).toolName === "session_reachable") {
+				const { sessions } = JSON.parse(text(last)) as { sessions: { sessionId: string; state: string }[] };
+				const dormant = sessions.find((session) => session.state === "dormant");
+				if (!dormant) throw new Error("scenario: nothing dormant to reach");
+				return fauxAssistantMessage(
+					fauxToolCall("session_send_message", { session: dormant.sessionId, message: `wake-reply ${prompt.split(" ")[1]}` }),
+					{ stopReason: "toolUse" },
+				);
+			}
 			if (prompt === "archive flaky" && !existsSync(join(signals, "flaky.failed"))) {
 				signal("flaky.failed");
 				return fauxAssistantMessage("", { stopReason: "error", errorMessage: "503 service unavailable" });
@@ -111,6 +121,8 @@ export default function (pi: ExtensionAPI) {
 						stopReason: "toolUse",
 					},
 				);
+			case "reach":
+				return fauxAssistantMessage(fauxToolCall("session_reachable", {}), { stopReason: "toolUse" });
 			case "archive":
 				return fauxAssistantMessage(fauxToolCall("swb_archive", {}), { stopReason: "toolUse" });
 			case "attention":

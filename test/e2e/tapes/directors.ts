@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState } from "../../../packages/cli/src/deck/protocol.ts";
 import { config, seed } from "../harness/deck.ts";
@@ -240,6 +240,46 @@ export const directors: Record<string, Director> = {
 			release(s, "child.scout");
 			await waitLs(s, "the parent idle", (ls) => ls[0]?.activity === "idle");
 			expect(s.ls().map((e) => e.id)).toEqual(parent.map((e) => e.id));
+		},
+	},
+
+	adopt: {
+		run: async (s) => {
+			const [adopted] = await waitLs(s, "adopted, dormant", (ls) => ls.length === 1 && !ls[0]?.live);
+			expect(adopted).toMatchObject({ open: true, unseen: false });
+			await until(() => s.signal("replied.back inside swb") !== "", TAPE, "the reply inside swb");
+			expect(s.ls()).toMatchObject([{ id: adopted?.id, open: true, live: true }]);
+		},
+	},
+
+	"swb-handoff": {
+		packages: ["pi-sessions"],
+		setup: async (s) => {
+			// session_reachable reads pi-sessions' search index, which the harness turns off.
+			const path = join(s.env.PI_CODING_AGENT_DIR as string, "settings.json");
+			const settings = JSON.parse(readFileSync(path, "utf8"));
+			settings.sessions.search.enable = true;
+			writeFileSync(path, JSON.stringify(settings));
+		},
+		run: async (s) => {
+			await entered(s, "child.scout");
+			const child = await until(() => s.ls().find((e) => e.title === "child scout"), TAPE, "the child tracked");
+			await Bun.sleep(3000);
+			release(s, "child.scout");
+			await waitLs(s, "the child idle", (ls) => ls.find((e) => e.id === child.id)?.activity === "idle");
+			await Bun.sleep(2000);
+			const host = s.query<{ tmux_session: string }>("select tmux_session from runtimes where session_id = ?", child.id)[0]?.tmux_session;
+			s.tmux(s.servers.sessions, "kill-session", "-t", `=${host}`);
+			await waitLs(s, "the child dormant", (ls) => ls.find((e) => e.id === child.id)?.live === false);
+			await until(() => s.signal("replied.w1") !== "", TAPE, "the woken child's reply");
+			expect(s.ls().find((e) => e.id === child.id)).toMatchObject({ open: true, live: true });
+		},
+	},
+
+	"agent-archive": {
+		run: async (s) => {
+			await waitLs(s, "a session", (ls) => ls[0]?.open === true);
+			await waitLs(s, "archived by its own pi", (ls) => ls[0]?.open === false && !ls[0].live);
 		},
 	},
 
