@@ -4,7 +4,6 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 export const repo = resolve(import.meta.dir, "../../..");
-export const PI_VERSION = "1.0.4";
 
 function run(argv: string[], env?: Record<string, string>, cwd?: string): string {
 	const result = Bun.spawnSync(argv, { env, cwd, stdout: "pipe", stderr: "pipe" });
@@ -24,8 +23,6 @@ const tools = (() => {
 	const wt = which("wt");
 	const piCli =
 		process.env.SWB_E2E_PI_CLI ?? join(run(["mise", "x", "--", "npm", "root", "-g"]), "@earendil-works/pi-coding-agent/dist/bundle/cli.js");
-	const version = run([node, piCli, "--version"]);
-	if (version !== PI_VERSION) throw new Error(`e2e needs pi ${PI_VERSION}, found ${version} at ${piCli}`);
 	return { node, tmux, wt, piCli };
 })();
 
