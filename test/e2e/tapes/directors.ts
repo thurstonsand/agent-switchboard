@@ -301,13 +301,13 @@ export const directors: Record<string, Director> = {
 					TAPE,
 					what,
 				);
-			await all("three Decks", "0 open");
+			await all("three Decks", "Archived (0)");
 			await Bun.sleep(1500);
 			keys(0, "n");
 			await until(() => screens()[0]?.includes("faux-1"), TAPE, "pi in the first Deck");
 			await Bun.sleep(800);
 			keys(0, "-l", "reply one session, three Decks", "Enter");
-			await all("the session in every roster", "1 open");
+			await all("the session in every roster", "(1)");
 			await Bun.sleep(1200);
 			keys(0, "-l", "/name Shared by three Decks", "Enter");
 			await all("the title in every roster", "Shared by three Decks");
@@ -318,7 +318,7 @@ export const directors: Record<string, Director> = {
 			await until(() => s.signal("replied.typed from the second Deck") !== "", TAPE, "the second Deck's turn");
 			await Bun.sleep(2000);
 			keys(2, "a");
-			await all("archived everywhere", "1 arch");
+			await all("archived everywhere", "Archived (1)");
 			expect(s.ls()[0]?.open).toBe(false);
 		},
 	},

@@ -3,7 +3,7 @@ Source common.tape
 
 Type "# inactive_after = 8s: quiet sessions fold into Inactive, but an Unseen one waits for my visit" Sleep 1s Enter
 Type "swb" Sleep 400ms Enter
-Wait+Screen /1 open/
+Wait+Screen /▾ \S+ \(1\)/
 Sleep 2s
 Type "n"
 Wait+Screen /faux-1/

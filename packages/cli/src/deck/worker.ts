@@ -5,7 +5,7 @@ import type { Config } from "../config.ts";
 import { derive, type RuntimeRecord, runtimeLive, runtimeRecords, type SessionRow, sessionRows, type World } from "../derive.ts";
 import { archive, ensureEditor, ensureSessionsServer, launch, unarchive, wake } from "../sessions.ts";
 import { markVisited, openStore, setView } from "../store.ts";
-import { listSessions, quote, SESSIONS, tmuxTry } from "../tmux.ts";
+import { listSessions, SESSIONS, tmuxTry } from "../tmux.ts";
 import { ensurePlaceholder, placeholderName } from "./deck.ts";
 import type { Entry, FromWorker, Snapshot, ToWorker, Turn } from "./protocol.ts";
 import { readTranscript } from "./transcript.ts";
@@ -148,8 +148,9 @@ function reap(snap: Snapshot, attached: Map<string, boolean>): void {
 		const runtime = runtimes.find((r) => r.tmux_session === entry.host);
 		const lastTouched = Math.max(row?.last_settled_at ?? 0, row?.visited_at ?? 0, runtime?.started_at ?? 0);
 		if (now - lastTouched < config.reapAfterMs) continue;
-		const target = quote(`=${entry.host}`);
-		tmuxTry(SESSIONS, "if-shell", "-F", "-t", `=${entry.host}:`, "#{?session_attached,0,1}", `kill-session -t ${target}`);
+		if (!runtime) continue;
+		// SIGTERM rather than closing the pane, so the recorder saves any draft; see stopPis.
+		tmuxTry(SESSIONS, "if-shell", "-F", "-t", `=${entry.host}:`, "#{?session_attached,0,1}", `run-shell -b 'kill -TERM ${runtime.pid}'`);
 	}
 }
 

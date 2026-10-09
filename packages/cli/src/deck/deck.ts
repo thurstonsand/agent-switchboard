@@ -1,7 +1,7 @@
 import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { stateDir } from "@swb/shared";
-import { type Config, loadConfig } from "../config.ts";
+import { type Config, loadConfig, type RosterWidth } from "../config.ts";
 import { SwbError } from "../errors.ts";
 import { ensureServer, ensureSessionsServer, hook, notify, onlyControl, randomHex, SWB, startScrubbed } from "../sessions.ts";
 import { openStore } from "../store.ts";
@@ -10,7 +10,12 @@ import type { Card, DeckPaths, DeckState } from "./protocol.ts";
 
 export const HELP_POPUP = ["-w", "62", "-h", "27", "-T", " swb keys ", `${SWB} __help`];
 
-export const ROSTER_WIDTH = 42;
+/** At least 20 columns, and never more than half the Deck. */
+export function rosterCols(width: RosterWidth, deckWidth: number): number {
+	const cols = "cols" in width ? width.cols : Math.round((deckWidth * width.percent) / 100);
+	return Math.max(20, Math.min(cols, Math.floor(deckWidth / 2)));
+}
+
 export const NARROW_BELOW = 100;
 export const SPLIT_FROM = 160;
 
@@ -225,7 +230,7 @@ export async function openDeck(intent: DeckIntent): Promise<void> {
 		"-h",
 		"-b",
 		"-l",
-		String(ROSTER_WIDTH),
+		String(rosterCols(config.rosterWidth, cols)),
 		"-t",
 		stage,
 		"-P",

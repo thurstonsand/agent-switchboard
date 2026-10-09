@@ -3,7 +3,7 @@ Source common.tape
 
 Type "# /wt fork moves the session into a new worktree; swb follows it" Sleep 1s Enter
 Type "swb" Sleep 400ms Enter
-Wait+Screen /0 open/
+Wait+Screen /Archived \(0\)/
 Sleep 1s
 Type "n"
 Wait+Screen /faux-1/

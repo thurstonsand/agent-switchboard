@@ -3,7 +3,7 @@ Source common.tape
 
 Type "# a new prompt in an archived session reopens it" Sleep 1s Enter
 Type "swb" Sleep 400ms Enter
-Wait+Screen /1 arch/
+Wait+Screen /Archived \(1\)/
 Sleep 1.5s
 Type "G"
 Sleep 500ms
@@ -15,5 +15,5 @@ Enter
 Wait+Screen /faux-1/
 Sleep 1.5s
 Type "reply one more thing after all" Sleep 400ms Enter
-Wait+Screen /1 open/
+Wait+Screen /▾ \S+ \(1\)/
 Sleep 3s

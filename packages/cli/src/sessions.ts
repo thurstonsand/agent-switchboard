@@ -111,10 +111,7 @@ function current(server: string, version: string): boolean {
 	return newer(running, VERSION) || (running === VERSION && conf.out === version);
 }
 
-/**
- * An upgrade ends every idle pi, so the next wake runs the new swb. SIGTERM, unlike closing the pane under it,
- * runs pi's shutdown hooks, so the recorder saves the draft; they write the db, so this runs outside its lock.
- */
+/** An upgrade ends every idle pi, so the next wake runs the new swb. Their shutdown writes the db, so this runs outside its lock. */
 function stopIdlePis(): void {
 	const hosts = new Set(listSessions(SESSIONS).map(([name]) => name as string));
 	const db = openStore();
@@ -124,7 +121,14 @@ function stopIdlePis(): void {
 	} finally {
 		db.close();
 	}
-	const stopping = idle.filter((runtime) => runtimeLive(runtime, bootId(), hosts));
+	stopPis(idle.filter((runtime) => runtimeLive(runtime, bootId(), hosts)));
+}
+
+/**
+ * Closing a pane hangs pi up on a dead terminal, and it exits before its shutdown hooks run; SIGTERM lets the
+ * recorder save the draft and clear its runtime. One that ignores it has its pane closed after 5 s.
+ */
+export function stopPis(stopping: RuntimeRow[]): void {
 	for (const runtime of stopping) process.kill(runtime.pid, "SIGTERM");
 	const deadline = Date.now() + 5000;
 	const open = () => {
@@ -295,28 +299,30 @@ export function wake(db: Db, id: string): string {
 
 /** The tmux session a live pi hosts this session in, if any. */
 function liveHost(db: Db, id: string, hosts: Set<string>): string | null {
-	const row = db.get("SELECT tmux_session, boot_id, pid FROM runtimes WHERE session_id = ?", id);
-	if (!row) return null;
-	const runtime = { tmux_session: row.tmux_session as string, boot_id: row.boot_id as string, pid: row.pid as number };
-	return runtimeLive(runtime, bootId(), hosts) ? runtime.tmux_session : null;
+	return liveRuntime(db, id, hosts)?.tmux_session ?? null;
+}
+
+function liveRuntime(db: Db, id: string, hosts: Set<string>): RuntimeRow | null {
+	const runtime = db.get("SELECT tmux_session, boot_id, pid FROM runtimes WHERE session_id = ?", id) as RuntimeRow | null;
+	return runtime && runtimeLive(runtime, bootId(), hosts) ? runtime : null;
 }
 
 /** Archives a session, refusing mid-turn; an idle live pi is killed, and editors nobody needs any more go with it. */
 export function archive(db: Db, id: string): void {
 	const hosts = new Set(listSessions(SESSIONS).map(([name]) => name as string));
-	const host = db.tx(() => {
+	const runtime = db.tx(() => {
 		const session = db.get("SELECT phase FROM sessions WHERE session_id = ?", id);
 		if (!session) throw new SwbError(`no session ${id}`);
-		const host = liveHost(db, id, hosts);
-		if (host && session.phase !== "idle") throw new SwbError("turn running: wait for it to complete");
+		const runtime = liveRuntime(db, id, hosts);
+		if (runtime && session.phase !== "idle") throw new SwbError("turn running: wait for it to complete");
 		db.run(
 			"INSERT INTO marks (session_id, archived_at) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET archived_at = excluded.archived_at",
 			id,
 			Date.now(),
 		);
-		return host;
+		return runtime;
 	});
-	if (host) tmuxTry(SESSIONS, "kill-session", "-t", `=${host}`);
+	if (runtime) stopPis([runtime]);
 	gc(db);
 }
 

@@ -16,6 +16,7 @@ See @CONTEXT.md for project vocabulary.
 - pi is a black box: `swb` never draws into or alters pi's own screen. The only exception is anything in scope for the recorder extension
 - tmux is an execution engine and should not be directly interactible in a tmux-y way
 - The TUI must be snappy: move processing to the background as much as possible, keeping the TUI fast to navigate, with loaders in place as needed
+- Say it once: each piece of state appears in exactly one place on screen. A second badge, line, or header saying the same thing costs space and splits attention
 - Fail loudly: a recorder that can't record says so in pi's footer instead of silently drifting
 
 ## Features

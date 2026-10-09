@@ -247,6 +247,34 @@ test("split shows pi below 160 columns and returns on widening, survives reopeni
 	s.save("hidden-then-40-cols.txt", s.screen());
 });
 
+test("the roster holds roster_width through resizes; clicking a sleeping session's Stage or splitting it wakes pi", async () => {
+	s = scenario("phase4", "roster-width-wake");
+	config(s, 'editor = "cat -v"\nroster_width = "25%"');
+	const live = await started(s, "--size", "200x50", "--", "new");
+	const id = live.staged.id as string;
+	expect(panes(s, live)[0]?.width).toBe(50);
+	s.swb("drive", "resize", "240x50");
+	const wide = await waitState(s, "240 columns", (x) => x.layout.width === 240);
+	await until(() => panes(s, wide)[0]?.width === 60, budgets.settle, `a 60-column roster, not ${panes(s, wide)[0]?.width}`);
+	s.save("240-cols.txt", s.screen());
+
+	await prefixKeys(s, "M-a", "h", "the roster focused", (x) => x.focus === "roster");
+	s.tmux(s.servers.sessions, "kill-session", "-t", `=${live.staged.host}`);
+	await waitState(s, "pi exited", (x) => x.staged.kind === "exited");
+	s.save("exited.txt", s.screen());
+	s.swb("drive", "click", "120", "20");
+	await waitState(s, "woken by the click", (x) => x.staged.kind === "live" && x.focus === "stage", budgets.piReady);
+	s.save("clicked-awake.txt", s.screen());
+
+	await prefixKeys(s, "M-a", "h", "the roster focused", (x) => x.focus === "roster");
+	const again = state(s);
+	s.tmux(s.servers.sessions, "kill-session", "-t", `=${again.staged.host}`);
+	await waitState(s, "exited again", (x) => x.staged.kind === "exited" && x.staged.id === id);
+	s.keys("M-a", "v");
+	await waitState(s, "split and woken", (x) => x.staged.kind === "live" && x.layout.split, budgets.piReady);
+	s.save("split-awake.txt", s.screen());
+});
+
 test("sessions in one directory share an editor, a worktree gets its own, and archiving the last one reaps it", async () => {
 	s = scenario("phase4", "editors");
 	config(s, 'editor = "cat -v"');

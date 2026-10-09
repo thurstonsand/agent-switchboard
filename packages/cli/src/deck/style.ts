@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { type RgbColor, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import type { RgbColor } from "@earendil-works/pi-tui";
 
 const sgr = (open: string, close: string) => (s: string) => `\x1b[${open}m${s}\x1b[${close}m`;
 
@@ -60,10 +60,4 @@ export function hex(color: RgbColor): string {
 export function sgrBg(code: string, s: string): string {
 	const open = `\x1b[${code}m`;
 	return `${open}${s.replaceAll("\x1b[0m", `\x1b[0m${open}`).replaceAll("\x1b[49m", open)}\x1b[0m`;
-}
-
-export function spread(left: string, right: string, width: number): string {
-	const gap = width - visibleWidth(left) - visibleWidth(right);
-	if (gap < 1) return truncateToWidth(left, width, "…");
-	return left + " ".repeat(gap) + right;
 }

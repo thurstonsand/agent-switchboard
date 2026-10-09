@@ -11,7 +11,11 @@ export type Config = {
 	reapAfterMs: number;
 	clipboard: string;
 	prefix: string;
+	rosterWidth: RosterWidth;
 };
+
+/** The roster's width: columns, or a share of the Deck. */
+export type RosterWidth = { cols: number } | { percent: number };
 
 type Unit = "s" | "m" | "h" | "d";
 const UNITS: Record<Unit, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
@@ -49,6 +53,7 @@ export function loadConfig(): Config {
 		reapAfterMs: UNITS.m * 30,
 		clipboard: defaultClipboard(),
 		prefix: "M-a",
+		rosterWidth: { cols: 42 },
 	};
 	for (const [key, value] of Object.entries(raw)) {
 		switch (key) {
@@ -69,6 +74,13 @@ export function loadConfig(): Config {
 			case "clipboard":
 				config.clipboard = string(key, value);
 				break;
+			case "roster_width": {
+				const percent = typeof value === "string" ? /^(\d+)%$/.exec(value) : null;
+				if (Number.isInteger(value) && (value as number) >= 20) config.rosterWidth = { cols: value as number };
+				else if (percent && Number(percent[1]) >= 5 && Number(percent[1]) <= 80) config.rosterWidth = { percent: Number(percent[1]) };
+				else throw new SwbError(`config: roster_width must be columns (20 or more) or a share like "25%", got ${JSON.stringify(value)}`);
+				break;
+			}
 			case "keys":
 				if (typeof value !== "object" || value === null || Array.isArray(value)) throw new SwbError("config: keys must be a table");
 				for (const [sub, subValue] of Object.entries(value as Record<string, unknown>)) {

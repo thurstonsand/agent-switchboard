@@ -6,6 +6,6 @@ Type "# three Decks, one switchboard" Sleep 1s Enter
 Hide
 Type "tmux -L demo -f /dev/null new -s demo swb \; split-window -v swb \; split-window -v swb \; select-layout even-vertical \; set -g status off" Enter
 Show
-Wait+Screen /(?s)0 open.*0 open.*0 open/
-Wait+Screen /(?s)1 arch.*1 arch.*1 arch/
+Wait+Screen /(?s)Archived \(0\).*Archived \(0\).*Archived \(0\)/
+Wait+Screen /(?s)Archived \(1\).*Archived \(1\).*Archived \(1\)/
 Sleep 3s

@@ -28,8 +28,8 @@ import {
 	HELP_POPUP,
 	NARROW_BELOW,
 	placeholderName,
-	ROSTER_WIDTH,
 	removeDeckFiles,
+	rosterCols,
 	SPLIT_FROM,
 	stageScript,
 	writeAtomic,
@@ -53,7 +53,6 @@ import {
 	sgrBg,
 	shortPath,
 	spinnerFrame,
-	spread,
 } from "./style.ts";
 
 const VISIT_MS = 1000;
@@ -1020,11 +1019,8 @@ class Roster implements Component {
 	}
 
 	header(width: number): string {
-		const all = [...entries.values()];
-		const open = all.filter((e) => e.open && !e.inactive).length;
-		const archived = all.filter((e) => !e.open).length;
 		const tag = this.query() !== "" && !this.filtering ? ` ${magenta(`/${this.filter.getValue()}`)}` : "";
-		return spread(` ${bold("swb")}${tag}`, gray(`${open} open · ${archived} arch `), width);
+		return truncateToWidth(` ${bold("swb")}${tag}`, width, "…");
 	}
 
 	list(rows: Row[], index: number, width: number, height: number, now: number): string[] {
@@ -1093,7 +1089,7 @@ class Roster implements Component {
 
 	/** Each key in the legend is also a button. */
 	hints(y: number): string {
-		if (this.filtering) return ` ${this.filter.render(Math.max(10, ROSTER_WIDTH - 2))[0] ?? ""}`;
+		if (this.filtering) return ` ${this.filter.render(Math.max(10, rosterCols(config.rosterWidth, deckWidth) - 2))[0] ?? ""}`;
 		const help: Hint = ["?", "keys", () => void showHelp()];
 		const newAtCursor: Hint = ["n", "new", () => this.newAtCursor()];
 		let hints: Hint[];
@@ -1121,7 +1117,7 @@ type Hint = [name: string, label: string, act: () => void];
 
 function rowLine(row: Row, width: number, now: number): string {
 	if (row.kind === "header") {
-		const count = row.collapsed ? gray(` (${row.count})`) : "";
+		const count = gray(` (${row.count})`);
 		return `${" ".repeat(1 + row.depth * 2)}${row.collapsed ? "▸" : "▾"} ${bold(projectName(row.project))}${count}`;
 	}
 	if (row.kind === "section") return ` ${row.expanded ? "▾" : "▸"} ${row.label} ${gray(`(${row.count})`)}`;
@@ -1176,7 +1172,17 @@ function syncRoster(toRoster: boolean): Promise<void> {
 				await tmuxAsync(UI, ...focusPi, "break-pane", "-d", "-s", rosterPane);
 			} else {
 				const active = await tmuxAsync(UI, "list-panes", "-t", stagePane, "-f", "#{pane_active}", "-F", "#{pane_id}");
-				const join = ["join-pane", "-h", "-d", "-l", String(Math.max(1, deckWidth - ROSTER_WIDTH - 1)), "-s", stagePane, "-t", rosterPane];
+				const join = [
+					"join-pane",
+					"-h",
+					"-d",
+					"-l",
+					String(Math.max(1, deckWidth - rosterCols(config.rosterWidth, deckWidth) - 1)),
+					"-s",
+					stagePane,
+					"-t",
+					rosterPane,
+				];
 				if (side) {
 					const width = await tmuxAsync(UI, "display", "-p", "-t", side.pane, "#{pane_width}");
 					join.push(";", "join-pane", "-h", "-d", "-l", width, "-s", side.pane, "-t", stagePane);
@@ -1231,6 +1237,9 @@ async function layout(): Promise<void> {
 		if (narrow && zoomFlag !== "1") await tmuxAsync(UI, "resize-pane", "-Z", "-t", active === "1" ? stagePane : rosterPane);
 		if (!narrow && zoomFlag === "1") await tmuxAsync(UI, "resize-pane", "-Z", "-t", rosterPane);
 	}
+	// tmux scales every pane with the window; the roster keeps its configured width instead.
+	if (!narrow && !rosterHidden && zoomFlag !== "1")
+		await tmuxAsync(UI, "resize-pane", "-t", rosterPane, "-x", String(rosterCols(config.rosterWidth, deckWidth)));
 }
 
 function quit(): void {
@@ -1248,16 +1257,21 @@ process.on("SIGTERM", cleanup);
 
 async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 	switch (cmd) {
-		case "focus":
+		case "focus": {
 			// Hooks run in the background and can land out of order, so each one rereads which pane is active.
 			focusReads = focusReads.then(async () => {
 				focusedPane = await tmuxAsync(UI, "display", "-p", "-t", deck, "#{pane_id}");
 			});
 			await focusReads;
+			const was = focus;
 			focus = focusedPane === rosterPane ? "roster" : "stage";
 			if (focus === "roster") for (const launch of launches) launch.keyboard = false;
+			// Moving onto a dormant session, by click or key, means to use it.
+			const onView = stage.staged === null ? undefined : entries.get(stage.staged);
+			if (was === "roster" && focus === "stage" && onView?.open && !onView.live) wake(onView.id, true);
 			apply();
 			break;
+		}
 		case "terminal-focus": {
 			const focused = argv[0] === "in";
 			if (focused === terminalFocused) break;
@@ -1325,6 +1339,7 @@ async function showView(e: Entry, next: View): Promise<void> {
 		editorsLost.delete(e.cwd);
 		if ((await requestEditor(e.cwd)) === null || stage.applied.id !== e.id) return;
 	}
+	if (next !== "editor" && !e.live) wake(e.id, focus === "stage");
 	if (next === "split" && deckWidth < SPLIT_FROM) toast(`split needs ${SPLIT_FROM} columns; showing pi`, "info");
 	localViews.set(e.id, next);
 	post({ type: "view", id: e.id, view: next });

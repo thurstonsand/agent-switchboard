@@ -3,7 +3,7 @@ Source common.tape
 
 Type "# n starts a pi; its first prompt makes it a tracked Session" Sleep 1s Enter
 Type "swb" Sleep 400ms Enter
-Wait+Screen /0 open/
+Wait+Screen /Archived \(0\)/
 Sleep 1.5s
 Type "n"
 Wait+Screen /faux-1/

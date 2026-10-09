@@ -51,6 +51,7 @@ editor = "nvim"           # defaults to $EDITOR
 inactive_after = "72h"    # open sessions idle this long move to Inactive
 reap_after = "30m"        # an idle live pi nobody is viewing is stopped after this long
 clipboard = "wl-copy"     # defaults to wl-copy, else xclip, else pbcopy
+roster_width = 42         # columns, or a share of the Deck like "25%"; never more than half
 
 [keys]
 prefix = "M-a"

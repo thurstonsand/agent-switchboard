@@ -13,6 +13,7 @@ const sock = args.sock;
 let card: Card = { tone: "empty", headline: "", title: "", path: "", lines: [], turns: null, keys: "", since: Date.now() };
 let raw = "";
 let typedAt = 0;
+let frame = "";
 
 function load(): boolean {
 	let next: string;
@@ -47,7 +48,7 @@ function turnLines(turn: Turn, width: number): string[] {
 function draw(): void {
 	const cols = process.stdout.columns;
 	const rows = process.stdout.rows;
-	const width = Math.max(10, Math.min(cols - 4, 88));
+	const width = Math.max(10, cols - 4);
 	const now = Date.now();
 	const loading = card.tone === "loading";
 	const glyph = loading ? `${spinnerFrame(now)} ` : "";
@@ -73,10 +74,16 @@ function draw(): void {
 	const body = [...head, ...conversation, ...foot];
 	const top = Math.max(0, Math.floor((rows - body.length) / 2));
 	const left = Math.max(0, Math.floor((cols - width) / 2));
-	let out = "\x1b[H\x1b[2J";
-	body.forEach((line, i) => {
-		if (top + i < rows) out += `\x1b[${top + i + 1};${left + 1}H${truncateToWidth(line, cols - left, "…")}`;
-	});
+	// Each row is overwritten in place inside one synchronized update; clearing the screen first flickers.
+	let out = "\x1b[?2026h";
+	for (let y = 0; y < rows; y++) {
+		const line = body[y - top];
+		out += `\x1b[${y + 1};1H\x1b[2K`;
+		if (line !== undefined) out += `\x1b[${y + 1};${left + 1}H${truncateToWidth(line, cols - left, "…")}`;
+	}
+	out += "\x1b[?2026l";
+	if (out === frame) return;
+	frame = out;
 	process.stdout.write(out);
 }
 
@@ -96,7 +103,10 @@ process.stdin.on("data", (data: Buffer) => {
 	typedAt = Date.now();
 	draw();
 });
-process.on("SIGWINCH", draw);
+process.on("SIGWINCH", () => {
+	frame = "";
+	draw();
+});
 process.on("SIGHUP", () => process.exit(0));
 
 load();

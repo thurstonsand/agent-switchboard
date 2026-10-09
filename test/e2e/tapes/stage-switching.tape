@@ -3,7 +3,7 @@ Source common.tape
 
 Type "# the Stage follows the cursor between live pis" Sleep 1s Enter
 Type "swb" Sleep 400ms Enter
-Wait+Screen /3 open/
+Wait+Screen /▾ \S+ \(3\)/
 Sleep 1s
 Type "w"
 Sleep 1.5s

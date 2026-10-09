@@ -3,7 +3,7 @@ Source common.tape
 
 Type "# a pi-sessions subagent is its own pi process, and never a Session here" Sleep 1s Enter
 Type "swb" Sleep 400ms Enter
-Wait+Screen /0 open/
+Wait+Screen /Archived \(0\)/
 Sleep 1s
 Type "n"
 Wait+Screen /faux-1/

@@ -3,7 +3,7 @@ Source common.tape
 
 Type "# three dormant sessions: w wakes in place, Enter wakes and focuses, esc backs out" Sleep 1s Enter
 Type "swb" Sleep 400ms Enter
-Wait+Screen /3 open/
+Wait+Screen /▾ \S+ \(3\)/
 Sleep 2s
 Type "w"
 Wait+Screen /faux-1/

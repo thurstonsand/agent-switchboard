@@ -91,8 +91,8 @@ Exit codes: 0 means success. 1 means a failed action, with the reason on stderr;
 
 ```text
 ┌ roster pane (pi-tui app) ───────┬ Stage pane (tmux client of the sessions server) ┐
-│ swb            6 open · 2 arch  │ <the real pi TUI of the selected session>        │
-│ ▾ agent-switchboard             │                                                  │
+│ swb                             │ <the real pi TUI of the selected session>        │
+│ ▾ agent-switchboard (6)         │                                                  │
 │   ◐ Deck mock round 2      now  │                                                  │
 │   ● Recorder footer        2h   │                                                  │
 │ ▾ ansiblonomicon                │                                                  │
@@ -109,7 +109,7 @@ The Stage shows one of three **views** of the selected session, and each session
 - **split**: the Editor on the left at 65% and pi on the right at 35%, as `ide` laid them out. In split view the Stage is two panes, each its own nested client of the sessions server.
 
 **Layout rules**, which the Deck state reports as `layout`:
-- The roster is 42 columns. A Deck narrower than 100 columns shows the roster alone, and Enter zooms the Stage to full width; `M-a z` or `M-a h` returns.
+- The roster is `roster_width` wide (42 columns by default, at most half the Deck), re-asserted on every resize because tmux would otherwise scale it with the window. A Deck narrower than 100 columns shows the roster alone, and Enter zooms the Stage to full width; `M-a z` or `M-a h` returns.
 - Split needs a Deck at least 160 columns wide. Narrower, a split session shows pi view, and `marks.view` keeps `split` so widening restores it.
 - Split applies only to a live session. Every card (dormant, loading, pi exited, empty) fills a single Stage pane, and a session that comes up in split gains its editor pane then.
 - The second Stage pane exists only while split is showing: it's created on entering split and killed on leaving it.
@@ -382,7 +382,7 @@ every 250 ms (in the worker):
   db.dataVersion() changed?  → post fresh rows to the TUI thread
   derive states → TUI thread diffs → render if changed
   reapable sessions → re-read phase, then
-    tmux if-shell -F -t =<s> '#{==:#{session_attached},0}' 'kill-session -t =<s>'
+    tmux if-shell -F -t =<s> '#{?session_attached,0,1}' "run-shell -b 'kill -TERM <pid>'"
     the attached check runs inside tmux, so a Deck that attached since the poll keeps it
 on key:
   update view model synchronously → render → schedule effects (never awaited by the input handler)
@@ -435,7 +435,8 @@ tmux client-focus-in / client-focus-out on the sessions server (plain attach vie
 TUI `a` / swb archive <id> / pi /archive
   phase ∈ {working, blocked} and live → refuse: "turn running: wait for it to complete"
   db.tx (BEGIN IMMEDIATE): re-check phase, then marks.archived_at = now
-  live → tmux kill-session <runtime.tmux_session>     SIGHUP → pi clean shutdown → runtime row deleted
+  live → SIGTERM pi, 5 s grace, then kill-session    SIGTERM → session_shutdown hooks run (draft saved, runtime row deleted)
+                                                      kill-session alone hangs up the pty first, and pi dies before its hooks run
   gc()                                                also triggered by the session-closed hook
 TUI `a` on an archived row / swb unarchive <id> → db.tx: marks.archived_at = null   nothing restarts; `w` or Enter resumes
 swb adopt <id>|<transcript>
