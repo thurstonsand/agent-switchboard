@@ -4,7 +4,7 @@ import { bootId, type Db, type View } from "@swb/shared";
 import type { Config } from "../config.ts";
 import { derive, type RuntimeRecord, runtimeLive, runtimeRecords, type SessionRow, sessionRows, type World } from "../derive.ts";
 import { archive, ensureEditor, ensureSessionsServer, launch, unarchive, wake } from "../sessions.ts";
-import { markVisited, openStore, setView } from "../store.ts";
+import { markVisited, openStore, setGroup, setView } from "../store.ts";
 import { listSessions, SESSIONS, tmuxTry } from "../tmux.ts";
 import { ensurePlaceholder, placeholderName } from "./deck.ts";
 import type { Entry, FromWorker, Snapshot, ToWorker, Turn } from "./protocol.ts";
@@ -34,6 +34,8 @@ const ORPHAN_DEAD_S = 10;
 
 /** Views chosen before a session's first prompt, written once it has a row to mark. */
 const pendingViews = new Map<string, View>();
+/** Likewise for Groups. */
+const pendingGroups = new Map<string, string | null>();
 
 function post(message: FromWorker): void {
 	self.postMessage(message);
@@ -49,6 +51,12 @@ function readDb(): void {
 		if (!rows.some((row) => row.session_id === id)) continue;
 		pendingViews.delete(id);
 		setView(db, id, view);
+		rows = sessionRows(db);
+	}
+	for (const [id, name] of pendingGroups) {
+		if (!rows.some((row) => row.session_id === id)) continue;
+		pendingGroups.delete(id);
+		setGroup(db, [id], name);
 		rows = sessionRows(db);
 	}
 }
@@ -105,6 +113,7 @@ function snapshot(): Polled {
 			project: runtime.project_root,
 			cwd: runtime.cwd,
 			branch: null,
+			group: pendingGroups.get(runtime.session_id) ?? null,
 			open: true,
 			live: true,
 			activity: "idle",
@@ -253,6 +262,20 @@ function handle(message: ToWorker): void {
 				else pendingViews.set(message.id, message.view);
 			} catch (error) {
 				post({ type: "viewFailed", id: message.id, text: (error as Error).message });
+			}
+			break;
+		case "group":
+			try {
+				readDb();
+				const known = new Set(rows.map((row) => row.session_id));
+				setGroup(
+					db,
+					message.ids.filter((id) => known.has(id)),
+					message.name,
+				);
+				for (const id of message.ids) if (!known.has(id)) pendingGroups.set(id, message.name);
+			} catch (error) {
+				post({ type: "groupFailed", text: (error as Error).message });
 			}
 			break;
 		case "editor": {

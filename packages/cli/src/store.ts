@@ -30,6 +30,7 @@ const MIGRATIONS: string[] = [
 		visited_at  INTEGER,
 		view        TEXT NOT NULL DEFAULT 'pi' CHECK (view IN ('pi','editor','split'))
 	);`,
+	"ALTER TABLE marks ADD COLUMN group_name TEXT",
 ];
 
 if (MIGRATIONS.length !== SCHEMA_VERSION) throw new Error(`${MIGRATIONS.length} migrations for schema v${SCHEMA_VERSION}`);
@@ -44,6 +45,18 @@ export function markVisited(db: Db, id: string): void {
 
 export function setView(db: Db, id: string, view: View): void {
 	db.run("INSERT INTO marks (session_id, view) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET view = excluded.view", id, view);
+}
+
+/** Moves sessions into a Group, or out of any when `name` is null. */
+export function setGroup(db: Db, ids: string[], name: string | null): void {
+	db.tx(() => {
+		for (const id of ids)
+			db.run(
+				"INSERT INTO marks (session_id, group_name) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET group_name = excluded.group_name",
+				id,
+				name,
+			);
+	});
 }
 
 /** Opens the db and brings it to this binary's schema; refuses a db from a newer swb. */

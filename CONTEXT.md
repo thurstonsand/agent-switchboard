@@ -64,12 +64,15 @@ What the **Stage** shows for a session: **pi**, its **Editor**, or a **split** o
 **Project**:
 A git repository together with all of its worktrees; sessions outside any repository group by directory.
 
+**Group**:
+A name I give a session, scoping it within its **Project**. A Group exists only while some session carries its name: the last one archived takes it away, and unarchiving one brings it back. A session with no Group falls back to its worktree's bucket under `group_by = "worktree"`, or sits directly under its **Project**.
+
 **Roster**:
-The TUI's sectioned list of sessions: open sessions by **Project**, then **Inactive** by **Project**, then **Archived** flat by recency.
+The TUI's sectioned list of sessions: open sessions by **Project**, then **Inactive** by **Project**, then **Archived** flat by recency. Beneath each **Project**, its **Groups** and worktree buckets are siblings, one level deep.
 
 ## Relationships
 
-- A **Session** belongs to exactly one **Project**, derived from its working directory
+- A **Session** belongs to exactly one **Project**, derived from its working directory, and to at most one **Group** within it
 - A **Session** is either **Open** or **Archived**; independently, it is **Live** or **Dormant**
 - **Activity** and **Unseen** apply only to **Open** sessions
 - pi-sessions **subagents** are never **Sessions** here; their parent's ledger owns them

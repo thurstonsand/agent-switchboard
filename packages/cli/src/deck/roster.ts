@@ -181,6 +181,29 @@ function viewOf(e: Entry): View {
 	return localViews.get(e.id) ?? e.view;
 }
 
+/** Groups set here and not yet back in a snapshot; null is ungrouped. */
+const localGroups = new Map<string, string | null>();
+
+/** Where a session sits beneath its Project: its own Group, else its worktree's bucket when group_by asks for one. */
+type Group = { kind: "custom"; name: string } | { kind: "worktree"; branch: string };
+
+function groupOf(e: Entry): Group | null {
+	const local = localGroups.get(e.id);
+	const name = local !== undefined ? local : e.group;
+	if (name !== null) return { kind: "custom", name };
+	if (config.groupBy === "worktree" && e.branch !== null) return { kind: "worktree", branch: e.branch };
+	return null;
+}
+
+function groupLabel(group: Group): string {
+	return group.kind === "custom" ? group.name : `⎇ ${group.branch}`;
+}
+
+function setGroup(ids: string[], name: string | null): void {
+	for (const id of ids) localGroups.set(id, name);
+	post({ type: "group", ids, name });
+}
+
 function stateOf(e: Entry): State {
 	if (launchFor(e.id) && !e.live) return "loading";
 	if (!e.open) return "archived";
@@ -575,6 +598,10 @@ function onSnapshot(next: Snapshot): void {
 	snapshot = next;
 	entries = new Map(next.entries.map((e) => [e.id, e]));
 	for (const [id, view] of localViews) if (entries.get(id)?.view === view) localViews.delete(id);
+	for (const [id, name] of localGroups) {
+		const e = entries.get(id);
+		if (!e || e.group === name) localGroups.delete(id);
+	}
 	settleLaunches();
 	followHost();
 	roster.settlePin();
@@ -640,6 +667,11 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
 			settleEditorWaits(message.dir, message.name);
 			if (message.text) toast(`editor: ${message.text}`, "error");
 			break;
+		case "groupFailed":
+			localGroups.clear();
+			toast(`group: ${message.text}`, "error");
+			apply();
+			break;
 		case "viewFailed":
 			localViews.delete(message.id);
 			toast(`view: ${message.text}`, "error");
@@ -667,18 +699,34 @@ function reveal(id: string): void {
 		return;
 	}
 	if (!e.open) roster.expanded.add("archived");
-	else if (e.inactive && !launchFor(e.id)) {
-		roster.expanded.add("inactive");
-		roster.collapsed.delete(`inactive:${e.project}`);
-	} else roster.collapsed.delete(`open:${e.project}`);
+	else {
+		const parent = e.inactive && !launchFor(e.id) ? "inactive" : "open";
+		if (parent === "inactive") roster.expanded.add("inactive");
+		const group = groupOf(e);
+		roster.collapsed.delete(`${parent}:${e.project}`);
+		if (group) roster.collapsed.delete(`${parent}:${e.project}:${groupKey(group)}`);
+	}
 	roster.selectedKey = id;
 	roster.syncStage(true);
 }
 
 type SectionKey = "inactive" | "archived";
 
+/** A Project header has no group; a Group or worktree bucket beneath it does, and starts sessions in its newest member's cwd. */
+type HeaderRow = {
+	kind: "header";
+	key: string;
+	projectKey: string;
+	project: string;
+	group: Group | null;
+	cwd: string;
+	count: number;
+	depth: number;
+	collapsed: boolean;
+};
+
 type Row =
-	| { kind: "header"; key: string; project: string; count: number; depth: number; collapsed: boolean }
+	| HeaderRow
 	| { kind: "session"; key: string; entry: Entry; depth: number; header: string }
 	| { kind: "section"; key: SectionKey; label: string; count: number; expanded: boolean };
 
@@ -694,6 +742,13 @@ function groupByProject(list: Entry[]): [string, Entry[]][] {
 	}
 	return [...groups.entries()].sort(([a], [b]) => projectName(a).localeCompare(projectName(b)) || a.localeCompare(b));
 }
+
+function groupKey(group: Group): string {
+	return group.kind === "custom" ? `g:${group.name}` : `b:${group.branch}`;
+}
+
+/** Where a dragged session would land: a header to light up and the Group it would take, or nowhere. */
+type Drop = { header: HeaderRow; name: string | null } | null;
 
 // The cursor's background is mixed from the terminal's own background and foreground, as pi's system theme
 // does. Until the terminal reports its colors, reverse video stands in.
@@ -715,6 +770,10 @@ class Roster implements Component {
 	expanded = new Set<SectionKey>();
 	filter = new Input({ prompt: "/ " });
 	filtering = false;
+	name = new Input({ prompt: "group: " });
+	naming: { ids: string[]; header: HeaderRow | null } | null = null;
+	/** A session being dragged by the mouse; `moved` once the pointer has left its row. */
+	dragging: { id: string; moved: boolean; drop: Drop } | null = null;
 	listTop = 2;
 	listHeight = 0;
 	/** What a click does, by row and column range, as of the last render. */
@@ -729,6 +788,10 @@ class Roster implements Component {
 			this.filter.setValue("");
 			this.filtering = false;
 		};
+		this.name.onSubmit = (value) => this.finishNaming(value);
+		this.name.onEscape = () => {
+			this.naming = null;
+		};
 	}
 
 	query(): string {
@@ -737,7 +800,9 @@ class Roster implements Component {
 
 	matches(e: Entry): boolean {
 		const q = this.query();
-		return q === "" || `${displayName(e)} ${projectName(e.project)} ${e.branch ?? ""}`.toLowerCase().includes(q);
+		const group = groupOf(e);
+		const label = group ? groupLabel(group) : "";
+		return q === "" || `${displayName(e)} ${projectName(e.project)} ${e.branch ?? ""} ${label}`.toLowerCase().includes(q);
 	}
 
 	rows(): Row[] {
@@ -745,12 +810,44 @@ class Roster implements Component {
 		const all = [...entries.values()].filter((e) => this.matches(e));
 		const open = all.filter((e) => e.open);
 		const pushGroups = (list: Entry[], depth: number, parent: string) => {
-			for (const [project, group] of groupByProject(list)) {
+			for (const [project, members] of groupByProject(list)) {
 				const key = `${parent}:${project}`;
 				const collapsed = this.collapsed.has(key);
-				rows.push({ kind: "header", key, project, count: group.length, depth, collapsed });
+				rows.push({ kind: "header", key, projectKey: key, project, group: null, cwd: project, count: members.length, depth, collapsed });
 				if (collapsed) continue;
-				for (const e of group) rows.push({ kind: "session", key: e.id, entry: e, depth, header: key });
+				// Groups and worktree buckets are siblings beneath the Project, ahead of its ungrouped sessions.
+				const buckets = new Map<string, { group: Group; members: Entry[] }>();
+				const loose: Entry[] = [];
+				for (const e of members) {
+					const group = groupOf(e);
+					if (!group) {
+						loose.push(e);
+						continue;
+					}
+					const bucket = buckets.get(groupKey(group)) ?? { group, members: [] };
+					bucket.members.push(e);
+					buckets.set(groupKey(group), bucket);
+				}
+				const sorted = [...buckets.entries()].sort(([, a], [, b]) => groupLabel(a.group).localeCompare(groupLabel(b.group)));
+				for (const [sub, { group, members: inside }] of sorted) {
+					const subKey = `${key}:${sub}`;
+					const subCollapsed = this.collapsed.has(subKey);
+					const cwd = (inside[0] as Entry).cwd;
+					rows.push({
+						kind: "header",
+						key: subKey,
+						projectKey: key,
+						project,
+						group,
+						cwd,
+						count: inside.length,
+						depth: depth + 1,
+						collapsed: subCollapsed,
+					});
+					if (subCollapsed) continue;
+					for (const e of inside) rows.push({ kind: "session", key: e.id, entry: e, depth: depth + 1, header: subKey });
+				}
+				for (const e of loose) rows.push({ kind: "session", key: e.id, entry: e, depth, header: key });
 			}
 		};
 		// A filter opens every section it has matches in, so a match is never hidden behind a caret.
@@ -812,6 +909,12 @@ class Roster implements Component {
 		stage.keyAt = performance.now();
 		frameKeyAt = stage.keyAt;
 		toasts = [];
+		if (this.naming) {
+			this.name.handleInput(data);
+			stage.keyAt = 0;
+			tui.requestRender();
+			return;
+		}
 		if (this.filtering) {
 			if (matchesKey(data, "up") || matchesKey(data, "down")) this.move(matchesKey(data, "up") ? -1 : 1);
 			else {
@@ -844,6 +947,7 @@ class Roster implements Component {
 		else if (k === "n") this.newAtCursor();
 		else if (k === "N") newSession(here);
 		else if (k === "/") this.filtering = true;
+		else if (k === "m") this.startNaming();
 		else if (k === "?") void showHelp();
 		this.syncStage(true);
 		stage.keyAt = 0;
@@ -861,7 +965,21 @@ class Roster implements Component {
 		// one under the press.
 		if (event.type === "press") {
 			this.pressed = this.targets.find((t) => t.y === event.y && event.x >= t.from && event.x < t.to) ?? null;
-			return undefined;
+			this.dragging = null;
+			const row = this.rowAt(event.y);
+			if (this.pressed || row?.kind !== "session" || !row.entry.open) return undefined;
+			this.dragging = { id: row.entry.id, moved: false, drop: null };
+			return { capture: true };
+		}
+		if (event.type === "drag" && this.dragging) {
+			const e = entries.get(this.dragging.id);
+			this.dragging.moved = true;
+			this.dragging.drop = e ? this.dropAt(event.y, e) : null;
+			return { handled: true };
+		}
+		if (event.type === "release" && this.dragging) {
+			this.finishDrag(event.y);
+			return { handled: true, render: true };
 		}
 		if (event.type !== "click") return undefined;
 		const target = this.pressed;
@@ -871,18 +989,20 @@ class Roster implements Component {
 			this.syncStage(true);
 			return { handled: true };
 		}
-		if (event.y < this.listTop || event.y >= this.listTop + this.listHeight) return undefined;
-		const rows = this.rows();
-		const index = this.scrollTop + (event.y - this.listTop);
-		const row = rows[index];
+		const row = this.rowAt(event.y);
 		if (!row) return undefined;
 		this.selectedKey = row.key;
-		this.lastIndex = index;
+		this.lastIndex = this.scrollTop + (event.y - this.listTop);
 		stage.holdForNew = false;
 		if (isHeader(row)) this.toggle(row);
 		else this.focusEntry(row.entry);
 		this.syncStage(true);
 		return { handled: true };
+	}
+
+	rowAt(y: number): Row | undefined {
+		if (y < this.listTop || y >= this.listTop + this.listHeight) return undefined;
+		return this.rows()[this.scrollTop + (y - this.listTop)];
 	}
 
 	move(delta: number): void {
@@ -977,7 +1097,63 @@ class Roster implements Component {
 
 	newAtCursor(): void {
 		const row = this.selected();
-		newSession(!row || row.kind === "section" ? here : row.kind === "session" ? row.entry.cwd : row.project);
+		newSession(!row || row.kind === "section" ? here : row.kind === "session" ? row.entry.cwd : row.cwd);
+	}
+
+	/** m: names the Group of the session under the cursor, or renames the Group whose header it's on; empty ungroups. */
+	startNaming(): void {
+		const row = this.selected();
+		this.filtering = false;
+		if (row?.kind === "session") {
+			const group = groupOf(row.entry);
+			this.naming = { ids: [row.entry.id], header: null };
+			this.name.setValue(group?.kind === "custom" ? group.name : "");
+		} else if (row?.kind === "header" && row.group?.kind === "custom") {
+			const name = row.group.name;
+			const ids = [...entries.values()]
+				.filter((e) => {
+					const group = groupOf(e);
+					return e.project === row.project && group?.kind === "custom" && group.name === name;
+				})
+				.map((e) => e.id);
+			this.naming = { ids, header: row };
+			this.name.setValue(name);
+		} else toast("m names a session's Group, or renames a Group", "info");
+	}
+
+	finishNaming(value: string): void {
+		const naming = this.naming;
+		this.naming = null;
+		if (!naming) return;
+		const name = value.trim() === "" ? null : value.trim();
+		setGroup(naming.ids, name);
+		// A renamed Group's header moves to its new key, and the cursor goes with it.
+		if (naming.header) this.selectedKey = name === null ? naming.header.projectKey : `${naming.header.projectKey}:g:${name}`;
+	}
+
+	dropAt(y: number, e: Entry): Drop {
+		if (y < this.listTop || y >= this.listTop + this.listHeight) return null;
+		const rows = this.rows();
+		const row = rows[this.scrollTop + (y - this.listTop)];
+		if (!row || row.kind === "section") return null;
+		const header = row.kind === "header" ? row : rows.find((r): r is HeaderRow => r.kind === "header" && r.key === row.header);
+		if (!header || header.project !== e.project) return null;
+		if (header.group?.kind === "custom") return { header, name: header.group.name };
+		if (header.group?.kind === "worktree" && header.group.branch !== e.branch) return null;
+		return { header, name: null };
+	}
+
+	/** Lands a drag: into the Group under the pointer, out of any on its Project or worktree bucket, or nowhere. */
+	finishDrag(y: number): void {
+		const drag = this.dragging;
+		this.dragging = null;
+		const e = drag && entries.get(drag.id);
+		if (!e || !drag.moved) return;
+		const drop = this.dropAt(y, e);
+		const group = groupOf(e);
+		const current = group?.kind === "custom" ? group.name : null;
+		if (!drop) toast("not a place for it; nothing moved", "info");
+		else if (drop.name !== current) setGroup([e.id], drop.name);
 	}
 
 	toggle(row: Row): void {
@@ -1033,7 +1209,8 @@ class Roster implements Component {
 				continue;
 			}
 			const line = truncateToWidth(rowLine(row, width, now), width, "…", true);
-			out.push(this.scrollTop + i === index ? cursorLine(line, focus === "roster") : line);
+			if (this.dragging?.drop?.header.key === row.key) out.push(cursorLine(line, true));
+			else out.push(this.scrollTop + i === index ? cursorLine(line, focus === "roster") : line);
 		}
 		if (rows.length === 0) out[0] = dim(snapshot ? (this.query() ? "   no matches" : "   no sessions yet · n new") : "   loading…");
 		return out;
@@ -1080,6 +1257,13 @@ class Roster implements Component {
 	/** Each key in the legend is also a button. */
 	hints(y: number): string {
 		if (this.filtering) return ` ${this.filter.render(Math.max(10, rosterWidth() - 2))[0] ?? ""}`;
+		if (this.naming) return ` ${this.name.render(Math.max(10, rosterWidth() - 2))[0] ?? ""}`;
+		const drag = this.dragging;
+		if (drag?.moved) {
+			if (!drag.drop) return ` ${red("✗ not here")}`;
+			const target = drag.drop.header.group;
+			return drag.drop.name === null ? ` drop to ungroup` : ` drop into ${bold(target ? groupLabel(target) : "")}`;
+		}
 		const help: Hint = ["?", "keys", () => void showHelp()];
 		const newAtCursor: Hint = ["n", "new", () => this.newAtCursor()];
 		const enter = (label: string): Hint => ["⏎", label, () => this.activate(true)];
@@ -1097,6 +1281,8 @@ class Roster implements Component {
 				[`${config.prefix} ?`, "keys", help[2]],
 			];
 		else if (!row) hints = [newAtCursor, help];
+		else if (row.kind === "header" && row.group?.kind === "custom")
+			hints = [enter(row.collapsed ? "expand" : "collapse"), ["m", "rename", () => this.startNaming()], newAtCursor, help];
 		else if (row.kind === "header") hints = [enter(row.collapsed ? "expand" : "collapse"), newAtCursor, help];
 		else if (row.kind === "section") hints = [enter(row.expanded ? "collapse" : "expand"), help];
 		else if (!row.entry.open) hints = [enter("open"), ["a", "unarchive", () => this.toggleArchived()], help];
@@ -1118,14 +1304,17 @@ type Hint = [name: string, label: string, act: () => void];
 function rowLine(row: Row, width: number, now: number): string {
 	if (row.kind === "header") {
 		const count = gray(` (${row.count})`);
-		return `${" ".repeat(1 + row.depth * 2)}${row.collapsed ? "▸" : "▾"} ${bold(projectName(row.project))}${count}`;
+		const name =
+			row.group === null ? bold(projectName(row.project)) : row.group.kind === "custom" ? row.group.name : magenta(groupLabel(row.group));
+		return `${" ".repeat(1 + row.depth * 2)}${row.collapsed ? "▸" : "▾"} ${name}${count}`;
 	}
 	if (row.kind === "section") return ` ${row.expanded ? "▾" : "▸"} ${row.label} ${gray(`(${row.count})`)}`;
 	const e = row.entry;
 	const mark = stage.staged === e.id ? (focus === "stage" ? cyan("▌") : "▌") : " ";
 	const lead = `${mark}${" ".repeat(2 + row.depth * 2)}`;
 	const when = e.open ? age(e.activityAt, now) : age(archivedKey(e), now);
-	const worktree = e.cwd !== e.project ? magenta("⎇") : " ";
+	// A worktree bucket already names the worktree.
+	const worktree = e.cwd !== e.project && groupOf(e)?.kind !== "worktree" ? magenta("⎇") : " ";
 	const right = ` ${worktree} ${gray(when.padStart(3))} `;
 	const titleWidth = width - visibleWidth(lead) - 2 - visibleWidth(right);
 	const title = truncateToWidth(e.provisional ? gray(displayName(e)) : displayName(e), titleWidth, "…", true);
@@ -1211,6 +1400,9 @@ async function prefixKey(k: string): Promise<void> {
 	if (k === "/") {
 		await focusRoster();
 		roster.filtering = true;
+	} else if (k === "m") {
+		await focusRoster();
+		roster.startNaming();
 	} else if (k === "j" || k === "k") roster.moveSession(k === "j" ? 1 : -1);
 	else if (k === "n") roster.newAtCursor();
 	else if (k === "N") newSession(here);
@@ -1283,6 +1475,8 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 			const was = focus;
 			focus = focusedPane === rosterPane ? "roster" : "stage";
 			if (focus === "roster") for (const launch of launches) launch.keyboard = false;
+			// A drag released over another pane never reports its release here.
+			else roster.dragging = null;
 			// Moving onto a dormant session, by click or key, means to use it.
 			const onView = stage.staged === null ? undefined : entries.get(stage.staged);
 			if (was === "roster" && focus === "stage" && onView?.open && !onView.live) wake(onView.id, true);
@@ -1362,8 +1556,10 @@ async function showView(e: Entry, next: View): Promise<void> {
 
 function viewState(): DeckState {
 	const rows = roster.rows();
+	const labels = new Map(rows.flatMap((row) => (row.kind === "header" && row.group ? [[row.key, groupLabel(row.group)]] : [])));
 	const index = roster.resolveCursor(rows);
 	const cursorRow = rows[index];
+	const drop = roster.dragging?.moved ? roster.dragging.drop : null;
 	const applied = stage.applied;
 	const staged = applied.id === null ? undefined : entries.get(applied.id);
 	return {
@@ -1372,7 +1568,8 @@ function viewState(): DeckState {
 		terminalFocused,
 		cursor: cursorRow?.kind === "session" ? cursorRow.entry.id : null,
 		cursorRow: index,
-		mode: roster.filtering ? "filter" : "roster",
+		mode: roster.filtering ? "filter" : roster.naming ? "name" : "roster",
+		drop: drop ? { project: projectName(drop.header.project), group: drop.header.group && groupLabel(drop.header.group) } : null,
 		filter: roster.query(),
 		focus: focus === "roster" ? "roster" : focusedPane === stagePane && applied.view !== "pi" ? "editor" : "stage",
 		staged: {
@@ -1393,9 +1590,15 @@ function viewState(): DeckState {
 						glyph: Bun.stripANSI(glyph(stateOf(row.entry), 0)),
 						state: stateOf(row.entry),
 						provisional: row.entry.provisional,
+						group: labels.get(row.header) ?? null,
 					}
 				: row.kind === "header"
-					? { kind: "header", project: projectName(row.project), expanded: !row.collapsed }
+					? {
+							kind: "header",
+							project: projectName(row.project),
+							group: row.group && groupLabel(row.group),
+							expanded: !row.collapsed,
+						}
 					: { kind: "section", label: row.label, count: row.count, expanded: row.expanded },
 		),
 		colors,

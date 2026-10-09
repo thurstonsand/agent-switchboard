@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { copyFileSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { SCHEMA_VERSION } from "../../packages/shared/src/index.ts";
 import { budgets, type LsEntry, release, repo, type Scenario, scenario, until, which } from "./harness/index.ts";
 
 let s: Scenario;
@@ -131,7 +132,7 @@ test("a migration under a running recorder turns its footer red at the next writ
 	await prompt("reply two");
 	await until(() => s.screen().includes("swb: not recording: db schema is v99"), budgets.settle, "the red footer");
 	const conn2 = s.db();
-	conn2.exec("PRAGMA user_version = 1");
+	conn2.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 	conn2.close();
 	const starts = s.signal("session_start");
 	await prompt("/reload");
@@ -152,7 +153,7 @@ test("swb refuses a db newer than itself, and a recorder started against a misma
 	conn.close();
 	const refused = s.swbTry("ls");
 	expect(refused.code).toBe(1);
-	expect(refused.err).toContain("is schema v7, newer than this swb (v1)");
+	expect(refused.err).toContain(`is schema v7, newer than this swb (v${SCHEMA_VERSION})`);
 
 	// Launched exactly as swb launches it, but against the db swb refused.
 	const server = `stale-${s.instance}`;

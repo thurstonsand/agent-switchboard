@@ -238,9 +238,15 @@ export async function drive(args: string[]): Promise<void> {
 			break;
 		}
 		case "drag": {
-			const [c1, r1, c2, r2] = rest.map(Number) as [number, number, number, number];
+			// --hold leaves the button down, for a look mid-drag; `release` lets go.
+			const [c1, r1, c2, r2] = rest.filter((arg) => arg !== "--hold").map(Number) as [number, number, number, number];
 			const steps = [1, 2, 3, 4].map((i) => sgr(32, Math.round(c1 + ((c2 - c1) * i) / 4), Math.round(r1 + ((r2 - r1) * i) / 4)));
-			await raw(sgr(0, c1, r1), ...steps, sgr(0, c2, r2, true));
+			await raw(sgr(0, c1, r1), ...steps, ...(rest.includes("--hold") ? [] : [sgr(0, c2, r2, true)]));
+			break;
+		}
+		case "release": {
+			const [col, row] = rest.map(Number) as [number, number];
+			await raw(sgr(0, col, row, true));
 			break;
 		}
 		case "resize": {

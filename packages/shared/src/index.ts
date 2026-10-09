@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 
 export { Db, type Param, type Row } from "./db.ts";
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export type Phase = "idle" | "working" | "blocked";
 export type View = "pi" | "editor" | "split";

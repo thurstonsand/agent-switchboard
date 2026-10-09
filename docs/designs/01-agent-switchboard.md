@@ -124,6 +124,8 @@ The final visual spec comes from the Deck mock rounds (see [ticket 09](../wayfin
 - `n` starts a new session: in the selected session's cwd on a session row, in the project root on a header, or where `swb` was run on a section row, as in an empty Deck.
 - `N` starts a new session where `swb` was run, whatever the cursor is on.
 - `w` wakes a dormant session in the background and never takes the keyboard.
+- `m` names the selected session's Group, prefilled with its current one; on a Group header it renames the Group for every session carrying it, archived ones included. An empty name ungroups. `m rename` shows in the legend on a Group header only.
+- Dragging an open session with the mouse moves it between Groups. Hovering a header, or any session beneath one, lights that header as the drop and the legend line names it: `drop into <group>`, or `drop to ungroup` over the Project header, its loose sessions, or the session's own worktree bucket. Anywhere else (another Project, another branch's bucket, a section, Archived, empty space) shows `✗ not here`, and releasing there moves nothing.
 - `/` filters; `y` copies `swb open <id>`; `Y` copies `@session:<uuid>`.
 - `l` on a session row is Enter, and on a collapsed header it expands. `h` on an expanded header collapses it; on a collapsed header or a session row it does nothing. Clicking, Enter, or space on a header toggles it. Clicking a session row is Enter: a click is a choice, unlike the cursor passing over it. `q` quits the Deck.
 
@@ -139,6 +141,7 @@ Clicking a pane focuses it. The bindings target panes by index rather than `{lef
 
 **Roster order**:
 - Open sessions are grouped by Project. Projects sort alphabetically and stay put; sessions within a project sort by `activity_at`, newest first.
+- Beneath a Project, one level deep and sorted by label: its Groups (`marks.group_name`), and under `group_by = "worktree"` a `⎇ branch` bucket per worktree for sessions without a Group. Its remaining sessions follow them, directly under the Project. Groups are never stored on their own: a Group is the set of open sessions carrying its name, so it vanishes with its last one and returns when one is unarchived.
 - Then **Inactive**, collapsed: open, no activity for 72h, never blocked or unseen. Grouped by project.
 - Then **Archived**: an inline section, collapsed by default like Inactive, flat, ordered by `max(activity_at, archived_at)` descending.
 - The cursor follows the session id across reorders.
@@ -213,7 +216,8 @@ CREATE TABLE marks (
   session_id  TEXT PRIMARY KEY REFERENCES sessions,
   archived_at INTEGER,
   visited_at  INTEGER,
-  view        TEXT NOT NULL DEFAULT 'pi' CHECK (view IN ('pi','editor','split'))
+  view        TEXT NOT NULL DEFAULT 'pi' CHECK (view IN ('pi','editor','split')),
+  group_name  TEXT                  -- the session's Group within its Project; NULL when it has none
 );
 ```
 
@@ -320,7 +324,7 @@ Failure: the recorder shows a persistent red footer status (`swb: not recording:
 - A detached tmux pane answers no color queries, so the harness stands in for a terminal: it sets `window-style` and `pane-colours` to a Gruvbox palette on its own server only, which tmux reports to the Deck as terminal colors. `drive theme light|dark` swaps them, and tmux sends the 997 that a real terminal would. The harness also sets `set-clipboard on` and captures OSC 52 into its buffer, which `drive clipboard` prints.
 - `drive keys` sends tmux key names to that pane, exactly as a terminal would deliver them.
 - `drive capture` is `capture-pane -p [-e]` of that pane: the composited Deck as a human sees it.
-- Each roster serves a **Deck socket** at `${XDG_STATE_HOME}/agent-switchboard/decks/<deck>.sock`, speaking HTTP over a unix socket. `GET /state` returns the view state, which is always current. `POST /cmd` takes the prefix and hook commands. `swb deck state` and `drive state` read `GET /state`. The state holds: `deck`, `cursor` (session id), `staged` (session id, Stage state, and `view`), `focus` (`roster`, `stage`, or `editor`), `zoomed`, `mode` (`roster`, `filter`, `help`), `filter`, `toasts`, `waking` (pending or loading ids, and whether the keyboard is waiting on one), `rows` (the visible rows in order: kind, id, title, glyph, and expanded for headers), `colors` (the terminal background the roster last read), `terminalFocused`, and `ready`.
+- Each roster serves a **Deck socket** at `${XDG_STATE_HOME}/agent-switchboard/decks/<deck>.sock`, speaking HTTP over a unix socket. `GET /state` returns the view state, which is always current. `POST /cmd` takes the prefix and hook commands. `swb deck state` and `drive state` read `GET /state`. The state holds: `deck`, `cursor` (session id), `staged` (session id, Stage state, and `view`), `focus` (`roster`, `stage`, or `editor`), `zoomed`, `mode` (`roster`, `filter`, `name`), `filter`, `toasts`, `waking` (pending or loading ids, and whether the keyboard is waiting on one), `drop` (mid-drag, the Project and Group a release would land in), `rows` (the visible rows in order: kind, id, title, glyph, and the Group label it sits under for sessions; project, group, and expanded for headers), `colors` (the terminal background the roster last read), `terminalFocused`, and `ready`.
 - A socket whose Deck session no longer exists on the UI server is reported as gone and removed.
 - `drive wait <path>=<value> [--timeout]` polls `GET /state` until it matches. It proved the most useful verb in the mock (e.g. `drive wait staged.kind=live`).
 

@@ -9,6 +9,7 @@ export type SessionState = {
 	project: string;
 	cwd: string;
 	branch: string | null;
+	group: string | null;
 	open: boolean;
 	live: boolean;
 	activity: Phase;
@@ -45,6 +46,7 @@ export type SessionRow = {
 	archived_at: number | null;
 	visited_at: number | null;
 	view: View | null;
+	group_name: string | null;
 	runtime: RuntimeRow | null;
 };
 
@@ -52,7 +54,7 @@ export function sessionRows(db: Db): SessionRow[] {
 	return db
 		.all(
 			`SELECT s.session_id, s.title, s.project_root, s.cwd, s.branch, s.transcript, s.phase, s.last_prompt_at, s.last_settled_at,
-		        m.archived_at, m.visited_at, m.view, r.tmux_session, r.boot_id, r.pid
+		        m.archived_at, m.visited_at, m.view, m.group_name, r.tmux_session, r.boot_id, r.pid
 		 FROM sessions s LEFT JOIN marks m USING (session_id) LEFT JOIN runtimes r USING (session_id)`,
 		)
 		.map((r) => ({
@@ -68,6 +70,7 @@ export function sessionRows(db: Db): SessionRow[] {
 			archived_at: r.archived_at as number | null,
 			visited_at: r.visited_at as number | null,
 			view: r.view as View | null,
+			group_name: r.group_name as string | null,
 			runtime:
 				r.tmux_session === null ? null : { tmux_session: r.tmux_session as string, boot_id: r.boot_id as string, pid: r.pid as number },
 		}));
@@ -108,6 +111,7 @@ export function derive(row: SessionRow, w: World): SessionState {
 		project: row.project_root,
 		cwd: row.cwd,
 		branch: row.branch,
+		group: row.group_name,
 		open,
 		live,
 		activity,

@@ -30,7 +30,7 @@ const USAGE = `swb: Agent Switchboard
   swb wake ID                  start a dormant session's pi in the background
   swb drive start [--size COLSxROWS] [--theme light|dark] [-- swb-args]
   swb drive keys [--delay MS] [-l TEXT]… [KEY…] | capture [--ansi] | theme light|dark | focus in|out
-            | click X Y | drag X1 Y1 X2 Y2 (0-based cells) | resize COLSxROWS | clipboard | stop
+            | click X Y | drag X1 Y1 X2 Y2 [--hold] | release X Y (0-based cells) | resize COLSxROWS | clipboard | stop
   swb drive state | wait PATH=VALUE [--timeout MS]
   swb deck state [--deck NAME] [--json]
   swb migrate                  create or upgrade the db

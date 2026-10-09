@@ -39,9 +39,19 @@ export type State = "loading" | "blocked" | "working" | "unseen" | "idle" | "dor
 
 export type StatSummary = { n: number; lastMs: number; avgMs: number; medianMs: number; maxMs: number };
 
-export type SessionStateRow = { kind: "session"; id: string; title: string; glyph: string; state: State; provisional: boolean };
+/** `group` is the label of the Group or worktree bucket it sits in, null when directly under its Project or a section. */
+export type SessionStateRow = {
+	kind: "session";
+	id: string;
+	title: string;
+	glyph: string;
+	state: State;
+	provisional: boolean;
+	group: string | null;
+};
 
-export type HeaderStateRow = { kind: "header"; project: string; expanded: boolean };
+/** A Project header has a null group; a Group or worktree bucket beneath it names its own. */
+export type HeaderStateRow = { kind: "header"; project: string; group: string | null; expanded: boolean };
 
 export type StateRow = SessionStateRow | HeaderStateRow | { kind: "section"; label: string; count: number; expanded: boolean };
 
@@ -53,7 +63,9 @@ export type DeckState = {
 	cursor: string | null;
 	/** The cursor's index in `rows`, headers included. */
 	cursorRow: number;
-	mode: "filter" | "roster";
+	mode: "filter" | "name" | "roster";
+	/** Mid-drag, the header a release would drop into: its Project, and its Group or worktree bucket, if any. */
+	drop: { project: string; group: string | null } | null;
 	filter: string;
 	focus: "roster" | "stage" | "editor";
 	staged: {
@@ -84,6 +96,7 @@ export type ToWorker =
 	| { type: "transcript"; id: string; path: string }
 	| { type: "background"; color: string }
 	| { type: "view"; id: string; view: View }
+	| { type: "group"; ids: string[]; name: string | null }
 	| { type: "editor"; dir: string };
 
 export type FromWorker =
@@ -95,4 +108,5 @@ export type FromWorker =
 	| { type: "toggled"; error: string | null }
 	| { type: "editor"; dir: string; name: string | null; text: string | null }
 	| { type: "viewFailed"; id: string; text: string }
+	| { type: "groupFailed"; text: string }
 	| { type: "error"; text: string };

@@ -326,6 +326,65 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	groups: {
+		setup: async (s) => {
+			config(s, 'group_by = "worktree"');
+			const worktree = join(s.root, "project-wt");
+			git(s, s.project, "init", "-q", "-b", "main");
+			git(s, s.project, "commit", "-q", "--allow-empty", "-m", "init");
+			git(s, s.project, "worktree", "add", "-q", "-b", "wt", worktree);
+			await seed(s, { turns: ["one"], title: "alpha" }, { turns: ["two"], title: "bravo" });
+			s.swb("drive", "start", "--", "new", "--cwd", worktree);
+			await until(() => JSON.parse(s.swb("drive", "state")).staged.kind === "live", TAPE, "the worktree's pi on the Stage");
+			s.keys("-l", "reply in the worktree", "Enter");
+			await until(() => s.signal("replied.in the worktree") !== "", TAPE, "the worktree's reply");
+			await waitLs(s, "titled after a turn", (ls) => ls.some((e) => e.cwd === worktree && e.activity === "idle"));
+			s.swb("drive", "stop");
+		},
+		run: async (s) => {
+			const id = (title: string) => s.ls().find((e) => e.title === title)?.id;
+			await waitLs(s, "alpha in review", (ls) => ls.find((e) => e.title === "alpha")?.group === "review");
+			let st = await waitDeck(
+				s,
+				"review on the roster",
+				(x) => x.filter === "" && x.rows.some((r) => r.kind === "header" && r.group === "review"),
+			);
+			// The roster's own pane, as a terminal would report the mouse to it: SGR, 1-based.
+			const mouse = async (...events: [number, number, number, boolean?][]) => {
+				for (const [button, col, row, up] of events) {
+					const bytes = [...Buffer.from(`\x1b[<${button};${col + 1};${row + 1}${up ? "m" : "M"}`)].map((b) =>
+						b.toString(16).padStart(2, "0"),
+					);
+					s.tmux(s.servers.ui, "send-keys", "-t", `=${st.deck}:.0`, "-H", ...bytes);
+					await Bun.sleep(120);
+				}
+			};
+			const line = (probe: (row: DeckState["rows"][number]) => boolean) => 2 + st.rows.findIndex(probe);
+			const drag = (from: number, to: number) =>
+				mouse([0, 8, from], ...[1, 2, 3, 4].map((i): [number, number, number] => [32, 8, Math.round(from + ((to - from) * i) / 4)]));
+
+			await Bun.sleep(2500);
+			const bravo = line((r) => r.kind === "session" && r.id === id("bravo"));
+			const alpha = line((r) => r.kind === "session" && r.id === id("alpha"));
+			await drag(bravo, alpha);
+			await waitDeck(s, "review lit as the drop", (x) => x.drop?.group === "review");
+			await Bun.sleep(2500);
+			await mouse([0, 8, alpha, true]);
+			await waitLs(s, "bravo in review", (ls) => ls.find((e) => e.title === "bravo")?.group === "review");
+
+			st = await waitDeck(s, "two in review", (x) => x.rows.filter((r) => r.kind === "session" && r.group === "review").length === 2);
+			await Bun.sleep(2500);
+			const from = line((r) => r.kind === "session" && r.id === id("bravo"));
+			const wt = line((r) => r.kind === "header" && r.group === "⎇ wt");
+			await drag(from, wt);
+			await Bun.sleep(2500);
+			if (deck(s).drop !== null) throw new Error("a worktree bucket of another branch offered itself as a drop");
+			await mouse([0, 8, wt, true]);
+			await waitDeck(s, "the refusal", (x) => x.toasts.some((t) => t.text.includes("nothing moved")));
+			expect(s.ls().find((e) => e.title === "bravo")?.group).toBe("review");
+		},
+	},
+
 	"move-mv": {
 		packages: ["@thurstonsand/pi-wt"],
 		setup: async (s) => {

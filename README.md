@@ -39,7 +39,7 @@ swb wake ID                  start a dormant session's pi in the background
 
 Inside a managed session, the recorder registers swb as a pi-sessions host, so `session_handoff` offers `launch: "swb"` in place of tmux and Ghostty splits. The child starts managed and lands on the roster. `session_reachable` lists dormant sessions too, and `session_send_message` to one wakes it first. Subagents still run in their parent's tmux and never become sessions.
 
-In the roster, `j`/`k` move, `Enter` focuses the session (waking it if it's dormant), `w` wakes it in the background, `n` starts a new session in the highlighted directory, `N` in the one you ran `swb` from, `a` archives or unarchives, `/` filters, and `q` quits. `M-a` is the Deck's prefix from anywhere: `M-a h` returns to the roster, `M-a e` swaps pi and the editor and focuses it, `M-a z` hides the roster, `M-a n`/`M-a N`/`M-a j`/`M-a k` and the other roster keys work after it too, `M-a q` closes the Deck, `M-a ?` lists the rest. Clicking a session focuses it, and the tabs under the roster and its legend are clickable.
+In the roster, `j`/`k` move, `Enter` focuses the session (waking it if it's dormant), `w` wakes it in the background, `n` starts a new session in the highlighted directory, `N` in the one you ran `swb` from, `a` archives or unarchives, `m` names the session's Group (or renames one from its header), `/` filters, and `q` quits. `M-a` is the Deck's prefix from anywhere: `M-a h` returns to the roster, `M-a e` swaps pi and the editor and focuses it, `M-a z` hides the roster, `M-a n`/`M-a N`/`M-a j`/`M-a k` and the other roster keys work after it too, `M-a q` closes the Deck, `M-a ?` lists the rest. Dragging a session onto a Group, or anywhere beneath one, moves it there. Clicking a session focuses it, and the tabs under the roster and its legend are clickable.
 
 ## Settings
 
@@ -52,6 +52,7 @@ inactive_after = "72h"    # open sessions idle this long move to Inactive
 reap_after = "30m"        # an idle live pi nobody is viewing is stopped after this long
 clipboard = "wl-copy"     # defaults to wl-copy, else xclip, else pbcopy
 roster_width = 42         # columns, or a share of the Deck like "25%"; never more than half
+group_by = "project"      # "worktree" buckets each Project's ungrouped sessions by worktree branch
 
 [keys]
 prefix = "M-a"

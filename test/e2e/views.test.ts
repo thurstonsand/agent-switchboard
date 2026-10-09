@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { join } from "node:path";
 import type { DeckState } from "../../packages/cli/src/deck/protocol.ts";
-import { config, cursorTo, entry, piSessions, reply, seed, state, waitState } from "./harness/deck.ts";
+import { config, cursorTo, entry, piSessions, reply, seed, sessionRows, state, waitState } from "./harness/deck.ts";
 import { budgets, git, type Scenario, scenario, until, which } from "./harness/index.ts";
 
 const NVIM = which("nvim");
@@ -398,4 +398,91 @@ test("a bad config key fails loudly, naming the key", async () => {
 		out.push(`$ cat config.toml\n${toml}\n$ swb ls\n${result.err}`);
 	}
 	s.save("errors.txt", out.join("\n"));
+});
+
+/** Each Group or worktree bucket, or `(project)` for sessions directly under it, with its open sessions. */
+function groups(st: DeckState): Record<string, string[]> {
+	const out: Record<string, string[]> = {};
+	for (const row of sessionRows(st)) {
+		const label = row.group ?? "(project)";
+		out[label] = [...(out[label] ?? []), row.id].sort();
+	}
+	return out;
+}
+
+/** The screen line a row of the open roster renders on: the list starts two lines down. */
+function lineOf(st: DeckState, probe: (row: DeckState["rows"][number]) => boolean): number {
+	return 2 + st.rows.findIndex(probe);
+}
+
+test("m names a session's Group; dragging moves it between Groups beside worktree buckets, and a Group lives only as long as its sessions", async () => {
+	s = scenario("phase4", "groups");
+	config(s, 'group_by = "worktree"');
+	const worktree = join(s.root, "project-wt");
+	git(s, s.project, "init", "-q", "-b", "main");
+	git(s, s.project, "commit", "-q", "--allow-empty", "-m", "init");
+	git(s, s.project, "worktree", "add", "-q", "-b", "wt", worktree);
+	const [a, b] = (await seed(s, { turns: ["one"], title: "alpha" }, { turns: ["two"], title: "bravo" })) as [string, string];
+	const w = (await started(s, "--", "new", "--cwd", worktree)).staged.id as string;
+	s.swb("drive", "stop");
+	s.swb("drive", "start");
+	const sorted = (...ids: string[]) => ids.sort();
+	await waitState(s, "worktree buckets", (x) => x.ready && Bun.deepEquals(groups(x), { "⎇ main": sorted(a, b), "⎇ wt": [w] }));
+	s.save("buckets.txt", s.screen());
+	s.save("buckets.ansi", s.swb("drive", "capture", "--ansi"));
+
+	await cursorTo(s, a);
+	s.keys("m");
+	await waitState(s, "naming", (x) => x.mode === "name");
+	s.keys("-l", "review", "Enter");
+	let st = await waitState(s, "alpha in review", (x) => groups(x).review?.join() === a && x.mode === "roster");
+	expect(groups(st)).toEqual({ review: [a], "⎇ main": [b], "⎇ wt": [w] });
+	expect(entry(s, a).group).toBe("review");
+	s.save("named.ansi", s.swb("drive", "capture", "--ansi"));
+
+	const bravo = lineOf(st, (r) => r.kind === "session" && r.id === b);
+	const alpha = lineOf(st, (r) => r.kind === "session" && r.id === a);
+	expect(s.screen().split("\n")[bravo]?.slice(0, 30)).toContain("bravo");
+	s.swb("drive", "drag", "8", `${bravo}`, "8", `${alpha}`, "--hold");
+	await waitState(s, "review lit as the drop", (x) => x.drop?.group === "review");
+	await until(() => s.screen().includes("drop into review"), budgets.settle, "the drop hint");
+	s.save("dragging.ansi", s.swb("drive", "capture", "--ansi"));
+	s.swb("drive", "release", "8", `${alpha}`);
+	st = await waitState(s, "bravo dropped into review", (x) => groups(x).review?.length === 2 && x.drop === null);
+	expect(groups(st)).toEqual({ review: sorted(a, b), "⎇ wt": [w] });
+	expect(entry(s, b).group).toBe("review");
+	s.save("dropped.ansi", s.swb("drive", "capture", "--ansi"));
+
+	const wt = lineOf(st, (r) => r.kind === "header" && r.group === "⎇ wt");
+	const from = lineOf(st, (r) => r.kind === "session" && r.id === b);
+	s.swb("drive", "drag", "8", `${from}`, "8", `${wt}`, "--hold");
+	await until(() => s.screen().includes("✗ not here"), budgets.settle, "the refusal hint");
+	expect(state(s).drop).toBeNull();
+	s.save("refused.ansi", s.swb("drive", "capture", "--ansi"));
+	s.swb("drive", "release", "8", `${wt}`);
+	st = await waitState(s, "the refusal toast", (x) => x.toasts.some((t) => t.text.includes("nothing moved")));
+	expect(groups(st)).toEqual({ review: sorted(a, b), "⎇ wt": [w] });
+
+	const project = lineOf(st, (r) => r.kind === "header" && r.group === null);
+	s.swb("drive", "drag", "8", `${from}`, "8", `${project}`);
+	st = await waitState(s, "bravo back in its bucket", (x) => groups(x)["⎇ main"]?.join() === b);
+	expect(groups(st)).toEqual({ review: [a], "⎇ main": [b], "⎇ wt": [w] });
+	expect(entry(s, b).group).toBeNull();
+
+	s.swb("archive", a);
+	await waitState(s, "review gone with its last session", (x) => !x.rows.some((r) => r.kind === "header" && r.group === "review"));
+	s.swb("unarchive", a);
+	await waitState(s, "review back with it", (x) => groups(x).review?.join() === a);
+
+	await cursorTo(s, a);
+	s.keys("k");
+	await waitState(s, "on the review header", (x) => x.rows[x.cursorRow]?.kind === "header");
+	s.keys("m");
+	await waitState(s, "renaming", (x) => x.mode === "name");
+	s.keys("C-u", "-l", "triage", "Enter");
+	st = await waitState(s, "review renamed triage", (x) => groups(x).triage?.join() === a);
+	const at = st.rows[st.cursorRow];
+	expect(at?.kind === "header" && at.group).toBe("triage");
+	expect(entry(s, a).group).toBe("triage");
+	s.save("renamed.ansi", s.swb("drive", "capture", "--ansi"));
 });

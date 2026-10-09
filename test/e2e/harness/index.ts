@@ -53,6 +53,7 @@ export type LsEntry = {
 	project: string;
 	cwd: string;
 	branch: string | null;
+	group: string | null;
 	open: boolean;
 	live: boolean;
 	activity: "idle" | "working" | "blocked";

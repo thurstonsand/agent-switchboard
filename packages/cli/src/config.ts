@@ -12,6 +12,8 @@ export type Config = {
 	clipboard: string;
 	prefix: string;
 	rosterWidth: RosterWidth;
+	/** What a Project's sessions sit under before any Group: the Project itself, or one bucket per worktree. */
+	groupBy: "project" | "worktree";
 };
 
 /** The roster's width: columns, or a share of the Deck. */
@@ -54,6 +56,7 @@ export function loadConfig(): Config {
 		clipboard: defaultClipboard(),
 		prefix: "M-a",
 		rosterWidth: { cols: 42 },
+		groupBy: "project",
 	};
 	for (const [key, value] of Object.entries(raw)) {
 		switch (key) {
@@ -61,6 +64,11 @@ export function loadConfig(): Config {
 				if (value !== "lazy" && value !== "eager")
 					throw new SwbError(`config: hover must be "lazy" or "eager", got ${JSON.stringify(value)}`);
 				config.hover = value;
+				break;
+			case "group_by":
+				if (value !== "project" && value !== "worktree")
+					throw new SwbError(`config: group_by must be "project" or "worktree", got ${JSON.stringify(value)}`);
+				config.groupBy = value;
 				break;
 			case "editor":
 				config.editor = string(key, value);
