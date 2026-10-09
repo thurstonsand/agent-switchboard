@@ -1,4 +1,4 @@
-# A turn that finishes while I'm looking elsewhere is Unseen; landing on it Visits it.
+# A turn that finishes while I'm looking elsewhere is Unseen; landing on it doesn't clear it, focusing its pi does.
 Source common.tape
 
 Type "# unseen: a turn finished while I looked elsewhere; a visit clears it" Sleep 1s Enter
@@ -22,4 +22,9 @@ Alt+a
 Type "h"
 Sleep 800ms
 Type "k"
-Sleep 4s
+Sleep 3s
+Screenshot ../artifacts/phase6/videos/unseen-visit-on-view.png
+Enter
+Sleep 3s
+Screenshot ../artifacts/phase6/videos/unseen-visit-focused.png
+Sleep 1s

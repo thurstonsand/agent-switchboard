@@ -42,7 +42,7 @@ What a live session's agent is doing right now: **working**, **blocked** on me (
 The agent finished its turn and is waiting for my next prompt.
 
 **Visit**:
-The moment I last looked at a session, by opening it from the **Roster** or focusing its **Viewer**; a timestamp watermark.
+The moment I last looked at a session, by focusing its pi on the **Stage** for a second, or focusing its **Viewer**; a timestamp watermark.
 
 **Unseen**:
 A session whose agent finished a turn after my last **Visit**.

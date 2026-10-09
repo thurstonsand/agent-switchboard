@@ -39,7 +39,7 @@ swb wake ID                  start a dormant session's pi in the background
 
 Inside a managed session, the recorder registers swb as a pi-sessions host, so `session_handoff` offers `launch: "swb"` in place of tmux and Ghostty splits. The child starts managed and lands on the roster. `session_reachable` lists dormant sessions too, and `session_send_message` to one wakes it first. Subagents still run in their parent's tmux and never become sessions.
 
-In the roster, `j`/`k` move, `Enter` focuses the session (waking it if it's dormant), `w` wakes it in the background, `n` starts a new session in the highlighted directory, `N` in the one you ran `swb` from, `a` archives or unarchives, `/` filters, and `q` quits. `M-a` is the Deck's prefix from anywhere: `M-a h` returns to the roster, `M-a e` swaps pi and the editor and focuses it, `M-a z` hides the roster, `M-a n`/`M-a N`/`M-a j`/`M-a k` and the other roster keys work after it too, `M-a q` closes the Deck, `M-a ?` lists the rest. The tabs under the roster and its legend are clickable.
+In the roster, `j`/`k` move, `Enter` focuses the session (waking it if it's dormant), `w` wakes it in the background, `n` starts a new session in the highlighted directory, `N` in the one you ran `swb` from, `a` archives or unarchives, `/` filters, and `q` quits. `M-a` is the Deck's prefix from anywhere: `M-a h` returns to the roster, `M-a e` swaps pi and the editor and focuses it, `M-a z` hides the roster, `M-a n`/`M-a N`/`M-a j`/`M-a k` and the other roster keys work after it too, `M-a q` closes the Deck, `M-a ?` lists the rest. Clicking a session focuses it, and the tabs under the roster and its legend are clickable.
 
 ## Settings
 

@@ -125,7 +125,7 @@ The final visual spec comes from the Deck mock rounds (see [ticket 09](../wayfin
 - `N` starts a new session where `swb` was run, whatever the cursor is on.
 - `w` wakes a dormant session in the background and never takes the keyboard.
 - `/` filters; `y` copies `swb open <id>`; `Y` copies `@session:<uuid>`.
-- `l` on a session row is Enter, and on a collapsed header it expands. `h` on an expanded header collapses it; on a collapsed header or a session row it does nothing. Clicking, Enter, or space on a header toggles it. `q` quits the Deck.
+- `l` on a session row is Enter, and on a collapsed header it expands. `h` on an expanded header collapses it; on a collapsed header or a session row it does nothing. Clicking, Enter, or space on a header toggles it. Clicking a session row is Enter: a click is a choice, unlike the cursor passing over it. `q` quits the Deck.
 
 **Prefix** (`M-a`, rebindable), handled by the UI server:
 - `Tab` toggles focus between the roster and the Stage. `h` and `l` move focus one pane left or right: roster, then editor and pi in split view.
@@ -222,7 +222,7 @@ Derived, never stored:
 - **Live**: a runtime row for the session with the current `boot_id`, `kill(pid, 0)` succeeds, and its `tmux_session` exists on the sessions server.
 - **Provisional**: a live runtime whose `session_id` has no `sessions` row yet: a new session before its first turn. The roster shows it as a "new session" row in its project, so the Deck can select and show it; it is never persisted as a Session.
 - **Interrupted**: not live and `phase != 'idle'`.
-- **Unseen**: open, `last_settled_at > coalesce(visited_at, 0)`, and not on the Stage of a focused Deck right now.
+- **Unseen**: open, `last_settled_at > coalesce(visited_at, 0)`, and not focused on a Deck's Stage right now.
 - **Reapable**: live, `phase = 'idle'`, no client attached to its tmux session, and `max(coalesce(last_settled_at, 0), coalesce(visited_at, 0))` older than `reap_after`.
 - **`activity_at`**: `max(last_prompt_at, coalesce(last_settled_at, 0))`. Archived rows order by `max(activity_at, archived_at)`. SQLite's scalar `max` returns NULL if any argument is NULL, so every nullable column is coalesced.
 - **Inactive**: open, `activity_at` older than 72h, and neither blocked nor unseen.
@@ -424,9 +424,9 @@ The placeholder is `swb`'s own process, so it can bind `esc` on the loading card
 ### Visit
 
 ```text
-roster loop: selected session S shown live, terminalFocused = true, for ≥ 1 s
+roster loop: selected session S live, its pi pane holding the keyboard, terminalFocused = true, for ≥ 1 s
   db.tx: marks.visited_at = now                once per 1 s dwell, again on leaving if the dwell completed, and again when a turn settles on it
-the dwell timer carries the selection it started for, so a stale timer never visits a later selection
+the dwell timer carries the session it started for, so a stale timer never visits a later one
 tmux client-focus-in / client-focus-out on the sessions server (plain attach viewers):
   swb visit --client <tty> --in|--out  → resolve client → session → visited_at = now
 ```
@@ -528,9 +528,9 @@ On every surface, archiving refuses while a turn is running. Archiving an idle s
 
 Whether a process is running is plumbing. A process starts only by `w`, Enter, or eager hover, and it stops by quitting, archiving, or reaping. The roster shows Dormant as Idle. Only ⚠ Interrupted surfaces process death, because a dead turn is the one runtime fact worth acting on.
 
-### 9. Visit means "it was live on a focused Deck's Stage"
+### 9. Visit means "I focused its pi"
 
-The Stage shows the real screen, so being shown there is seeing it, wherever the keyboard focus is. The 1 s dwell keeps a fast scroll through the roster from clearing everything it passes.
+Showing a session on the Stage while the cursor passes over it cleared Unseen too easily: a glance isn't reading. Focusing its pi is the deliberate act, so a Visit needs the keyboard in pi's pane for 1 s. The editor pane of a split doesn't count.
 
 ### 10. pi mints ids, and tmux names are internal
 

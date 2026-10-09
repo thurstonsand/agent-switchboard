@@ -170,7 +170,7 @@ test("three Decks stay in sync: a wake, an archive, and a new session in one sho
 	const rowState = (st: DeckState, id: string) => sessionRows(st).find((r) => r.id === id)?.state;
 
 	await cursorTo(s, a);
-	s.keys("w");
+	s.keys("Enter");
 	await waitState(s, "a live", (x) => x.staged.id === a && x.staged.kind === "live", budgets.piReady);
 	await until(
 		() => rowState(two.state(), a) === "idle" && rowState(three.state(), a) === "idle",
@@ -317,6 +317,11 @@ test("roster navigation: h l space and a header click fold projects; g G jump; M
 
 	await cursorTo(s, b);
 	await waitState(s, "b live on the Stage", (x) => x.staged.id === b && x.staged.kind === "live");
+	s.swb("drive", "click", "6", String(otherLine + 1));
+	await waitState(s, "one click on b focuses its pi", (x) => x.focus === "stage" && x.staged.id === b);
+	await Bun.sleep(500);
+	s.keys("M-a", "h");
+	await waitState(s, "back to the roster", (x) => x.focus === "roster");
 	s.keys("M-a", "Tab");
 	await waitState(s, "Tab to pi", (x) => x.focus === "stage");
 	s.keys("M-a", "Tab");

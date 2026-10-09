@@ -205,7 +205,7 @@ test("Inactive after inactive_after, never while blocked or unseen", async () =>
 	s.keys("M-a", "h");
 	await waitState(s, "roster focus", (x) => x.focus === "roster");
 	await cursorTo(s, unseen);
-	s.keys("w");
+	s.keys("Enter");
 	await waitState(s, "unseen live on view", (x) => x.staged.id === unseen && x.staged.kind === "live", budgets.piReady);
 	await until(() => entry(s, unseen).inactive, 8000, "visited, then inactive");
 	const st = await waitState(s, "Inactive section", (x) => x.rows.some((r) => r.kind === "section" && r.label === "Inactive"));

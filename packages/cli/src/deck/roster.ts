@@ -129,7 +129,6 @@ const launches: Launch[] = [];
 let focus: "roster" | "stage" = "roster";
 // No focus event has arrived when the Deck starts; the terminal that just launched it is assumed focused.
 let terminalFocused = true;
-let terminalFocusedAt = Date.now();
 /** A wide Deck's roster, broken out of the Stage's window so the Stage fills the terminal. */
 let rosterHidden = false;
 let narrow = false;
@@ -172,8 +171,7 @@ function launchFor(id: string): Launch | undefined {
 }
 
 function isUnseen(e: Entry): boolean {
-	if (!e.unseen) return false;
-	return !(piShown(stage.applied) && stage.applied.id === e.id && terminalFocused);
+	return e.unseen && stage.watched !== e.id;
 }
 
 /** Views chosen in this Deck that the db doesn't reflect yet. */
@@ -284,7 +282,7 @@ const stage = {
 	holdForNew: false,
 	applied: onCard("empty", null, EMPTY),
 	cardJson: "",
-	liveSince: 0,
+	watched: null as string | null,
 	visited: false,
 	visitTimer: null as Timer | null,
 	hoverTimer: null as Timer | null,
@@ -435,12 +433,7 @@ function apply(): void {
 	writeStageCard(d);
 	const prev = stage.applied;
 	stage.applied = d;
-	const was = piShown(prev) ? prev.id : null;
-	const now = piShown(d) ? d.id : null;
-	if (was !== now) {
-		if (was) leaveLive(was);
-		if (now) enterLive(now);
-	}
+	syncVisit();
 	const e = d.id === null ? undefined : entries.get(d.id);
 	if (d.host && e?.open && viewOf(e) !== "pi" && snapshot && !snapshot.editors[e.cwd]) {
 		if (!editorsAsked.has(e.cwd)) void requestEditor(e.cwd);
@@ -456,32 +449,31 @@ function apply(): void {
 	switchStage(main, d.target, false);
 }
 
-function enterLive(id: string): void {
-	stage.liveSince = Date.now();
-	stage.visited = false;
-	armVisit(id);
+function watching(): string | null {
+	const a = stage.applied;
+	if (!terminalFocused || focus !== "stage" || !piShown(a)) return null;
+	if (a.view === "split" && focusedPane === stagePane) return null;
+	return a.id;
 }
 
-function leaveLive(id: string): void {
+/** A Visit is pi focused on a focused Deck's Stage for 1 s; passing over a session in the roster isn't one. */
+function syncVisit(): void {
+	const id = watching();
+	if (id === stage.watched) return;
 	if (stage.visitTimer) clearTimeout(stage.visitTimer);
 	stage.visitTimer = null;
-	if (stage.visited && terminalFocused) post({ type: "visit", id });
+	// Turns that landed while I watched are seen.
+	if (stage.watched && stage.visited) post({ type: "visit", id: stage.watched });
 	stage.visited = false;
-}
-
-/** A Visit is a session live on a focused Deck's Stage for 1 s. The timer carries its id, so it never visits a later selection. */
-function armVisit(id: string): void {
-	if (stage.visitTimer) clearTimeout(stage.visitTimer);
-	stage.visitTimer = null;
-	if (!terminalFocused) return;
-	const wait = Math.max(0, VISIT_MS - (Date.now() - Math.max(stage.liveSince, terminalFocusedAt)));
+	stage.watched = id;
+	if (id === null) return;
 	stage.visitTimer = setTimeout(() => {
 		stage.visitTimer = null;
-		if (!piShown(stage.applied) || stage.applied.id !== id || !terminalFocused) return;
+		if (stage.watched !== id) return;
 		stage.visited = true;
 		post({ type: "visit", id });
 		tui.requestRender();
-	}, wait);
+	}, VISIT_MS);
 }
 
 function stageSession(id: string): void {
@@ -591,9 +583,7 @@ function onSnapshot(next: Snapshot): void {
 	apply();
 	roster.syncStage(false);
 	// A turn that lands while I'm already watching is seen as it lands.
-	const applied = stage.applied;
-	if (piShown(applied) && applied.id && stage.visited && terminalFocused && entries.get(applied.id)?.unseen)
-		post({ type: "visit", id: applied.id });
+	if (stage.watched && stage.visited && entries.get(stage.watched)?.unseen) post({ type: "visit", id: stage.watched });
 }
 
 // ── worker ──────────────────────────────────────────────────────────────
@@ -889,9 +879,8 @@ class Roster implements Component {
 		this.selectedKey = row.key;
 		this.lastIndex = index;
 		stage.holdForNew = false;
-		// Every click on a header toggles it; a session row needs a double-click to focus.
 		if (isHeader(row)) this.toggle(row);
-		else if ((event.clickCount ?? 1) >= 2) this.focusEntry(row.entry);
+		else this.focusEntry(row.entry);
 		this.syncStage(true);
 		return { handled: true };
 	}
@@ -1304,15 +1293,7 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 			const focused = argv[0] === "in";
 			if (focused === terminalFocused) break;
 			terminalFocused = focused;
-			if (focused) {
-				terminalFocusedAt = Date.now();
-				if (piShown(stage.applied) && stage.applied.id) armVisit(stage.applied.id);
-			} else {
-				if (stage.visitTimer) clearTimeout(stage.visitTimer);
-				stage.visitTimer = null;
-				if (piShown(stage.applied) && stage.applied.id && stage.visited) post({ type: "visit", id: stage.applied.id });
-				stage.visited = false;
-			}
+			syncVisit();
 			break;
 		}
 		case "layout":

@@ -193,6 +193,9 @@ export const directors: Record<string, Director> = {
 			await Bun.sleep(1500);
 			release(s, "background-job");
 			await waitLs(s, "the job unseen", (ls) => ls.find((e) => e.id === busy?.id)?.unseen === true);
+			await waitDeck(s, "the cursor on the job", (x) => x.staged.id === busy?.id && x.staged.kind === "live" && x.focus === "roster");
+			await Bun.sleep(2000);
+			if (!s.ls().find((e) => e.id === busy?.id)?.unseen) throw new Error("passing over the job cleared Unseen");
 			await waitLs(s, "visited", (ls) => ls.find((e) => e.id === busy?.id)?.unseen === false);
 		},
 	},

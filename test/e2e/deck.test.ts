@@ -102,7 +102,7 @@ test("swb open selects an Inactive session, opening its section", async () => {
 	config(s, 'inactive_after = "2s"');
 	s.swb("drive", "start");
 	await cursorTo(s, a);
-	s.keys("w");
+	s.keys("Enter");
 	const up = await waitState(s, "a live", (x) => x.staged.id === a && x.staged.kind === "live", budgets.piReady);
 	await until(() => entry(s, a).unseen === false, budgets.settle, "a visited");
 	s.tmux(s.servers.sessions, "kill-session", "-t", `=${up.staged.host}`);
@@ -149,7 +149,7 @@ test("an idle, unviewed pi is reaped after reap_after; the one on view is not", 
 	s.save("reaped.txt", `${s.screen()}\n${JSON.stringify(s.ls(), null, 2)}`);
 });
 
-test("a live session on view for a second is Visited and stops being Unseen; a dormant one on view is not", async () => {
+test("a session is Visited by a focused second on its pi, not by the cursor passing over it", async () => {
 	s = scenario("phase2", "visit");
 	const [a, b] = (await seed(s, { turns: ["a"] }, { turns: ["b"] })) as [string, string];
 	s.swb("drive", "start");
@@ -159,6 +159,12 @@ test("a live session on view for a second is Visited and stops being Unseen; a d
 	await cursorTo(s, a);
 	s.keys("w");
 	await waitState(s, "a live", (x) => x.staged.id === a && x.staged.kind === "live", budgets.piReady);
+	await Bun.sleep(2000);
+	expect(entry(s, a).unseen).toBe(true);
+	expect(state(s).rows.find((r) => r.kind === "session" && r.id === a)).toMatchObject({ state: "unseen" });
+	s.save("on-view-unseen.txt", s.screen());
+	s.keys("Enter");
+	await waitState(s, "pi focused", (x) => x.focus === "stage");
 	await until(() => !entry(s, a).unseen, 3000, "a visited");
 	expect(entry(s, b).unseen).toBe(true);
 	s.save("visited.txt", `${s.screen()}\n${JSON.stringify(s.ls(), null, 2)}`);

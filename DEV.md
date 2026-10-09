@@ -47,4 +47,4 @@ Some scenarios install the host's own pi-sessions and pi-wt, found through its p
 - **Never write unit tests.** Every test is an end-to-end test of a real workflow: real interactive pi inside private tmux servers, the real recorder, db, and `swb`. That includes real pi-sessions subagents and handoffs, which must never appear as Sessions
 - Drive the Deck the way a human would, through `swb drive` (keys in, screen captured out) and `swb deck state --json`
 - pi-ai's faux provider, registered by a scenario extension, scripts turns offline at zero token cost
-- Every change ships with visual proof, as VHS recordings, screen captures, or `capture-pane` output, whichever shows it best
+- Every change ships with visual proof I can look at: a VHS recording (`mise run evidence`), or a PNG from a tape's `Screenshot` command. Text captures and `capture-pane` output are for assertions; I read them, but I'd much rather see an image
