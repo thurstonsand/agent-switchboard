@@ -34,10 +34,13 @@ export function cleanEnv(extra: Record<string, string> = {}): Record<string, str
 	return env;
 }
 
+/** Clients run from /, so a mise tmux shim can't apply the caller's project env to the panes they create. */
+export const CLIENT_CWD = "/";
+
 type Result = { ok: boolean; out: string; err: string };
 
 export function tmuxTry(server: string, ...args: string[]): Result {
-	const result = Bun.spawnSync([tmuxBin(), "-L", server, ...args], { env: cleanEnv(), stdout: "pipe", stderr: "pipe" });
+	const result = Bun.spawnSync([tmuxBin(), "-L", server, ...args], { cwd: CLIENT_CWD, env: cleanEnv(), stdout: "pipe", stderr: "pipe" });
 	return { ok: result.exitCode === 0, out: result.stdout.toString().replace(/\n$/, ""), err: result.stderr.toString().trim() };
 }
 
@@ -48,7 +51,7 @@ export function tmux(server: string, ...args: string[]): string {
 }
 
 export async function tmuxAsync(server: string, ...args: string[]): Promise<string> {
-	const proc = Bun.spawn([tmuxBin(), "-L", server, ...args], { env: cleanEnv(), stdout: "pipe", stderr: "pipe" });
+	const proc = Bun.spawn([tmuxBin(), "-L", server, ...args], { cwd: CLIENT_CWD, env: cleanEnv(), stdout: "pipe", stderr: "pipe" });
 	const [code, out, err] = await Promise.all([proc.exited, new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
 	if (code !== 0) throw new SwbError(`tmux -L ${server} ${args.join(" ")}: ${err.trim()}`);
 	return out.replace(/\n$/, "");

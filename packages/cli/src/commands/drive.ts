@@ -177,7 +177,21 @@ export async function drive(args: string[]): Promise<void> {
 			const themeLines = themeCommands(theme(values.theme)).map(([set, flag, option, value]) => `${set} ${flag} ${option} ${quote(value)}`);
 			writeFileSync(conf, [...HARNESS_CONF, ...themeLines, ""].join("\n"));
 			const command = [SWB, ...swbArgs].map(quote).join(" ");
-			harness("-f", conf, "new-session", "-d", "-s", "drive", "-x", match[1] as string, "-y", match[2] as string, command);
+			harness(
+				"-f",
+				conf,
+				"new-session",
+				"-d",
+				"-s",
+				"drive",
+				"-c",
+				process.cwd(),
+				"-x",
+				match[1] as string,
+				"-y",
+				match[2] as string,
+				command,
+			);
 			if (swbArgs.length === 0 || ["new", "open", "adopt"].includes(swbArgs[0] as string)) await waitReady();
 			break;
 		}

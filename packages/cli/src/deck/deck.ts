@@ -5,7 +5,7 @@ import { type Config, loadConfig } from "../config.ts";
 import { SwbError } from "../errors.ts";
 import { ensureServer, ensureSessionsServer, hook, notify, randomHex, SWB, startScrubbed } from "../sessions.ts";
 import { openStore } from "../store.ts";
-import { cleanEnv, listSessions, quote, SESSIONS, tmux, tmuxBin, tmuxTry, UI } from "../tmux.ts";
+import { CLIENT_CWD, cleanEnv, listSessions, quote, SESSIONS, tmux, tmuxBin, tmuxTry, UI } from "../tmux.ts";
 import type { Card, DeckPaths, DeckState } from "./protocol.ts";
 
 export const HELP_POPUP = ["-w", "62", "-h", "26", "-T", " swb keys ", `${SWB} __help`];
@@ -232,6 +232,7 @@ export async function openDeck(intent: DeckIntent): Promise<void> {
 	if (cols < NARROW_BELOW) tmux(UI, "set", "-t", deck, "@swb_narrow", "1", ";", "resize-pane", "-Z", "-t", rosterPane);
 
 	const attach = Bun.spawn([tmuxBin(), "-L", UI, "attach", "-t", `=${deck}`], {
+		cwd: CLIENT_CWD,
 		env: cleanEnv(),
 		stdio: ["inherit", "inherit", "inherit"],
 	});

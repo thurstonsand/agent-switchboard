@@ -3,7 +3,7 @@ import { basename, join } from "node:path";
 import { bootId, type Db, dbPath, projectRoot, stateDir } from "@swb/shared";
 import { runtimeLive } from "./derive.ts";
 import { SwbError } from "./errors.ts";
-import { cleanEnv, listSessions, quote, SESSIONS, tmux, tmuxBin, tmuxTry } from "./tmux.ts";
+import { CLIENT_CWD, cleanEnv, listSessions, quote, SESSIONS, tmux, tmuxBin, tmuxTry } from "./tmux.ts";
 
 export const SWB = process.execPath;
 
@@ -86,9 +86,8 @@ export function startScrubbed(server: string, args: string[]): void {
 		'if command -v direnv >/dev/null 2>&1; then exec direnv exec / "$@"; fi',
 		'exec "$@"',
 	].join("\n");
-	// From /, so a mise tmux shim doesn't reapply the caller's project env after the scrub.
 	const result = Bun.spawnSync(["/bin/sh", "-c", script, "sh", tmuxBin(), "-L", server, ...args], {
-		cwd: "/",
+		cwd: CLIENT_CWD,
 		env: cleanEnv(),
 		stdout: "pipe",
 		stderr: "pipe",
