@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0 — 2026-10-09
+
+### Added
+
+- **`M-a z`** hides the list in a wide Deck, leaving pi, the editor, or the split full width; `M-a h` or `Tab` brings it back. A narrow Deck keeps zooming.
+- **Prefix roster keys** — `M-a` followed by `n a w y Y / j k` does what the list's own key does, from any pane. `M-a j`/`k` restage without taking the keyboard off pi.
+- **Clickable tabs and legend** — the selected session's `pi`, `editor`, and `split` tabs switch its view, and the legend's hints run their keys.
+
+### Changed
+
+- `M-a e` and the other view keys put the keyboard on the pane they bring up. A split refused for want of columns puts it on pi.
+
 ## 0.2.2 — 2026-10-09
 
 ### Fixed
