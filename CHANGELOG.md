@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1 — 2026-10-09
+
+### Added
+
+- **`M-a q`** closes the Deck from any pane, pi included. Sessions keep running.
+
+### Fixed
+
+- Managed pi and the editor start in your login shell from the passwd entry. Before, they ran under tmux's `/bin/sh`, skipping your shell setup and mise activation, so a project tool could resolve to the system one (e.g. a python too old for `tomllib`).
+- swb's tmux servers no longer pick up the starting project's mise env through a mise `tmux` shim.
+
 ## 0.2.0 — 2026-10-09
 
 ### Added
