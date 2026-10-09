@@ -28,15 +28,11 @@ export type Turn = { who: "you" | "pi"; text: string };
 
 /** What the Stage shows when it shows no live session; the placeholder renders it. */
 export type Card = {
-	tone: "empty" | "loading" | "exited" | "dormant" | "interrupted" | "archived" | "failed";
-	headline: string;
-	title: string;
-	path: string;
+	/** Title, state, and path, only while the roster is off-screen; its detail bar owns them otherwise. */
+	head: string[];
 	lines: string[];
 	/** The whole conversation, oldest first; null while it is still being read. */
 	turns: Turn[] | null;
-	keys: string;
-	since: number;
 };
 
 export type State = "loading" | "blocked" | "working" | "unseen" | "idle" | "dormant" | "interrupted" | "archived";

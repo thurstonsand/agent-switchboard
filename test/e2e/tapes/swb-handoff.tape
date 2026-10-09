@@ -15,7 +15,7 @@ Alt+a
 Type "h"
 Type "k"
 Wait+Screen /child scout done/
-Wait+Screen /pi exited/
+Wait+Screen /not running/
 Sleep 2.5s
 Type "j"
 Sleep 1s

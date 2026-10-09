@@ -8,7 +8,7 @@ Sleep 1s
 Type "swb ls" Sleep 400ms Enter
 Sleep 1.5s
 Type 'swb adopt "$PI_CODING_AGENT_DIR"/sessions/*/*.jsonl' Sleep 400ms Enter
-Wait+Screen /Idle/
+Wait+Screen /not running/
 Sleep 2.5s
 Enter
 Wait+Screen /faux-1/

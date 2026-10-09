@@ -23,7 +23,7 @@ Type "G"
 Type "k"
 Sleep 1.5s
 Enter
-Wait+Screen /back to the list/
+Wait+Screen /esc list/
 Sleep 100ms
 Escape
 Sleep 4s

@@ -223,7 +223,7 @@ test("a plain tmux attach shares a session with the Deck staging it, and detachi
 	s.save("deck-after.txt", s.screen());
 });
 
-test("a pi that dies before it's ready shows Failed to start, and w retries once pi works again", async () => {
+test("a pi that dies before it's ready says failed to start, and w retries once pi works again", async () => {
 	s = scenario("phase5", "failed-start");
 	const [a] = (await seed(s, { turns: ["fails"] })) as [string];
 	const pi = join(s.bin, "pi");
@@ -233,9 +233,9 @@ test("a pi that dies before it's ready shows Failed to start, and w retries once
 	await cursorTo(s, a);
 	s.keys("w");
 	const failed = await waitState(s, "failed", (x) => x.staged.kind === "failed", budgets.piReady);
-	expect(failed.toasts).toContainEqual({ text: "pi failed to start: pi: broken on purpose", level: "error" });
-	await until(() => s.screen().includes("Failed to start"), budgets.settle, "the failed card");
-	expect(s.screen()).toContain("pi: broken on purpose");
+	expect(failed.toasts).toEqual([]);
+	await until(() => s.screen().includes("failed to start"), budgets.settle, "the failed card");
+	expect(s.screen().split("pi: broken on purpose")).toHaveLength(2);
 	expect(entry(s, a).live).toBe(false);
 	expect(piSessions(s)).toHaveLength(0);
 	s.save("failed.txt", s.screen());

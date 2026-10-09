@@ -124,7 +124,8 @@ test("a dormant card shows the whole conversation, newest at the bottom, cropped
 	await until(() => s.screen().includes("turn-11"), budgets.settle, "the newest turn on the card");
 	const screen = s.screen();
 	s.save("dormant-card.txt", screen);
-	expect(screen).toContain("Idle");
+	expect(screen).toContain("not running");
+	expect(screen.match(/not running/g)).toHaveLength(1);
 	expect(screen).toContain("you");
 	expect(screen).not.toContain("turn-0-");
 	expect(screen.indexOf("reply turn-10")).toBeLessThan(screen.lastIndexOf("turn-11"));
@@ -477,7 +478,7 @@ test("the sessions server killed under an open Deck recovers on the next w", asy
 	s.swb("drive", "start");
 	await cursorTo(s, a);
 	s.tmux(s.servers.sessions, "kill-server");
-	await until(() => s.screen().includes("w wake"), budgets.settle, "the dormant card back on the Stage");
+	await until(() => s.screen().includes("⏎ wake"), budgets.settle, "the dormant card back on the Stage");
 	s.save("killed.txt", s.screen());
 	s.keys("w");
 	await waitState(s, "a live again", (x) => x.staged.id === a && x.staged.kind === "live", budgets.piReady);

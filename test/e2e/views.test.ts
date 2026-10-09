@@ -247,7 +247,7 @@ test("split shows pi below 160 columns and returns on widening, survives reopeni
 	s.save("hidden-then-40-cols.txt", s.screen());
 });
 
-test("the roster holds roster_width through resizes; clicking a sleeping session's Stage or splitting it wakes pi", async () => {
+test("the roster holds roster_width, or a dragged width, through resizes; clicking a sleeping session's Stage or splitting it wakes pi", async () => {
 	s = scenario("phase4", "roster-width-wake");
 	config(s, 'editor = "cat -v"\nroster_width = "25%"');
 	const live = await started(s, "--size", "200x50", "--", "new");
@@ -257,6 +257,12 @@ test("the roster holds roster_width through resizes; clicking a sleeping session
 	const wide = await waitState(s, "240 columns", (x) => x.layout.width === 240);
 	await until(() => panes(s, wide)[0]?.width === 60, budgets.settle, `a 60-column roster, not ${panes(s, wide)[0]?.width}`);
 	s.save("240-cols.txt", s.screen());
+	s.tmux(s.servers.ui, "resize-pane", "-t", `=${wide.deck}:.0`, "-x", "80");
+	await Bun.sleep(300);
+	s.swb("drive", "resize", "200x50");
+	await waitState(s, "200 columns", (x) => x.layout.width === 200);
+	await until(() => panes(s, wide)[0]?.width === 80, budgets.settle, `the dragged 80 columns kept, not ${panes(s, wide)[0]?.width}`);
+	s.save("dragged-200-cols.txt", s.screen());
 
 	await prefixKeys(s, "M-a", "h", "the roster focused", (x) => x.focus === "roster");
 	s.tmux(s.servers.sessions, "kill-session", "-t", `=${live.staged.host}`);

@@ -142,7 +142,7 @@ test("a archives an idle live session and kills its pi; a on an Archived row lea
 	await waitState(s, "Archived expanded", (x) => x.rows.some((r) => r.kind === "section" && r.label === "Archived" && r.expanded));
 	await cursorTo(s, d);
 	const onD = await waitState(s, "archived d on the Stage", (x) => x.cursor === d && x.staged.kind === "dormant");
-	await until(() => s.screen().includes("unarchive"), budgets.settle, "the archived card");
+	await until(() => s.screen().includes("a unarchive"), budgets.settle, "the archived legend");
 	s.save("archived-card.txt", s.screen());
 	const archivedAt = rowIndex(onD, d);
 	s.keys("a");

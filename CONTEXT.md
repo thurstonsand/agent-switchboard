@@ -22,7 +22,7 @@ An open session with no activity in the last 72 hours.
 A session whose agent process is running in this boot.
 
 **Dormant**:
-An open session with no running process; the roster shows it as **Idle** unless it is **Interrupted**.
+An open session with no running process; the roster shows it as not running unless it is **Interrupted**.
 
 **Interrupted**:
 A dormant session whose process ended mid-turn rather than while idle.

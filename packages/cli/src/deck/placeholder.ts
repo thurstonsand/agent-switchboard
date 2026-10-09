@@ -3,14 +3,14 @@ import { parseArgs } from "node:util";
 import { matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { UsageError } from "../errors.ts";
 import type { Card, Turn } from "./protocol.ts";
-import { bold, cyan, dim, gray, red, spinnerFrame, yellow } from "./style.ts";
+import { cyan, dim, gray, yellow } from "./style.ts";
 
 const { values: args } = parseArgs({ args: process.argv.slice(3), options: { card: { type: "string" }, sock: { type: "string" } } });
 if (!args.card || !args.sock) throw new UsageError("__placeholder: --card and --sock are required");
 const cardPath = args.card;
 const sock = args.sock;
 
-let card: Card = { tone: "empty", headline: "", title: "", path: "", lines: [], turns: null, keys: "", since: Date.now() };
+let card: Card = { head: [], lines: [], turns: null };
 let raw = "";
 let typedAt = 0;
 let frame = "";
@@ -29,16 +29,6 @@ function load(): boolean {
 	return true;
 }
 
-const TONE: Record<Card["tone"], (s: string) => string> = {
-	loading: cyan,
-	dormant: (s) => s,
-	interrupted: red,
-	exited: red,
-	failed: red,
-	archived: yellow,
-	empty: gray,
-};
-
 function turnLines(turn: Turn, width: number): string[] {
 	const wrapped = turn.text.split("\n").flatMap((line) => (line === "" ? [""] : wrapTextWithAnsi(line, width - 5)));
 	const label = turn.who === "you" ? cyan("you") : gray("pi");
@@ -50,16 +40,10 @@ function draw(): void {
 	const rows = process.stdout.rows;
 	const width = Math.max(10, cols - 4);
 	const now = Date.now();
-	const loading = card.tone === "loading";
-	const glyph = loading ? `${spinnerFrame(now)} ` : "";
-	const elapsed = loading ? gray(`  ${((now - card.since) / 1000).toFixed(1)} s`) : "";
-	const head: string[] = [];
-	if (card.headline !== "") head.push(TONE[card.tone](bold(`${glyph}${card.headline}`)) + elapsed, "");
-	if (card.title !== "") head.push(...wrapTextWithAnsi(bold(card.title), width).slice(0, 2));
-	if (card.path !== "") head.push(gray(card.path));
+	const head = card.head.flatMap((line) => wrapTextWithAnsi(line, width).slice(0, 2));
+	if (head.length > 0 && card.lines.length > 0) head.push("");
 	for (const line of card.lines) head.push(...(line === "" ? [""] : wrapTextWithAnsi(dim(line), width)));
 	const foot: string[] = [];
-	if (card.keys !== "") foot.push("", card.keys);
 	if (typedAt > now - 1500) foot.push("", yellow("input ignored: pi isn't running here"));
 
 	// The conversation fills the room left between the head and the foot, newest at the bottom.
@@ -113,5 +97,5 @@ load();
 draw();
 setInterval(() => {
 	const changed = load();
-	if (changed || card.tone === "loading" || typedAt > Date.now() - 2000) draw();
+	if (changed || typedAt > Date.now() - 2000) draw();
 }, 80);

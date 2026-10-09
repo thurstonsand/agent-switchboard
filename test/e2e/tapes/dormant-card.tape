@@ -4,7 +4,7 @@ Source common.tape
 Type "# dormant sessions show their last turns without starting pi" Sleep 1s Enter
 Type "swb" Sleep 400ms Enter
 Wait+Screen /▾ \S+ \(2\)/
-Wait+Screen /w wake/
+Wait+Screen /⏎ wake/
 Sleep 3s
 Type "j"
 Sleep 3s
