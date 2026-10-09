@@ -72,8 +72,10 @@ depends = ["lint", "typecheck", "build", "dist:pi"]
 
 [tasks.install]
 description = "Build swb from this checkout into ~/.local/bin"
-depends = ["build"]
-run = "install -m 0755 dist/swb ~/.local/bin/swb"
+run = [
+  "bun build --compile --minify --sourcemap --define SWB_INSTALL_VERSION=\\\"$(git describe --tags --match 'v*' | sed 's/^v//')\\\" packages/cli/src/main.ts packages/cli/src/deck/worker.ts --outfile dist/swb",
+  "install -m 0755 dist/swb ~/.local/bin/swb",
+]
 
 [tasks.e2e]
 description = "Real pi in private tmux servers, scripted by the faux provider"

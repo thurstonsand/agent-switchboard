@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { stateDir } from "@swb/shared";
 import { type Config, loadConfig } from "../config.ts";
 import { SwbError } from "../errors.ts";
-import { ensureServer, ensureSessionsServer, hook, notify, randomHex, SWB, startScrubbed } from "../sessions.ts";
+import { ensureServer, ensureSessionsServer, hook, notify, onlyControl, randomHex, SWB, startScrubbed } from "../sessions.ts";
 import { openStore } from "../store.ts";
 import { CLIENT_CWD, cleanEnv, listSessions, quote, SESSIONS, tmux, tmuxBin, tmuxTry, UI } from "../tmux.ts";
 import type { Card, DeckPaths, DeckState } from "./protocol.ts";
@@ -93,8 +93,11 @@ function uiConf(config: Config): string {
 }
 
 export function ensureUiServer(config: Config): void {
-	ensureServer(UI, uiConf(config), (path) =>
-		startScrubbed(UI, ["-f", path, "new-session", "-d", "-s", "swb-ctl", ";", "set", "-t", "swb-ctl", "@swb_kind", "control"]),
+	ensureServer(
+		UI,
+		uiConf(config),
+		(path) => startScrubbed(UI, ["-f", path, "new-session", "-d", "-s", "swb-ctl", ";", "set", "-t", "swb-ctl", "@swb_kind", "control"]),
+		() => onlyControl(UI),
 	);
 }
 
@@ -174,8 +177,9 @@ export async function openDeck(intent: DeckIntent): Promise<void> {
 	if (!process.stdout.isTTY) throw new SwbError("swb needs a terminal");
 	const config = loadConfig();
 	openStore();
-	ensureSessionsServer();
+	// Reap a crashed Deck's placeholder first; left standing, it holds the sessions server back from restarting.
 	liveDecks();
+	ensureSessionsServer();
 	ensureUiServer(config);
 	const deck = `deck-${randomHex(3)}`;
 	const paths = deckPaths(deck);

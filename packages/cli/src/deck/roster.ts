@@ -18,7 +18,9 @@ import type { View } from "@swb/shared";
 import { loadConfig } from "../config.ts";
 import { displayName, projectName } from "../derive.ts";
 import { UsageError } from "../errors.ts";
+import { newer } from "../sessions.ts";
 import { quote, SESSIONS, tmux, tmuxAsync, tmuxTry, UI } from "../tmux.ts";
+import { VERSION } from "../version.ts";
 import { Control } from "./control.ts";
 import {
 	deckEnv,
@@ -1084,7 +1086,7 @@ class Roster implements Component {
 	messageLine(now: number): string {
 		toasts = toasts.filter((t) => t.until > now);
 		const t = toasts.at(-1);
-		if (!t) return "";
+		if (!t) return snapshot && newer(snapshot.swbVersion, VERSION) ? ` ${red(`✗ swb ${snapshot.swbVersion} is in; reopen the Deck`)}` : "";
 		return ` ${t.level === "error" ? red(`✗ ${t.text}`) : green(t.text)}`;
 	}
 

@@ -20,6 +20,8 @@ export type Snapshot = {
 	/** The last lines of each pi this Deck launched that died before it registered, by its tmux session. */
 	died: Record<string, string[]>;
 	serverUp: boolean;
+	/** The swb that last configured the sessions server. */
+	swbVersion: string;
 };
 
 export type Turn = { who: "you" | "pi"; text: string };

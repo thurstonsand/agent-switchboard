@@ -65,6 +65,7 @@ function snapshot(): Polled {
 		"#{@swb_dir}",
 		"#{pane_dead}",
 		"#{pane_dead_time}",
+		"#{@swb_version}",
 	);
 	const died: Record<string, string[]> = {};
 	for (const [name, kind, , , , dead, deadAt] of listed) {
@@ -125,6 +126,7 @@ function snapshot(): Polled {
 			editors: Object.fromEntries(listed.filter(([, kind]) => kind === "editor").map(([name, , , , dir]) => [dir, name])),
 			died,
 			serverUp: listed.length > 0,
+			swbVersion: listed[0]?.[7] ?? "",
 		},
 		attached,
 		names: new Set(listed.map(([name]) => name as string)),
@@ -215,6 +217,7 @@ function handle(message: ToWorker): void {
 			break;
 		case "new":
 			try {
+				ensureSessionsServer();
 				const host = launch(message.cwd, null, []);
 				launched.add(host);
 				post({ type: "created", host });

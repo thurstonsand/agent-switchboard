@@ -3,7 +3,9 @@ import { basename, join } from "node:path";
 import { bootId, type Db, dbPath, projectRoot, stateDir } from "@swb/shared";
 import { runtimeLive } from "./derive.ts";
 import { SwbError } from "./errors.ts";
-import { CLIENT_CWD, cleanEnv, listSessions, quote, SESSIONS, tmux, tmuxBin, tmuxTry } from "./tmux.ts";
+import { openStore } from "./store.ts";
+import { CLIENT_CWD, cleanEnv, killServer, listSessions, quote, SESSIONS, tmux, tmuxBin, tmuxTry } from "./tmux.ts";
+import { VERSION } from "./version.ts";
 
 export const SWB = process.execPath;
 
@@ -57,26 +59,71 @@ function confVersion(conf: string): string {
 	return Bun.hash(conf).toString(16);
 }
 
-/** Sources the embedded config into a server whenever it differs from what the server last loaded. */
-export function ensureServer(server: string, conf: string, start: (confPath: string) => void): void {
+/** Whether release a is newer than b. A server from before swb stamped its version has none, which is oldest. */
+export function newer(a: string, b: string): boolean {
+	const parse = (v: string) => (/^(\d+)\.(\d+)\.(\d+)/.exec(v)?.slice(1).map(Number) ?? [-1, -1, -1]) as number[];
+	const [x, y] = [parse(a), parse(b)];
+	for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return (x[i] as number) > (y[i] as number);
+	return false;
+}
+
+/**
+ * Brings a server in line with this swb. A newer swb's server is left alone, so an old Deck can't drag it back;
+ * the old Deck says so instead. An older one is restarted when `upgrade` finds it safe, and reloaded in place
+ * otherwise; the same version with a changed config just reloads. Two swbs upgrading at once serialize on the
+ * db's write lock, so the second finds the first's fresh server instead of killing it.
+ */
+export function ensureServer(server: string, conf: string, start: (confPath: string) => void, upgrade: (db: Db) => boolean): void {
 	const version = confVersion(conf);
-	const dir = join(stateDir(), "tmux");
-	mkdirSync(dir, { recursive: true, mode: 0o700 });
-	const path = join(dir, `${server}.conf`);
-	const current = tmuxTry(server, "show", "-gqv", "@swb_conf_version");
-	if (current.ok && current.out === version) return;
-	writeFileSync(path, `${conf}\nset -g @swb_conf_version ${version}\n`);
-	if (current.ok) {
-		tmux(server, "source-file", path);
-		return;
-	}
+	if (current(server, version)) return;
+	const db = openStore();
 	try {
-		start(path);
-	} catch (error) {
-		// Another swb started the server between the check and the start.
-		if (!tmuxTry(server, "show", "-gqv", "@swb_conf_version").ok) throw error;
-		tmux(server, "source-file", path);
+		db.tx(() => {
+			if (current(server, version)) return;
+			const dir = join(stateDir(), "tmux");
+			mkdirSync(dir, { recursive: true, mode: 0o700 });
+			const path = join(dir, `${server}.conf`);
+			writeFileSync(path, `${conf}\nset -g @swb_conf_version ${version}\nset -g @swb_version ${VERSION}\n`);
+			const up = tmuxTry(server, "show", "-gqv", "@swb_version");
+			if (up.ok && newer(VERSION, up.out) && upgrade(db)) killServer(server);
+			else if (up.ok) {
+				tmux(server, "source-file", path);
+				return;
+			}
+			try {
+				start(path);
+			} catch (error) {
+				// An swb from before this lock started the server between the check and the start.
+				if (!tmuxTry(server, "show", "-gqv", "@swb_conf_version").ok) throw error;
+				tmux(server, "source-file", path);
+			}
+		});
+	} finally {
+		db.close();
 	}
+}
+
+/** Up, and either on this config or owned by a newer swb. */
+function current(server: string, version: string): boolean {
+	const conf = tmuxTry(server, "show", "-gqv", "@swb_conf_version");
+	if (!conf.ok) return false;
+	const running = tmux(server, "show", "-gqv", "@swb_version");
+	return newer(running, VERSION) || (running === VERSION && conf.out === version);
+}
+
+/** An upgrade ends every idle pi, so the next wake runs the new swb; it restarts the server only once nothing else is on it. */
+function stopIdlePis(db: Db): boolean {
+	const hosts = new Set(listSessions(SESSIONS).map(([name]) => name as string));
+	const idle = db.all("SELECT r.tmux_session, r.boot_id, r.pid FROM runtimes r JOIN sessions s USING (session_id) WHERE s.phase = 'idle'");
+	for (const row of idle) {
+		const runtime = { tmux_session: row.tmux_session as string, boot_id: row.boot_id as string, pid: row.pid as number };
+		if (runtimeLive(runtime, bootId(), hosts)) tmuxTry(SESSIONS, "kill-session", "-t", `=${runtime.tmux_session}`);
+	}
+	return onlyControl(SESSIONS);
+}
+
+export function onlyControl(server: string): boolean {
+	return listSessions(server, "#{@swb_kind}").every(([, kind]) => kind === "control");
 }
 
 /** Starts the server from a scrubbed environment, so project credentials from mise or direnv stay out of it. */
@@ -96,8 +143,12 @@ export function startScrubbed(server: string, args: string[]): void {
 }
 
 export function ensureSessionsServer(): void {
-	ensureServer(SESSIONS, sessionsConf(), (path) =>
-		startScrubbed(SESSIONS, ["-f", path, "new-session", "-d", "-s", "swb-ctl", ";", "set", "-t", "swb-ctl", "@swb_kind", "control"]),
+	ensureServer(
+		SESSIONS,
+		sessionsConf(),
+		(path) =>
+			startScrubbed(SESSIONS, ["-f", path, "new-session", "-d", "-s", "swb-ctl", ";", "set", "-t", "swb-ctl", "@swb_kind", "control"]),
+		stopIdlePis,
 	);
 }
 
@@ -119,7 +170,6 @@ export function randomHex(bytes: number): string {
 
 /** Starts a managed pi in the background and returns its tmux session; pi comes up on its own time. */
 export function launch(cwd: string, resume: string | null, piArgs: string[]): string {
-	ensureSessionsServer();
 	const name = `${basename(projectRoot(cwd)).replaceAll(/[.:]/g, "_")}-${randomHex(2)}`;
 	const shell = loginShell();
 	const pi = ["exec pi", ...[...(resume ? ["--session-id", resume] : []), ...piArgs].map(quote)].join(" ");

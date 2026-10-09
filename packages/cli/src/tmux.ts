@@ -57,6 +57,23 @@ export async function tmuxAsync(server: string, ...args: string[]): Promise<stri
 	return out.replace(/\n$/, "");
 }
 
+/** kill-server returns before the server exits; a new-session in that window reaches the dying server and fails. */
+export function killServer(server: string): void {
+	const running = tmuxTry(server, "display", "-p", "#{pid}");
+	if (!running.ok) return;
+	// A second upgrader can lose the race to the first; the server is gone either way.
+	tmuxTry(server, "kill-server");
+	const pid = Number(running.out);
+	for (;;) {
+		try {
+			process.kill(pid, 0);
+		} catch {
+			return;
+		}
+		Bun.sleepSync(10);
+	}
+}
+
 /** Session names on a server, with the given format fields, or none when the server is down. */
 export function listSessions(server: string, ...fields: string[]): string[][] {
 	const result = tmuxTry(server, "list-sessions", "-F", ["#{session_name}", ...fields].join("\t"));

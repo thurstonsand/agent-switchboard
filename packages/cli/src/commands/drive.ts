@@ -5,7 +5,7 @@ import { stateDir } from "@swb/shared";
 import { fetchState } from "../deck/deck.ts";
 import { SwbError, UsageError } from "../errors.ts";
 import { SWB } from "../sessions.ts";
-import { cleanEnv, DRIVE, quote, tmux, tmuxBin, tmuxTry, UI } from "../tmux.ts";
+import { cleanEnv, DRIVE, killServer, quote, tmux, tmuxBin, tmuxTry, UI } from "../tmux.ts";
 
 // The harness stands in for a real terminal with Gruvbox Light Hard / Dark Hard. A detached tmux pane answers no color
 // queries; with these styles its server answers OSC 10/11 from window-style and OSC 4 from pane-colours, as Ghostty would.
@@ -141,22 +141,6 @@ async function raw(...sequences: string[]): Promise<void> {
 	}
 }
 
-/** kill-server returns before the server exits; a new-session in that window reaches the dying server and fails. */
-async function stopHarness(): Promise<void> {
-	const running = tmuxTry(DRIVE, "display", "-p", "#{pid}");
-	if (!running.ok) return;
-	tmux(DRIVE, "kill-server");
-	const pid = Number(running.out);
-	for (;;) {
-		try {
-			process.kill(pid, 0);
-		} catch {
-			return;
-		}
-		await Bun.sleep(10);
-	}
-}
-
 export async function drive(args: string[]): Promise<void> {
 	const [verb, ...rest] = args;
 	switch (verb) {
@@ -170,7 +154,7 @@ export async function drive(args: string[]): Promise<void> {
 			});
 			const match = /^(\d+)x(\d+)$/.exec(values.size);
 			if (!match) throw new UsageError(`drive: --size must be COLSxROWS, got ${values.size}`);
-			await stopHarness();
+			killServer(DRIVE);
 			const dir = join(stateDir(), "drive");
 			mkdirSync(dir, { recursive: true, mode: 0o700 });
 			const conf = join(dir, `${DRIVE}.conf`);
@@ -272,7 +256,7 @@ export async function drive(args: string[]): Promise<void> {
 			break;
 		}
 		case "stop":
-			await stopHarness();
+			killServer(DRIVE);
 			break;
 		default:
 			throw new UsageError(`drive: unknown verb ${verb ?? "(none)"}`);

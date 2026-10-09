@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState, HeaderStateRow } from "../../packages/cli/src/deck/protocol.ts";
+import { VERSION } from "../../packages/cli/src/version.ts";
 import { cursorTo, entry, headerRows, piSessions, reply, rowIndex, seed, sessionRows, state, terminal, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 
@@ -381,4 +382,51 @@ test("n in an empty Deck, and on a section row, starts a session where swb was r
 		budgets.piReady,
 	);
 	expect(third.focus).toBe("stage");
+});
+
+test("a newer swb takes over: idle pis stop, a working one keeps its turn, and empty servers restart; an older swb leaves a newer server alone and its Deck says so", async () => {
+	s = scenario("phase5", "upgrade");
+	const { sessions, ui } = s.servers;
+	const [a, b] = (await seed(s, { turns: ["a"] }, { turns: ["b"] })) as [string, string];
+	s.swb("wake", a);
+	s.swb("wake", b);
+	await until(() => entry(s, a).live && entry(s, b).live, budgets.piReady, "both live");
+	const hostOf = (id: string) =>
+		s.query<{ tmux_session: string }>("SELECT tmux_session FROM runtimes WHERE session_id = ?", id)[0]?.tmux_session;
+	const [hostA, hostB] = [hostOf(a), hostOf(b)] as [string, string];
+	s.tmux(sessions, "send-keys", "-t", `=${hostB}:`, "-l", "hold u1");
+	s.tmux(sessions, "send-keys", "-t", `=${hostB}:`, "Enter");
+	await until(() => s.signal("u1.entered") !== "", budgets.piReady, "b mid-turn");
+	const names = (server: string) => s.tmux(server, "list-sessions", "-F", "#{session_name}").split("\n");
+	const pid = (server: string) => s.tmux(server, "display", "-p", "#{pid}");
+
+	for (const server of [sessions, ui]) s.tmux(server, "set", "-gu", "@swb_version");
+	const uiBefore = pid(ui);
+	s.swb("drive", "start");
+	await waitState(s, "the Deck up", (x) => sessionRows(x).length === 2);
+	expect(names(sessions)).not.toContain(hostA);
+	expect(names(sessions)).toContain(hostB);
+	expect(entry(s, a).live).toBe(false);
+	expect(entry(s, b).activity).toBe("working");
+	expect(s.tmux(sessions, "show", "-gv", "@swb_version")).toBe(VERSION);
+	expect(pid(ui)).not.toBe(uiBefore);
+	release(s, "u1");
+	await until(() => entry(s, b).activity === "idle", budgets.settle, "b's turn done");
+	s.save("upgraded.txt", s.screen());
+
+	s.tmux(sessions, "set", "-g", "@swb_version", "99.0.0");
+	await until(() => s.screen().includes("swb 99.0.0 is in; reopen the Deck"), budgets.settle, "the outdated Deck warning");
+	s.save("outdated.txt", s.screen());
+	s.swb("wake", a);
+	expect(s.tmux(sessions, "show", "-gv", "@swb_version")).toBe("99.0.0");
+
+	s.swb("drive", "stop");
+	for (const name of names(sessions)) if (name !== "swb-ctl") s.tmux(sessions, "kill-session", "-t", `=${name}`);
+	await until(() => names(ui).every((name) => name === "swb-ctl"), budgets.settle, "the Deck gone");
+	for (const server of [sessions, ui]) s.tmux(server, "set", "-gu", "@swb_version");
+	const before = [pid(sessions), pid(ui)];
+	s.swb("drive", "start");
+	await waitState(s, "the Deck up again", (x) => sessionRows(x).length === 2);
+	expect([pid(sessions), pid(ui)]).not.toContain(before[0]);
+	expect(pid(ui)).not.toBe(before[1]);
 });
