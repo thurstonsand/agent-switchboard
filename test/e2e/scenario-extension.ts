@@ -47,6 +47,7 @@ function text(message: Message): string {
 }
 
 export default function (pi: ExtensionAPI) {
+	if (process.env.SWB_E2E_LOGIN_SHELL) signal("login-shell");
 	if (existsSync(join(signals, "start.hold"))) {
 		signal("start.entered");
 		const sleeper = new Int32Array(new SharedArrayBuffer(4));

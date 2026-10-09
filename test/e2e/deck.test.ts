@@ -28,6 +28,7 @@ test("w wakes a dormant session to live while the keyboard stays in the roster",
 	const up = await waitState(s, "live", (x) => x.staged.kind === "live", budgets.piReady);
 	expect(up.focus).toBe("roster");
 	expect(entry(s, id).live).toBe(true);
+	expect(s.signal("login-shell")).not.toBe("");
 	s.save("live.txt", s.screen());
 });
 

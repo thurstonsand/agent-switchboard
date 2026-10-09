@@ -100,6 +100,18 @@ export function ensureSessionsServer(): void {
 	);
 }
 
+/**
+ * From the passwd entry: inside swb's tmux servers $SHELL is always their default-shell, /bin/sh,
+ * and Bun's os.userInfo() reads $SHELL instead of the passwd entry.
+ */
+function loginShell(): string {
+	const query = process.platform === "darwin" ? ["/usr/bin/id", "-P"] : ["getent", "passwd", String(process.getuid?.())];
+	const result = Bun.spawnSync(query, { stdout: "pipe", stderr: "pipe" });
+	const shell = result.stdout.toString().trim().split(":").at(-1);
+	if (result.exitCode !== 0 || !shell) throw new SwbError(`no login shell from ${query.join(" ")}: ${result.stderr.toString().trim()}`);
+	return shell;
+}
+
 export function randomHex(bytes: number): string {
 	return [...crypto.getRandomValues(new Uint8Array(bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -108,7 +120,7 @@ export function randomHex(bytes: number): string {
 export function launch(cwd: string, resume: string | null, piArgs: string[]): string {
 	ensureSessionsServer();
 	const name = `${basename(projectRoot(cwd)).replaceAll(/[.:]/g, "_")}-${randomHex(2)}`;
-	const shell = process.env.SHELL || "/bin/sh";
+	const shell = loginShell();
 	const pi = ["exec pi", ...[...(resume ? ["--session-id", resume] : []), ...piArgs].map(quote)].join(" ");
 	tmux(
 		SESSIONS,
@@ -162,7 +174,7 @@ export function ensureEditor(db: Db, dir: string, editor: string): string {
 		const existing = listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_dir}").find(([, kind, d]) => kind === "editor" && d === dir);
 		if (existing) return existing[0] as string;
 		const name = `${basename(dir).replaceAll(/[.:]/g, "_")}-edit-${randomHex(2)}`;
-		const shell = process.env.SHELL || "/bin/sh";
+		const shell = loginShell();
 		tmux(
 			SESSIONS,
 			"new-session",

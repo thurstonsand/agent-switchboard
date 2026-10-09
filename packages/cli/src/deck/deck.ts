@@ -131,7 +131,6 @@ export function ensurePlaceholder(deck: string): void {
 const DECK_ENV = [
 	"PATH",
 	"HOME",
-	"SHELL",
 	"EDITOR",
 	"LANG",
 	"XDG_STATE_HOME",

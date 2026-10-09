@@ -121,8 +121,9 @@ export function scenario(
 
 	const path = `${bin}:/usr/local/bin:/usr/bin:/bin`;
 	const profile = `export PATH=${path}\n`;
-	writeFileSync(join(home, ".zshenv"), profile);
-	writeFileSync(join(home, ".bash_profile"), profile);
+	// Only the user's real login shell sets the marker; /bin/sh reads just .profile.
+	writeFileSync(join(home, ".zshenv"), `${profile}export SWB_E2E_LOGIN_SHELL=1\n`);
+	writeFileSync(join(home, ".bash_profile"), `${profile}export SWB_E2E_LOGIN_SHELL=1\n`);
 	writeFileSync(join(home, ".profile"), profile);
 	// pi 1.0.4 marks a freshly registered native provider usable at startup only if it has a stored
 	// credential; otherwise initial model selection races an async auth check and intermittently finds no model.
