@@ -14,12 +14,12 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 //   handoff <name>    hand off to the swb host, with the task `reply child <name>`
 //   message <id> <n>  send session <id> a pi-sessions message, which it answers like `reply <n>`
 //   reach <n>         find the first dormant session through session_reachable and message it like `message`
-//   archive <text>    call swb_archive, then answer "tool done <text>"
+//   archive <text>    call swb_update_session to archive itself, then answer "tool done <text>"
 // A pi that starts while start.hold exists signals start.entered and blocks until start.release.
 // pi-sessions' handoff extraction is answered with a fixed briefing.
 // `archive flaky` fails its post-tool reply once with a retryable provider error.
 // `/e2e-kick <prompt>` starts a turn with a custom message, the way a pi-sessions handoff child kicks off.
-// Raw terminal input is appended to input.log as JSON lines; `/e2e-bg` asks the terminal for its background (OSC 11).
+// Raw terminal input is appended to input.log as JSON lines; `/e2e-bg` asks the terminal for its background (OSC 11) and palette color 9 (OSC 4).
 // Signals live in $HOME/e2e-signals because HOME survives the sessions server's scrubbed environment.
 
 const signals = join(process.env.HOME ?? "", "e2e-signals");
@@ -125,7 +125,7 @@ export default function (pi: ExtensionAPI) {
 			case "reach":
 				return fauxAssistantMessage(fauxToolCall("session_reachable", {}), { stopReason: "toolUse" });
 			case "archive":
-				return fauxAssistantMessage(fauxToolCall("swb_archive", {}), { stopReason: "toolUse" });
+				return fauxAssistantMessage(fauxToolCall("swb_update_session", { archived: true }), { stopReason: "toolUse" });
 			case "attention":
 				return fauxAssistantMessage(fauxToolCall("e2e_attention", { name: arg }), { stopReason: "toolUse" });
 			default:
@@ -170,9 +170,9 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("e2e-bg", {
-		description: "Query the terminal background",
+		description: "Query the terminal background and palette color 9",
 		handler: async () => {
-			process.stdout.write("\x1b]11;?\x1b\\");
+			process.stdout.write("\x1b]11;?\x1b\\\x1b]4;9;?\x1b\\");
 		},
 	});
 }

@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { bootId, type Db, type Phase, pidAlive, type View } from "@swb/shared";
+import { bootId, type Db, operatorDir, type Phase, pidAlive, type View } from "@swb/shared";
 import { listSessions, SESSIONS } from "./tmux.ts";
 
 /** One Session with every derived state, as `swb ls --json` prints it. */
@@ -10,6 +10,8 @@ export type SessionState = {
 	cwd: string;
 	branch: string | null;
 	group: string | null;
+	/** It coordinates from the Operator folder instead of working in a Project. */
+	operator: boolean;
 	open: boolean;
 	live: boolean;
 	activity: Phase;
@@ -17,6 +19,7 @@ export type SessionState = {
 	interrupted: boolean;
 	inactive: boolean;
 	activityAt: number;
+	visitedAt: number | null;
 	archivedAt: number | null;
 };
 
@@ -105,6 +108,7 @@ export function derive(row: SessionRow, w: World): SessionState {
 	const activityAt = Math.max(row.last_prompt_at, row.last_settled_at ?? 0);
 	const activity: Phase = live ? row.phase : "idle";
 	const unseen = open && (row.last_settled_at ?? 0) > (row.visited_at ?? 0);
+	const operator = row.cwd === operatorDir();
 	return {
 		id: row.session_id,
 		title: row.title,
@@ -112,13 +116,15 @@ export function derive(row: SessionRow, w: World): SessionState {
 		cwd: row.cwd,
 		branch: row.branch,
 		group: row.group_name,
+		operator,
 		open,
 		live,
 		activity,
 		unseen,
 		interrupted: !live && row.phase !== "idle",
-		inactive: open && activityAt < w.now - w.inactiveAfterMs && activity !== "blocked" && !unseen,
+		inactive: open && !operator && activityAt < w.now - w.inactiveAfterMs && activity !== "blocked" && !unseen,
 		activityAt,
+		visitedAt: row.visited_at,
 		archivedAt: open ? null : row.archived_at,
 	};
 }

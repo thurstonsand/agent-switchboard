@@ -18,7 +18,8 @@ import { VERSION } from "./version.ts";
 
 const USAGE = `swb: Agent Switchboard
 
-  swb                          open a Deck
+  swb                          open a Deck where the last one in this Project left off
+  swb -c, --continue           open a Deck in pi on this Project's most recent session, or a new one
   swb new [--cwd DIR]          open a Deck on a new pi session
   swb open ID                  open a Deck on a session
   swb adopt ID|TRANSCRIPT      track a session pi ran outside swb, then open it; quit that pi first
@@ -44,7 +45,10 @@ async function main(args: string[]): Promise<void> {
 	}
 	switch (command) {
 		case undefined:
-			return openDeck({ select: null, newCwd: null });
+			return openDeck({ select: null, newCwd: null, continue: false });
+		case "-c":
+		case "--continue":
+			return openDeck({ select: null, newCwd: null, continue: true });
 		case "--version":
 			console.log(VERSION);
 			return;

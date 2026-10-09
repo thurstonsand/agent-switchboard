@@ -24,7 +24,8 @@ Sessions run headless in a dedicated tmux server. `swb` opens a Deck: a roster o
 ## Use
 
 ```text
-swb                          open a Deck
+swb                          open a Deck where the last one in this Project left off
+swb -c, --continue           open a Deck in pi on this Project's most recent session, or a new one
 swb new [--cwd DIR]          open a Deck on a new pi session
 swb open ID                  open a Deck on a session
 swb adopt ID|TRANSCRIPT      track a session pi ran outside swb, then open it; quit that pi first
@@ -40,6 +41,10 @@ swb wake ID                  start a dormant session's pi in the background
 Inside a managed session, the recorder registers swb as a pi-sessions host, so `session_handoff` offers `launch: "swb"` in place of tmux and Ghostty splits. The child starts managed and lands on the roster. `session_reachable` lists dormant sessions too, and `session_send_message` to one wakes it first. Subagents still run in their parent's tmux and never become sessions.
 
 In the roster, `j`/`k` move, `Enter` focuses the session (waking it if it's dormant), `w` wakes it in the background, `n` starts a new session in the highlighted directory, `N` in the one you ran `swb` from, `a` archives or unarchives, `m` names the session's Group (or renames one from its header), `/` filters, and `q` quits. `M-a` is the Deck's prefix from anywhere: `M-a h` returns to the roster, `M-a e` swaps pi and the editor and focuses it, `M-a z` hides the roster, `M-a n`/`M-a N`/`M-a j`/`M-a k` and the other roster keys work after it too, `M-a q` closes the Deck, `M-a ?` lists the rest. Dragging a session onto a Group, or anywhere beneath one, moves it there. Clicking a session focuses it, and the tabs under the roster and its legend are clickable.
+
+### Operators
+
+The Operators section sits atop the roster: sessions that coordinate the others rather than work in a Project. `n` on it starts one in `~/.config/agent-switchboard/operator`, whose AGENTS.md (written once, then yours to edit) makes it the dispatcher. An Operator reads only that AGENTS.md, not the user-level one or any above it, and reaches the other sessions through pi-sessions. To promote an existing session, `/mv` it into that folder.
 
 ## Settings
 

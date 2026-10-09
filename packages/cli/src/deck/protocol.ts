@@ -1,6 +1,7 @@
 import type { View } from "@swb/shared";
 import type { Config } from "../config.ts";
 import type { SessionState } from "../derive.ts";
+import type { DeckLayout } from "../store.ts";
 
 /** One roster entry: a Session, or a live pi that has had no prompt yet (provisional, titled by its id). */
 export type Entry = SessionState & {
@@ -87,7 +88,8 @@ export type DeckState = {
 export type DeckPaths = { sock: string; card: string; target: string; side: string };
 
 export type ToWorker =
-	| { type: "init"; deck: string; paths: DeckPaths; config: Config }
+	| { type: "init"; deck: string; paths: DeckPaths; config: Config; here: string }
+	| { type: "layout"; layout: DeckLayout }
 	| { type: "wake"; id: string }
 	| { type: "new"; cwd: string; group: string | null }
 	| { type: "visit"; id: string }
@@ -100,6 +102,7 @@ export type ToWorker =
 	| { type: "editor"; dir: string };
 
 export type FromWorker =
+	| { type: "restore"; layout: DeckLayout | null }
 	| { type: "snapshot"; snapshot: Snapshot }
 	| { type: "woke"; id: string; host: string }
 	| { type: "created"; host: string }

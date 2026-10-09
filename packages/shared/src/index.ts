@@ -1,11 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 export { Db, type Param, type Row } from "./db.ts";
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export type Phase = "idle" | "working" | "blocked";
 export type View = "pi" | "editor" | "split";
@@ -23,6 +23,17 @@ export function stateDir(): string {
 export function configDir(): string {
 	return join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "agent-switchboard");
 }
+
+/** Where Operators live: sessions there coordinate every Project instead of belonging to one. */
+export function operatorDir(): string {
+	if (physicalOperatorDir) return physicalOperatorDir;
+	const dir = join(configDir(), "operator");
+	if (!existsSync(dir)) return dir;
+	// pi's cwd is physical, so a symlinked ~/.config would otherwise never match.
+	physicalOperatorDir = realpathSync(dir);
+	return physicalOperatorDir;
+}
+let physicalOperatorDir: string | undefined;
 
 export function dbPath(): string {
 	return join(stateDir(), "swb.db");

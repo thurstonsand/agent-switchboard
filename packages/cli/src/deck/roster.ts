@@ -14,11 +14,12 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "@earendil-works/pi-tui";
-import type { View } from "@swb/shared";
+import { operatorDir, projectRoot, type View } from "@swb/shared";
 import { loadConfig } from "../config.ts";
 import { displayName, projectName } from "../derive.ts";
 import { UsageError } from "../errors.ts";
 import { newer } from "../sessions.ts";
+import type { DeckLayout } from "../store.ts";
 import { quote, SESSIONS, tmux, tmuxAsync, tmuxTry, UI } from "../tmux.ts";
 import { VERSION } from "../version.ts";
 import { Control } from "./control.ts";
@@ -59,6 +60,7 @@ const VISIT_MS = 1000;
 const HOVER_MS = 500;
 const TOAST_MS = 3500;
 const DETAIL_LINES = 3;
+const LAYOUT_SETTLE_MS = 500;
 const VIEWS: View[] = ["pi", "editor", "split"];
 
 const { values: args } = parseArgs({
@@ -69,6 +71,7 @@ const { values: args } = parseArgs({
 		select: { type: "string" },
 		new: { type: "string" },
 		here: { type: "string" },
+		continue: { type: "boolean" },
 	},
 });
 if (!args.deck || !args.stage || !args.here) throw new UsageError("__roster: --deck, --stage, and --here are required");
@@ -151,7 +154,9 @@ async function sizingRoster(work: () => Promise<void>): Promise<void> {
 }
 
 function rosterWidth(): number {
-	return draggedCols ?? rosterCols(config.rosterWidth, deckWidth);
+	// A width dragged in a wider terminal, restored into this one, still leaves the Stage room.
+	if (draggedCols !== null) return Math.max(20, Math.min(draggedCols, deckWidth - 21));
+	return rosterCols(config.rosterWidth, deckWidth);
 }
 /** The pane id the keyboard is on. */
 let focusedPane = "";
@@ -188,6 +193,7 @@ const localGroups = new Map<string, string | null>();
 type Group = { kind: "custom"; name: string } | { kind: "worktree"; branch: string };
 
 function groupOf(e: Entry): Group | null {
+	if (e.operator) return null;
 	const local = localGroups.get(e.id);
 	const name = local !== undefined ? local : e.group;
 	if (name !== null) return { kind: "custom", name };
@@ -594,6 +600,69 @@ function followHost(): void {
 	if (focus === "stage") void focusRoster();
 }
 
+/** The cursor the last Deck in this Project left, until the first snapshot places it. */
+let restoredKey: string | null = null;
+let started = false;
+/** `-c`: the session whose pi takes the keyboard once the Stage is up. */
+let continueTo: Entry | null = null;
+
+/**
+ * Where the first snapshot puts the cursor: `swb open`'s session, `-c`'s most recent session here, where the last Deck in
+ * this Project left it, else the session I last visited. Only `-c` takes the keyboard.
+ */
+function startCursor(): void {
+	started = true;
+	if (args.select || args.new) return;
+	const open = [...entries.values()].filter((e) => e.open && !e.provisional);
+	if (args.continue) {
+		const root = projectRoot(here);
+		const recent = open
+			.filter((e) => e.project === root)
+			.sort((a, b) => (b.visitedAt ?? 0) - (a.visitedAt ?? 0) || b.activityAt - a.activityAt)[0];
+		if (!recent) {
+			newSession(here, null);
+			return;
+		}
+		reveal(recent.id);
+		continueTo = recent;
+		return;
+	}
+	if (restoredKey !== null && entries.get(restoredKey)?.open) {
+		reveal(restoredKey);
+		return;
+	}
+	if (restoredKey !== null && roster.rows().some((row) => row.key === restoredKey)) {
+		roster.selectedKey = restoredKey;
+		return;
+	}
+	const visited = open.filter((e) => e.visitedAt !== null).sort((a, b) => (b.visitedAt ?? 0) - (a.visitedAt ?? 0))[0];
+	if (visited) reveal(visited.id);
+}
+
+let savedLayout = "";
+let draftLayout = "";
+let draftSince = 0;
+
+/** Keeps this Project's layout for the next Deck opened in it, once it has held still for a moment. */
+function keepLayout(now: number): void {
+	if (!started) return;
+	const kept: DeckLayout = {
+		selectedKey: roster.selectedKey,
+		rosterCols: draggedCols,
+		collapsed: [...roster.collapsed],
+		expanded: [...roster.expanded],
+	};
+	const json = JSON.stringify(kept);
+	if (json !== draftLayout) {
+		draftLayout = json;
+		draftSince = now;
+		return;
+	}
+	if (json === savedLayout || now - draftSince < LAYOUT_SETTLE_MS) return;
+	savedLayout = json;
+	post({ type: "layout", layout: kept });
+}
+
 function onSnapshot(next: Snapshot): void {
 	snapshot = next;
 	entries = new Map(next.entries.map((e) => [e.id, e]));
@@ -605,6 +674,7 @@ function onSnapshot(next: Snapshot): void {
 	settleLaunches();
 	followHost();
 	roster.settlePin();
+	if (!started) startCursor();
 	const e = stage.staged === null ? undefined : entries.get(stage.staged);
 	if (e && !e.live && e.transcript && !transcripts.has(e.id)) post({ type: "transcript", id: e.id, path: e.transcript });
 	apply();
@@ -629,6 +699,15 @@ worker.onerror = (event: ErrorEvent) => {
 worker.onmessage = (event: MessageEvent<FromWorker>) => {
 	const message = event.data;
 	switch (message.type) {
+		case "restore":
+			if (message.layout) {
+				roster.collapsed = new Set(message.layout.collapsed);
+				roster.expanded = new Set(message.layout.expanded.flatMap((saved) => SECTION_KEYS.filter((key) => key === saved)));
+				draggedCols = message.layout.rosterCols;
+				restoredKey = message.layout.selectedKey;
+				void layout();
+			}
+			break;
 		case "snapshot":
 			onSnapshot(message.snapshot);
 			break;
@@ -699,6 +778,7 @@ function reveal(id: string): void {
 		return;
 	}
 	if (!e.open) roster.expanded.add("archived");
+	else if (e.operator) roster.expanded.add("operators");
 	else {
 		const parent = e.inactive && !launchFor(e.id) ? "inactive" : "open";
 		if (parent === "inactive") roster.expanded.add("inactive");
@@ -710,7 +790,8 @@ function reveal(id: string): void {
 	roster.syncStage(true);
 }
 
-type SectionKey = "inactive" | "archived";
+type SectionKey = "operators" | "inactive" | "archived";
+const SECTION_KEYS: SectionKey[] = ["operators", "inactive", "archived"];
 
 /** A Project header has no group; a Group or worktree bucket beneath it does, and starts sessions in its newest member's cwd. */
 type HeaderRow = {
@@ -767,7 +848,7 @@ class Roster implements Component {
 	pin: { index: number; answered: boolean } | null = null;
 	scrollTop = 0;
 	collapsed = new Set<string>();
-	expanded = new Set<SectionKey>();
+	expanded = new Set<SectionKey>(["operators"]);
 	filter = new Input({ prompt: "/ " });
 	filtering = false;
 	name = new Input({ prompt: "group: " });
@@ -856,9 +937,13 @@ class Roster implements Component {
 			rows.push({ kind: "section", key, label, count, expanded });
 			return expanded;
 		};
+		const operators = open.filter((e) => e.operator).sort((a, b) => b.activityAt - a.activityAt);
+		if (section("operators", "Operators", operators.length)) {
+			for (const e of operators) rows.push({ kind: "session", key: e.id, entry: e, depth: 0, header: "operators" });
+		}
 		const inactive = (e: Entry) => e.inactive && !launchFor(e.id);
 		pushGroups(
-			open.filter((e) => !inactive(e)),
+			open.filter((e) => !e.operator && !inactive(e)),
 			0,
 			"open",
 		);
@@ -876,9 +961,15 @@ class Roster implements Component {
 		if (rows.length === 0) return -1;
 		let index = rows.findIndex((r) => r.key === this.selectedKey);
 		if (index === -1 && this.selectedKey === "") {
-			// Nothing chosen yet: land on the first session, and don't settle on a section before the first snapshot fills in.
-			index = rows.findIndex((r) => r.kind === "session");
-			if (index === -1) return 0;
+			// Nothing chosen yet: land on the first session past the Operators, and don't settle on a section before the first
+			// snapshot fills in.
+			index = rows.findIndex((r) => r.kind === "session" && !r.entry.operator);
+			if (index === -1) index = rows.findIndex((r) => r.kind === "session");
+			if (index === -1)
+				return Math.max(
+					0,
+					rows.findIndex((r) => r.kind !== "section" || r.key !== "operators"),
+				);
 		}
 		if (index === -1) index = Math.min(this.lastIndex, rows.length - 1);
 		this.selectedKey = (rows[index] as Row).key;
@@ -967,7 +1058,7 @@ class Roster implements Component {
 			this.pressed = this.targets.find((t) => t.y === event.y && event.x >= t.from && event.x < t.to) ?? null;
 			this.dragging = null;
 			const row = this.rowAt(event.y);
-			if (this.pressed || row?.kind !== "session" || !row.entry.open) return undefined;
+			if (this.pressed || row?.kind !== "session" || !row.entry.open || row.entry.operator) return undefined;
 			this.dragging = { id: row.entry.id, moved: false, drop: null };
 			return { capture: true };
 		}
@@ -1098,6 +1189,10 @@ class Roster implements Component {
 	/** n: in the cursor's directory, joining its Group: a Group header's newest session's directory, there being no other. */
 	newAtCursor(): void {
 		const row = this.selected();
+		if ((row?.kind === "section" && row.key === "operators") || (row?.kind === "session" && row.entry.operator)) {
+			newSession(operatorDir(), null);
+			return;
+		}
 		if (!row || row.kind === "section") {
 			newSession(here, null);
 			return;
@@ -1110,7 +1205,8 @@ class Roster implements Component {
 	startNaming(): void {
 		const row = this.selected();
 		this.filtering = false;
-		if (row?.kind === "session") {
+		if (row?.kind === "session" && row.entry.operator) toast("Operators don't take Groups", "info");
+		else if (row?.kind === "session") {
 			const group = groupOf(row.entry);
 			this.naming = { ids: [row.entry.id], header: null };
 			this.name.setValue(group?.kind === "custom" ? group.name : "");
@@ -1290,6 +1386,8 @@ class Roster implements Component {
 		else if (row.kind === "header" && row.group?.kind === "custom")
 			hints = [enter(row.collapsed ? "expand" : "collapse"), ["m", "rename", () => this.startNaming()], newAtCursor, help];
 		else if (row.kind === "header") hints = [enter(row.collapsed ? "expand" : "collapse"), newAtCursor, help];
+		else if (row.kind === "section" && row.key === "operators")
+			hints = [enter(row.expanded ? "collapse" : "expand"), ["n", "new operator", () => this.newAtCursor()], help];
 		else if (row.kind === "section") hints = [enter(row.expanded ? "collapse" : "expand"), help];
 		else if (!row.entry.open) hints = [enter("open"), ["a", "unarchive", () => this.toggleArchived()], help];
 		else hints = [enter(row.entry.live ? "focus" : "wake"), ["a", "archive", () => this.toggleArchived()], newAtCursor, help];
@@ -1629,8 +1727,11 @@ tui.start();
 
 // Like pi: query the colors, and again on every light/dark report (997). The roster starts before the Deck's
 // client attaches, so the first query gets nothing; tmux sends a 997 on attach, and that query gets everything.
+// pi asks for the palette once, at startup, usually with no client attached; tmux answers OSC 4 for a detached pane
+// only from pane-colours, so mirror this terminal's palette onto the sessions server.
 async function queryColors(scheme: string | null): Promise<void> {
-	const { foreground, background } = await tui.queryTerminalColors({ timeoutMs: 200 });
+	const { foreground, background, palette } = await tui.queryTerminalColors({ timeoutMs: 200 });
+	if (palette) await tmuxAsync(SESSIONS, ...palette.flatMap((color, i) => [";", "set", "-g", `pane-colours[${i}]`, hex(color)]).slice(1));
 	cursorBg = background && foreground ? { focused: mix(background, foreground, 0.2), unfocused: mix(background, foreground, 0.08) } : null;
 	colors = { background: background ? hex(background as RgbColor) : null, scheme: scheme ?? colors.scheme };
 	if (colors.background) post({ type: "background", color: colors.background });
@@ -1664,7 +1765,7 @@ Bun.serve({
 	},
 });
 
-post({ type: "init", deck, paths, config });
+post({ type: "init", deck, paths, config, here });
 if (args.new) newSession(args.new, null);
 void layout();
 
@@ -1685,7 +1786,9 @@ setInterval(() => {
 	const wasReady = ready;
 	ready = snapshot !== null && main.up;
 	if (ready && !wasReady && args.select) reveal(args.select);
+	if (ready && !wasReady && continueTo) roster.focusEntry(continueTo);
 	const now = Date.now();
+	keepLayout(now);
 	if (toasts.some((t) => t.until <= now) || launches.length > 0 || [...entries.values()].some((e) => e.activity === "blocked"))
 		tui.requestRender();
 }, 100);

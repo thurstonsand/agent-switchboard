@@ -313,10 +313,10 @@ Failure: the recorder shows a persistent red footer status (`swb: not recording:
 - Otherwise it writes `marks.archived_at` and calls `ctx.shutdown()`.
 - The tmux `session-closed` hook then runs `swb gc`, which reaps the editor.
 
-`swb_archive`, a tool registered only in managed processes, archives when the user asks the agent to:
-- It writes the same mark and calls `ctx.shutdown()` mid-turn; pi defers that until the turn settles, so the final message lands and the session is not Interrupted.
+`swb_update_session`, a tool registered only in managed processes, archives or unarchives a session, the current one by default:
+- Archiving the current session writes the same mark and calls `ctx.shutdown()` mid-turn; pi defers that until the turn settles, so the final message lands and the session is not Interrupted.
 - A retry, compaction, or queued message inside that turn doesn't reopen it; only a new turn from idle does.
-- No confirmation, and no unarchive tool: `swb unarchive <id>` covers that.
+- Archiving another session is refused while it is mid-turn. Unarchiving doesn't restart it.
 
 ### Drive contract
 

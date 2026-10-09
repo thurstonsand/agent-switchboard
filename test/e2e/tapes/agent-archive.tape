@@ -1,7 +1,7 @@
-# pi archives its own session with the swb_archive tool once the work is done.
+# pi archives its own session with the swb_update_session tool once the work is done.
 Source common.tape
 
-Type "# pi archives its own session with swb_archive" Sleep 1s Enter
+Type "# pi archives its own session with swb_update_session" Sleep 1s Enter
 Type "swb" Sleep 400ms Enter
 Wait+Screen /Archived \(0\)/
 Sleep 1s

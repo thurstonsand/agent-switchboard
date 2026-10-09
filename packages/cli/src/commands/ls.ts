@@ -13,13 +13,16 @@ Lists every Session, open and archived, with its derived state.
   project      project root: the parent of the git common dir, else the cwd
   cwd          current working directory
   branch       git branch (or short HEAD), or null outside git
+  group        its Group, or null
+  operator     its cwd is the Operator folder
   open         not archived
   live         its pi process is running in this boot
   activity     "working", "blocked", or "idle" (always "idle" when not live)
   unseen       open, and its agent finished a turn after my last Visit
   interrupted  not live, and its process ended mid-turn
-  inactive     open, no activity within inactive_after, neither blocked nor unseen
+  inactive     open, not an Operator, no activity within inactive_after, neither blocked nor unseen
   activityAt   epoch ms of the last prompt or settle
+  visitedAt    epoch ms of my last Visit, or null
   archivedAt   epoch ms it was archived, or null when open`;
 
 function glyph(s: SessionState): string {

@@ -92,7 +92,7 @@ test("a first turn started by a custom message, as a handoff child's is, is trac
 	s.save("kicked-off-killed.txt", `${s.screen()}\n${JSON.stringify(s.ls(), null, 2)}`);
 });
 
-test("swb_archive archives from inside a turn, and pi quits only once the turn's final message lands", async () => {
+test("swb_update_session archives from inside a turn, and pi quits only once the turn's final message lands", async () => {
 	s = scenario("phase3", "archive-tool");
 	const { id, host } = await liveSession("ready");
 	s.keys("-l", "archive now", "Enter");

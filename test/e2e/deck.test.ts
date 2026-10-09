@@ -244,8 +244,8 @@ async function latencies(n: number): Promise<number[]> {
 	return out;
 }
 
-/** The OSC 11 reply a pi gets from its terminal, asked by `/e2e-bg` typed into its tmux session on the sessions server. */
-async function piBackground(host: string): Promise<string> {
+/** The OSC 11 or OSC 4 reply a pi gets from its terminal, asked by `/e2e-bg` typed into its tmux session on the sessions server. */
+async function piColor(host: string, osc: "11" | "4;9"): Promise<string> {
 	const log = join(s.home, "e2e-signals/input.log");
 	writeFileSync(log, "");
 	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host}:`, "-l", "/e2e-bg");
@@ -256,15 +256,17 @@ async function piBackground(host: string): Promise<string> {
 				.split("\n")
 				.filter(Boolean)
 				.map((line) => JSON.parse(line) as string);
-			return lines.find((line) => line.startsWith("\x1b]11;")) ?? false;
+			return lines.find((line) => line.startsWith(`\x1b]${osc};`)) ?? false;
 		},
 		budgets.settle,
-		`${host}'s OSC 11 reply`,
+		`${host}'s OSC ${osc} reply`,
 	);
 }
 
 const LIGHT_BG = "\x1b]11;rgb:f9f9/f5f5/d7d7\x1b\\";
 const DARK_BG = "\x1b]11;rgb:1d1d/2020/2121\x1b\\";
+const LIGHT_RED = "\x1b]4;9;rgb:9d9d/0000/0606\x1b\\";
+const DARK_RED = "\x1b]4;9;rgb:fbfb/4949/3434\x1b\\";
 
 test("with the db writer lock held and a 50 MB transcript being parsed, the cursor still moves within 100 ms", async () => {
 	s = scenario("phase2", "slow-worker");
@@ -368,15 +370,15 @@ test("the roster and a live pi report the harness terminal's background, and bot
 	s.swb("drive", "start", "--", "new");
 	const st = await waitState(s, "the new pi live", (x) => x.staged.kind === "live");
 	await waitState(s, "the roster's light background", (x) => x.colors.background === "#f9f5d7");
-	expect(await piBackground(st.staged.host as string)).toBe(LIGHT_BG);
+	expect(await piColor(st.staged.host as string, "11")).toBe(LIGHT_BG);
 	s.save("light.ansi", s.swb("drive", "capture", "--ansi"));
 	s.swb("drive", "theme", "dark");
 	await waitState(s, "the roster's dark background", (x) => x.colors.background === "#1d2021");
-	await until(async () => (await piBackground(st.staged.host as string)) === DARK_BG, budgets.settle, "pi's dark background");
+	await until(async () => (await piColor(st.staged.host as string, "11")) === DARK_BG, budgets.settle, "pi's dark background");
 	s.save("dark.ansi", s.swb("drive", "capture", "--ansi"));
 });
 
-test("a pi woken with w and never viewed reports the terminal's background and re-themes while still unviewed", async () => {
+test("a pi woken with w and never viewed reports the terminal's background and palette, and re-themes while still unviewed", async () => {
 	s = scenario("phase2", "unviewed-theme");
 	const [a, b] = (await seed(s, { turns: ["a"] }, { turns: ["b"] })) as [string, string];
 	s.swb("drive", "start");
@@ -389,10 +391,12 @@ test("a pi woken with w and never viewed reports the terminal's background and r
 		{ tmux_session: string },
 	];
 	expect(s.tmux(s.servers.sessions, "list-sessions", "-F", "#{session_name} #{session_attached}")).toContain(`${host} 0`);
-	expect(await piBackground(host)).toBe(LIGHT_BG);
+	expect(await piColor(host, "11")).toBe(LIGHT_BG);
+	expect(await piColor(host, "4;9")).toBe(LIGHT_RED);
 	s.swb("drive", "theme", "dark");
 	await waitState(s, "the roster's dark background", (x) => x.colors.background === "#1d2021");
-	await until(async () => (await piBackground(host)) === DARK_BG, budgets.settle, "the unviewed pi's dark background");
+	await until(async () => (await piColor(host, "11")) === DARK_BG, budgets.settle, "the unviewed pi's dark background");
+	await until(async () => (await piColor(host, "4;9")) === DARK_RED, budgets.settle, "the unviewed pi's dark palette");
 });
 
 test("Enter, then a prompt typed in the Stage, shows working then idle in the roster", async () => {

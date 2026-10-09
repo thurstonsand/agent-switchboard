@@ -284,9 +284,11 @@ test("roster navigation: h l space and a header click fold projects; g G jump; M
 
 	const header = (project: string) => (x: DeckState) => headerRows(x).find((r) => r.project.endsWith(project));
 	s.keys("g");
-	const top = await waitState(s, "cursor on the first header", (x) => x.cursor === null);
+	const top = await waitState(s, "cursor on the Operators section", (x) => x.cursorRow === 0);
+	expect(top.rows[0]).toMatchObject({ kind: "section", label: "Operators", count: 0 });
+	s.keys("j");
 	const first = headerRows(top)[0] as HeaderStateRow;
-	expect(top.rows[0]).toEqual(first);
+	expect(top.rows[1]).toEqual(first);
 	s.keys("h");
 	await waitState(s, "first project folded", (x) => header(first.project)(x)?.expanded === false);
 	s.keys("l");

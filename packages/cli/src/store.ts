@@ -31,6 +31,11 @@ const MIGRATIONS: string[] = [
 		view        TEXT NOT NULL DEFAULT 'pi' CHECK (view IN ('pi','editor','split'))
 	);`,
 	"ALTER TABLE marks ADD COLUMN group_name TEXT",
+	`CREATE TABLE deck_layouts (
+		project_root TEXT PRIMARY KEY,
+		state        TEXT NOT NULL,
+		saved_at     INTEGER NOT NULL
+	);`,
 ];
 
 if (MIGRATIONS.length !== SCHEMA_VERSION) throw new Error(`${MIGRATIONS.length} migrations for schema v${SCHEMA_VERSION}`);
@@ -57,6 +62,23 @@ export function setGroup(db: Db, ids: string[], name: string | null): void {
 				name,
 			);
 	});
+}
+
+/** A Deck's layout as last left in a Project, which the next Deck opened there starts from. */
+export type DeckLayout = { selectedKey: string; rosterCols: number | null; collapsed: string[]; expanded: string[] };
+
+export function loadLayout(db: Db, projectRoot: string): DeckLayout | null {
+	const row = db.get("SELECT state FROM deck_layouts WHERE project_root = ?", projectRoot);
+	return row ? (JSON.parse(row.state as string) as DeckLayout) : null;
+}
+
+export function saveLayout(db: Db, projectRoot: string, layout: DeckLayout): void {
+	db.run(
+		"INSERT INTO deck_layouts (project_root, state, saved_at) VALUES (?, ?, ?) ON CONFLICT (project_root) DO UPDATE SET state = excluded.state, saved_at = excluded.saved_at",
+		projectRoot,
+		JSON.stringify(layout),
+		Date.now(),
+	);
 }
 
 /** Opens the db and brings it to this binary's schema; refuses a db from a newer swb. */

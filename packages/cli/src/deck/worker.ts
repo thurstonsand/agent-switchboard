@@ -1,10 +1,10 @@
 /// <reference lib="webworker" />
 import { statSync } from "node:fs";
-import { bootId, type Db, type View } from "@swb/shared";
+import { bootId, type Db, operatorDir, projectRoot, type View } from "@swb/shared";
 import type { Config } from "../config.ts";
 import { derive, type RuntimeRecord, runtimeLive, runtimeRecords, type SessionRow, sessionRows, type World } from "../derive.ts";
 import { archive, ensureEditor, ensureSessionsServer, launch, unarchive, wake } from "../sessions.ts";
-import { markVisited, openStore, setGroup, setView } from "../store.ts";
+import { loadLayout, markVisited, openStore, saveLayout, setGroup, setView } from "../store.ts";
 import { listSessions, SESSIONS, tmuxTry } from "../tmux.ts";
 import { ensurePlaceholder, placeholderName } from "./deck.ts";
 import type { Entry, FromWorker, Snapshot, ToWorker, Turn } from "./protocol.ts";
@@ -19,6 +19,8 @@ const TICK_MS = 250;
 
 let deck = "";
 let config: Config;
+/** The Project of the directory swb was run in, whose saved layout this Deck starts from and keeps. */
+let layoutRoot = "";
 let db: Db;
 const boot = bootId();
 let lastJson = "";
@@ -122,6 +124,7 @@ function snapshot(): Polled {
 			cwd: runtime.cwd,
 			branch: null,
 			group: pendingGroups.get(runtime.session_id) ?? null,
+			operator: runtime.cwd === operatorDir(),
 			open: true,
 			live: true,
 			activity: "idle",
@@ -129,6 +132,7 @@ function snapshot(): Polled {
 			interrupted: false,
 			inactive: false,
 			activityAt: runtime.started_at,
+			visitedAt: null,
 			archivedAt: null,
 			view: "pi",
 			transcript: null,
@@ -222,8 +226,13 @@ function handle(message: ToWorker): void {
 			deck = message.deck;
 			config = message.config;
 			db = openStore();
+			layoutRoot = projectRoot(message.here);
+			post({ type: "restore", layout: loadLayout(db, layoutRoot) });
 			setInterval(tick, TICK_MS);
 			break;
+		case "layout":
+			saveLayout(db, layoutRoot, message.layout);
+			return;
 		case "wake":
 			try {
 				const host = wake(db, message.id);

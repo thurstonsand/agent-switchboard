@@ -94,5 +94,5 @@ export async function adopt(args: string[]): Promise<void> {
 		);
 		markVisited(db, id);
 	});
-	await openDeck({ select: id, newCwd: null });
+	await openDeck({ select: id, newCwd: null, continue: false });
 }

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { stateDir } from "@swb/shared";
 import { type Config, loadConfig, type RosterWidth } from "../config.ts";
 import { SwbError } from "../errors.ts";
+import { ensureOperatorDir } from "../operator.ts";
 import { ensureServer, ensureSessionsServer, hook, notify, onlyControl, randomHex, SWB, startScrubbed } from "../sessions.ts";
 import { openStore } from "../store.ts";
 import { CLIENT_CWD, cleanEnv, listSessions, quote, SESSIONS, tmux, tmuxBin, tmuxTry, UI } from "../tmux.ts";
@@ -175,13 +176,15 @@ export function stageScript(deck: string, targetPath: string): string {
 	].join("\n");
 }
 
-export type DeckIntent = { select: string | null; newCwd: string | null };
+/** `continue`: pi takes the keyboard on the most recent session in this Project, or a new one. */
+export type DeckIntent = { select: string | null; newCwd: string | null; continue: boolean };
 
 /** Builds a Deck (roster pane and Stage pane) and attaches this terminal to it. */
 export async function openDeck(intent: DeckIntent): Promise<void> {
 	if (!process.stdout.isTTY) throw new SwbError("swb needs a terminal");
 	const config = loadConfig();
 	openStore();
+	ensureOperatorDir();
 	// Reap a crashed Deck's placeholder first; left standing, it holds the sessions server back from restarting.
 	liveDecks();
 	ensureSessionsServer();
@@ -215,6 +218,7 @@ export async function openDeck(intent: DeckIntent): Promise<void> {
 	const roster = [SWB, "__roster", "--deck", deck, "--stage", stage, "--here", process.cwd()];
 	if (intent.select) roster.push("--select", intent.select);
 	if (intent.newCwd) roster.push("--new", intent.newCwd);
+	if (intent.continue) roster.push("--continue");
 	const rosterPane = tmux(
 		UI,
 		"split-window",

@@ -64,10 +64,11 @@ function theme(name: string | undefined): Theme {
 
 function themeCommands(name: Theme): [string, string, string, string][] {
 	const t = THEMES[name];
+	// The background change sends the light/dark report, so the palette must already be in place, as in a real terminal.
 	return [
+		...t.palette.map((color, i): [string, string, string, string] => ["set", "-g", `pane-colours[${i}]`, color]),
 		["set", "-g", "window-style", `bg=${t.bg},fg=${t.fg}`],
 		["set", "-g", "window-active-style", `bg=${t.bg},fg=${t.fg}`],
-		...t.palette.map((color, i): [string, string, string, string] => ["set", "-g", `pane-colours[${i}]`, color]),
 	];
 }
 
@@ -185,7 +186,7 @@ export async function drive(args: string[]): Promise<void> {
 				{ cwd: process.cwd(), env: cleanEnv(), stdout: "pipe", stderr: "pipe" },
 			);
 			if (started.exitCode !== 0) throw new SwbError(`starting tmux -L ${DRIVE}: ${started.stderr.toString().trim()}`);
-			if (swbArgs.length === 0 || ["new", "open", "adopt"].includes(swbArgs[0] as string)) await waitReady();
+			if (swbArgs.length === 0 || ["-c", "--continue", "new", "open", "adopt"].includes(swbArgs[0] as string)) await waitReady();
 			break;
 		}
 		case "state":

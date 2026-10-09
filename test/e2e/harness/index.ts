@@ -54,6 +54,7 @@ export type LsEntry = {
 	cwd: string;
 	branch: string | null;
 	group: string | null;
+	operator: boolean;
 	open: boolean;
 	live: boolean;
 	activity: "idle" | "working" | "blocked";
@@ -142,6 +143,7 @@ export function scenario(
 			defaultModel: "faux-1",
 			quietStartup: true,
 			tuiMode: "regular",
+			theme: "system",
 		}),
 	);
 

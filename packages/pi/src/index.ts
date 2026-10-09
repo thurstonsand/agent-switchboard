@@ -3,7 +3,8 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { bootId, branch, Db, pidAlive, projectRoot, type Row, SCHEMA_VERSION } from "@swb/shared";
+import { Text } from "@earendil-works/pi-tui";
+import { bootId, branch, Db, operatorDir, pidAlive, projectRoot, type Row, SCHEMA_VERSION } from "@swb/shared";
 import { Type } from "typebox";
 
 type Launch = { readonly db: string; readonly tmuxSession: string; readonly bin: string };
@@ -95,6 +96,8 @@ function hostOfTranscript(db: Db, proc: Process, transcript: string): string | u
 }
 
 export default function (pi: ExtensionAPI) {
+	// swb writes the Operator folder's extension itself; without this, every new Operator would stop on pi's trust prompt.
+	pi.on("project_trust", (event) => ({ trusted: event.cwd === operatorDir() ? "yes" : "undecided" }));
 	const claimed = claim();
 	if (!claimed) return;
 	const proc: Process = claimed;
@@ -206,7 +209,7 @@ export default function (pi: ExtensionAPI) {
 
 	// Not the user message_start: a handoff child's first turn starts with a custom message.
 	// pi re-emits agent_start for retries, compaction, and queued messages within one turn; only a turn
-	// that starts from idle moves last_prompt_at, so swb_archive can't be undone by its own turn.
+	// that starts from idle moves last_prompt_at, so swb_update_session can't be undone by its own turn.
 	pi.on("agent_start", (_event, ctx) => {
 		writeFor(ctx, (db, id) => {
 			const transcript = ctx.sessionManager.getSessionFile();
@@ -292,23 +295,53 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
-		name: "swb_archive",
-		label: "Archive session",
-		description:
-			"Archive this session in Agent Switchboard. It leaves the user's roster of open sessions, and pi quits as soon as this turn ends. The user can restore it with `swb unarchive <id>`.",
-		promptSnippet: "Archive this session when the user asks",
+		name: "swb_update_session",
+		label: "Update session",
+		description: "Archive or unarchive a session. Omit session to update the current session.",
+		promptSnippet: "Archive or unarchive a session",
 		promptGuidelines: [
-			"Use swb_archive only when the user asks to archive this session; never archive on your own initiative.",
-			"Call swb_archive as the last action of the turn, then end with a brief final message: pi quits once the turn ends.",
+			"Archive only when the user asks, or when you started that session and have driven it to completion.",
+			"Archiving the current session will quit it when the turn ends: call it last, then end with a brief final message.",
+			"Archiving another session fails while it is mid-turn. Unarchiving doesn't restart it; session_send_message wakes it.",
 		],
-		parameters: Type.Object({}),
-		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-			if (!markArchived(ctx)) {
-				throw new Error(proc.failure ? `swb: not recording: ${proc.failure}` : "swb: no session recorded yet");
+		parameters: Type.Object({
+			session: Type.Optional(Type.String({ description: "Session id; omit for the current session" })),
+			archived: Type.Boolean(),
+		}),
+		renderCall(args, theme) {
+			const target =
+				!args.session || args.session === current
+					? "This session"
+					: ((connect().get("SELECT title FROM sessions WHERE session_id = ?", args.session)?.title as string | null | undefined) ??
+						args.session);
+			return new Text(
+				`${theme.fg("toolTitle", theme.bold(args.archived ? "Archive" : "Unarchive"))} · ${theme.fg("accent", target)}`,
+				0,
+				0,
+			);
+		},
+		renderResult(result, _options, theme, context) {
+			const output = result.content.find((item) => item.type === "text")?.text ?? "";
+			return new Text(context.isError ? theme.fg("error", output) : "", 0, 0);
+		},
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const self = ctx.sessionManager.getSessionId();
+			if (!params.session || params.session === self) {
+				if (!params.archived) throw new Error("this session is already open");
+				if (!markArchived(ctx)) {
+					throw new Error(proc.failure ? `swb: not recording: ${proc.failure}` : "swb: no session recorded yet");
+				}
+				ctx.shutdown();
+				return { content: [{ type: "text", text: "Archived. pi quits when this turn ends." }], details: undefined };
 			}
-			ctx.shutdown();
+			try {
+				await run(proc.launch.bin, [params.archived ? "archive" : "unarchive", params.session], { timeout: 15_000 });
+			} catch (error) {
+				const { stderr, message } = error as { stderr?: string; message: string };
+				throw new Error(stderr?.trim() || message);
+			}
 			return {
-				content: [{ type: "text", text: "Archived. pi quits when this turn ends." }],
+				content: [{ type: "text", text: params.archived ? "Archived." : "Unarchived. It stays dormant until messaged." }],
 				details: undefined,
 			};
 		},

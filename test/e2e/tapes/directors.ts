@@ -413,4 +413,23 @@ export const directors: Record<string, Director> = {
 			expect(moved).toMatchObject({ open: true, live: true });
 		},
 	},
+
+	startup: {
+		setup: async (s) => {
+			await seed(s, { turns: ["one"], title: "alpha" }, { turns: ["two"], title: "bravo" });
+		},
+		run: async (s) => {
+			const id = (title: string) => s.ls().find((e) => e.title === title)?.id;
+			await waitLs(s, "an Operator after its first turn", (ls) => ls.some((e) => e.operator && e.activity === "idle"));
+			const first = await waitDeck(s, "alpha under the cursor", (x) => x.cursor === id("alpha") && x.filter === "");
+			const restored = await waitDeck(s, "a second Deck", (x) => x.deck !== first.deck && x.ready && x.cursor !== null);
+			expect(restored).toMatchObject({ cursor: id("alpha"), focus: "roster" });
+			const continued = await waitDeck(
+				s,
+				"swb -c in pi",
+				(x) => x.deck !== restored.deck && x.staged.kind === "live" && x.focus === "stage",
+			);
+			expect(continued.staged.id).toBe(id("bravo") as string);
+		},
+	},
 };

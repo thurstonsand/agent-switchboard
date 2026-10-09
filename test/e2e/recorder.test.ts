@@ -281,8 +281,8 @@ test("a user tmux.conf binding M-z and setting window-style changes nothing insi
 	writeFileSync(`${s.home}/.config/tmux/tmux.conf`, conf);
 	await startManaged();
 	expect(await typed("M-z")).toEqual(["\x1b[122;3u"]);
-	const reply = (await typed("-l", "/e2e-bg", "Enter")).at(-1);
-	expect(reply).toBe("\x1b]11;rgb:f9f9/f5f5/d7d7\x1b\\");
+	const replies = await typed("-l", "/e2e-bg", "Enter");
+	expect(replies).toContain("\x1b]11;rgb:f9f9/f5f5/d7d7\x1b\\");
 });
 
 test("a session live in one managed pi cannot be opened in another", async () => {
