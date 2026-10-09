@@ -32,6 +32,7 @@ Some scenarios install the host's own pi-sessions and pi-wt, found through its p
 
 - Database: `${XDG_STATE_HOME:-~/.local/state}/agent-switchboard/swb.db` (directory `0700`, file `0600`)
 - Settings: `${XDG_CONFIG_HOME:-~/.config}/agent-switchboard/config.toml`; unknown keys are an error
+- Drafts: `${XDG_STATE_HOME:-~/.local/state}/agent-switchboard/drafts/<session_id>`, an unsent prompt saved when an upgrade stops its pi
 - Deck sockets: `${XDG_STATE_HOME:-~/.local/state}/agent-switchboard/decks/<deck>.sock`
 - tmux servers: `tmux -L swb` (sessions) and `tmux -L swb-ui` (Decks), each suffixed `-<SWB_INSTANCE>` when that is set. Tests always set it
 

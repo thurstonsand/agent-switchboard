@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState, HeaderStateRow } from "../../packages/cli/src/deck/protocol.ts";
 import { VERSION } from "../../packages/cli/src/version.ts";
@@ -384,6 +384,34 @@ test("n in an empty Deck, and on a section row, starts a session where swb was r
 	expect(third.focus).toBe("stage");
 });
 
+test("n starts a session in the highlighted row's directory, N where swb was run", async () => {
+	s = scenario("phase6", "n-cursor");
+	const elsewhere = join(s.home, "elsewhere");
+	mkdirSync(elsewhere);
+	s.swb("drive", "start", "--", "new", "--cwd", elsewhere);
+	const away = await waitState(s, "a pi elsewhere", (x) => x.staged.kind === "live" && x.staged.id !== null, budgets.piReady);
+	s.keys("M-a", "N");
+	const here = await waitState(
+		s,
+		"M-a N starts one where swb was run",
+		(x) => x.staged.kind === "live" && x.staged.id !== null && x.staged.id !== away.staged.id,
+		budgets.piReady,
+	);
+	s.keys("M-a", "h");
+	await waitState(s, "roster focus", (x) => x.focus === "roster");
+	await cursorTo(s, away.staged.id as string);
+	s.keys("n");
+	const beside = await waitState(
+		s,
+		"n on the elsewhere row",
+		(x) => x.staged.kind === "live" && x.staged.id !== null && x.staged.id !== away.staged.id && x.staged.id !== here.staged.id,
+		budgets.piReady,
+	);
+	s.save("n-cursor.txt", s.screen());
+	const cwdOf = (id: string | null) => s.query<{ cwd: string }>("SELECT cwd FROM runtimes WHERE session_id = ?", id)[0]?.cwd;
+	expect([away, here, beside].map((x) => cwdOf(x.staged.id))).toEqual([realpathSync(elsewhere), s.project, realpathSync(elsewhere)]);
+});
+
 test("a newer swb takes over: idle pis stop, a working one keeps its turn, and empty servers restart; an older swb leaves a newer server alone and its Deck says so", async () => {
 	s = scenario("phase5", "upgrade");
 	const { sessions, ui } = s.servers;
@@ -394,6 +422,13 @@ test("a newer swb takes over: idle pis stop, a working one keeps its turn, and e
 	const hostOf = (id: string) =>
 		s.query<{ tmux_session: string }>("SELECT tmux_session FROM runtimes WHERE session_id = ?", id)[0]?.tmux_session;
 	const [hostA, hostB] = [hostOf(a), hostOf(b)] as [string, string];
+	const draft = join(s.env.XDG_STATE_HOME as string, "agent-switchboard", "drafts", a);
+	s.tmux(sessions, "send-keys", "-t", `=${hostA}:`, "-l", "half a thought");
+	await until(
+		() => s.tmux(sessions, "capture-pane", "-p", "-t", `=${hostA}:`).includes("half a thought"),
+		budgets.settle,
+		"a's draft typed",
+	);
 	s.tmux(sessions, "send-keys", "-t", `=${hostB}:`, "-l", "hold u1");
 	s.tmux(sessions, "send-keys", "-t", `=${hostB}:`, "Enter");
 	await until(() => s.signal("u1.entered") !== "", budgets.piReady, "b mid-turn");
@@ -407,6 +442,7 @@ test("a newer swb takes over: idle pis stop, a working one keeps its turn, and e
 	expect(names(sessions)).not.toContain(hostA);
 	expect(names(sessions)).toContain(hostB);
 	expect(entry(s, a).live).toBe(false);
+	await until(() => existsSync(draft) && readFileSync(draft, "utf8") === "half a thought", budgets.settle, "a's draft saved");
 	expect(entry(s, b).activity).toBe("working");
 	expect(s.tmux(sessions, "show", "-gv", "@swb_version")).toBe(VERSION);
 	expect(pid(ui)).not.toBe(uiBefore);
@@ -419,6 +455,13 @@ test("a newer swb takes over: idle pis stop, a working one keeps its turn, and e
 	s.save("outdated.txt", s.screen());
 	s.swb("wake", a);
 	expect(s.tmux(sessions, "show", "-gv", "@swb_version")).toBe("99.0.0");
+	await until(
+		() => entry(s, a).live && s.tmux(sessions, "capture-pane", "-p", "-t", `=${hostOf(a)}:`).includes("half a thought"),
+		budgets.piReady,
+		"a's draft back",
+	);
+	s.save("draft-restored.txt", s.tmux(sessions, "capture-pane", "-p", "-t", `=${hostOf(a)}:`));
+	expect(existsSync(draft)).toBe(false);
 
 	s.swb("drive", "stop");
 	for (const name of names(sessions)) if (name !== "swb-ctl") s.tmux(sessions, "kill-session", "-t", `=${name}`);

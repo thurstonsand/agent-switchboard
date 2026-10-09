@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bootId, branch, Db, pidAlive, projectRoot, type Row, SCHEMA_VERSION } from "@swb/shared";
@@ -153,8 +155,24 @@ export default function (pi: ExtensionAPI) {
 		return { cancel: true };
 	});
 
-	pi.on("session_start", (_event, ctx) => {
+	const draftPath = (id: string) => join(dirname(proc.launch.db), "drafts", id);
+
+	/** The prompt being typed when swb stopped this pi, put back when the session next starts. */
+	const restoreDraft = (ctx: ExtensionContext, id: string) => {
+		let draft: string;
+		try {
+			draft = readFileSync(draftPath(id), "utf8");
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+			throw error;
+		}
+		if (!ctx.ui.getEditorText()) ctx.ui.setEditorText(draft);
+		rmSync(draftPath(id));
+	};
+
+	pi.on("session_start", (event, ctx) => {
 		current = ctx.sessionManager.getSessionId();
+		if (event.reason !== "reload") restoreDraft(ctx, current);
 		proc.attention.clear();
 		writeFor(ctx, (db, id) => {
 			const host = hostOfSession(db, proc, id);
@@ -298,6 +316,12 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", (event, ctx) => {
 		if (event.reason !== "quit") return;
+		const draft = ctx.ui.getEditorText();
+		if (draft.trim()) {
+			const path = draftPath(ctx.sessionManager.getSessionId());
+			mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+			writeFileSync(path, draft, { mode: 0o600 });
+		}
 		writeFor(ctx, (db) => db.run("DELETE FROM runtimes WHERE tmux_session = ?", proc.launch.tmuxSession));
 	});
 }

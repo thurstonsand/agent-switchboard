@@ -76,7 +76,7 @@ function uiConf(config: Config): string {
 		`bind h if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { if -F '#{pane_index}' { select-pane -t :.- } { set -u @swb_hidden ; ${roster("focus")} } }`,
 		"bind l if -F '#{@swb_narrow}' { select-pane -Z -t :.1 } { if -F '#{e|<:#{pane_index},#{e|-:#{window_panes},1}}' { select-pane -t :.+ } }",
 		`bind z if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { if -F '#{@swb_hidden}' { set -u @swb_hidden } { set @swb_hidden 1 } ; ${roster("sync")} }`,
-		...[..."nawyY/jk"].map((k) => `bind ${k} ${notify(`__deck #{session_name} key ${k}`)}`),
+		...[..."nNawyY/jk"].map((k) => `bind ${k} ${notify(`__deck #{session_name} key ${k}`)}`),
 		`bind e ${notify("__deck #{session_name} view-swap")}`,
 		`bind v ${notify("__deck #{session_name} view-split")}`,
 		"bind q kill-session",

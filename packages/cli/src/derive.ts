@@ -26,7 +26,7 @@ export function world(inactiveAfterMs: number): World {
 	return { now: Date.now(), bootId: bootId(), hosts: new Set(listSessions(SESSIONS).map(([name]) => name as string)), inactiveAfterMs };
 }
 
-type RuntimeRow = { tmux_session: string; boot_id: string; pid: number };
+export type RuntimeRow = { tmux_session: string; boot_id: string; pid: number };
 
 export function runtimeLive(runtime: RuntimeRow, boot: string, hosts: Set<string>): boolean {
 	return runtime.boot_id === boot && hosts.has(runtime.tmux_session) && pidAlive(runtime.pid);

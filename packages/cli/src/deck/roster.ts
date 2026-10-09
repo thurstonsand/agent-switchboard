@@ -844,7 +844,8 @@ class Roster implements Component {
 		else if (k === "w") this.wake();
 		else if (k === "a") this.toggleArchived();
 		else if (k === "y" || k === "Y") this.copy(k === "y");
-		else if (k === "n") this.newHere();
+		else if (k === "n") this.newAtCursor();
+		else if (k === "N") newSession(here);
 		else if (k === "/") this.filtering = true;
 		else if (k === "?") void showHelp();
 		this.syncStage(true);
@@ -978,7 +979,7 @@ class Roster implements Component {
 		);
 	}
 
-	newHere(): void {
+	newAtCursor(): void {
 		const row = this.selected();
 		newSession(!row || row.kind === "section" ? here : row.kind === "session" ? row.entry.cwd : row.project);
 	}
@@ -1094,7 +1095,7 @@ class Roster implements Component {
 	hints(y: number): string {
 		if (this.filtering) return ` ${this.filter.render(Math.max(10, ROSTER_WIDTH - 2))[0] ?? ""}`;
 		const help: Hint = ["?", "keys", () => void showHelp()];
-		const newHere: Hint = ["n", "new", () => this.newHere()];
+		const newAtCursor: Hint = ["n", "new", () => this.newAtCursor()];
 		let hints: Hint[];
 		if (focus === "stage")
 			hints = [
@@ -1102,8 +1103,8 @@ class Roster implements Component {
 				[`${config.prefix} z`, "hide list", () => void setRosterHidden(true)],
 				[`${config.prefix} ?`, "keys", help[2]],
 			];
-		else if (this.selected() && isHeader(this.selected() as Row)) hints = [["⏎", "toggle", () => this.activate(true)], newHere, help];
-		else hints = [["⏎", "focus", () => this.activate(true)], ["w", "wake", () => this.wake()], newHere, help];
+		else if (this.selected() && isHeader(this.selected() as Row)) hints = [["⏎", "toggle", () => this.activate(true)], newAtCursor, help];
+		else hints = [["⏎", "focus", () => this.activate(true)], ["w", "wake", () => this.wake()], newAtCursor, help];
 		return this.clickable(
 			y,
 			hints.flatMap(([name, label, act]): [string, (() => void) | null][] => [
@@ -1201,7 +1202,8 @@ async function prefixKey(k: string): Promise<void> {
 		await focusRoster();
 		roster.filtering = true;
 	} else if (k === "j" || k === "k") roster.moveSession(k === "j" ? 1 : -1);
-	else if (k === "n") roster.newHere();
+	else if (k === "n") roster.newAtCursor();
+	else if (k === "N") newSession(here);
 	else if (k === "w") roster.wake();
 	else if (k === "a") roster.toggleArchived();
 	else if (k === "y" || k === "Y") roster.copy(k === "y");

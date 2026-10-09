@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { bootId, type Db, dbPath, projectRoot, stateDir } from "@swb/shared";
-import { runtimeLive } from "./derive.ts";
+import { type RuntimeRow, runtimeLive } from "./derive.ts";
 import { SwbError } from "./errors.ts";
 import { openStore } from "./store.ts";
 import { CLIENT_CWD, cleanEnv, killServer, listSessions, quote, SESSIONS, tmux, tmuxBin, tmuxTry } from "./tmux.ts";
@@ -73,7 +73,7 @@ export function newer(a: string, b: string): boolean {
  * otherwise; the same version with a changed config just reloads. Two swbs upgrading at once serialize on the
  * db's write lock, so the second finds the first's fresh server instead of killing it.
  */
-export function ensureServer(server: string, conf: string, start: (confPath: string) => void, upgrade: (db: Db) => boolean): void {
+export function ensureServer(server: string, conf: string, start: (confPath: string) => void, upgrade: () => boolean): void {
 	const version = confVersion(conf);
 	if (current(server, version)) return;
 	const db = openStore();
@@ -85,7 +85,7 @@ export function ensureServer(server: string, conf: string, start: (confPath: str
 			const path = join(dir, `${server}.conf`);
 			writeFileSync(path, `${conf}\nset -g @swb_conf_version ${version}\nset -g @swb_version ${VERSION}\n`);
 			const up = tmuxTry(server, "show", "-gqv", "@swb_version");
-			if (up.ok && newer(VERSION, up.out) && upgrade(db)) killServer(server);
+			if (up.ok && newer(VERSION, up.out) && upgrade()) killServer(server);
 			else if (up.ok) {
 				tmux(server, "source-file", path);
 				return;
@@ -111,15 +111,28 @@ function current(server: string, version: string): boolean {
 	return newer(running, VERSION) || (running === VERSION && conf.out === version);
 }
 
-/** An upgrade ends every idle pi, so the next wake runs the new swb; it restarts the server only once nothing else is on it. */
-function stopIdlePis(db: Db): boolean {
+/**
+ * An upgrade ends every idle pi, so the next wake runs the new swb. SIGTERM, unlike closing the pane under it,
+ * runs pi's shutdown hooks, so the recorder saves the draft; they write the db, so this runs outside its lock.
+ */
+function stopIdlePis(): void {
 	const hosts = new Set(listSessions(SESSIONS).map(([name]) => name as string));
-	const idle = db.all("SELECT r.tmux_session, r.boot_id, r.pid FROM runtimes r JOIN sessions s USING (session_id) WHERE s.phase = 'idle'");
-	for (const row of idle) {
-		const runtime = { tmux_session: row.tmux_session as string, boot_id: row.boot_id as string, pid: row.pid as number };
-		if (runtimeLive(runtime, bootId(), hosts)) tmuxTry(SESSIONS, "kill-session", "-t", `=${runtime.tmux_session}`);
+	const db = openStore();
+	let idle: RuntimeRow[];
+	try {
+		idle = db.all("SELECT r.* FROM runtimes r JOIN sessions s USING (session_id) WHERE s.phase = 'idle'") as RuntimeRow[];
+	} finally {
+		db.close();
 	}
-	return onlyControl(SESSIONS);
+	const stopping = idle.filter((runtime) => runtimeLive(runtime, bootId(), hosts));
+	for (const runtime of stopping) process.kill(runtime.pid, "SIGTERM");
+	const deadline = Date.now() + 5000;
+	const open = () => {
+		const left = new Set(listSessions(SESSIONS).map(([name]) => name as string));
+		return stopping.filter((runtime) => left.has(runtime.tmux_session));
+	};
+	while (open().length > 0 && Date.now() < deadline) Bun.sleepSync(20);
+	for (const runtime of open()) tmuxTry(SESSIONS, "kill-session", "-t", `=${runtime.tmux_session}`);
 }
 
 export function onlyControl(server: string): boolean {
@@ -143,12 +156,14 @@ export function startScrubbed(server: string, args: string[]): void {
 }
 
 export function ensureSessionsServer(): void {
+	const running = tmuxTry(SESSIONS, "show", "-gqv", "@swb_version");
+	if (running.ok && newer(VERSION, running.out)) stopIdlePis();
 	ensureServer(
 		SESSIONS,
 		sessionsConf(),
 		(path) =>
 			startScrubbed(SESSIONS, ["-f", path, "new-session", "-d", "-s", "swb-ctl", ";", "set", "-t", "swb-ctl", "@swb_kind", "control"]),
-		stopIdlePis,
+		() => onlyControl(SESSIONS),
 	);
 }
 
