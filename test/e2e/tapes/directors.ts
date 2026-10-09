@@ -254,13 +254,6 @@ export const directors: Record<string, Director> = {
 
 	"swb-handoff": {
 		packages: ["pi-sessions"],
-		setup: async (s) => {
-			// session_reachable reads pi-sessions' search index, which the harness turns off.
-			const path = join(s.env.PI_CODING_AGENT_DIR as string, "settings.json");
-			const settings = JSON.parse(readFileSync(path, "utf8"));
-			settings.sessions.search.enable = true;
-			writeFileSync(path, JSON.stringify(settings));
-		},
 		run: async (s) => {
 			await entered(s, "child.scout");
 			const child = await until(() => s.ls().find((e) => e.title === "child scout"), TAPE, "the child tracked");

@@ -7,15 +7,6 @@ Wait+Screen /0 open/
 Sleep 1s
 Type "n"
 Wait+Screen /faux-1/
-Hide
-Type "/session-index" Sleep 300ms Enter
-Sleep 1.5s
-Type "r"
-Sleep 1s
-Enter
-Wait+Screen /[Ii]ndex/
-Sleep 3s
-Show
 Sleep 1s
 Type "handoff scout" Sleep 400ms Enter
 Wait+Screen /2 open/
