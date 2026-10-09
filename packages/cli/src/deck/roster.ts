@@ -538,7 +538,7 @@ function wake(id: string, keyboard: boolean): void {
 	apply();
 }
 
-function newSession(cwd: string): void {
+function newSession(cwd: string, group: string | null): void {
 	if (newLaunch()) {
 		toast("a new session is already starting", "info");
 		return;
@@ -547,7 +547,7 @@ function newSession(cwd: string): void {
 	stage.holdForNew = true;
 	stage.staged = null;
 	stage.ended = null;
-	post({ type: "new", cwd });
+	post({ type: "new", cwd, group });
 	apply();
 	void focusStage();
 }
@@ -945,7 +945,7 @@ class Roster implements Component {
 		else if (k === "a") this.toggleArchived();
 		else if (k === "y" || k === "Y") this.copy(k === "y");
 		else if (k === "n") this.newAtCursor();
-		else if (k === "N") newSession(here);
+		else if (k === "N") newSession(here, null);
 		else if (k === "/") this.filtering = true;
 		else if (k === "m") this.startNaming();
 		else if (k === "?") void showHelp();
@@ -1095,9 +1095,15 @@ class Roster implements Component {
 		);
 	}
 
+	/** n: in the cursor's directory, joining its Group: a Group header's newest session's directory, there being no other. */
 	newAtCursor(): void {
 		const row = this.selected();
-		newSession(!row || row.kind === "section" ? here : row.kind === "session" ? row.entry.cwd : row.cwd);
+		if (!row || row.kind === "section") {
+			newSession(here, null);
+			return;
+		}
+		const group = row.kind === "session" ? groupOf(row.entry) : row.group;
+		newSession(row.kind === "session" ? row.entry.cwd : row.cwd, group?.kind === "custom" ? group.name : null);
 	}
 
 	/** m: names the Group of the session under the cursor, or renames the Group whose header it's on; empty ungroups. */
@@ -1405,7 +1411,7 @@ async function prefixKey(k: string): Promise<void> {
 		roster.startNaming();
 	} else if (k === "j" || k === "k") roster.moveSession(k === "j" ? 1 : -1);
 	else if (k === "n") roster.newAtCursor();
-	else if (k === "N") newSession(here);
+	else if (k === "N") newSession(here, null);
 	else if (k === "w") roster.wake();
 	else if (k === "a") roster.toggleArchived();
 	else if (k === "y" || k === "Y") roster.copy(k === "y");
@@ -1659,7 +1665,7 @@ Bun.serve({
 });
 
 post({ type: "init", deck, paths, config });
-if (args.new) newSession(args.new);
+if (args.new) newSession(args.new, null);
 void layout();
 
 // Ready once the first snapshot is in and the Stage's nested client is attached to the sessions server.

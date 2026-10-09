@@ -382,6 +382,7 @@ export const directors: Record<string, Director> = {
 			await mouse([0, 8, wt, true]);
 			await waitDeck(s, "the refusal", (x) => x.toasts.some((t) => t.text.includes("nothing moved")));
 			expect(s.ls().find((e) => e.title === "bravo")?.group).toBe("review");
+			await waitLs(s, "n joined review", (ls) => ls.filter((e) => e.group === "review").length === 3);
 		},
 	},
 

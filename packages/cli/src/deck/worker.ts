@@ -36,6 +36,8 @@ const ORPHAN_DEAD_S = 10;
 const pendingViews = new Map<string, View>();
 /** Likewise for Groups. */
 const pendingGroups = new Map<string, string | null>();
+/** The Group a new session joins, by the host launched for it, until its pi registers a session id. */
+const hostGroups = new Map<string, string>();
 
 function post(message: FromWorker): void {
 	self.postMessage(message);
@@ -52,6 +54,12 @@ function readDb(): void {
 		pendingViews.delete(id);
 		setView(db, id, view);
 		rows = sessionRows(db);
+	}
+	for (const runtime of runtimes) {
+		const name = hostGroups.get(runtime.tmux_session);
+		if (name === undefined) continue;
+		hostGroups.delete(runtime.tmux_session);
+		pendingGroups.set(runtime.session_id, name);
 	}
 	for (const [id, name] of pendingGroups) {
 		if (!rows.some((row) => row.session_id === id)) continue;
@@ -230,6 +238,7 @@ function handle(message: ToWorker): void {
 				ensureSessionsServer();
 				const host = launch(message.cwd, null, []);
 				launched.add(host);
+				if (message.group !== null) hostGroups.set(host, message.group);
 				post({ type: "created", host });
 			} catch (error) {
 				post({ type: "launchFailed", id: null, text: (error as Error).message });

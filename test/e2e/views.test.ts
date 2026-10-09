@@ -415,7 +415,7 @@ function lineOf(st: DeckState, probe: (row: DeckState["rows"][number]) => boolea
 	return 2 + st.rows.findIndex(probe);
 }
 
-test("m names a session's Group; dragging moves it between Groups beside worktree buckets, and a Group lives only as long as its sessions", async () => {
+test("m names a session's Group, n joins it; dragging moves it between Groups beside worktree buckets, and a Group lives only as long as its sessions", async () => {
 	s = scenario("phase4", "groups");
 	config(s, 'group_by = "worktree"');
 	const worktree = join(s.root, "project-wt");
@@ -485,4 +485,18 @@ test("m names a session's Group; dragging moves it between Groups beside worktre
 	expect(at?.kind === "header" && at.group).toBe("triage");
 	expect(entry(s, a).group).toBe("triage");
 	s.save("renamed.ansi", s.swb("drive", "capture", "--ansi"));
+
+	s.keys("n");
+	const joined = await waitState(
+		s,
+		"a new pi from the triage header",
+		(x) => x.staged.kind === "live" && x.focus === "stage",
+		budgets.piReady,
+	);
+	const n = joined.staged.id as string;
+	await waitState(s, "the provisional row in triage", (x) => groups(x).triage?.includes(n) === true);
+	await reply(s, "joined");
+	await until(() => entry(s, n)?.group === "triage", budgets.settle, "the new session's Group written once it has a row");
+	expect(entry(s, n).cwd).toBe(entry(s, a).cwd);
+	s.save("joined.ansi", s.swb("drive", "capture", "--ansi"));
 });

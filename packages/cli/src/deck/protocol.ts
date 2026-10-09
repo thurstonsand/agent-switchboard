@@ -89,7 +89,7 @@ export type DeckPaths = { sock: string; card: string; target: string; side: stri
 export type ToWorker =
 	| { type: "init"; deck: string; paths: DeckPaths; config: Config }
 	| { type: "wake"; id: string }
-	| { type: "new"; cwd: string }
+	| { type: "new"; cwd: string; group: string | null }
 	| { type: "visit"; id: string }
 	| { type: "archive"; id: string }
 	| { type: "unarchive"; id: string }

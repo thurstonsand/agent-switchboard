@@ -27,3 +27,14 @@ Sleep 500ms
 Screenshot ../artifacts/phase6/videos/groups-refused.png
 Wait+Screen /nothing moved/
 Sleep 2s
+Type "n"
+Wait+Screen /faux-1/
+Sleep 1s
+Type "reply joined review from n" Sleep 400ms Enter
+Sleep 2s
+Alt+a
+Type "h"
+Wait+Screen /review \(3\)/
+Sleep 1.5s
+Screenshot ../artifacts/phase6/videos/groups-joined.png
+Sleep 1s
