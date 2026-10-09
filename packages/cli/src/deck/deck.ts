@@ -78,6 +78,7 @@ function uiConf(config: Config): string {
 		`bind z if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { if -F '#{||:#{window_zoomed_flag},#{pane_index}}' { resize-pane -Z } { if -F '#{==:#{window_panes},3}' { select-pane -t :.2 ; resize-pane -Z -t :.2 } { select-pane -t :.1 ; resize-pane -Z -t :.1 } } } \\; ${layout}`,
 		`bind e ${notify("__deck #{session_name} view-swap")}`,
 		`bind v ${notify("__deck #{session_name} view-split")}`,
+		"bind q kill-session",
 		`bind ? display-popup -E ${HELP_POPUP.map(quote).join(" ")}`,
 		`bind ${prefix} send-keys ${prefix}`,
 		// A Deck is created detached; destroy-unattached set globally would kill it before its client attaches.

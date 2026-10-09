@@ -63,6 +63,7 @@ function keys(prefix: string): [string, string][] {
 		[`${prefix} e`, "swap pi and the editor"],
 		[`${prefix} v`, "split the editor beside pi"],
 		[`${prefix} z`, "zoom the focused pane, or pi from the list"],
+		[`${prefix} q`, "close the Deck from anywhere"],
 		[`${prefix} ?`, "these keys"],
 		[`${prefix} ${prefix}`, `a literal ${prefix}`],
 	];

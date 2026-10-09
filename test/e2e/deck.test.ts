@@ -58,6 +58,14 @@ test("Enter on a dormant row holds the keyboard on the loading card and hands it
 	await waitState(s, "b live on the Stage", (x) => x.staged.id === b && x.staged.kind === "live", budgets.piReady);
 	expect(state(s).focus).toBe("roster");
 	s.save("esc-live.txt", s.screen());
+
+	s.keys("Enter");
+	await waitState(s, "keyboard in b's pi", (x) => x.focus === "stage");
+	s.keys("M-a", "q");
+	const decks = () => s.tmux(s.servers.ui, "list-sessions", "-F", "#{session_name}").split("\n");
+	await until(() => !decks().some((name) => name.startsWith("deck-")), 5000, "M-a q closes the Deck from pi");
+	s.save("prefix-q.txt", s.screen());
+	expect(entry(s, a).live && entry(s, b).live).toBe(true);
 });
 
 test("moving the cursor while n's pi starts stages that row, and the pi landing doesn't take it back", async () => {
