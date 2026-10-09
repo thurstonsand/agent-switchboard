@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2 — 2026-10-09
+
+### Fixed
+
+- A project's own tools win in managed pi again. When `tmux` resolved to a mise shim, it prepended the starting project's mise PATH to each new pane, and the shell's mise activation then pushed the project's `.venv/bin` far down PATH, so `python3` resolved to mise's python instead of the venv's.
+
 ## 0.2.1 — 2026-10-09
 
 ### Added
