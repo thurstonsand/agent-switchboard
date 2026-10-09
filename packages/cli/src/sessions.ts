@@ -86,7 +86,9 @@ export function startScrubbed(server: string, args: string[]): void {
 		'if command -v direnv >/dev/null 2>&1; then exec direnv exec / "$@"; fi',
 		'exec "$@"',
 	].join("\n");
+	// From /, so a mise tmux shim doesn't reapply the caller's project env after the scrub.
 	const result = Bun.spawnSync(["/bin/sh", "-c", script, "sh", tmuxBin(), "-L", server, ...args], {
+		cwd: "/",
 		env: cleanEnv(),
 		stdout: "pipe",
 		stderr: "pipe",
@@ -140,7 +142,7 @@ export function launch(cwd: string, resume: string | null, piArgs: string[]): st
 		`SWB_BIN=${SWB}`,
 		"-e",
 		"PI_IMAGE_PROTOCOL=none",
-		`exec env -u TMUX -u TMUX_PANE ${shell} -lic ${quote(pi)}`,
+		`exec env -u TMUX -u TMUX_PANE SHELL=${shell} ${shell} -lic ${quote(pi)}`,
 		";",
 		"set",
 		"-t",
@@ -183,7 +185,7 @@ export function ensureEditor(db: Db, dir: string, editor: string): string {
 			name,
 			"-c",
 			dir,
-			`exec env -u TMUX -u TMUX_PANE ${shell} -lic ${quote(`exec ${editor}`)}`,
+			`exec env -u TMUX -u TMUX_PANE SHELL=${shell} ${shell} -lic ${quote(`exec ${editor}`)}`,
 			";",
 			"set",
 			"-t",
