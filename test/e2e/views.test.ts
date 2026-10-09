@@ -71,7 +71,9 @@ test("M-a e swaps the Stage to nvim in the session's directory, and back", async
 	const id = live.staged.id as string;
 	s.save("pi.txt", s.screen());
 
-	const st = await prefixKeys(s, "M-a", "e", "editor view", (x) => x.staged.view === "editor");
+	// From the roster, M-a e takes the keyboard to the editor it brings up, and back to pi.
+	await prefixKeys(s, "M-a", "h", "the roster focused", (x) => x.focus === "roster");
+	const st = await prefixKeys(s, "M-a", "e", "editor view", (x) => x.staged.view === "editor" && x.focus === "editor");
 	expect(st.staged).toMatchObject({ id, kind: "live", savedView: "editor" });
 	expect(st.focus).toBe("editor");
 	const [editor, ...more] = editors(s);
@@ -84,12 +86,26 @@ test("M-a e swaps the Stage to nvim in the session's directory, and back", async
 	await until(() => savedView(s, id) === "editor", budgets.settle, "marks.view = editor");
 	s.save("editor.txt", s.screen());
 
-	const back = await prefixKeys(s, "M-a", "e", "pi view", (x) => x.staged.view === "pi");
+	await prefixKeys(s, "M-a", "h", "the roster focused", (x) => x.focus === "roster");
+	const back = await prefixKeys(s, "M-a", "e", "pi view", (x) => x.staged.view === "pi" && x.focus === "stage");
 	expect(back.staged.savedView).toBe("pi");
 	await until(() => s.screen().includes("hello") && !s.screen().includes("NVIM v"), budgets.settle, "pi back on the Stage");
 	await until(() => savedView(s, id) === "pi", budgets.settle, "marks.view = pi");
 	expect(editors(s).length).toBe(1);
 	s.save("pi-again.txt", s.screen());
+
+	const tab = (label: string): [string, string] => {
+		const lines = s.screen().split("\n");
+		const y = lines.findIndex((line) => line.includes(" pi  editor  split "));
+		expect(y).toBeGreaterThan(-1);
+		return [String((lines[y] as string).indexOf(` ${label} `) + 1), String(y)];
+	};
+	s.swb("drive", "click", ...tab("editor"));
+	await waitState(s, "the editor tab clicked", (x) => x.staged.view === "editor");
+	s.save("editor-tab.txt", s.screen());
+	await Bun.sleep(500);
+	s.swb("drive", "click", ...tab("pi"));
+	await waitState(s, "the pi tab clicked", (x) => x.staged.view === "pi");
 });
 
 test("M-a v splits the editor at 65% beside pi; M-a h and l walk all three panes; the split follows the session", async () => {
@@ -130,14 +146,24 @@ test("M-a v splits the editor at 65% beside pi; M-a h and l walk all three panes
 	await until(() => activePane(s, st) === 2, budgets.settle, "M-a Tab back to pi, not the editor");
 	s.keys("M-a", "h", "M-a", "h");
 	await waitState(s, "roster", (x) => x.focus === "roster");
-	s.keys("M-a", "z");
-	await until(
-		() => activePane(s, st) === 2 && s.tmux(s.servers.ui, "display", "-p", "-t", `=${st.deck}:`, "#{window_zoomed_flag}") === "1",
-		budgets.settle,
-		"M-a z zooms pi",
+	const hidden = await prefixKeys(s, "M-a", "z", "M-a z hides the roster", (x) => x.layout.rosterHidden && x.focus === "stage");
+	const [shownEditor, shownPi] = panes(s, hidden) as [Pane, Pane];
+	expect(panes(s, hidden).length).toBe(2);
+	expect(shownEditor.width + shownPi.width + 1).toBe(200);
+	expect(activePane(s, hidden)).toBe(1);
+	expect(hidden.layout.split).toBe(true);
+	s.save("split-hidden.txt", s.screen());
+	await prefixKeys(s, "M-a", "h", "M-a h to the editor", (x) => x.focus === "editor");
+	const shown = await prefixKeys(
+		s,
+		"M-a",
+		"h",
+		"M-a h past the editor shows the roster",
+		(x) => !x.layout.rosterHidden && x.focus === "roster",
 	);
-	s.keys("M-a", "z", "M-a", "h", "M-a", "h");
-	await waitState(s, "roster", (x) => x.focus === "roster");
+	expect(panes(s, shown).map((p) => p.index)).toEqual([0, 1, 2]);
+	expect((panes(s, shown)[0] as Pane).width).toBe(42);
+	expect(activePane(s, shown)).toBe(0);
 	await cursorTo(s, other);
 	const away = await waitState(s, "the other session alone", (x) => x.staged.id === other && !x.layout.split);
 	expect(away.staged).toMatchObject({ view: "pi", savedView: "pi" });
@@ -201,6 +227,8 @@ test("split shows pi below 160 columns and returns on widening, survives reopeni
 	s.keys("M-a", "v", "M-a", "v");
 	const told = await waitState(s, "a split refusal", (x) => x.toasts.some((t) => t.text === "split needs 160 columns; showing pi"));
 	expect(told.staged).toMatchObject({ view: "pi", savedView: "split" });
+	expect(told.focus).toBe("stage");
+	await prefixKeys(s, "M-a", "h", "the roster focused", (x) => x.focus === "roster");
 
 	s.swb("drive", "resize", "90x40");
 	const tiny = await waitState(s, "the roster alone at 90", (x) => x.layout.rosterOnly && !x.layout.split);
@@ -208,6 +236,15 @@ test("split shows pi below 160 columns and returns on widening, survives reopeni
 	await until(() => activePane(s, tiny) === 0 && !s.screen().includes("hello"), budgets.settle, "only the roster on screen");
 	expect(s.tmux(s.servers.ui, "display", "-p", "-t", `=${tiny.deck}:`, "#{window_zoomed_flag}")).toBe("1");
 	s.save("90-cols.txt", s.screen());
+
+	s.swb("drive", "resize", "200x50");
+	await waitState(s, "wide again", (x) => !x.layout.rosterOnly && x.layout.width === 200);
+	await prefixKeys(s, "M-a", "z", "the roster hidden", (x) => x.layout.rosterHidden);
+	s.swb("drive", "resize", "40x15");
+	const squeezed = await waitState(s, "the roster back at 40", (x) => x.layout.rosterOnly && !x.layout.rosterHidden);
+	expect(panes(s, squeezed)[0]?.index).toBe(0);
+	await prefixKeys(s, "M-a", "h", "the roster reachable at 40", (x) => x.focus === "roster");
+	s.save("hidden-then-40-cols.txt", s.screen());
 });
 
 test("sessions in one directory share an editor, a worktree gets its own, and archiving the last one reaps it", async () => {

@@ -8,7 +8,7 @@ import { openStore } from "../store.ts";
 import { CLIENT_CWD, cleanEnv, listSessions, quote, SESSIONS, tmux, tmuxBin, tmuxTry, UI } from "../tmux.ts";
 import type { Card, DeckPaths, DeckState } from "./protocol.ts";
 
-export const HELP_POPUP = ["-w", "62", "-h", "26", "-T", " swb keys ", `${SWB} __help`];
+export const HELP_POPUP = ["-w", "62", "-h", "27", "-T", " swb keys ", `${SWB} __help`];
 
 export const ROSTER_WIDTH = 42;
 export const NARROW_BELOW = 100;
@@ -44,7 +44,7 @@ export function writeCard(paths: DeckPaths, card: Card): void {
 /** The whole config of the UI server. Prefix bindings and hooks report to the Deck's roster through its socket. */
 function uiConf(config: Config): string {
 	const prefix = config.prefix;
-	const layout = notify("__deck #{session_name} layout");
+	const roster = (what: string) => notify(`__deck #{session_name} roster ${what}`);
 	return [
 		"set -g default-terminal tmux-256color",
 		"set -g default-shell /bin/sh",
@@ -70,12 +70,13 @@ function uiConf(config: Config): string {
 		`set -g prefix ${prefix}`,
 		"set -g prefix2 None",
 		"unbind -aq -T prefix",
-		// Panes by index (roster, then the Stage's one or two, pi last): {left} and {right} stop resolving while a pane is
-		// zoomed. A narrow Deck shows one pane at a time and never splits, so its moves carry the zoom along.
-		"bind Tab if -F '#{@swb_narrow}' { select-pane -Z -t :.+ } { if -F '#{pane_index}' { select-pane -t :.0 } { if -F '#{==:#{window_panes},3}' { select-pane -t :.2 } { select-pane -t :.1 } } }",
-		"bind h if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { if -F '#{pane_index}' { select-pane -t :.- } }",
+		// Panes by index (roster, then the Stage's one or two, pi last). A narrow Deck shows one pane at a time and never
+		// splits, so its moves carry the zoom along. @swb_hidden is the wide Deck's roster state; the roster makes it so.
+		`bind Tab if -F '#{@swb_narrow}' { select-pane -Z -t :.+ } { if -F '#{@swb_hidden}' { set -u @swb_hidden ; ${roster("focus")} } { if -F '#{pane_index}' { select-pane -t :.0 } { if -F '#{==:#{window_panes},3}' { select-pane -t :.2 } { select-pane -t :.1 } } } }`,
+		`bind h if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { if -F '#{pane_index}' { select-pane -t :.- } { set -u @swb_hidden ; ${roster("focus")} } }`,
 		"bind l if -F '#{@swb_narrow}' { select-pane -Z -t :.1 } { if -F '#{e|<:#{pane_index},#{e|-:#{window_panes},1}}' { select-pane -t :.+ } }",
-		`bind z if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { if -F '#{||:#{window_zoomed_flag},#{pane_index}}' { resize-pane -Z } { if -F '#{==:#{window_panes},3}' { select-pane -t :.2 ; resize-pane -Z -t :.2 } { select-pane -t :.1 ; resize-pane -Z -t :.1 } } } \\; ${layout}`,
+		`bind z if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { if -F '#{@swb_hidden}' { set -u @swb_hidden } { set @swb_hidden 1 } ; ${roster("sync")} }`,
+		...[..."nawyY/jk"].map((k) => `bind ${k} ${notify(`__deck #{session_name} key ${k}`)}`),
 		`bind e ${notify("__deck #{session_name} view-swap")}`,
 		`bind v ${notify("__deck #{session_name} view-split")}`,
 		"bind q kill-session",
@@ -86,6 +87,7 @@ function uiConf(config: Config): string {
 		hook("client-focus-in", "__deck #{session_name} terminal-focus in"),
 		hook("client-focus-out", "__deck #{session_name} terminal-focus out"),
 		hook("window-pane-changed", "__deck #{session_name} focus #{pane_id}"),
+		hook("session-window-changed", "__deck #{session_name} focus #{pane_id}"),
 		hook("window-resized", "__deck #{session_name} layout"),
 	].join("\n");
 }

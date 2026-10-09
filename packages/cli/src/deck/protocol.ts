@@ -65,7 +65,7 @@ export type DeckState = {
 		view: View;
 		savedView: View;
 	};
-	layout: { width: number; rosterOnly: boolean; split: boolean; zoomed: boolean };
+	layout: { width: number; rosterOnly: boolean; split: boolean; rosterHidden: boolean };
 	waking: { id: string | null; keyboardWaiting: boolean }[];
 	rows: StateRow[];
 	colors: { background: string | null; scheme: string | null };

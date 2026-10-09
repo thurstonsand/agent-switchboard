@@ -57,6 +57,8 @@ import {
 const VISIT_MS = 1000;
 const HOVER_MS = 500;
 const TOAST_MS = 3500;
+const DETAIL_LINES = 4;
+const VIEWS: View[] = ["pi", "editor", "split"];
 
 const { values: args } = parseArgs({
 	args: process.argv.slice(3),
@@ -127,7 +129,8 @@ let focus: "roster" | "stage" = "roster";
 // No focus event has arrived when the Deck starts; the terminal that just launched it is assumed focused.
 let terminalFocused = true;
 let terminalFocusedAt = Date.now();
-let zoomed = false;
+/** A wide Deck's roster, broken out of the Stage's window so the Stage fills the terminal. */
+let rosterHidden = false;
 let narrow = false;
 let deckWidth = 0;
 /** The pane id the keyboard is on. */
@@ -359,6 +362,7 @@ function settleEditorWaits(dir: string, name: string | null): void {
 
 /** Every change to the Stage's panes and clients, in order. */
 let stageOps = Promise.resolve();
+let focusReads = Promise.resolve();
 
 function switchStage(client: StageClient, target: string, force: boolean): void {
 	const keyAt = stage.keyAt;
@@ -714,6 +718,9 @@ class Roster implements Component {
 	filtering = false;
 	listTop = 2;
 	listHeight = 0;
+	/** What a click does, by row and column range, as of the last render. */
+	targets: { y: number; from: number; to: number; act: () => void }[] = [];
+	pressed: { y: number; from: number; to: number; act: () => void } | null = null;
 
 	constructor() {
 		this.filter.onSubmit = () => {
@@ -849,7 +856,21 @@ class Roster implements Component {
 			this.syncStage(true);
 			return { handled: true };
 		}
-		if (event.type !== "click" || event.button !== "left") return undefined;
+		if (event.button !== "left") return undefined;
+		// Clicking the roster focuses it, and its focus hook can re-render the legend before the release: the target is the
+		// one under the press.
+		if (event.type === "press") {
+			this.pressed = this.targets.find((t) => t.y === event.y && event.x >= t.from && event.x < t.to) ?? null;
+			return undefined;
+		}
+		if (event.type !== "click") return undefined;
+		const target = this.pressed;
+		this.pressed = null;
+		if (target) {
+			target.act();
+			this.syncStage(true);
+			return { handled: true };
+		}
 		if (event.y < this.listTop || event.y >= this.listTop + this.listHeight) return undefined;
 		const rows = this.rows();
 		const index = this.scrollTop + (event.y - this.listTop);
@@ -873,6 +894,19 @@ class Roster implements Component {
 		this.selectedKey = (rows[next] as Row).key;
 		this.lastIndex = next;
 		stage.holdForNew = false;
+	}
+
+	/** Moves to the next session row in that direction, if there is one. */
+	moveSession(delta: number): void {
+		const rows = this.rows();
+		for (let i = this.resolveCursor(rows) + delta; i >= 0 && i < rows.length; i += delta) {
+			const row = rows[i] as Row;
+			if (row.kind !== "session") continue;
+			this.selectedKey = row.key;
+			this.lastIndex = i;
+			stage.holdForNew = false;
+			return;
+		}
 	}
 
 	activate(enter: boolean): void {
@@ -967,11 +1001,12 @@ class Roster implements Component {
 		const now = Date.now();
 		const rows = this.rows();
 		const index = this.resolveCursor(rows);
-		const detail = this.detail(width, now);
-		const bodyHeight = Math.max(1, height - 5 - detail.length);
+		this.targets = [];
+		const bodyHeight = Math.max(1, height - 5 - DETAIL_LINES);
+		const detail = this.detail(width, now, 3 + bodyHeight);
 		const lines = [this.header(width), gray("─".repeat(width))];
 		lines.push(...this.list(rows, index, width, bodyHeight, now));
-		lines.push(gray("─".repeat(width)), ...detail, this.messageLine(now), this.hints());
+		lines.push(gray("─".repeat(width)), ...detail, this.messageLine(now), this.hints(3 + bodyHeight + DETAIL_LINES + 1));
 		const out = lines.map((line) => truncateToWidth(line, width, "…", true));
 		perf.render.add(performance.now() - t0);
 		if (frameKeyAt > 0) {
@@ -1008,7 +1043,20 @@ class Roster implements Component {
 		return out;
 	}
 
-	detail(width: number, now: number): string[] {
+	/** Joins the parts into row y's line, recording where each clickable one lands. */
+	clickable(y: number, parts: [string, (() => void) | null][]): string {
+		let x = 0;
+		let line = "";
+		for (const [text, act] of parts) {
+			const w = visibleWidth(text);
+			if (act) this.targets.push({ y, from: x, to: x + w, act });
+			line += text;
+			x += w;
+		}
+		return line;
+	}
+
+	detail(width: number, now: number, top: number): string[] {
 		const e = this.cursorEntry() ?? (stage.staged === null ? null : (entries.get(stage.staged) ?? null));
 		if (!e) return ["", "", "", ""];
 		const state = stateOf(e);
@@ -1016,15 +1064,19 @@ class Roster implements Component {
 		if (state !== "loading" && state !== "archived") facts.push(e.live ? "live" : "not running");
 		if (e.provisional) facts.push(gray("no prompt yet"));
 		const where = `${shortPath(e.cwd)}${e.branch ? ` ${magenta(`⎇ ${e.branch}`)}` : ""}`;
-		let onView = gray("not on view");
-		if (stage.staged === e.id) {
+		let tabs = "";
+		if (stage.staged === e.id && e.open) {
 			const kind = stage.applied.kind;
-			const what = kind === "live" ? "" : kind === "loading" ? ": starting" : `: ${kind}`;
-			const view = stage.applied.view === "pi" ? "" : ` · ${stage.applied.view}`;
+			const what = kind === "live" ? "" : gray(` · ${kind === "loading" ? "starting" : kind}`);
 			const focused = !terminalFocused ? gray(" · terminal unfocused") : focus === "stage" ? cyan(" · focused") : "";
-			onView = `${focus === "stage" ? cyan("▌") : gray("▌")} on view${what}${view}${zoomed && !narrow ? " · zoomed" : ""}${focused}`;
+			const parts: [string, (() => void) | null][] = [[` ${focus === "stage" ? cyan("▌") : gray("▌")}`, null]];
+			for (const view of VIEWS) {
+				const label = ` ${view} `;
+				parts.push([view === stage.applied.view ? cursorLine(label, true) : gray(label), () => void showView(e, view)]);
+			}
+			tabs = this.clickable(top + 3, [...parts, [`${what}${focused}`, null]]);
 		}
-		return [` ${bold(displayName(e))}`, ` ${facts.join(gray(" · "))}`, ` ${gray(where)}`, ` ${onView}`].map((line) =>
+		return [` ${bold(displayName(e))}`, ` ${facts.join(gray(" · "))}`, ` ${gray(where)}`, tabs].map((line) =>
 			truncateToWidth(line, width, "…"),
 		);
 	}
@@ -1036,17 +1088,33 @@ class Roster implements Component {
 		return ` ${t.level === "error" ? red(`✗ ${t.text}`) : green(t.text)}`;
 	}
 
-	hints(): string {
+	/** Each key in the legend is also a button. */
+	hints(y: number): string {
 		if (this.filtering) return ` ${this.filter.render(Math.max(10, ROSTER_WIDTH - 2))[0] ?? ""}`;
+		const help: Hint = ["?", "keys", () => void showHelp()];
+		const newHere: Hint = ["n", "new", () => this.newHere()];
+		let hints: Hint[];
 		if (focus === "stage")
-			return ` ${[key(`${config.prefix} h`, "list"), key(`${config.prefix} z`, "zoom"), key(`${config.prefix} ?`, "keys")].join(" ")}`;
-		const row = this.selected();
-		if (row && isHeader(row)) return ` ${[key("⏎", "toggle"), key("n", "new"), key("?", "keys")].join(" ")}`;
-		return ` ${[key("⏎", "focus"), key("w", "wake"), key("n", "new"), key("?", "keys")].join(" ")}`;
+			hints = [
+				[`${config.prefix} h`, "list", () => void focusRoster()],
+				[`${config.prefix} z`, "hide list", () => void setRosterHidden(true)],
+				[`${config.prefix} ?`, "keys", help[2]],
+			];
+		else if (this.selected() && isHeader(this.selected() as Row)) hints = [["⏎", "toggle", () => this.activate(true)], newHere, help];
+		else hints = [["⏎", "focus", () => this.activate(true)], ["w", "wake", () => this.wake()], newHere, help];
+		return this.clickable(
+			y,
+			hints.flatMap(([name, label, act]): [string, (() => void) | null][] => [
+				[" ", null],
+				[key(name, label), act],
+			]),
+		);
 	}
 
 	invalidate(): void {}
 }
+
+type Hint = [name: string, label: string, act: () => void];
 
 function rowLine(row: Row, width: number, now: number): string {
 	if (row.kind === "header") {
@@ -1074,7 +1142,69 @@ async function focusStage(): Promise<void> {
 }
 
 async function focusRoster(): Promise<void> {
-	await tmuxAsync(UI, "select-pane", ...(narrow ? ["-Z"] : []), "-t", rosterPane);
+	await tmuxAsync(UI, "set", "-u", "-t", deck, "@swb_hidden");
+	await syncRoster(true);
+}
+
+async function setRosterHidden(hidden: boolean): Promise<void> {
+	await tmuxAsync(UI, "set", ...(hidden ? [] : ["-u"]), "-t", deck, "@swb_hidden", ...(hidden ? ["1"] : []));
+	await syncRoster(false);
+}
+
+/**
+ * Brings the roster in line with @swb_hidden. Hiding breaks it out to a window of its own; showing joins the Stage's
+ * panes back into that window, because join-pane appends to the pane list and the bindings count on the roster being
+ * pane 0.
+ */
+function syncRoster(toRoster: boolean): Promise<void> {
+	stageOps = stageOps.then(async () => {
+		const raw = await tmuxAsync(UI, "show", "-qv", "-t", deck, "@swb_hidden");
+		if (narrow && raw === "1") await tmuxAsync(UI, "set", "-u", "-t", deck, "@swb_hidden");
+		const want = !narrow && raw === "1";
+		if (want === rosterHidden) {
+			if (toRoster && !want) await tmuxAsync(UI, "select-pane", ...(narrow ? ["-Z"] : []), "-t", rosterPane);
+			return;
+		}
+		try {
+			if (want) {
+				// Focus moves first: breaking the active roster away hands focus to the window's last pane, and that pane's
+				// focus hook can land after pi's.
+				const focusPi = focusedPane === rosterPane ? ["select-pane", "-t", side?.pane ?? stagePane, ";"] : [];
+				await tmuxAsync(UI, ...focusPi, "break-pane", "-d", "-s", rosterPane);
+			} else {
+				const active = await tmuxAsync(UI, "list-panes", "-t", stagePane, "-f", "#{pane_active}", "-F", "#{pane_id}");
+				const join = ["join-pane", "-h", "-d", "-l", String(Math.max(1, deckWidth - ROSTER_WIDTH - 1)), "-s", stagePane, "-t", rosterPane];
+				if (side) {
+					const width = await tmuxAsync(UI, "display", "-p", "-t", side.pane, "#{pane_width}");
+					join.push(";", "join-pane", "-h", "-d", "-l", width, "-s", side.pane, "-t", stagePane);
+				}
+				await tmuxAsync(UI, ...join, ";", "select-window", "-t", rosterPane, ";", "select-pane", "-t", toRoster ? rosterPane : active);
+			}
+		} catch (error) {
+			toast(`roster: ${(error as Error).message}`, "error");
+		} finally {
+			// A tmux sequence can fail halfway, so the windows say whether the roster is hidden.
+			const [rosterWindow, stageWindow] = await Promise.all(
+				[rosterPane, stagePane].map((pane) => tmuxAsync(UI, "display", "-p", "-t", pane, "#{window_id}")),
+			);
+			rosterHidden = rosterWindow !== stageWindow;
+		}
+	});
+	return stageOps;
+}
+
+/** The roster's own keys, from anywhere after the prefix. j and k step over headers, and the keyboard stays put. */
+async function prefixKey(k: string): Promise<void> {
+	if (k === "/") {
+		await focusRoster();
+		roster.filtering = true;
+	} else if (k === "j" || k === "k") roster.moveSession(k === "j" ? 1 : -1);
+	else if (k === "n") roster.newHere();
+	else if (k === "w") roster.wake();
+	else if (k === "a") roster.toggleArchived();
+	else if (k === "y" || k === "Y") roster.copy(k === "y");
+	else throw new Error(`unknown deck key ${k}`);
+	roster.syncStage(true);
 }
 
 async function showHelp(): Promise<void> {
@@ -1090,13 +1220,13 @@ async function layout(): Promise<void> {
 	const [zoomFlag, active] = (await tmuxAsync(UI, "display", "-p", "-t", stagePane, "#{window_zoomed_flag}\t#{pane_active}")).split("\t");
 	const wasNarrow = narrow;
 	narrow = deckWidth < NARROW_BELOW;
+	if (narrow) await syncRoster(false);
 	if (narrow !== wasNarrow) {
 		if (narrow) await tmuxAsync(UI, "set", "-t", deck, "@swb_narrow", "1");
 		else await tmuxAsync(UI, "set", "-u", "-t", deck, "@swb_narrow");
 		if (narrow && zoomFlag !== "1") await tmuxAsync(UI, "resize-pane", "-Z", "-t", active === "1" ? stagePane : rosterPane);
 		if (!narrow && zoomFlag === "1") await tmuxAsync(UI, "resize-pane", "-Z", "-t", rosterPane);
 	}
-	zoomed = (await tmuxAsync(UI, "display", "-p", "-t", stagePane, "#{window_zoomed_flag}")) === "1";
 }
 
 function quit(): void {
@@ -1115,10 +1245,13 @@ process.on("SIGTERM", cleanup);
 async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 	switch (cmd) {
 		case "focus":
-			focusedPane = argv[0] ?? "";
+			// Hooks run in the background and can land out of order, so each one rereads which pane is active.
+			focusReads = focusReads.then(async () => {
+				focusedPane = await tmuxAsync(UI, "display", "-p", "-t", deck, "#{pane_id}");
+			});
+			await focusReads;
 			focus = focusedPane === rosterPane ? "roster" : "stage";
 			if (focus === "roster") for (const launch of launches) launch.keyboard = false;
-			zoomed = (await tmuxAsync(UI, "display", "-p", "-t", stagePane, "#{window_zoomed_flag}")) === "1";
 			apply();
 			break;
 		case "terminal-focus": {
@@ -1142,6 +1275,12 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 		case "view-swap":
 		case "view-split":
 			await changeView(cmd === "view-swap");
+			break;
+		case "roster":
+			await syncRoster(argv[0] === "focus");
+			break;
+		case "key":
+			await prefixKey(argv[0] ?? "");
 			break;
 		case "esc":
 			for (const launch of launches) launch.keyboard = false;
@@ -1167,27 +1306,28 @@ async function changeView(swap: boolean): Promise<void> {
 	const saved = viewOf(e);
 	if (swap && saved === "split") return;
 	const showing = stage.applied.view;
-	const onStage = focus === "stage";
 	let next: View;
 	if (swap) next = showing === "editor" ? "pi" : "editor";
 	else if (saved !== "split") next = "split";
-	else next = showing === "split" && onStage && focusedPane === stagePane ? "editor" : "pi";
+	else next = showing === "split" && focus === "stage" && focusedPane === stagePane ? "editor" : "pi";
+	await showView(e, next);
+}
+
+/** The keyboard goes to the pane the view brought up; entering split, to the one matching what showed before. */
+async function showView(e: Entry, next: View): Promise<void> {
+	const showing = stage.applied.view;
 	if (next !== "pi") {
 		editorsAsked.delete(e.cwd);
 		editorsLost.delete(e.cwd);
 		if ((await requestEditor(e.cwd)) === null || stage.applied.id !== e.id) return;
 	}
 	if (next === "split" && deckWidth < SPLIT_FROM) toast(`split needs ${SPLIT_FROM} columns; showing pi`, "info");
-	if (!narrow) await tmuxAsync(UI, "if", "-F", "#{window_zoomed_flag}", `resize-pane -Z -t ${quote(stagePane)}`);
 	localViews.set(e.id, next);
 	post({ type: "view", id: e.id, view: next });
 	apply();
 	await stageOps;
-	if (onStage) {
-		const pane = next === "split" && showing === "pi" && side ? side.pane : stagePane;
-		await tmuxAsync(UI, "select-pane", ...(narrow ? ["-Z"] : []), "-t", pane);
-	}
-	zoomed = (await tmuxAsync(UI, "display", "-p", "-t", stagePane, "#{window_zoomed_flag}")) === "1";
+	const pane = next === "split" && showing === "pi" && side ? side.pane : stagePane;
+	await tmuxAsync(UI, "select-pane", ...(narrow ? ["-Z"] : []), "-t", pane);
 }
 
 // ── view state ──────────────────────────────────────────────────────────
@@ -1214,7 +1354,7 @@ function viewState(): DeckState {
 			view: applied.view,
 			savedView: staged ? viewOf(staged) : "pi",
 		},
-		layout: { width: deckWidth, rosterOnly: narrow, split: side !== null, zoomed },
+		layout: { width: deckWidth, rosterOnly: narrow, split: side !== null, rosterHidden },
 		waking: launches.map((launch) => ({ id: launch.id, keyboardWaiting: launch.keyboard })),
 		rows: rows.map((row) =>
 			row.kind === "session"

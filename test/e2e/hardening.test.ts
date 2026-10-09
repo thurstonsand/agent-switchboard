@@ -110,14 +110,14 @@ test("a Deck started inside another tmux works as in a bare terminal, M-a passin
 	outer.keys("M-a", "h");
 	await until(() => outer.state().focus === "roster", budgets.settle, "the roster focused through the outer tmux");
 	outer.keys("M-a", "z");
-	await until(() => outer.state().layout.zoomed, budgets.settle, "pi zoomed");
+	await until(() => outer.state().layout.rosterHidden, budgets.settle, "the roster hidden");
 	await until(() => outer.screen().includes("nested"), budgets.settle, "pi on screen");
 	s.save("nested.txt", outer.screen());
 	outer.keys("M-a", "z", "M-a", "h");
 	await until(
 		() => {
 			const st = outer.state();
-			return st.focus === "roster" && !st.layout.zoomed;
+			return st.focus === "roster" && !st.layout.rosterHidden;
 		},
 		budgets.settle,
 		"back in the roster",
@@ -135,7 +135,7 @@ test("a narrow terminal shows one pane at a time: Enter shows pi, M-a h returns 
 	await cursorTo(s, a);
 	s.save("roster.txt", s.screen());
 	s.keys("Enter");
-	await waitState(s, "pi zoomed and focused", (x) => x.staged.kind === "live" && x.focus === "stage" && x.layout.zoomed, budgets.piReady);
+	await waitState(s, "pi zoomed and focused", (x) => x.staged.kind === "live" && x.focus === "stage", budgets.piReady);
 	await until(() => s.screen().includes("narrow-one"), budgets.settle, "pi filling the terminal");
 	s.save("pi.txt", s.screen());
 	s.keys("M-a", "h");
@@ -152,7 +152,7 @@ test("a narrow terminal shows one pane at a time: Enter shows pi, M-a h returns 
 	await until(() => s.screen().includes("▸ Archived"), budgets.settle, "the roster repainted at 40 columns");
 	s.save("40-cols.txt", s.screen());
 	s.swb("drive", "resize", "140x40");
-	await waitState(s, "both panes again", (x) => !x.layout.rosterOnly && !x.layout.zoomed);
+	await waitState(s, "both panes again", (x) => !x.layout.rosterOnly && !x.layout.rosterHidden);
 	await until(() => s.screen().includes("narrow-one") && s.screen().includes(" swb "), budgets.settle, "roster and pi side by side");
 	s.save("widened.txt", s.screen());
 });
@@ -321,9 +321,24 @@ test("roster navigation: h l space and a header click fold projects; g G jump; M
 	s.keys("M-a", "Tab");
 	await waitState(s, "Tab back", (x) => x.focus === "roster");
 	s.keys("M-a", "z");
-	await waitState(s, "pi zoomed from the list", (x) => x.layout.zoomed && x.focus === "stage");
+	await waitState(s, "the roster hidden from the list, pi focused", (x) => x.layout.rosterHidden && x.focus === "stage");
 	s.keys("M-a", "z");
-	await waitState(s, "unzoomed", (x) => !x.layout.zoomed);
+	await waitState(s, "the roster back, pi still focused", (x) => !x.layout.rosterHidden && x.focus === "stage");
+	s.keys("M-a", "j");
+	await waitState(
+		s,
+		"M-a j stages the session below, keys stay on pi",
+		(x) => x.cursor !== b && x.staged.id === x.cursor && x.focus === "stage",
+	);
+	s.keys("M-a", "k");
+	await waitState(s, "M-a k stages b again", (x) => x.cursor === b && x.staged.id === b && x.focus === "stage");
+	const lines = s.screen().split("\n");
+	const hint = lines.findIndex((line) => line.includes("hide list"));
+	expect(hint).toBeGreaterThan(-1);
+	s.swb("drive", "click", String((lines[hint] as string).indexOf("hide list")), String(hint));
+	await waitState(s, "the legend's hide list clicked", (x) => x.layout.rosterHidden);
+	s.keys("M-a", "z");
+	await waitState(s, "the roster back", (x) => !x.layout.rosterHidden);
 	s.keys("M-a", "?");
 	await until(() => s.screen().includes("any key closes"), budgets.settle, "the key help");
 	s.save("help.txt", s.screen());
@@ -358,4 +373,12 @@ test("n in an empty Deck, and on a section row, starts a session where swb was r
 	await until(() => cwds().length === 2, budgets.settle, "both pis registered");
 	expect(cwds()).toEqual([s.project, s.project]);
 	expect(second.focus).toBe("stage");
+	s.keys("M-a", "n");
+	const third = await waitState(
+		s,
+		"M-a n from pi starts a third",
+		(x) => x.staged.kind === "live" && x.staged.id !== null && x.staged.id !== second.staged.id && x.staged.id !== first.staged.id,
+		budgets.piReady,
+	);
+	expect(third.focus).toBe("stage");
 });
