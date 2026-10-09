@@ -5,7 +5,7 @@ import { stateDir } from "@swb/shared";
 import { fetchState } from "../deck/deck.ts";
 import { SwbError, UsageError } from "../errors.ts";
 import { SWB } from "../sessions.ts";
-import { DRIVE, quote, tmux, tmuxTry, UI } from "../tmux.ts";
+import { cleanEnv, DRIVE, quote, tmux, tmuxBin, tmuxTry, UI } from "../tmux.ts";
 
 // The harness stands in for a real terminal with Gruvbox Light Hard / Dark Hard. A detached tmux pane answers no color
 // queries; with these styles its server answers OSC 10/11 from window-style and OSC 4 from pane-colours, as Ghostty would.
@@ -177,21 +177,30 @@ export async function drive(args: string[]): Promise<void> {
 			const themeLines = themeCommands(theme(values.theme)).map(([set, flag, option, value]) => `${set} ${flag} ${option} ${quote(value)}`);
 			writeFileSync(conf, [...HARNESS_CONF, ...themeLines, ""].join("\n"));
 			const command = [SWB, ...swbArgs].map(quote).join(" ");
-			harness(
-				"-f",
-				conf,
-				"new-session",
-				"-d",
-				"-s",
-				"drive",
-				"-c",
-				process.cwd(),
-				"-x",
-				match[1] as string,
-				"-y",
-				match[2] as string,
-				command,
+			// From the caller's directory, so a mise tmux shim applies the env the caller already has instead of the one at /,
+			// which would leave the caller's project env looking like a baseline the Deck's scrub can't remove.
+			const started = Bun.spawnSync(
+				[
+					tmuxBin(),
+					"-L",
+					DRIVE,
+					"-f",
+					conf,
+					"new-session",
+					"-d",
+					"-s",
+					"drive",
+					"-c",
+					process.cwd(),
+					"-x",
+					match[1] as string,
+					"-y",
+					match[2] as string,
+					command,
+				],
+				{ cwd: process.cwd(), env: cleanEnv(), stdout: "pipe", stderr: "pipe" },
 			);
+			if (started.exitCode !== 0) throw new SwbError(`starting tmux -L ${DRIVE}: ${started.stderr.toString().trim()}`);
 			if (swbArgs.length === 0 || ["new", "open", "adopt"].includes(swbArgs[0] as string)) await waitReady();
 			break;
 		}
