@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.4.0 — 2026-10-10
+
+Schema v3: update swb and the recorder together; an older one refuses the db.
+
+### Added
+
+- **Operators** — sessions in `~/.config/agent-switchboard/operator`, in their own section atop the roster, outside every Project and never Inactive. They read only that folder's AGENTS.md, written once as CAPCOM. `n` on the section starts one.
+- **Layout restore** — a new Deck picks up the last Deck's cursor, folds, and dragged width for this Project, else lands on the most recently visited session. The keyboard stays in the roster.
+- **`swb -c`** — opens a Deck in pi on this Project's most recent session, or a new one.
+- **Groups** — `m` names a session's Group, or renames one from its header; dragging a session lights the Group it would land in. Groups sit beside worktree buckets under `group_by = "worktree"` and vanish with their last open session. `n` joins the cursor's Group.
+- **`N`** starts a session where swb was run; `n` keeps using the highlighted row's directory.
+- **`roster_width`** setting, in columns or `N%`, capped at half the Deck.
+- **`swb_update_session`** replaces `swb_archive`: archive or unarchive this session or another, refusing one mid-turn. It renders as "Archive · title".
+- **Upgrades take over** — a newer swb stops idle pis and restarts or re-sources its older tmux servers. Working and blocked pis keep running. An older Deck says "reopen the Deck".
+- Unsent drafts survive upgrades and restarts.
+
+### Changed
+
+- A Visit is a focused second on pi. Passing the cursor or `w` no longer clears Unseen.
+- One click on a session focuses it, waking it if dormant.
+- The bar under the roster is one status word, path and branch, and view tabs. The legend lists only what the current row does.
+- Project headers carry counts; the top-right "open · arch" is gone.
+- The preview fills the Stage and no longer flickers.
+- Focusing a sleeping session, or choosing pi or split for it, wakes it.
+
+### Fixed
+
+- A pi started with no viewer gets the terminal's palette hues, not pi's built-in ones.
+- Archive and reap stop pi with SIGTERM, so its shutdown hooks run.
+
 ## 0.3.0 — 2026-10-09
 
 ### Added
