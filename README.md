@@ -44,7 +44,7 @@ In the roster, `j`/`k` move, `Enter` focuses the session (waking it if it's dorm
 
 ### Operators
 
-The Operators section sits atop the roster: sessions that coordinate the others rather than work in a Project. `n` on it starts one in `~/.config/agent-switchboard/operator`, whose AGENTS.md, which swb keeps current, makes it the dispatcher. An Operator reads only that AGENTS.md, not the user-level one or any above it, and reaches the other sessions through pi-sessions. Its new sessions are always swb-managed handoffs; it can't start subagents, which the Deck can't see. To promote an existing session, `/mv` it into that folder.
+The Operators section sits atop the roster: sessions that coordinate the others rather than work in a Project. `n` on it starts one in `~/.config/agent-switchboard/operator`, whose AGENTS.md, which swb keeps current, makes it the dispatcher. An Operator reads only that AGENTS.md, not the user-level one or any above it, and reaches the other sessions through pi-sessions. Its new sessions are always swb-managed handoffs; its pi-sessions settings turn off subagents and deferred handoffs, which the Deck can't see. To promote an existing session, `/mv` it into that folder.
 
 ## Settings
 

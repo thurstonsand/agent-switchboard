@@ -26,7 +26,7 @@ Delegate outcomes, not choreography:
 - Leave the method to the worker. They are capable; a step list makes them brittle.
 - Name the repo and branch when it might differ from the target session's.
 - Tell the worker where to report back and what done means: investigate and report, fix and verify, implement and report, push, release. That goes in the message to the worker, not in your reply to me.
-- Every new session is a `session_handoff` with `launch: "swb"`. Never spawn subagents or deferred sessions: swb can't see them, so neither can I.
+- Every new session is a `session_handoff`, so it lands on my roster.
 
 ## Reports
 

@@ -32,7 +32,7 @@ Some scenarios install the host's own pi-sessions and pi-wt, found through its p
 
 - Database: `${XDG_STATE_HOME:-~/.local/state}/agent-switchboard/swb.db` (directory `0700`, file `0600`)
 - Settings: `${XDG_CONFIG_HOME:-~/.config}/agent-switchboard/config.toml`; unknown keys are an error
-- Operator folder: `${XDG_CONFIG_HOME:-~/.config}/agent-switchboard/operator`. Every Deck rewrites its `AGENTS.md` and `.pi/extensions/operator.js` from the copies swb ships
+- Operator folder: `${XDG_CONFIG_HOME:-~/.config}/agent-switchboard/operator`. Every Deck rewrites its `AGENTS.md`, `.pi/extensions/operator.js`, and `.pi/settings.json` from the copies swb ships
 - Deck layout: the `deck_layouts` table, one row per Project root: the cursor, folds, and roster width the next Deck there starts from
 - Drafts: `${XDG_STATE_HOME:-~/.local/state}/agent-switchboard/drafts/<session_id>`, an unsent prompt saved when an upgrade stops its pi
 - Deck sockets: `${XDG_STATE_HOME:-~/.local/state}/agent-switchboard/decks/<deck>.sock`

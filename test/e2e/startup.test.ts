@@ -59,10 +59,12 @@ test("n on Operators starts a trusted pi that reads only swb's current AGENTS.md
 	expect(readFileSync(join(operator, "AGENTS.md"), "utf8")).toContain("CAPCOM");
 
 	const before = s.ls().map((e) => e.id);
-	s.keys("-l", "subagent s1", "Enter");
-	await until(() => s.screen().includes("tool done s1"), budgets.piReady, "the refused subagent handoff");
-	expect(s.screen()).toContain("swb can't see them");
-	expect(s.signal("child.s1.entered")).toBe("");
+	for (const launch of ["subagent", "deferred"]) {
+		s.keys("-l", `${launch} ${launch}1`, "Enter");
+		await until(() => s.screen().includes(`tool done ${launch}1`), budgets.piReady, `the refused ${launch} handoff`);
+		expect(s.screen()).toContain("launch: must be equal to constant");
+	}
+	expect(s.signal("child.subagent1.entered")).toBe("");
 	expect(s.ls().map((e) => e.id)).toEqual(before);
 	const rows = state(s).rows;
 	expect(rows[0]).toMatchObject({ kind: "section", label: "Operators", count: 1 });
