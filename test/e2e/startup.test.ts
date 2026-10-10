@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { entry, reply, seed, state, waitState } from "./harness/deck.ts";
-import { budgets, type Scenario, scenario } from "./harness/index.ts";
+import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
 afterEach(async () => {
@@ -24,8 +24,8 @@ export default function peek(pi) {
 }
 `;
 
-test("n on Operators starts a trusted pi in the Operator folder that reads only that folder's AGENTS.md", async () => {
-	s = scenario("phase6", "operators");
+test("n on Operators starts a trusted pi that reads only swb's current AGENTS.md and can't start subagents", async () => {
+	s = scenario("phase6", "operators", { packages: ["pi-sessions"], recorder: true });
 	const agentDir = s.env.PI_CODING_AGENT_DIR as string;
 	// A symlinked config dir, as dotfile managers leave it: pi's cwd is the physical path.
 	const physical = join(s.root, "dotfiles");
@@ -33,6 +33,8 @@ test("n on Operators starts a trusted pi in the Operator folder that reads only 
 	symlinkSync(physical, join(s.home, ".config-link"));
 	s.env.XDG_CONFIG_HOME = join(s.home, ".config-link");
 	const operator = join(physical, "agent-switchboard/operator");
+	mkdirSync(operator, { recursive: true });
+	writeFileSync(join(operator, "AGENTS.md"), "# a stale copy from an older swb\n");
 	writeFileSync(join(s.home, "AGENTS.md"), "# an ancestor's instructions\n");
 	writeFileSync(join(agentDir, "AGENTS.md"), "# the user's instructions\n");
 	mkdirSync(join(agentDir, "extensions"));
@@ -55,6 +57,13 @@ test("n on Operators starts a trusted pi in the Operator folder that reads only 
 	expect(entry(s, id)).toMatchObject({ operator: true, cwd: operator });
 	expect(JSON.parse(s.signal("context"))).toEqual([join(operator, "AGENTS.md")]);
 	expect(readFileSync(join(operator, "AGENTS.md"), "utf8")).toContain("CAPCOM");
+
+	const before = s.ls().map((e) => e.id);
+	s.keys("-l", "subagent s1", "Enter");
+	await until(() => s.screen().includes("tool done s1"), budgets.piReady, "the refused subagent handoff");
+	expect(s.screen()).toContain("swb can't see them");
+	expect(s.signal("child.s1.entered")).toBe("");
+	expect(s.ls().map((e) => e.id)).toEqual(before);
 	const rows = state(s).rows;
 	expect(rows[0]).toMatchObject({ kind: "section", label: "Operators", count: 1 });
 	expect(rows[1]).toMatchObject({ kind: "session", id });

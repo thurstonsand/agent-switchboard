@@ -1,4 +1,4 @@
-# Startup: n on Operators starts an Operator; a new Deck comes back where the last one left off; swb -c lands in pi.
+# Startup: n on Operators starts an Operator, which can't start subagents; a new Deck comes back where the last one left off; swb -c lands in pi.
 Source common.tape
 
 Type "# n on Operators starts an Operator" Sleep 1s Enter
@@ -12,6 +12,10 @@ Wait+Screen /faux-1/
 Sleep 1s
 Type "reply on duty" Sleep 400ms Enter
 Sleep 2s
+Type "subagent scout" Sleep 400ms Enter
+Wait+Screen /tool done scout/
+Sleep 1.5s
+Screenshot ../artifacts/phase6/videos/startup-operator-refused.png
 Alt+a
 Type "h"
 Wait+Screen /Operators \(1\)/

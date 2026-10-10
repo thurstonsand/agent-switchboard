@@ -415,6 +415,7 @@ export const directors: Record<string, Director> = {
 	},
 
 	startup: {
+		packages: ["pi-sessions"],
 		setup: async (s) => {
 			await seed(s, { turns: ["one"], title: "alpha" }, { turns: ["two"], title: "bravo" });
 		},
