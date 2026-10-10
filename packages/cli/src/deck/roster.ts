@@ -491,7 +491,7 @@ function syncBelow(): void {
 			writeAtomic(paths.below, want);
 			const created = await tmuxAsync(
 				UI,
-				...["split-window", "-v", "-d", "-l", "30%", "-t", parent, "-P", "-F", "#{pane_id}"],
+				...["split-window", "-v", "-d", "-l", "50%", "-t", parent, "-P", "-F", "#{pane_id}"],
 				...deckEnv(),
 				stageScript(deck, paths.below, true),
 			);

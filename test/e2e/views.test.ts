@@ -557,6 +557,7 @@ test("M-a s puts the directory's shell under pi, right of the split editor; ctrl
 	expect(shell.width).toBe(pi.width);
 	expect(shell.top).toBe(pi.top + pi.height + 1);
 	expect(editor.height).toBe(pi.height + shell.height + 1);
+	expect(Math.abs(pi.height - shell.height)).toBeLessThanOrEqual(1);
 	expect(roster.left).toBe(0);
 	s.keys("-l", "echo shell-$((6*7)) in $PWD", "Enter");
 	await until(() => s.screen().includes(`shell-42 in ${s.project}`), budgets.settle, "the shell in the session's directory");
