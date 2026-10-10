@@ -145,6 +145,8 @@ export const directors: Record<string, Director> = {
 			await waitDeck(s, "the editor view", (x) => x.staged.view === "editor" && x.focus === "editor");
 			await waitDeck(s, "back to pi", (x) => x.staged.view === "pi");
 			await waitDeck(s, "split", (x) => x.layout.split && x.staged.view === "split");
+			await waitDeck(s, "the shell", (x) => x.layout.shell && x.focus === "shell");
+			await waitDeck(s, "ctrl-d closed it", (x) => !x.layout.shell && x.layout.split);
 		},
 	},
 

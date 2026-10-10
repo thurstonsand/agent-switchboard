@@ -55,6 +55,9 @@ What `swb` opens: the **Roster** beside a **Stage**, in one disposable layout. E
 **Editor**:
 The text editor for one directory, shared by every session whose working directory it is; it shows on the **Stage** instead of, or beside, the session.
 
+**Shell**:
+A login shell for one directory, opened beneath pi on the **Stage** in one **Deck**. Hiding it keeps it running; exiting it ends it.
+
 **Stage**:
 Internal term for the Deck's live, interactive view of the selected session; moving the Roster cursor changes which session it shows. Internal term (not in UI).
 

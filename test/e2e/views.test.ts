@@ -45,6 +45,26 @@ function savedView(s: Scenario, id: string): string | undefined {
 	return s.query<{ view: string }>("SELECT view FROM marks WHERE session_id = ?", id)[0]?.view;
 }
 
+type Box = { id: string; left: number; top: number; width: number; height: number };
+
+function boxes(s: Scenario, st: DeckState): Box[] {
+	return s
+		.tmux(s.servers.ui, "list-panes", "-t", `=${st.deck}:`, "-F", "#{pane_id} #{pane_left} #{pane_top} #{pane_width} #{pane_height}")
+		.split("\n")
+		.map((line) => line.split(" "))
+		.map(([id, ...n]) => {
+			const [left, top, width, height] = n.map(Number) as [number, number, number, number];
+			return { id: id as string, left, top, width, height };
+		});
+}
+
+function shells(s: Scenario): string[] {
+	return s
+		.tmux(s.servers.sessions, "list-sessions", "-F", "#{session_name}\t#{@swb_kind}")
+		.split("\n")
+		.filter((line) => line.endsWith("\tshell"));
+}
+
 /** A new session started in a Deck, prompted once so it has a row to remember its view. */
 async function started(s: Scenario, ...args: string[]): Promise<DeckState> {
 	s.swb("drive", "start", ...args);
@@ -445,7 +465,9 @@ test("m names a session's Group, n joins it; dragging moves it between Groups be
 	expect(s.screen().split("\n")[bravo]?.slice(0, 30)).toContain("bravo");
 	s.swb("drive", "drag", "8", `${bravo}`, "8", `${alpha}`, "--hold");
 	await waitState(s, "review lit as the drop", (x) => x.drop?.group === "review");
-	await until(() => s.screen().includes("drop into review"), budgets.settle, "the drop hint");
+	await until(() => s.screen().includes("⇢ into review"), budgets.settle, "the drop hint");
+	// The carried session stays where it was, hollowed out.
+	expect(s.screen().split("\n")[bravo]).toMatch(/┆\s+◌ bravo/);
 	s.save("dragging.ansi", s.swb("drive", "capture", "--ansi"));
 	s.swb("drive", "release", "8", `${alpha}`);
 	st = await waitState(s, "bravo dropped into review", (x) => groups(x).review?.length === 2 && x.drop === null);
@@ -467,6 +489,28 @@ test("m names a session's Group, n joins it; dragging moves it between Groups be
 	s.swb("drive", "drag", "8", `${from}`, "8", `${project}`);
 	st = await waitState(s, "bravo back in its bucket", (x) => groups(x)["⎇ main"]?.join() === b);
 	expect(groups(st)).toEqual({ review: [a], "⎇ main": [b], "⎇ wt": [w] });
+	expect(entry(s, b).group).toBeNull();
+
+	// The picker narrows to the Project's Groups as I type, offering a new one until a name matches exactly.
+	await cursorTo(s, b);
+	s.keys("m");
+	await waitState(s, "picking", (x) => x.mode === "name");
+	await until(() => s.screen().includes("(no Group)"), budgets.settle, "the picker, no Group first");
+	s.keys("-l", "rev");
+	await until(() => s.screen().includes('+ new "rev"'), budgets.settle, "a new Group offered");
+	s.save("picker.ansi", s.swb("drive", "capture", "--ansi"));
+	s.keys("Enter");
+	st = await waitState(s, "bravo picked into review", (x) => groups(x).review?.length === 2 && x.mode === "roster");
+	expect(entry(s, b).group).toBe("review");
+	await cursorTo(s, b);
+	s.keys("m");
+	await waitState(s, "picking again", (x) => x.mode === "name");
+	const none = s
+		.screen()
+		.split("\n")
+		.findIndex((line) => line.includes("(no Group)"));
+	s.swb("drive", "click", "6", `${none}`);
+	st = await waitState(s, "bravo clicked back to its bucket", (x) => groups(x)["⎇ main"]?.join() === b && x.mode === "roster");
 	expect(entry(s, b).group).toBeNull();
 
 	s.swb("archive", a);
@@ -499,4 +543,79 @@ test("m names a session's Group, n joins it; dragging moves it between Groups be
 	await until(() => entry(s, n)?.group === "triage", budgets.settle, "the new session's Group written once it has a row");
 	expect(entry(s, n).cwd).toBe(entry(s, a).cwd);
 	s.save("joined.ansi", s.swb("drive", "capture", "--ansi"));
+});
+
+test("M-a s puts the directory's shell under pi, right of the split editor; ctrl-hjkl walk the panes; M-a s and ctrl-d close it", async () => {
+	s = scenario("phase7", "shell");
+	config(s, 'editor = "cat -v"');
+	await started(s, "--size", "200x50", "--", "new");
+	await prefixKeys(s, "M-a", "v", "split", (x) => x.layout.split && x.focus === "stage");
+	let st = await prefixKeys(s, "M-a", "s", "the shell, with the keyboard", (x) => x.layout.shell && x.focus === "shell");
+	const [roster, editor, pi, shell] = boxes(s, st) as [Box, Box, Box, Box];
+	expect(boxes(s, st).length).toBe(4);
+	expect(shell.left).toBe(pi.left);
+	expect(shell.width).toBe(pi.width);
+	expect(shell.top).toBe(pi.top + pi.height + 1);
+	expect(editor.height).toBe(pi.height + shell.height + 1);
+	expect(roster.left).toBe(0);
+	s.keys("-l", "echo shell-$((6*7)) in $PWD", "Enter");
+	await until(() => s.screen().includes(`shell-42 in ${s.project}`), budgets.settle, "the shell in the session's directory");
+	s.save("shell.txt", s.screen());
+	s.save("shell.ansi", s.swb("drive", "capture", "--ansi"));
+
+	for (const [key, want] of [
+		["C-k", "stage"],
+		["C-j", "shell"],
+		["C-h", "editor"],
+		["C-h", "roster"],
+		["C-h", "roster"],
+		["C-l", "editor"],
+	] as const) {
+		s.keys(key);
+		await waitState(s, `${key} to ${want}`, (x) => x.focus === want);
+	}
+	// From the roster, Tab and l go back to the pane I left, not the first one.
+	s.keys("C-l", "C-j");
+	await waitState(s, "shell", (x) => x.focus === "shell");
+	await prefixKeys(s, "M-a", "Tab", "M-a Tab to the roster", (x) => x.focus === "roster");
+	await prefixKeys(s, "M-a", "Tab", "M-a Tab back to the shell", (x) => x.focus === "shell");
+	await prefixKeys(s, "M-a", "h", "M-a h", (x) => x.focus === "editor");
+	await prefixKeys(s, "M-a", "h", "M-a h", (x) => x.focus === "roster");
+	await prefixKeys(s, "M-a", "l", "M-a l back to the editor", (x) => x.focus === "editor");
+
+	s.keys("C-l", "C-j");
+	await waitState(s, "shell", (x) => x.focus === "shell");
+	st = await prefixKeys(s, "M-a", "s", "the shell hidden, the keyboard on pi", (x) => !x.layout.shell && x.focus === "stage");
+	expect(boxes(s, st).length).toBe(3);
+	expect(shells(s).length).toBe(1);
+	await prefixKeys(s, "M-a", "s", "the same shell back", (x) => x.layout.shell && x.focus === "shell");
+	await until(() => s.screen().includes("shell-42"), budgets.settle, "its scrollback kept");
+
+	s.keys("C-d");
+	st = await waitState(s, "ctrl-d closes it", (x) => !x.layout.shell && x.layout.split);
+	expect(boxes(s, st).length).toBe(3);
+	await until(() => shells(s).length === 0, budgets.settle, "the shell's session gone");
+	await prefixKeys(s, "M-a", "s", "a fresh shell", (x) => x.layout.shell && x.focus === "shell");
+	expect(s.screen()).not.toContain("shell-42");
+});
+
+test.skipIf(!NVIM)("ctrl-hjkl move between nvim's windows, and off its edge into the Deck's panes", async () => {
+	s = scenario("phase7", "nvim-nav");
+	// A directory opens in netrw, whose own ctrl-h and ctrl-l maps are in the way.
+	config(s, `editor = "${NVIM} --clean ."`);
+	await started(s, "--", "new");
+	await prefixKeys(s, "M-a", "e", "the editor", (x) => x.staged.view === "editor" && x.focus === "editor");
+	await until(() => s.screen().includes("~"), budgets.settle, "nvim drawn");
+	s.keys("-l", ":vsplit", "Enter", "C-l");
+	await Bun.sleep(500);
+	expect(state(s).focus).toBe("editor");
+	s.keys("C-h");
+	await Bun.sleep(500);
+	// One window over inside nvim, still at home.
+	expect(state(s).focus).toBe("editor");
+	s.save("nvim-split.txt", s.screen());
+	s.keys("C-h");
+	await waitState(s, "off nvim's left edge to the roster", (x) => x.focus === "roster");
+	s.keys("C-l");
+	await waitState(s, "back into nvim", (x) => x.focus === "editor");
 });

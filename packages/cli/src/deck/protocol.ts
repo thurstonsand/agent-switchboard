@@ -18,6 +18,7 @@ export type Snapshot = {
 	hosts: string[];
 	/** Each directory's Editor, by its tmux session. */
 	editors: Record<string, string>;
+	shells: Record<string, string>;
 	/** The last lines of each pi this Deck launched that died before it registered, by its tmux session. */
 	died: Record<string, string[]>;
 	serverUp: boolean;
@@ -68,7 +69,7 @@ export type DeckState = {
 	/** Mid-drag, the header a release would drop into: its Project, and its Group or worktree bucket, if any. */
 	drop: { project: string; group: string | null } | null;
 	filter: string;
-	focus: "roster" | "stage" | "editor";
+	focus: "roster" | "stage" | "editor" | "shell";
 	staged: {
 		id: string | null;
 		host: string | null;
@@ -76,7 +77,7 @@ export type DeckState = {
 		view: View;
 		savedView: View;
 	};
-	layout: { width: number; rosterOnly: boolean; split: boolean; rosterHidden: boolean };
+	layout: { width: number; rosterOnly: boolean; split: boolean; shell: boolean; rosterHidden: boolean };
 	waking: { id: string | null; keyboardWaiting: boolean }[];
 	rows: StateRow[];
 	colors: { background: string | null; scheme: string | null };
@@ -85,7 +86,7 @@ export type DeckState = {
 };
 
 /** `side` is the target file of the Stage's second pane, which exists only while split is showing. */
-export type DeckPaths = { sock: string; card: string; target: string; side: string };
+export type DeckPaths = { sock: string; card: string; target: string; side: string; below: string };
 
 export type ToWorker =
 	| { type: "init"; deck: string; paths: DeckPaths; config: Config; here: string }
@@ -95,11 +96,13 @@ export type ToWorker =
 	| { type: "visit"; id: string }
 	| { type: "archive"; id: string }
 	| { type: "unarchive"; id: string }
+	| { type: "stop"; id: string }
 	| { type: "transcript"; id: string; path: string }
 	| { type: "background"; color: string }
 	| { type: "view"; id: string; view: View }
 	| { type: "group"; ids: string[]; name: string | null }
-	| { type: "editor"; dir: string };
+	| { type: "editor"; dir: string }
+	| { type: "shell"; dir: string };
 
 export type FromWorker =
 	| { type: "restore"; layout: DeckLayout | null }
@@ -109,7 +112,9 @@ export type FromWorker =
 	| { type: "transcript"; id: string; turns: Turn[] | null; error: string | null }
 	| { type: "launchFailed"; id: string | null; text: string }
 	| { type: "toggled"; error: string | null }
+	| { type: "stopped"; error: string | null }
 	| { type: "editor"; dir: string; name: string | null; text: string | null }
+	| { type: "shell"; dir: string; name: string | null; text: string | null }
 	| { type: "viewFailed"; id: string; text: string }
 	| { type: "groupFailed"; text: string }
 	| { type: "error"; text: string };

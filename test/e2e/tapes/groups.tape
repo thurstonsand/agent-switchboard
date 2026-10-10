@@ -16,7 +16,7 @@ Escape
 Wait+Screen /review \(1\)/
 Sleep 1.5s
 Screenshot ../artifacts/phase6/videos/groups-named.png
-Wait+Screen /drop into review/
+Wait+Screen /⇢ into review/
 Sleep 500ms
 Screenshot ../artifacts/phase6/videos/groups-dragging.png
 Wait+Screen /review \(2\)/
@@ -38,3 +38,15 @@ Wait+Screen /review \(3\)/
 Sleep 1.5s
 Screenshot ../artifacts/phase6/videos/groups-joined.png
 Sleep 1s
+Type "m"
+Wait+Screen /\(no Group\)/
+Sleep 1.5s
+Screenshot ../artifacts/phase6/videos/groups-picker.png
+Down
+Sleep 800ms
+Type "on-call"
+Wait+Screen /\+ new "on-call"/
+Sleep 1.5s
+Screenshot ../artifacts/phase6/videos/groups-picker-new.png
+Escape
+Sleep 1.5s

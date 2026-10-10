@@ -30,6 +30,11 @@ test("w wakes a dormant session to live while the keyboard stays in the roster",
 	expect(entry(s, id).live).toBe(true);
 	expect(s.signal("login-shell")).not.toBe("");
 	s.save("live.txt", s.screen());
+
+	s.keys("x");
+	await waitState(s, "x stops it", (x) => x.staged.kind === "exited");
+	await until(() => !entry(s, id).live, budgets.settle, "its pi gone");
+	expect(entry(s, id)).toMatchObject({ open: true, interrupted: false });
 });
 
 test("Enter on a dormant row holds the keyboard on the loading card and hands it to pi; Enter then esc backs out while pi still comes up", async () => {

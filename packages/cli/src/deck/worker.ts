@@ -3,7 +3,7 @@ import { statSync } from "node:fs";
 import { bootId, type Db, operatorDir, projectRoot, type View } from "@swb/shared";
 import type { Config } from "../config.ts";
 import { derive, type RuntimeRecord, runtimeLive, runtimeRecords, type SessionRow, sessionRows, type World } from "../derive.ts";
-import { archive, ensureEditor, ensureSessionsServer, launch, unarchive, wake } from "../sessions.ts";
+import { archive, ensureEditor, ensureSessionsServer, ensureShell, launch, stop, unarchive, wake } from "../sessions.ts";
 import { loadLayout, markVisited, openStore, saveLayout, setGroup, setView } from "../store.ts";
 import { listSessions, SESSIONS, tmuxTry } from "../tmux.ts";
 import { ensurePlaceholder, placeholderName } from "./deck.ts";
@@ -145,6 +145,7 @@ function snapshot(): Polled {
 			entries,
 			hosts: [...attached.keys()],
 			editors: Object.fromEntries(listed.filter(([, kind]) => kind === "editor").map(([name, , , , dir]) => [dir, name])),
+			shells: Object.fromEntries(listed.filter(([, kind]) => kind === "shell").map(([name, , , , dir]) => [dir, name])),
 			died,
 			serverUp: listed.length > 0,
 			swbVersion: listed[0]?.[7] ?? "",
@@ -267,6 +268,14 @@ function handle(message: ToWorker): void {
 				post({ type: "toggled", error: (error as Error).message });
 			}
 			break;
+		case "stop":
+			try {
+				stop(db, message.id);
+				post({ type: "stopped", error: null });
+			} catch (error) {
+				post({ type: "stopped", error: (error as Error).message });
+			}
+			break;
 		case "transcript":
 			transcript(message.id, message.path);
 			return;
@@ -308,6 +317,20 @@ function handle(message: ToWorker): void {
 			dataVersion = -1;
 			const up = tick().has(name);
 			post({ type: "editor", dir: message.dir, name: up ? name : null, text: up ? null : `${config.editor} exited at once` });
+			return;
+		}
+		case "shell": {
+			let name: string;
+			try {
+				name = ensureShell(db, message.dir);
+			} catch (error) {
+				post({ type: "shell", dir: message.dir, name: null, text: (error as Error).message });
+				break;
+			}
+			lastJson = "";
+			dataVersion = -1;
+			const up = tick().has(name);
+			post({ type: "shell", dir: message.dir, name: up ? name : null, text: up ? null : "the shell exited at once" });
 			return;
 		}
 	}

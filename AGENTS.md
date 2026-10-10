@@ -21,7 +21,7 @@ See @CONTEXT.md for project vocabulary.
 
 ## Features
 
-- `swb`: opens a Deck where the last one in this Project left off. The roster lists Operators, then open sessions grouped by project, then Inactive, then Archived. Beside it, the Stage shows the selected session as pi, its directory's editor, or a split of both
+- `swb`: opens a Deck where the last one in this Project left off. The roster lists Operators, then open sessions grouped by project, then Inactive, then Archived. Beside it, the Stage shows the selected session as pi, its directory's editor, or a split of both, with an optional shell beneath pi
 - `swb -c`: opens a Deck in pi on this Project's most recent session, or a new one
 - Operators: sessions in swb's Operator folder that coordinate the rest, reading only that folder's AGENTS.md
 - `swb new`, `open`, `adopt`, `archive`, `unarchive`, `ls --json`: the scriptable surface

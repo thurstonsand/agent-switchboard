@@ -12,7 +12,7 @@ import { open } from "./commands/open.ts";
 import { unarchive } from "./commands/unarchive.ts";
 import { visit } from "./commands/visit.ts";
 import { wake } from "./commands/wake.ts";
-import { openDeck } from "./deck/deck.ts";
+import { editorNav, openDeck } from "./deck/deck.ts";
 import { SwbError, UsageError } from "./errors.ts";
 import { VERSION } from "./version.ts";
 
@@ -94,6 +94,8 @@ async function main(args: string[]): Promise<void> {
 			return;
 		case "__help":
 			return help();
+		case "__nav":
+			return editorNav(rest[0] ?? "", process.env.SWB_EDITOR ?? "");
 		default:
 			throw new UsageError(`unknown command ${command}\n\n${USAGE}`);
 	}

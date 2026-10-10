@@ -239,12 +239,34 @@ export function launch(cwd: string, resume: string | null, piArgs: string[]): st
 
 /** The Editor for a directory, started if missing. Two Decks asking at once serialize on the db's write lock. */
 export function ensureEditor(db: Db, dir: string, editor: string): string {
+	return ensureDirSession(
+		db,
+		"editor",
+		dir,
+		nvimEditor(editor) ? `${editor} -c ${quote(`lua dofile(${JSON.stringify(nvimNav())})`)}` : editor,
+	);
+}
+
+/** Only nvim gets swb's ctrl-hjkl; any other Editor keeps those keys to itself. */
+export function nvimEditor(editor: string): boolean {
+	return basename(editor.trim().split(/\s+/)[0] ?? "") === "nvim";
+}
+
+/** The directory's shell for the Stage; it ends with its shell, which hides it. */
+export function ensureShell(db: Db, dir: string): string {
+	return ensureDirSession(db, "shell", dir, null);
+}
+
+function ensureDirSession(db: Db, kind: "editor" | "shell", dir: string, command: string | null): string {
 	ensureSessionsServer();
 	return db.tx(() => {
-		const existing = listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_dir}").find(([, kind, d]) => kind === "editor" && d === dir);
+		const existing = listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_dir}").find(([, k, d]) => k === kind && d === dir);
 		if (existing) return existing[0] as string;
-		const name = `${basename(dir).replaceAll(/[.:]/g, "_")}-edit-${randomHex(2)}`;
+		const name = `${basename(dir).replaceAll(/[.:]/g, "_")}-${kind === "editor" ? "edit" : "sh"}-${randomHex(2)}`;
 		const shell = loginShell();
+		const run = command
+			? `SWB_EDITOR=${quote(name)} SHELL=${shell} ${shell} -lic ${quote(`exec ${command}`)}`
+			: `SHELL=${shell} ${shell} -l`;
 		tmux(
 			SESSIONS,
 			"new-session",
@@ -253,13 +275,13 @@ export function ensureEditor(db: Db, dir: string, editor: string): string {
 			name,
 			"-c",
 			dir,
-			`exec env -u TMUX -u TMUX_PANE SHELL=${shell} ${shell} -lic ${quote(`exec ${editor}`)}`,
+			`exec env -u TMUX -u TMUX_PANE ${run}`,
 			";",
 			"set",
 			"-t",
 			name,
 			"@swb_kind",
-			"editor",
+			kind,
 			";",
 			"set",
 			"-t",
@@ -269,6 +291,33 @@ export function ensureEditor(db: Db, dir: string, editor: string): string {
 		);
 		return name;
 	});
+}
+
+/**
+ * ctrl-hjkl in an nvim Editor: between its own windows, and at an edge on into the Deck's panes, which the Deck's
+ * bindings hand ctrl-hjkl to whenever the Editor has the keyboard.
+ */
+function nvimNav(): string {
+	const path = join(stateDir(), "nvim-nav.lua");
+	const lua = `-- Written by swb for its Editors.
+local function maps(buffer)
+  for _, k in ipairs({ "h", "j", "k", "l" }) do
+    vim.keymap.set("n", "<C-" .. k .. ">", function()
+      if vim.fn.winnr(k) ~= vim.fn.winnr() then
+        vim.cmd("wincmd " .. k)
+      else
+        vim.fn.jobstart({ ${JSON.stringify(SWB)}, "__nav", k })
+      end
+    end, { buffer = buffer, desc = "swb: window or Deck pane " .. k })
+  end
+end
+maps(false)
+-- netrw maps <C-h> and <C-l> in its own buffers, over the global ones.
+vim.api.nvim_create_autocmd("FileType", { pattern = "netrw", callback = function(ev) maps(ev.buf) end })
+`;
+	mkdirSync(stateDir(), { recursive: true, mode: 0o700 });
+	writeFileSync(path, lua);
+	return path;
 }
 
 /**
@@ -326,6 +375,17 @@ export function archive(db: Db, id: string): void {
 	gc(db);
 }
 
+/** Stops a live idle pi, keeping its session open to wake later; refuses mid-turn, as archive does. */
+export function stop(db: Db, id: string): void {
+	const hosts = new Set(listSessions(SESSIONS).map(([name]) => name as string));
+	const session = db.get("SELECT phase FROM sessions WHERE session_id = ?", id);
+	if (!session) throw new SwbError(`no session ${id}`);
+	const runtime = liveRuntime(db, id, hosts);
+	if (!runtime) throw new SwbError("not running");
+	if (session.phase !== "idle") throw new SwbError("turn running: wait for it to complete");
+	stopPis([runtime]);
+}
+
 /** Back to open; nothing restarts. */
 export function unarchive(db: Db, id: string): void {
 	db.tx(() => {
@@ -334,11 +394,11 @@ export function unarchive(db: Db, id: string): void {
 	});
 }
 
-/** Kills each editor whose directory no open session uses any more. */
+/** Kills each Editor and shell whose directory no open session uses any more. */
 export function gc(db: Db): void {
 	const listed = listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_dir}");
-	const editors = listed.filter(([, kind]) => kind === "editor");
-	if (editors.length === 0) return;
+	const owned = listed.filter(([, kind]) => kind === "editor" || kind === "shell");
+	if (owned.length === 0) return;
 	const hosts = new Set(listed.map(([name]) => name as string));
 	const open = db.all(
 		`SELECT s.cwd FROM sessions s LEFT JOIN marks m USING (session_id)
@@ -348,7 +408,7 @@ export function gc(db: Db): void {
 		.all("SELECT cwd, tmux_session FROM runtimes WHERE session_id NOT IN (SELECT session_id FROM sessions)")
 		.filter((row) => hosts.has(row.tmux_session as string));
 	const used = new Set([...open, ...provisional].map((row) => row.cwd as string));
-	for (const [name, , dir] of editors) {
+	for (const [name, , dir] of owned) {
 		if (!used.has(dir as string)) tmuxTry(SESSIONS, "kill-session", "-t", `=${name}`);
 	}
 }

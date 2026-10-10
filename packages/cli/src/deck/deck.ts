@@ -9,7 +9,7 @@ import { openStore } from "../store.ts";
 import { CLIENT_CWD, cleanEnv, listSessions, quote, SESSIONS, tmux, tmuxBin, tmuxTry, UI } from "../tmux.ts";
 import type { Card, DeckPaths, DeckState } from "./protocol.ts";
 
-export const HELP_POPUP = ["-w", "62", "-h", "30", "-T", " swb keys ", `${SWB} __help`];
+export const HELP_POPUP = ["-w", "62", "-h", "34", "-T", " swb keys ", `${SWB} __help`];
 
 /** At least 20 columns, and never more than half the Deck. */
 export function rosterCols(width: RosterWidth, deckWidth: number): number {
@@ -31,6 +31,7 @@ export function deckPaths(deck: string): DeckPaths {
 		card: join(dir, `${deck}.card.json`),
 		target: join(dir, `${deck}.target`),
 		side: join(dir, `${deck}.side`),
+		below: join(dir, `${deck}.below`),
 	};
 }
 
@@ -47,10 +48,53 @@ export function writeCard(paths: DeckPaths, card: Card): void {
 	writeAtomic(paths.card, JSON.stringify(card));
 }
 
+const deckCmd = (what: string) => notify(`__deck #{session_name} ${what}`);
+const roster = (what: string) => deckCmd(`roster ${what}`);
+/** From the roster: the pane the keyboard last left, or the session's pi when that pane is gone. */
+const backToStage = `if -F '#{P:#{?pane_last,1,}}' { last-pane } { ${deckCmd("stage")} }`;
+
+/**
+ * One pane toward h, j, k, or l, never wrapping, as ctrl-hjkl and an Editor at its own edge both move. Leftward off a
+ * hidden roster's Stage shows it.
+ */
+export function nav(k: "h" | "j" | "k" | "l"): string {
+	const narrow = k === "h" ? "select-pane -Z -t :.0" : k === "l" ? "select-pane -Z -t :.1" : "";
+	const [edge, flag] = { h: ["left", "L"], j: ["bottom", "D"], k: ["top", "U"], l: ["right", "R"] }[k];
+	// Past the left edge is always the roster: hidden, or still joining back after M-a z, the roster queues the move behind that.
+	const off = k === "h" ? `set -u @swb_hidden ; ${roster("focus")}` : "";
+	return `if -F '#{@swb_narrow}' { ${narrow} } { if -F '#{pane_at_${edge}}' { ${off} } { select-pane -${flag} } }`;
+}
+
+/**
+ * `swb __nav`, from an Editor at its own edge: the Deck pane showing it most recently is a nested client of the sessions
+ * server whose tty is that pane's, and the move runs there as if ctrl-hjkl had reached tmux.
+ */
+export function editorNav(k: string, editor: string): void {
+	if (k !== "h" && k !== "j" && k !== "k" && k !== "l") throw new SwbError(`__nav: no direction ${k}`);
+	const clients = tmux(SESSIONS, "list-clients", "-t", `=${editor}`, "-F", "#{client_activity}\t#{client_tty}")
+		.split("\n")
+		.filter(Boolean)
+		.map((line) => line.split("\t") as [string, string])
+		.toSorted(([a], [b]) => Number(b) - Number(a));
+	const panes = new Map(
+		tmux(UI, "list-panes", "-a", "-F", "#{pane_tty}\t#{pane_id}")
+			.split("\n")
+			.map((line) => line.split("\t") as [string, string]),
+	);
+	const pane = clients.map(([, tty]) => panes.get(tty)).find(Boolean);
+	if (!pane) return;
+	const result = Bun.spawnSync([tmuxBin(), "-L", UI, "source-file", "-t", pane, "-"], {
+		cwd: CLIENT_CWD,
+		env: cleanEnv(),
+		stdin: Buffer.from(nav(k)),
+		stderr: "pipe",
+	});
+	if (result.exitCode !== 0) throw new SwbError(`__nav: ${result.stderr.toString().trim()}`);
+}
+
 /** The whole config of the UI server. Prefix bindings and hooks report to the Deck's roster through its socket. */
 function uiConf(config: Config): string {
 	const prefix = config.prefix;
-	const roster = (what: string) => notify(`__deck #{session_name} roster ${what}`);
 	return [
 		"set -g default-terminal tmux-256color",
 		"set -g default-shell /bin/sh",
@@ -76,15 +120,17 @@ function uiConf(config: Config): string {
 		`set -g prefix ${prefix}`,
 		"set -g prefix2 None",
 		"unbind -aq -T prefix",
-		// Panes by index (roster, then the Stage's one or two, pi last). A narrow Deck shows one pane at a time and never
+		// The roster is pane 0 while it shows; the Stage's panes follow. A narrow Deck shows one pane at a time and never
 		// splits, so its moves carry the zoom along. @swb_hidden is the wide Deck's roster state; the roster makes it so.
-		`bind Tab if -F '#{@swb_narrow}' { select-pane -Z -t :.+ } { if -F '#{@swb_hidden}' { set -u @swb_hidden ; ${roster("focus")} } { if -F '#{pane_index}' { select-pane -t :.0 } { if -F '#{==:#{window_panes},3}' { select-pane -t :.2 } { select-pane -t :.1 } } } }`,
-		`bind h if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { if -F '#{pane_index}' { select-pane -t :.- } { set -u @swb_hidden ; ${roster("focus")} } }`,
-		"bind l if -F '#{@swb_narrow}' { select-pane -Z -t :.1 } { if -F '#{e|<:#{pane_index},#{e|-:#{window_panes},1}}' { select-pane -t :.+ } }",
+		`bind Tab if -F '#{@swb_narrow}' { select-pane -Z -t :.+ } { if -F '#{@swb_hidden}' { set -u @swb_hidden ; ${roster("focus")} } { if -F '#{pane_index}' { select-pane -t :.0 } { ${backToStage} } } }`,
+		`bind h ${nav("h")}`,
+		`bind l if -F '#{||:#{@swb_narrow},#{||:#{pane_index},#{@swb_hidden}}}' { ${nav("l")} } { ${backToStage} }`,
+		...(["h", "j", "k", "l"] as const).map((k) => `bind -n C-${k} if -F '#{@swb_editor}' { send-keys C-${k} } { ${nav(k)} }`),
 		`bind z if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { if -F '#{@swb_hidden}' { set -u @swb_hidden } { set @swb_hidden 1 } ; ${roster("sync")} }`,
-		...[..."nNawyY/jkm"].map((k) => `bind ${k} ${notify(`__deck #{session_name} key ${k}`)}`),
+		...[..."nNawxyY/jkm"].map((k) => `bind ${k} ${notify(`__deck #{session_name} key ${k}`)}`),
 		`bind e ${notify("__deck #{session_name} view-swap")}`,
 		`bind v ${notify("__deck #{session_name} view-split")}`,
+		`bind s ${notify("__deck #{session_name} shell")}`,
 		"bind q kill-session",
 		`bind ? display-popup -E ${HELP_POPUP.map(quote).join(" ")}`,
 		`bind ${prefix} send-keys ${prefix}`,
@@ -161,14 +207,15 @@ export function deckEnv(): string[] {
 /**
  * A Stage pane: a nested client of the sessions server. It waits for the Deck's own client first, because a
  * nested client that attaches before the real terminal has no colors to inherit. Whenever it drops, it re-attaches
- * to the Deck's current target, else the placeholder.
+ * to the Deck's current target, else the placeholder; a shell's pane instead closes with its shell.
  */
-export function stageScript(deck: string, targetPath: string): string {
+export function stageScript(deck: string, targetPath: string, closes = false): string {
 	const ui = `${quote(tmuxBin())} -L ${quote(UI)}`;
 	const sessions = `${quote(tmuxBin())} -L ${quote(SESSIONS)}`;
+	const wait = ["unset TMUX TMUX_PANE", `until ${ui} list-clients -t ${quote(`=${deck}`)} 2>/dev/null | grep -q .; do sleep 0.05; done`];
+	if (closes) return [...wait, `exec ${sessions} attach -t "=$(cat ${quote(targetPath)})" >/dev/null 2>&1`].join("\n");
 	return [
-		"unset TMUX TMUX_PANE",
-		`until ${ui} list-clients -t ${quote(`=${deck}`)} 2>/dev/null | grep -q .; do sleep 0.05; done`,
+		...wait,
 		"while :; do",
 		`  t=$(cat ${quote(targetPath)} 2>/dev/null)`,
 		`  ${sessions} attach -t "=$t" >/dev/null 2>&1 || ${sessions} attach -t ${quote(`=${placeholderName(deck)}`)} >/dev/null 2>&1 || sleep 0.2`,
@@ -271,7 +318,7 @@ export function liveDecks(): string[] {
 
 export function removeDeckFiles(deck: string): void {
 	const paths = deckPaths(deck);
-	for (const path of [paths.sock, paths.card, paths.target, paths.side]) rmSync(path, { force: true });
+	for (const path of [paths.sock, paths.card, paths.target, paths.side, paths.below]) rmSync(path, { force: true });
 }
 
 export async function fetchState(deck: string): Promise<DeckState> {

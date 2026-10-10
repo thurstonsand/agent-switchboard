@@ -18,7 +18,7 @@ import { operatorDir, projectRoot, type View } from "@swb/shared";
 import { loadConfig } from "../config.ts";
 import { displayName, projectName } from "../derive.ts";
 import { UsageError } from "../errors.ts";
-import { newer } from "../sessions.ts";
+import { newer, nvimEditor } from "../sessions.ts";
 import type { DeckLayout } from "../store.ts";
 import { quote, SESSIONS, tmux, tmuxAsync, tmuxTry, UI } from "../tmux.ts";
 import { VERSION } from "../version.ts";
@@ -284,10 +284,12 @@ type Applied = {
 	target: string;
 	/** The Stage's second pane, which only split has. */
 	side: string | null;
+	/** The directory's shell, under pi. */
+	below: string | null;
 };
 
 function onCard(kind: Applied["kind"], id: string | null, card: Card): Applied {
-	return { kind, id, host: null, card, view: "pi", target: placeholder, side: null };
+	return { kind, id, host: null, card, view: "pi", target: placeholder, side: null, below: null };
 }
 
 function piShown(a: Applied): boolean {
@@ -298,6 +300,8 @@ function piShown(a: Applied): boolean {
 type StageClient = { pane: string; tty: string; up: boolean };
 const main: StageClient = { pane: stagePane, tty: "", up: false };
 let side: (StageClient & { target: string }) | null = null;
+/** The shell's pane, under whichever pane holds pi. It closes with its shell, so it needs no client tracking. */
+let below: { pane: string; target: string; parent: string } | null = null;
 
 const EMPTY: Card = { head: [], lines: ["Nothing selected."], turns: [] };
 
@@ -350,14 +354,35 @@ function piStage(): Applied {
 		const failed = stage.ended.failed;
 		return onCard(failed ? "failed" : "exited", e.id, card(e, failed ? ["pi quit before it was ready:", ...stage.ended.lines] : []));
 	}
-	if (e.live && e.host) return { kind: "live", id: e.id, host: e.host, card: null, view: "pi", target: e.host, side: null };
+	if (e.live && e.host) return { kind: "live", id: e.id, host: e.host, card: null, view: "pi", target: e.host, side: null, below: null };
 	const launch = launchFor(e.id);
 	if (launch) return onCard("loading", e.id, card(e, launch.keyboard && rosterOffScreen() ? [ESC_LINE] : []));
 	return onCard("dormant", e.id, card(e));
 }
 
-/** The session's own view, as far as it can show: split needs pi live and a wide Deck, and both need the Editor. */
+/** The session's own view, as far as it can show, and its directory's shell when this Deck shows it. */
 function desired(): Applied {
+	const d = viewed();
+	const e = d.id === null ? undefined : entries.get(d.id);
+	const shell = e?.open && !narrow && shellsShown.has(e.cwd) ? snapshot?.shells[e.cwd] : undefined;
+	return shell ? { ...d, below: shell } : d;
+}
+
+/** Directories whose shell this Deck shows; a shell that exits leaves the set. */
+const shellsShown = new Set<string>();
+const shellWaits = new Map<string, (name: string | null) => void>();
+
+function requestShell(dir: string): Promise<string | null> {
+	const existing = snapshot?.shells[dir];
+	if (existing) return Promise.resolve(existing);
+	return new Promise((resolve) => {
+		shellWaits.set(dir, resolve);
+		post({ type: "shell", dir });
+	});
+}
+
+/** Split needs pi live and a wide Deck, and both need the Editor. */
+function viewed(): Applied {
 	const d = piStage();
 	const e = d.id === null ? undefined : entries.get(d.id);
 	const editor = e?.open ? snapshot?.editors[e.cwd] : undefined;
@@ -449,6 +474,44 @@ function syncSide(): void {
 	});
 }
 
+/** Creates or kills the shell's pane to match what is applied, under pi's pane; leaving it keeps the keyboard where it is. */
+function syncBelow(): void {
+	stageOps = stageOps.then(async () => {
+		const want = stage.applied.below;
+		const parent = side?.pane ?? stagePane;
+		try {
+			if (below && (want !== below.target || parent !== below.parent)) {
+				const { pane } = below;
+				below = null;
+				// Ctrl-D in the shell already closed it.
+				await tmuxAsync(UI, "kill-pane", "-t", pane).catch(() => {});
+				if (focusedPane === pane) await tmuxAsync(UI, "select-pane", "-t", parent);
+			}
+			if (want === null || below) return;
+			writeAtomic(paths.below, want);
+			const created = await tmuxAsync(
+				UI,
+				...["split-window", "-v", "-d", "-l", "30%", "-t", parent, "-P", "-F", "#{pane_id}"],
+				...deckEnv(),
+				stageScript(deck, paths.below, true),
+			);
+			below = { pane: created, target: want, parent };
+		} catch (error) {
+			toast(`shell: ${(error as Error).message}`, "error");
+		}
+	});
+}
+
+/** Ctrl-hjkl reach an nvim Editor in the pane showing it; nvim hands moves off its own edge back through `swb __nav`. */
+function tagEditor(on: boolean): void {
+	stageOps = stageOps.then(() =>
+		tmuxAsync(UI, "set", "-p", "-t", stagePane, ...(on ? ["@swb_editor", "1"] : ["-u", "@swb_editor"])).then(
+			() => {},
+			(error: Error) => toast(`editor: ${error.message}`, "error"),
+		),
+	);
+}
+
 function writeStageCard(d: Applied): void {
 	if (!d.card || d.target !== placeholder) return;
 	const json = JSON.stringify(d.card);
@@ -473,6 +536,8 @@ function apply(): void {
 	}
 	tui.requestRender();
 	if (d.side !== prev.side || d.side !== (side?.target ?? null)) syncSide();
+	if (d.below !== (below?.target ?? null) || d.side !== prev.side) syncBelow();
+	if (nvimEditor(config.editor) && (d.view !== "pi") !== (prev.view !== "pi")) tagEditor(d.view !== "pi");
 	if (d.target === prev.target) return;
 	writeAtomic(paths.target, d.target);
 	switchStage(main, d.target, false);
@@ -671,6 +736,8 @@ function onSnapshot(next: Snapshot): void {
 		const e = entries.get(id);
 		if (!e || e.group === name) localGroups.delete(id);
 	}
+	// Ctrl-D in a shell is the same as hiding it.
+	for (const dir of shellsShown) if (!next.shells[dir]) shellsShown.delete(dir);
 	settleLaunches();
 	followHost();
 	roster.settlePin();
@@ -735,6 +802,9 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
 			roster.pin = null;
 			toast(message.error, "error");
 			break;
+		case "stopped":
+			if (message.error !== null) toast(message.error, "error");
+			break;
 		case "launchFailed": {
 			const index = launches.findIndex((launch) => launch.id === message.id && launch.host === null);
 			if (index !== -1) launches.splice(index, 1);
@@ -745,6 +815,11 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
 		case "editor":
 			settleEditorWaits(message.dir, message.name);
 			if (message.text) toast(`editor: ${message.text}`, "error");
+			break;
+		case "shell":
+			shellWaits.get(message.dir)?.(message.name);
+			shellWaits.delete(message.dir);
+			if (message.text) toast(`shell: ${message.text}`, "error");
 			break;
 		case "groupFailed":
 			localGroups.clear();
@@ -851,8 +926,9 @@ class Roster implements Component {
 	expanded = new Set<SectionKey>(["operators"]);
 	filter = new Input({ prompt: "/ " });
 	filtering = false;
-	name = new Input({ prompt: "group: " });
-	naming: { ids: string[]; header: HeaderRow | null } | null = null;
+	name = new Input({ prompt: "> " });
+	/** `m`'s picker: the sessions it moves, the Group header it started on, and the highlighted choice. */
+	naming: { ids: string[]; header: HeaderRow | null; project: string; title: string; choice: number } | null = null;
 	/** A session being dragged by the mouse; `moved` once the pointer has left its row. */
 	dragging: { id: string; moved: boolean; drop: Drop } | null = null;
 	listTop = 2;
@@ -869,7 +945,6 @@ class Roster implements Component {
 			this.filter.setValue("");
 			this.filtering = false;
 		};
-		this.name.onSubmit = (value) => this.finishNaming(value);
 		this.name.onEscape = () => {
 			this.naming = null;
 		};
@@ -1001,7 +1076,17 @@ class Roster implements Component {
 		frameKeyAt = stage.keyAt;
 		toasts = [];
 		if (this.naming) {
-			this.name.handleInput(data);
+			const choices = this.choices();
+			if (matchesKey(data, "up") || matchesKey(data, "down")) {
+				const step = matchesKey(data, "up") ? -1 : 1;
+				this.naming.choice = Math.max(0, Math.min(choices.length - 1, this.naming.choice + step));
+			} else if (matchesKey(data, "enter")) {
+				const choice = choices[this.naming.choice];
+				if (choice) this.finishNaming(choice.name);
+			} else {
+				this.name.handleInput(data);
+				if (this.naming) this.naming.choice = 0;
+			}
 			stage.keyAt = 0;
 			tui.requestRender();
 			return;
@@ -1033,6 +1118,7 @@ class Roster implements Component {
 		else if (matchesKey(data, "left") || k === "h") this.left();
 		else if (matchesKey(data, "escape")) this.filter.setValue("");
 		else if (k === "w") this.wake();
+		else if (k === "x") this.stop();
 		else if (k === "a") this.toggleArchived();
 		else if (k === "y" || k === "Y") this.copy(k === "y");
 		else if (k === "n") this.newAtCursor();
@@ -1152,6 +1238,14 @@ class Roster implements Component {
 		else wake(e.id, false);
 	}
 
+	/** x: the counterpart to w. Frees the process and keeps the session open; any unsent prompt is saved as a draft. */
+	stop(): void {
+		const e = this.cursorEntry();
+		if (!e) return;
+		if (!e.live) toast("not running", "info");
+		else post({ type: "stop", id: e.id });
+	}
+
 	toggleArchived(): void {
 		const row = this.selected();
 		if (row?.kind !== "session" || this.pin) return;
@@ -1201,15 +1295,23 @@ class Roster implements Component {
 		newSession(row.kind === "session" ? row.entry.cwd : row.cwd, group?.kind === "custom" ? group.name : null);
 	}
 
-	/** m: names the Group of the session under the cursor, or renames the Group whose header it's on; empty ungroups. */
+	/**
+	 * m: picks the Group for the session under the cursor, or for every session under the Group header it's on, which
+	 * merges into an existing Group or renames to a new one.
+	 */
 	startNaming(): void {
 		const row = this.selected();
 		this.filtering = false;
+		this.name.setValue("");
 		if (row?.kind === "session" && row.entry.operator) toast("Operators don't take Groups", "info");
 		else if (row?.kind === "session") {
 			const group = groupOf(row.entry);
-			this.naming = { ids: [row.entry.id], header: null };
-			this.name.setValue(group?.kind === "custom" ? group.name : "");
+			const project = row.entry.project;
+			this.naming = { ids: [row.entry.id], header: null, project, title: displayName(row.entry), choice: 0 };
+			this.naming.choice = Math.max(
+				0,
+				this.choices().findIndex((c) => c.name === (group?.kind === "custom" ? group.name : null)),
+			);
 		} else if (row?.kind === "header" && row.group?.kind === "custom") {
 			const name = row.group.name;
 			const ids = [...entries.values()]
@@ -1218,16 +1320,55 @@ class Roster implements Component {
 					return e.project === row.project && group?.kind === "custom" && group.name === name;
 				})
 				.map((e) => e.id);
-			this.naming = { ids, header: row };
-			this.name.setValue(name);
-		} else toast("m names a session's Group, or renames a Group", "info");
+			this.naming = { ids, header: row, project: row.project, title: name, choice: 0 };
+			this.naming.choice = Math.max(
+				0,
+				this.choices().findIndex((c) => c.name === name),
+			);
+		} else toast("m picks a session's Group, or renames a Group", "info");
 	}
 
-	finishNaming(value: string): void {
+	/** No Group when nothing is typed, then the Project's Groups matching what is, then a new one unless one matches exactly. */
+	choices(): { label: string; name: string | null }[] {
+		const naming = this.naming;
+		if (!naming) return [];
+		const typed = this.name.getValue().trim();
+		const groups = new Set<string>();
+		for (const e of entries.values()) {
+			const group = groupOf(e);
+			if (e.open && e.project === naming.project && group?.kind === "custom") groups.add(group.name);
+		}
+		const out: { label: string; name: string | null }[] = typed === "" ? [{ label: "(no Group)", name: null }] : [];
+		for (const name of [...groups].sort((a, b) => a.localeCompare(b)))
+			if (name.toLowerCase().includes(typed.toLowerCase())) out.push({ label: name, name });
+		if (typed !== "" && !groups.has(typed)) out.push({ label: `+ new "${typed}"`, name: typed });
+		return out;
+	}
+
+	/** The picker's rows, which the list gives up its bottom to; each choice is a button. */
+	picker(width: number, height: number): [string, (() => void) | null][] {
+		const naming = this.naming;
+		if (!naming) return [];
+		const choices = this.choices();
+		const shown = Math.max(1, Math.min(choices.length, height - 4));
+		const from = Math.max(0, Math.min(naming.choice - shown + 1, choices.length - shown));
+		const title = ` ${naming.header ? "rename" : "Group for"} ${naming.title} `;
+		const out: [string, (() => void) | null][] = [
+			[gray(`─${truncateToWidth(title, width - 2, "…")}${"─".repeat(Math.max(0, width - 1 - visibleWidth(title)))}`), null],
+		];
+		for (let i = from; i < from + shown; i++) {
+			const choice = choices[i] as { label: string; name: string | null };
+			const label = choice.name === null ? dim(choice.label) : choice.label.startsWith("+ ") ? green(choice.label) : choice.label;
+			const line = truncateToWidth(`   ${label}`, width, "…", true);
+			out.push([i === naming.choice ? cursorLine(line, true) : line, () => this.finishNaming(choice.name)]);
+		}
+		return out;
+	}
+
+	finishNaming(name: string | null): void {
 		const naming = this.naming;
 		this.naming = null;
 		if (!naming) return;
-		const name = value.trim() === "" ? null : value.trim();
 		setGroup(naming.ids, name);
 		// A renamed Group's header moves to its new key, and the cursor goes with it.
 		if (naming.header) this.selectedKey = name === null ? naming.header.projectKey : `${naming.header.projectKey}:g:${name}`;
@@ -1298,7 +1439,12 @@ class Roster implements Component {
 		return truncateToWidth(` ${bold("swb")}${tag}`, width, "…");
 	}
 
-	list(rows: Row[], index: number, width: number, height: number, now: number): string[] {
+	list(rows: Row[], index: number, width: number, full: number, now: number): string[] {
+		const picker = this.picker(width, full);
+		const height = Math.max(1, full - picker.length);
+		picker.forEach(([, act], i) => {
+			if (act) this.targets.push({ y: this.listTop + height + i, from: 0, to: width, act });
+		});
 		if (index < this.scrollTop) this.scrollTop = index;
 		if (index >= this.scrollTop + height) this.scrollTop = index - height + 1;
 		this.scrollTop = Math.max(0, Math.min(this.scrollTop, Math.max(0, rows.length - height)));
@@ -1315,7 +1461,7 @@ class Roster implements Component {
 			else out.push(this.scrollTop + i === index ? cursorLine(line, focus === "roster") : line);
 		}
 		if (rows.length === 0) out[0] = dim(snapshot ? (this.query() ? "   no matches" : "   no sessions yet · n new") : "   loading…");
-		return out;
+		return [...out, ...picker.map(([line]) => line)];
 	}
 
 	/** Joins the parts into row y's line, recording where each clickable one lands. */
@@ -1364,7 +1510,7 @@ class Roster implements Component {
 		if (drag?.moved) {
 			if (!drag.drop) return ` ${red("✗ not here")}`;
 			const target = drag.drop.header.group;
-			return drag.drop.name === null ? ` drop to ungroup` : ` drop into ${bold(target ? groupLabel(target) : "")}`;
+			return drag.drop.name === null ? ` ⇢ out of its Group` : ` ⇢ into ${bold(target ? groupLabel(target) : "")}`;
 		}
 		const help: Hint = ["?", "keys", () => void showHelp()];
 		const newAtCursor: Hint = ["n", "new", () => this.newAtCursor()];
@@ -1414,6 +1560,11 @@ function rowLine(row: Row, width: number, now: number): string {
 	}
 	if (row.kind === "section") return ` ${row.expanded ? "▾" : "▸"} ${row.label} ${gray(`(${row.count})`)}`;
 	const e = row.entry;
+	// Mid-drag, the session being carried is a hollow outline of itself.
+	if (roster.dragging?.moved && roster.dragging.id === e.id) {
+		const lead = `${gray("┆")}${" ".repeat(2 + row.depth * 2)}`;
+		return `${lead}${gray("◌")} ${gray(truncateToWidth(displayName(e), width - visibleWidth(lead) - 2, "…"))}`;
+	}
 	const mark = stage.staged === e.id ? (focus === "stage" ? cyan("▌") : "▌") : " ";
 	const lead = `${mark}${" ".repeat(2 + row.depth * 2)}`;
 	const when = e.open ? age(e.activityAt, now) : age(archivedKey(e), now);
@@ -1481,6 +1632,10 @@ function syncRoster(toRoster: boolean): Promise<void> {
 						const width = await tmuxAsync(UI, "display", "-p", "-t", side.pane, "#{pane_width}");
 						join.push(";", "join-pane", "-h", "-d", "-l", width, "-s", side.pane, "-t", stagePane);
 					}
+					if (below) {
+						const height = await tmuxAsync(UI, "display", "-p", "-t", below.pane, "#{pane_height}");
+						join.push(";", "join-pane", "-v", "-d", "-l", height, "-s", below.pane, "-t", below.parent);
+					}
 					await tmuxAsync(UI, ...join, ";", "select-window", "-t", rosterPane, ";", "select-pane", "-t", toRoster ? rosterPane : active);
 				}
 			} catch (error) {
@@ -1511,6 +1666,7 @@ async function prefixKey(k: string): Promise<void> {
 	else if (k === "n") roster.newAtCursor();
 	else if (k === "N") newSession(here, null);
 	else if (k === "w") roster.wake();
+	else if (k === "x") roster.stop();
 	else if (k === "a") roster.toggleArchived();
 	else if (k === "y" || k === "Y") roster.copy(k === "y");
 	else throw new Error(`unknown deck key ${k}`);
@@ -1604,6 +1760,12 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 		case "roster":
 			await syncRoster(argv[0] === "focus");
 			break;
+		case "stage":
+			await focusStage();
+			break;
+		case "shell":
+			await toggleShell();
+			break;
 		case "key":
 			await prefixKey(argv[0] ?? "");
 			break;
@@ -1616,6 +1778,30 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 			throw new Error(`unknown deck command ${cmd}`);
 	}
 	tui.requestRender();
+}
+
+/** Shows or hides the shell under pi for the staged session's directory, and the keyboard follows it in and back out. */
+async function toggleShell(): Promise<void> {
+	const e = stage.applied.id === null ? undefined : entries.get(stage.applied.id);
+	if (!e?.open) {
+		toast("no open session on view", "info");
+		return;
+	}
+	if (narrow) {
+		toast(`the shell needs ${NARROW_BELOW} columns`, "info");
+		return;
+	}
+	if (shellsShown.delete(e.cwd)) {
+		const inShell = below !== null && focusedPane === below.pane;
+		apply();
+		if (inShell) await focusStage();
+		return;
+	}
+	if ((await requestShell(e.cwd)) === null) return;
+	shellsShown.add(e.cwd);
+	apply();
+	await stageOps;
+	if (below) await tmuxAsync(UI, "select-pane", "-t", below.pane);
 }
 
 /**
@@ -1675,7 +1861,14 @@ function viewState(): DeckState {
 		mode: roster.filtering ? "filter" : roster.naming ? "name" : "roster",
 		drop: drop ? { project: projectName(drop.header.project), group: drop.header.group && groupLabel(drop.header.group) } : null,
 		filter: roster.query(),
-		focus: focus === "roster" ? "roster" : focusedPane === stagePane && applied.view !== "pi" ? "editor" : "stage",
+		focus:
+			focus === "roster"
+				? "roster"
+				: focusedPane === below?.pane
+					? "shell"
+					: focusedPane === stagePane && applied.view !== "pi"
+						? "editor"
+						: "stage",
 		staged: {
 			id: applied.id,
 			host: applied.host,
@@ -1683,7 +1876,7 @@ function viewState(): DeckState {
 			view: applied.view,
 			savedView: staged ? viewOf(staged) : "pi",
 		},
-		layout: { width: deckWidth, rosterOnly: narrow, split: side !== null, rosterHidden },
+		layout: { width: deckWidth, rosterOnly: narrow, split: side !== null, shell: below !== null, rosterHidden },
 		waking: launches.map((launch) => ({ id: launch.id, keyboardWaiting: launch.keyboard })),
 		rows: rows.map((row) =>
 			row.kind === "session"
