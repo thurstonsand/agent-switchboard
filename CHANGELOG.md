@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.5.0 — 2026-10-10
+
+Needs pi-sessions 0.17.0 or later for Operators.
+
+### Added
+
+- **Shell** — `M-a s` opens the directory's login shell beneath pi, sharing its column evenly; beside a split editor it sits bottom-right. `M-a s` hides it; `ctrl-d` ends it.
+- **ctrl-hjkl** move between the Deck's panes by position. An nvim Editor walks its own windows first, netrw included, then steps off its edge into the Deck. `M-a h` and `M-a l` follow the same geometry.
+- **Group picker** — `m` lists the Project's Groups, plus "(no Group)" and a "+ new" row for a typed name.
+- **`x`** stops an idle session's pi; the session stays open, and Enter wakes it again.
+
+### Changed
+
+- swb owns the Operator's AGENTS.md and rewrites it whenever it differs from the shipped copy. The Operator talks like a colleague instead of filing reports, and keeps no STATE.md.
+- An Operator can't start subagents or deferred handoffs: its folder's `.pi/settings.json` turns them off in pi-sessions, so `session_handoff` offers only `launch: "swb"`.
+- A dragged row stays in place, hollowed, and the hint names where it will drop.
+
+### Fixed
+
+- The help popup fits its keys instead of wrapping and scrolling.
+
 ## 0.4.0 — 2026-10-10
 
 Schema v3: update swb and the recorder together; an older one refuses the db.
