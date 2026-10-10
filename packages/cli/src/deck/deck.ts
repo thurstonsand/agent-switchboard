@@ -9,7 +9,7 @@ import { openStore } from "../store.ts";
 import { CLIENT_CWD, cleanEnv, listSessions, quote, SESSIONS, tmux, tmuxBin, tmuxTry, UI } from "../tmux.ts";
 import type { Card, DeckPaths, DeckState } from "./protocol.ts";
 
-export const HELP_POPUP = ["-w", "62", "-h", "29", "-T", " swb keys ", `${SWB} __help`];
+export const HELP_POPUP = ["-w", "62", "-h", "30", "-T", " swb keys ", `${SWB} __help`];
 
 /** At least 20 columns, and never more than half the Deck. */
 export function rosterCols(width: RosterWidth, deckWidth: number): number {
