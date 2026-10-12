@@ -1,6 +1,6 @@
 ---
 name: npm-release
-description: Prepare, tag, publish, and verify a release of Agent Switchboard: the swb binaries, the generated pi branch, and the npm package. Use when the user wants to release swb or @thurstonsand/pi-agent-switchboard.
+description: "Prepare, tag, publish, and verify a release of Agent Switchboard: the swb binaries, the generated pi branch, and the npm package. Use when the user wants to release swb or @thurstonsand/pi-agent-switchboard."
 ---
 
 # Release
