@@ -2,3 +2,4 @@ node_modules/
 dist/
 test/e2e/artifacts/
 *.bun-build
+.amp/portals/*

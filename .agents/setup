@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Prepares an Amp orb to build, test, and run swb, and to run pi by hand.
+set -euo pipefail
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo"
+
+step() {
+  local name="$1"
+  shift
+  local start=$SECONDS
+  echo "==> $name"
+  "$@"
+  echo "<== $name ($((SECONDS - start))s)"
+}
+
+export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$PATH"
+export MISE_YES=1
+
+# pi downloads fd on its first run when the system has none.
+install_fd() {
+  dpkg -s fd-find >/dev/null 2>&1 && return
+  sudo apt-get update -qq
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fd-find
+}
+
+install_mise() {
+  command -v mise >/dev/null || curl -fsSL https://mise.run | sh
+  mise --version
+}
+
+persist_path() {
+  local marker="# agent-switchboard: mise tools and swb"
+  grep -Fqx "$marker" "$HOME/.bash_profile" 2>/dev/null && return
+  cat >>"$HOME/.bash_profile" <<'EOF'
+
+# agent-switchboard: mise tools and swb
+case ":$PATH:" in
+	*":$HOME/.local/share/mise/shims:"*) ;;
+	*) export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$PATH" ;;
+esac
+EOF
+}
+
+install_tools() {
+  mise trust --quiet "$repo/mise.toml"
+  mise install
+}
+
+# Mirrors CI: pi itself, plus the two host packages the e2e scenarios load.
+install_pi() {
+  local root
+  root="$(mise x -- npm root -g)"
+  [ -f "$root/@earendil-works/pi-coding-agent/package.json" ] ||
+    mise x -- npm install -g --no-fund --no-audit @earendil-works/pi-coding-agent
+  mise reshim
+}
+
+# The harness resolves pi-sessions and pi-wt from ~/.pi/agent/settings.json, so installing them
+# there serves both e2e and a hand-run pi. The recorder comes from this checkout's dist/pi.
+configure_pi() {
+  for source in npm:pi-sessions npm:@thurstonsand/pi-wt "$repo/dist/pi"; do
+    pi install "$source"
+  done
+}
+
+link_swb() {
+  mkdir -p "$HOME/.local/bin"
+  ln -sfn "$repo/dist/swb" "$HOME/.local/bin/swb"
+}
+
+step "fd" install_fd
+step "mise" install_mise
+step "persist PATH" persist_path
+step "mise install" install_tools
+step "bun install" bun install --frozen-lockfile
+step "build" mise run build
+step "dist:pi" mise run dist:pi
+step "link swb" link_swb
+step "pi" install_pi
+step "pi packages" configure_pi
