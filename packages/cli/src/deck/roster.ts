@@ -294,6 +294,11 @@ function onCard(kind: Applied["kind"], id: string | null, card: Card): Applied {
 	return { kind, id, host: null, card, view: "pi", target: placeholder, side: null, below: null };
 }
 
+/** A pi still starting, on view so whatever it asks before it registers (a missing cwd, project trust) can be answered. */
+function starting(id: string | null, host: string): Applied {
+	return { kind: "loading", id, host: null, card: null, view: "pi", target: host, side: null, below: null };
+}
+
 function piShown(a: Applied): boolean {
 	return a.kind === "live" && a.view !== "editor";
 }
@@ -346,6 +351,7 @@ function newLaunch(): Launch | undefined {
 function piStage(): Applied {
 	const pending = newLaunch();
 	if (stage.staged === null && pending) {
+		if (pending.host) return starting(null, pending.host);
 		// A new session has no row yet, so its card is the only place that says it's starting.
 		const lines = pending.keyboard && rosterOffScreen() ? [ESC_LINE] : [];
 		return onCard("loading", null, { head: [cyan("starting a new session")], lines, turns: [] });
@@ -358,6 +364,7 @@ function piStage(): Applied {
 	}
 	if (e.live && e.host) return { kind: "live", id: e.id, host: e.host, card: null, view: "pi", target: e.host, side: null, below: null };
 	const launch = launchFor(e.id);
+	if (launch?.host) return starting(e.id, launch.host);
 	if (launch) return onCard("loading", e.id, card(e, launch.keyboard && rosterOffScreen() ? [ESC_LINE] : []));
 	return onCard("dormant", e.id, card(e));
 }

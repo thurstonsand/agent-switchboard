@@ -37,7 +37,7 @@ test("w wakes a dormant session to live while the keyboard stays in the roster",
 	expect(entry(s, id)).toMatchObject({ open: true, interrupted: false });
 });
 
-test("Enter on a dormant row holds the keyboard on the loading card and hands it to pi; Enter then esc backs out while pi still comes up", async () => {
+test("Enter on a dormant row puts the keyboard on its pi as it comes up; Enter then M-a h backs out while pi still starts", async () => {
 	s = scenario("phase2", "enter-wake");
 	const [a, b] = (await seed(s, { turns: ["alpha"] }, { turns: ["beta"] })) as [string, string];
 	s.swb("drive", "start");
@@ -55,12 +55,12 @@ test("Enter on a dormant row holds the keyboard on the loading card and hands it
 	await waitState(s, "roster focus", (x) => x.focus === "roster");
 	await cursorTo(s, b);
 	s.keys("Enter");
-	await waitState(s, "keyboard on b's loading card", (x) => x.staged.id === b && x.focus === "stage");
+	await waitState(s, "keyboard on b's starting pi", (x) => x.staged.id === b && x.focus === "stage");
 	await Bun.sleep(100);
-	s.keys("Escape");
+	s.keys("M-a", "h");
 	const back = await waitState(s, "back in the roster", (x) => x.focus === "roster");
 	expect(back.waking.every((w) => !w.keyboardWaiting)).toBe(true);
-	await until(() => entry(s, b).live, budgets.piReady, "b live after esc");
+	await until(() => entry(s, b).live, budgets.piReady, "b live after backing out");
 	await waitState(s, "b live on the Stage", (x) => x.staged.id === b && x.staged.kind === "live", budgets.piReady);
 	expect(state(s).focus).toBe("roster");
 	s.save("esc-live.txt", s.screen());
