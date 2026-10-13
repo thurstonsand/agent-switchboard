@@ -57,6 +57,7 @@ function keys(prefix: string): [string, string][] {
 		["a", "archive; unarchive an archived one"],
 		["y Y", "copy swb open <id>; @session:<id>"],
 		["m", "pick the session's Group; rename a Group"],
+		["right-click", "a row's menu of these keys"],
 		["drag", "into a Group, or out onto its Project"],
 		["/", "filter; esc clears"],
 		["q", "close the Deck (sessions keep running)"],
@@ -68,7 +69,7 @@ function keys(prefix: string): [string, string][] {
 		[`${prefix} e`, "swap pi and the editor"],
 		[`${prefix} v`, "split the editor beside pi"],
 		[`${prefix} s`, "a shell below pi; ctrl-d closes it"],
-		[`${prefix} z`, "hide or show the sidebar"],
+		[`${prefix} z`, "hide or show the sidebar; click ◂ to show it"],
 		[`${prefix} <key>`, "j k n N w x a y Y / m, as in the sidebar"],
 		[`${prefix} d`, "in the directory picker, remove the highlighted one"],
 		[`${prefix} q`, "close the Deck from anywhere"],
@@ -79,7 +80,8 @@ function keys(prefix: string): [string, string][] {
 
 export async function help(): Promise<void> {
 	const lines = keys(loadConfig().prefix).map(([k, label]) => (k === "" ? "" : `  ${bold(k.padEnd(12))} ${label}`));
-	process.stdout.write(`\n${lines.join("\n")}\n\n  ${dim("any key closes")}`);
+	// Mouse reporting on, so a click reaches stdin like a key.
+	process.stdout.write(`\x1b[?1000h\x1b[?1006h\n${lines.join("\n")}\n\n  ${dim("any key or click closes")}`);
 	process.stdin.setRawMode(true);
 	await new Promise<void>((resolve) => process.stdin.once("data", () => resolve()));
 	process.exit(0);

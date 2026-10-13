@@ -20,7 +20,7 @@ import { loadConfig } from "../config.ts";
 import { displayName, projectName } from "../derive.ts";
 import { completions, expandHome, type Target, type TargetTree, targetName } from "../dirs.ts";
 import { UsageError } from "../errors.ts";
-import { newer, nvimEditor } from "../sessions.ts";
+import { newer, notify, nvimEditor } from "../sessions.ts";
 import type { DeckLayout } from "../store.ts";
 import { quote, SESSIONS, tmux, tmuxAsync, tmuxTry, UI } from "../tmux.ts";
 import { VERSION } from "../version.ts";
@@ -330,6 +330,21 @@ const stage = {
 };
 
 const rosterOffScreen = () => narrow || rosterHidden;
+
+let statusShown = false;
+let statusOps = Promise.resolve();
+/** While the Stage fills the Deck, its status line carries the click that brings the roster back. */
+function syncStatus(): void {
+	const want = rosterHidden || (narrow && focus === "stage");
+	if (want === statusShown) return;
+	statusShown = want;
+	statusOps = statusOps.then(() =>
+		tmuxAsync(UI, "set", "-t", deck, "status", want ? "on" : "off").then(
+			() => {},
+			(error: Error) => toast(`status: ${error.message}`, "error"),
+		),
+	);
+}
 
 function card(e: Entry, lines: string[] = []): Card {
 	const transcript = transcripts.get(e.id);
@@ -1193,6 +1208,20 @@ class Roster implements Component {
 			this.syncStage(true);
 			return { handled: true };
 		}
+		// On the click, not the press: a menu already open when the button comes up would take the release as a choice.
+		if (event.button === "right") {
+			if (event.type !== "click") return { handled: true };
+			const row = this.rowAt(event.y);
+			this.filtering = false;
+			this.naming = null;
+			if (!row) return { handled: true, render: true };
+			this.selectedKey = row.key;
+			this.lastIndex = this.scrollTop + (event.y - this.listTop);
+			stage.holdForNew = false;
+			this.syncStage(true);
+			void showMenu(row, event.screenX, event.screenY);
+			return { handled: true, render: true };
+		}
 		if (event.button !== "left") return undefined;
 		// Clicking the roster focuses it, and its focus hook can re-render the legend before the release: the target is the
 		// one under the press.
@@ -1224,6 +1253,8 @@ class Roster implements Component {
 		}
 		const row = this.rowAt(event.y);
 		if (!row) return undefined;
+		// Picking a row is done filtering, as ⏎ is; the filter stays applied.
+		this.filtering = false;
 		this.selectedKey = row.key;
 		this.lastIndex = this.scrollTop + (event.y - this.listTop);
 		stage.holdForNew = false;
@@ -1413,7 +1444,7 @@ class Roster implements Component {
 		const from = Math.max(0, Math.min(naming.choice - shown + 1, choices.length - shown));
 		const title = ` ${naming.header ? "rename" : "Group for"} ${naming.title} `;
 		const out: [string, (() => void) | null][] = [
-			[gray(`─${truncateToWidth(title, width - 2, "…")}${"─".repeat(Math.max(0, width - 1 - visibleWidth(title)))}`), null],
+			[`${gray(`─${truncateToWidth(title, width - 5, "…")}${"─".repeat(Math.max(0, width - 4 - visibleWidth(title)))}`)} ✕ `, null],
 		];
 		for (let i = from; i < from + shown; i++) {
 			const choice = choices[i] as { label: string; name: string | null };
@@ -1766,9 +1797,16 @@ class Roster implements Component {
 		return out;
 	}
 
+	/** The filter's tag, while one applies, is a button that clears it. */
 	header(width: number): string {
-		const tag = this.query() !== "" && !this.filtering ? ` ${magenta(`/${this.filter.getValue()}`)}` : "";
-		return truncateToWidth(` ${bold("swb")}${tag}`, width, "…");
+		const tag: [string, (() => void) | null][] =
+			this.query() !== "" && !this.filtering
+				? [
+						[" ", null],
+						[`${magenta(`/${this.filter.getValue()}`)} ✕`, () => this.filter.setValue("")],
+					]
+				: [];
+		return truncateToWidth(this.clickable(0, [[` ${bold("swb")}`, null], ...tag]), width, "…");
 	}
 
 	list(rows: Row[], index: number, width: number, full: number, now: number): string[] {
@@ -1777,6 +1815,16 @@ class Roster implements Component {
 		picker.forEach(([, act], i) => {
 			if (act) this.targets.push({ y: this.listTop + height + i, from: 0, to: width, act });
 		});
+		// The ✕ closing the Group picker, at its title's right end.
+		if (picker.length > 0)
+			this.targets.push({
+				y: this.listTop + height,
+				from: width - 3,
+				to: width,
+				act: () => {
+					this.naming = null;
+				},
+			});
 		if (index < this.scrollTop) this.scrollTop = index;
 		if (index >= this.scrollTop + height) this.scrollTop = index - height + 1;
 		this.scrollTop = Math.max(0, Math.min(this.scrollTop, Math.max(0, rows.length - height)));
@@ -1822,6 +1870,9 @@ class Roster implements Component {
 				const label = ` ${view} `;
 				parts.push([view === stage.applied.view ? cursorLine(label, true) : gray(label), () => void showView(e, view)]);
 			}
+			// The shell is a toggle beside the views, not one of them.
+			if (!narrow)
+				parts.push(["  ", null], [stage.applied.below ? cursorLine(" shell ", true) : gray(" shell "), () => void toggleShell()]);
 			tabs = this.clickable(top + 2, parts);
 		}
 		return [` ${status(e)}${elapsed}`, ` ${gray(where)}`, tabs].map((line) => truncateToWidth(line, width, "…"));
@@ -2064,6 +2115,7 @@ function syncRoster(toRoster: boolean): Promise<void> {
 					[rosterPane, stagePane].map((pane) => tmuxAsync(UI, "display", "-p", "-t", pane, "#{window_id}")),
 				);
 				rosterHidden = rosterWindow !== stageWindow;
+				syncStatus();
 				// The card carries the title and state only while the roster is off-screen.
 				writeStageCard(desired());
 			}
@@ -2096,9 +2148,68 @@ async function prefixKey(k: string): Promise<void> {
 	roster.syncStage(true);
 }
 
+async function deckClient(): Promise<string | undefined> {
+	return (await tmuxAsync(UI, "list-clients", "-t", `=${deck}`, "-F", "#{client_name}")).split("\n")[0] || undefined;
+}
+
 async function showHelp(): Promise<void> {
-	const client = (await tmuxAsync(UI, "list-clients", "-t", `=${deck}`, "-F", "#{client_name}")).split("\n")[0];
+	const client = await deckClient();
 	if (client) await tmuxAsync(UI, "display-popup", "-c", client, "-E", ...HELP_POPUP);
+}
+
+/** A menu item and the roster key it stands for; null is a separator. */
+type MenuItem = [label: string, key: string] | null;
+
+function menuItems(row: Row): MenuItem[] {
+	if (row.kind === "section") return row.key === "operators" ? [["New Operator", "n"]] : [];
+	if (row.kind === "header") {
+		const items: MenuItem[] = [["New session here", "n"]];
+		if (row.group?.kind === "custom") items.push(["Rename Group…", "m"]);
+		return items;
+	}
+	const e = row.entry;
+	const items: MenuItem[] = [];
+	if (!e.open) items.push(["Unarchive", "a"]);
+	else {
+		items.push(e.live ? ["Stop", "x"] : ["Wake", "w"]);
+		if (!e.provisional) items.push(["Archive", "a"]);
+		if (!e.operator) items.push(["Group…", "m"]);
+		items.push([e.operator ? "New Operator" : "New session here", "n"]);
+	}
+	items.push(null, ["Copy swb open <id>", "y"], ["Copy @session:<id>", "Y"]);
+	return items;
+}
+
+/** Right-click: the row's menu at the pointer. Its items run the prefix keys on the cursor's row, which the click moved there. */
+async function showMenu(row: Row, x: number, y: number): Promise<void> {
+	const items = menuItems(row);
+	const client = await deckClient();
+	if (items.length === 0 || !client) return;
+	const title =
+		row.kind === "session"
+			? displayName(row.entry)
+			: row.kind === "section"
+				? row.label
+				: row.group
+					? groupLabel(row.group)
+					: projectName(row.project);
+	const args = items.flatMap((item) => (item === null ? [""] : [item[0], item[1], notify(`__deck ${deck} key ${item[1]}`)]));
+	// -M takes clicks though no mouse binding opened it. -y is the menu's bottom edge; it opens just below the row.
+	const bottom = y + 1 + items.length + 2;
+	await tmuxAsync(
+		UI,
+		"display-menu",
+		"-M",
+		"-c",
+		client,
+		"-T",
+		` ${title.replaceAll("#", "##")} `,
+		"-x",
+		String(x),
+		"-y",
+		String(bottom),
+		...args,
+	);
 }
 
 /** Below NARROW_BELOW columns the roster stands alone, and focus moves zoom along. */
@@ -2119,6 +2230,7 @@ function layout(): Promise<void> {
 		}
 		// tmux scales every pane with the window; the roster keeps its configured or dragged width instead.
 		if (!narrow && !rosterHidden && zoomFlag !== "1") await tmuxAsync(UI, "resize-pane", "-t", rosterPane, "-x", String(rosterWidth()));
+		syncStatus();
 		if (narrow !== wasNarrow) writeStageCard(desired());
 	});
 }
@@ -2163,6 +2275,7 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 			// Moving onto a dormant session, by click or key, means to use it.
 			const onView = stage.staged === null ? undefined : entries.get(stage.staged);
 			if (was === "roster" && focus === "stage" && onView?.open && !onView.live) wake(onView.id, true);
+			syncStatus();
 			apply();
 			break;
 		}

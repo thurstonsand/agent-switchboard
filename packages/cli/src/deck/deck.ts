@@ -9,7 +9,7 @@ import { openStore } from "../store.ts";
 import { CLIENT_CWD, cleanEnv, listSessions, quote, SESSIONS, tmux, tmuxBin, tmuxTry, UI } from "../tmux.ts";
 import type { Card, DeckPaths, DeckState } from "./protocol.ts";
 
-export const HELP_POPUP = ["-w", "62", "-h", "34", "-T", " swb keys ", `${SWB} __help`];
+export const HELP_POPUP = ["-w", "72", "-h", "36", "-T", " swb keys ", `${SWB} __help`];
 
 /** At least 20 columns, and never more than half the Deck. */
 export function rosterCols(width: RosterWidth, deckWidth: number): number {
@@ -107,7 +107,12 @@ function uiConf(config: Config): string {
 		// Its default, external, drops the sessions server's OSC 52 here.
 		"set -s set-clipboard on",
 		"set -s exit-empty off",
+		// The roster turns its Deck's status line on while it's off-screen: the line is the mouse's way back to it.
 		"set -g status off",
+		"set -g status-position top",
+		"set -g status-style default",
+		`set -g status-format[0] "#[range=user|roster] #[bold]◂ ${prefix} z#[nobold] #[dim]show list#[nodim] #[norange]"`,
+		`bind -n MouseDown1Status if -F '#{==:#{mouse_status_range},roster}' { if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { set -u @swb_hidden ; ${roster("focus")} } }`,
 		"set -g mouse on",
 		"set -g history-limit 0",
 		"set -g destroy-unattached off",

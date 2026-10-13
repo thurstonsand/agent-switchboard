@@ -361,10 +361,10 @@ test("roster navigation: h l space and a header click fold projects; g G jump; M
 	s.keys("M-a", "z");
 	await waitState(s, "the roster back", (x) => !x.layout.rosterHidden);
 	s.keys("M-a", "?");
-	await until(() => s.screen().includes("any key closes"), budgets.settle, "the key help");
+	await until(() => s.screen().includes("any key or click closes"), budgets.settle, "the key help");
 	s.save("help.txt", s.screen());
 	s.keys("x");
-	await until(() => !s.screen().includes("any key closes"), budgets.settle, "help closed");
+	await until(() => !s.screen().includes("any key or click closes"), budgets.settle, "help closed");
 	s.keys("M-a", "h");
 	await waitState(s, "roster", (x) => x.focus === "roster");
 	s.keys("q");

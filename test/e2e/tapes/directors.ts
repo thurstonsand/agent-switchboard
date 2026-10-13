@@ -520,6 +520,76 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	mouse: {
+		setup: async (s) => {
+			await seed(
+				s,
+				{ turns: ["the parser is refactored"], title: "Refactor the parser" },
+				{ turns: ["notes drafted"], title: "Draft release notes" },
+			);
+		},
+		run: async (s) => {
+			// The tape only watches; the clicks are the director's, through the drive harness the tape attached to.
+			/** Clicks `text` in the first `cols` columns, the roster's unless told otherwise. */
+			const click = async (text: string, right = false, cols = 42) => {
+				await Bun.sleep(1500);
+				const [x, y] = await until(
+					() => {
+						const lines = s.swb("drive", "capture").split("\n");
+						const at = lines.findIndex((line) => line.slice(0, cols).includes(text));
+						return at !== -1 && [(lines[at] as string).indexOf(text) + 1, at];
+					},
+					TAPE,
+					`${text} on screen`,
+				);
+				s.swb("drive", "click", ...(right ? ["--right"] : []), String(x), String(y));
+			};
+			const drive = (): DeckState => JSON.parse(s.swb("drive", "state"));
+			const waitDrive = (what: string, probe: (x: DeckState) => boolean) =>
+				until(
+					() => {
+						try {
+							return probe(drive());
+						} catch {
+							return false;
+						}
+					},
+					TAPE,
+					what,
+				);
+			await waitDrive("the Deck up", (x) => x.ready);
+			await click("Refactor", true);
+			await click("Wake");
+			await waitDrive("woken from the menu", (x) => x.staged.kind === "live");
+			await click("Refactor");
+			await waitDrive("its pi focused by a click", (x) => x.focus === "stage");
+			await click("hide list");
+			await waitDrive("the roster hidden", (x) => x.layout.rosterHidden);
+			await Bun.sleep(1000);
+			await click("show list");
+			await waitDrive("the roster back", (x) => !x.layout.rosterHidden);
+			await click(" shell ");
+			await waitDrive("the shell", (x) => x.layout.shell && x.focus === "shell");
+			s.keys("-l", "echo the shell came from a click", "Enter");
+			await Bun.sleep(1000);
+			await click(" shell ");
+			await waitDrive("the shell closed", (x) => !x.layout.shell);
+			await click("? keys");
+			await click("any key or click closes", false, 1000);
+			await until(() => !s.swb("drive", "capture").includes("any key or click closes"), TAPE, "help closed by a click");
+			await click("Draft", true);
+			await Bun.sleep(3000);
+			s.keys("Escape");
+			s.swb("drive", "resize", "90x30");
+			await waitDrive("a narrow Deck, the roster alone", (x) => x.layout.rosterOnly);
+			await click("Refactor");
+			await waitDrive("pi alone", (x) => x.focus === "stage");
+			await Bun.sleep(1000);
+			await click("show list");
+			await waitDrive("the roster alone again", (x) => x.focus === "roster");
+		},
+	},
+
 	startup: {
 		packages: ["pi-sessions"],
 		setup: async (s) => {
