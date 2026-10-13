@@ -13,5 +13,5 @@ export function launch(args: string[]): void {
 	if (!values.cwd || !id || !values.model) throw new UsageError("launch: --cwd, --session-id, and --model are required");
 	if (!existsSync(values.cwd)) throw new SwbError(`launch: no directory ${values.cwd}`);
 	ensureSessionsServer();
-	console.log(start(realpathSync(values.cwd), id, ["--approve", "--model", values.model]));
+	console.log(start(realpathSync(values.cwd), id, ["--session-id", id, "--approve", "--model", values.model]));
 }

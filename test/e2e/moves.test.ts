@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { entry, reply, state, waitState } from "./harness/deck.ts";
-import { budgets, git, type Scenario, scenario, until } from "./harness/index.ts";
+import { budgets, git, gitRepo, gitWorktree, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
 afterEach(async () => {
@@ -68,6 +68,36 @@ test("/mv to another directory: swb follows the session there, into that directo
 	await until(() => existsSync(transcript(id)), budgets.settle, "the transcript column pointing at the moved file");
 	expect(entry(s, id)).toMatchObject({ cwd: elsewhere, project: elsewhere, open: true, live: true });
 	await wakesWhereItWent(id, elsewhere);
+});
+
+test("a session whose directory is gone wakes into its own transcript from its project, never a fresh session under its id", async () => {
+	s = scenario("phase6", "gone-cwd", { packages: [], recorder: true });
+	gitRepo(s, s.project);
+	const worktree = gitWorktree(s, s.project, "feature");
+	s.swb("drive", "start", "--", "new", "--cwd", worktree);
+	const st = await waitState(
+		s,
+		"the new pi live with the keyboard",
+		(x) => x.staged.kind === "live" && x.focus === "stage",
+		budgets.piReady,
+	);
+	const id = st.staged.id as string;
+	await reply(s, "before the move");
+	await until(() => entry(s, id)?.activity === "idle", budgets.settle, "idle");
+	s.tmux(s.servers.sessions, "kill-session", "-t", `=${st.staged.host as string}`);
+	await waitState(s, "the exited card", (x) => x.staged.id === id && x.staged.kind === "exited");
+	git(s, s.project, "worktree", "remove", "--force", worktree);
+	s.keys("Enter");
+	await until(() => s.screen().includes("cwd from session file does not exist"), budgets.piReady, "pi's missing-cwd prompt on the Stage");
+	expect(state(s)).toMatchObject({ focus: "stage", staged: { id, kind: "loading" } });
+	s.save("missing-cwd.txt", s.screen());
+	expect(s.screen()).toContain(realpathSync(s.project));
+	s.keys("Enter");
+	await waitState(s, "woken", (x) => x.staged.id === id && x.staged.kind === "live", budgets.piReady);
+	await until(() => s.screen().includes("before the move"), budgets.settle, "the conversation, continued in the project");
+	s.save("woken.txt", s.screen());
+	expect(s.query<{ cwd: string }>("select cwd from runtimes where session_id = ?", id)).toEqual([{ cwd: realpathSync(s.project) }]);
+	expect(s.ls().map((e) => e.id)).toEqual([id]);
 });
 
 test("/wt fork: swb follows the session into the new worktree, in the same project, and it wakes there", async () => {

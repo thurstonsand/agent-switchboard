@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { bootId, type Db, dbPath, projectRoot, stateDir } from "@swb/shared";
 import { type RuntimeRow, runtimeLive } from "./derive.ts";
@@ -188,10 +188,10 @@ export function randomHex(bytes: number): string {
 }
 
 /** Starts a managed pi in the background and returns its tmux session; pi comes up on its own time. */
-export function launch(cwd: string, resume: string | null, piArgs: string[]): string {
+export function launch(cwd: string, launchId: string | null, piArgs: string[]): string {
 	const name = `${basename(projectRoot(cwd)).replaceAll(/[.:]/g, "_")}-${randomHex(2)}`;
 	const shell = loginShell();
-	const pi = ["exec pi", ...[...(resume ? ["--session-id", resume] : []), ...piArgs].map(quote)].join(" ");
+	const pi = ["exec pi", ...piArgs.map(quote)].join(" ");
 	tmux(
 		SESSIONS,
 		"new-session",
@@ -235,7 +235,7 @@ export function launch(cwd: string, resume: string | null, piArgs: string[]): st
 		`=${name}:`,
 		"remain-on-exit-format",
 		"",
-		...(resume ? [";", "set", "-t", name, "@swb_launch_id", resume] : []),
+		...(launchId ? [";", "set", "-t", name, "@swb_launch_id", launchId] : []),
 	);
 	return name;
 }
@@ -343,9 +343,12 @@ export function wake(db: Db, id: string): string {
 		const recorded = new Set(db.all("SELECT tmux_session FROM runtimes").map((row) => row.tmux_session as string));
 		const inFlight = hosts.find(([name, kind, launchId]) => kind === "pi" && launchId === id && !recorded.has(name as string));
 		if (inFlight) return inFlight[0] as string;
-		const session = db.get("SELECT cwd FROM sessions WHERE session_id = ?", id);
+		const session = db.get("SELECT cwd, project_root, transcript FROM sessions WHERE session_id = ?", id);
 		if (!session) throw new SwbError(`no session ${id}`);
-		return launch(session.cwd as string, id, []);
+		// --session-id only searches the starting directory's sessions, and tmux starts a missing directory in $HOME,
+		// where pi would mint a fresh session under this id. The transcript reaches pi's own missing-cwd prompt instead.
+		const cwd = existsSync(session.cwd as string) ? (session.cwd as string) : (session.project_root as string);
+		return launch(cwd, id, ["--session", session.transcript as string]);
 	});
 }
 
