@@ -274,4 +274,18 @@ export function git(s: Scenario, cwd: string, ...args: string[]): string {
 	return run(["git", "-c", "user.name=e2e", "-c", "user.email=e2e@example.com", ...args], s.env, cwd);
 }
 
+/** A git repository at dir with one empty commit on main. */
+export function gitRepo(s: Scenario, dir: string): string {
+	mkdirSync(dir, { recursive: true });
+	git(s, dir, "init", "-q", "-b", "main");
+	git(s, dir, "commit", "-q", "--allow-empty", "-m", "init");
+	return dir;
+}
+
+/** A worktree of main on a new branch, beside it by default. */
+export function gitWorktree(s: Scenario, main: string, branch: string, path = `${main}-${branch}`): string {
+	git(s, main, "worktree", "add", "-q", "-b", branch, path);
+	return path;
+}
+
 export const budgets = { piReady: 30_000, settle: 10_000, deckReady: 5_000 };

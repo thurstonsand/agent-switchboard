@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { configDir } from "@swb/shared";
 import { parse } from "smol-toml";
+import type { DirsConfig } from "./dirs.ts";
 import { SwbError } from "./errors.ts";
 
 export type Config = {
@@ -14,6 +15,8 @@ export type Config = {
 	rosterWidth: RosterWidth;
 	/** What a Project's sessions sit under before any Group: the Project itself, or one bucket per worktree. */
 	groupBy: "project" | "worktree";
+	/** Where the directory picker looks for places to start sessions, beyond the ones sessions have used. */
+	dirs: DirsConfig;
 };
 
 /** The roster's width: columns, or a share of the Deck. */
@@ -57,6 +60,7 @@ export function loadConfig(): Config {
 		prefix: "M-a",
 		rosterWidth: { cols: 42 },
 		groupBy: "project",
+		dirs: { scan: [], depth: 2, exclude: [], include: [], sort: "name" },
 	};
 	for (const [key, value] of Object.entries(raw)) {
 		switch (key) {
@@ -89,6 +93,24 @@ export function loadConfig(): Config {
 				else throw new SwbError(`config: roster_width must be columns (20 or more) or a share like "25%", got ${JSON.stringify(value)}`);
 				break;
 			}
+			case "dirs":
+				if (typeof value !== "object" || value === null || Array.isArray(value)) throw new SwbError("config: dirs must be a table");
+				for (const [sub, subValue] of Object.entries(value as Record<string, unknown>)) {
+					if (sub === "depth") {
+						if (!Number.isInteger(subValue) || (subValue as number) < 1 || (subValue as number) > 10)
+							throw new SwbError(`config: dirs.depth must be 1 to 10, got ${JSON.stringify(subValue)}`);
+						config.dirs.depth = subValue as number;
+					} else if (sub === "sort") {
+						if (subValue !== "name" && subValue !== "recent")
+							throw new SwbError(`config: dirs.sort must be "name" or "recent", got ${JSON.stringify(subValue)}`);
+						config.dirs.sort = subValue;
+					} else if (sub === "scan" || sub === "exclude" || sub === "include") {
+						if (!Array.isArray(subValue) || subValue.some((v) => typeof v !== "string" || v === ""))
+							throw new SwbError(`config: dirs.${sub} must be a list of paths, got ${JSON.stringify(subValue)}`);
+						config.dirs[sub] = subValue as string[];
+					} else throw new SwbError(`config: unknown key dirs.${sub}`);
+				}
+				break;
 			case "keys":
 				if (typeof value !== "object" || value === null || Array.isArray(value)) throw new SwbError("config: keys must be a table");
 				for (const [sub, subValue] of Object.entries(value as Record<string, unknown>)) {

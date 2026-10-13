@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { join } from "node:path";
 import type { DeckState } from "../../packages/cli/src/deck/protocol.ts";
-import { config, cursorTo, entry, piSessions, reply, seed, sessionRows, state, waitState } from "./harness/deck.ts";
+import { config, cursorTo, entry, pickNew, piSessions, reply, seed, sessionRows, state, waitState } from "./harness/deck.ts";
 import { budgets, git, type Scenario, scenario, until, which } from "./harness/index.ts";
 
 const NVIM = which("nvim");
@@ -530,7 +530,7 @@ test("m names a session's Group, n joins it; dragging moves it between Groups be
 	expect(entry(s, a).group).toBe("triage");
 	s.save("renamed.ansi", s.swb("drive", "capture", "--ansi"));
 
-	s.keys("n");
+	await pickNew(s);
 	const joined = await waitState(
 		s,
 		"a new pi from the triage header",

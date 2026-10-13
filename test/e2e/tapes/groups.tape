@@ -28,6 +28,9 @@ Screenshot ../artifacts/phase6/videos/groups-refused.png
 Wait+Screen /nothing moved/
 Sleep 2s
 Type "n"
+Wait+Screen /new session in/
+Sleep 800ms
+Enter
 Wait+Screen /faux-1/
 Sleep 1s
 Type "reply joined review from n" Sleep 400ms Enter

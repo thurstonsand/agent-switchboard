@@ -1,9 +1,9 @@
 import { expect } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState } from "../../../packages/cli/src/deck/protocol.ts";
 import { config, seed } from "../harness/deck.ts";
-import { git, type HostPackage, type LsEntry, release, type Scenario, until, which } from "../harness/index.ts";
+import { git, gitRepo, gitWorktree, type HostPackage, type LsEntry, release, type Scenario, until, which } from "../harness/index.ts";
 
 export type Director = {
 	packages?: HostPackage[];
@@ -326,8 +326,6 @@ export const directors: Record<string, Director> = {
 					what,
 				);
 			await all("three Decks", "Archived (0)");
-			await Bun.sleep(1500);
-			keys(0, "n");
 			await until(() => screens()[0]?.includes("faux-1"), TAPE, "pi in the first Deck");
 			await Bun.sleep(800);
 			keys(0, "-l", "reply one session, three Decks", "Enter");
@@ -344,6 +342,76 @@ export const directors: Record<string, Director> = {
 			keys(2, "a");
 			await all("archived everywhere", "Archived (1)");
 			expect(s.ls()[0]?.open).toBe(false);
+		},
+	},
+
+	"dir-picker": {
+		setup: async (s) => {
+			const code = join(s.home, "code");
+			const repo = (name: string) => gitRepo(s, join(code, name));
+			const worktree = (main: string, branch: string) => gitWorktree(s, main, branch);
+			const swbRepo = repo("agent-switchboard");
+			const picker = worktree(swbRepo, "dir-picker");
+			worktree(swbRepo, "reaper-fix");
+			// Removed by hand, never pruned: git still lists it, the picker mustn't.
+			rmSync(worktree(swbRepo, "old-spike"), { recursive: true });
+			const ansible = repo("ansiblonomicon");
+			worktree(ansible, "amp-model-config");
+			const piSessions = repo("pi-sessions");
+			for (const name of ["pi-doppelclaude", "ghosttykit", "go-unifi", "sagecoffee", "matic-home-assistant", "dotfiles"]) repo(name);
+			repo("node_modules/left-pad");
+			for (const dir of ["games", "matic-re/jadx", ".scratch/dc-0123", "../notes"]) mkdirSync(join(code, dir), { recursive: true });
+			config(s, '[dirs]\nscan = ["~/code"]\ninclude = ["~/code/games"]\nexclude = ["dotfiles"]\n');
+			for (const [cwd, title] of [
+				[swbRepo, "Directory picker design"],
+				[swbRepo, "Reaper flake"],
+				[picker, "Prototype the picker"],
+				[ansible, "pod042 runner unit"],
+				[piSessions, "Handoff wake race"],
+			] as const) {
+				s.swb("drive", "start", "--", "new", "--cwd", cwd);
+				const st = await until(
+					() => {
+						const x = JSON.parse(s.swb("drive", "state"));
+						return x.staged.kind === "live" && x;
+					},
+					TAPE,
+					"pi on the Stage",
+				);
+				s.swb("drive", "focus", "out");
+				s.keys("-l", `reply ${title}`, "Enter");
+				await until(() => s.signal(`replied.${title}`) !== "", TAPE, title);
+				s.keys("-l", `/name ${title}`, "Enter");
+				await waitLs(s, `${title} titled`, (ls) => ls.some((e) => e.title === title && e.activity === "idle"));
+				s.tmux(s.servers.sessions, "kill-session", "-t", `=${st.staged.host}`);
+				await waitLs(s, `${title} dormant`, (ls) => ls.some((e) => e.title === title && !e.live));
+				s.swb("drive", "stop");
+			}
+		},
+		run: async (s) => {
+			const { deck } = await waitDeck(s, "the Deck up", () => true);
+			const pane = `=${deck}:.0`;
+			const lines = () => s.tmux(s.servers.ui, "capture-pane", "-p", "-t", pane).split("\n");
+			// The last picker: opened after matic-re was added, so it's listed.
+			const shown = await until(
+				() => {
+					const now = lines();
+					return now[0]?.includes("new session in") && now.some((l) => /^\s*matic-re\s/.test(l)) && now;
+				},
+				TAPE,
+				"the picker with matic-re listed",
+			);
+			// Long enough for the tape to capture it as opened, on matic-re.
+			await Bun.sleep(3000);
+			// The pointer moves, no button held, onto pi-sessions: SGR motion is button 35.
+			const y = shown.findIndex((l) => /^\s*pi-sessions\b/.test(l)) + 1;
+			for (const x of [30, 20, 10]) {
+				const bytes = [...Buffer.from(`\x1b[<35;${x};${y}M`)].map((b) => b.toString(16).padStart(2, "0"));
+				s.tmux(s.servers.ui, "send-keys", "-t", pane, "-H", ...bytes);
+				await Bun.sleep(150);
+			}
+			await until(() => lines().some((l) => /pi-sessions\s+✕/.test(l)), TAPE, "the highlight under the pointer");
+			await until(() => !lines()[0]?.includes("new session in"), TAPE, "the picker closed");
 		},
 	},
 

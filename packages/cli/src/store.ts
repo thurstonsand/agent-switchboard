@@ -36,6 +36,10 @@ const MIGRATIONS: string[] = [
 		state        TEXT NOT NULL,
 		saved_at     INTEGER NOT NULL
 	);`,
+	`CREATE TABLE dirs (
+		path  TEXT PRIMARY KEY,
+		state TEXT NOT NULL CHECK (state IN ('added','removed'))
+	);`,
 ];
 
 if (MIGRATIONS.length !== SCHEMA_VERSION) throw new Error(`${MIGRATIONS.length} migrations for schema v${SCHEMA_VERSION}`);

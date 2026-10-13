@@ -2,10 +2,7 @@
 Source common.tape
 
 Type "# the session's editor: swap with M-a e, split with M-a v; M-a s for a shell; ctrl-hjkl between them" Sleep 1s Enter
-Type "swb" Sleep 400ms Enter
-Wait+Screen /Archived \(0\)/
-Sleep 1s
-Type "n"
+Type "swb new" Sleep 400ms Enter
 Wait+Screen /faux-1/
 Sleep 1s
 Type "reply the editor is one keystroke away" Sleep 400ms Enter

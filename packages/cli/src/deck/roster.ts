@@ -1,4 +1,5 @@
-import { rmSync } from "node:fs";
+import { rmSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
 import { parseArgs } from "node:util";
 import {
 	type Component,
@@ -17,6 +18,7 @@ import {
 import { operatorDir, projectRoot, type View } from "@swb/shared";
 import { loadConfig } from "../config.ts";
 import { displayName, projectName } from "../derive.ts";
+import { completions, expandHome, type Target, type TargetTree, targetName } from "../dirs.ts";
 import { UsageError } from "../errors.ts";
 import { newer, nvimEditor } from "../sessions.ts";
 import type { DeckLayout } from "../store.ts";
@@ -36,7 +38,7 @@ import {
 	writeAtomic,
 	writeCard,
 } from "./deck.ts";
-import type { Card, DeckState, Entry, FromWorker, Snapshot, State, StatSummary, ToWorker, Turn } from "./protocol.ts";
+import type { Card, DeckState, Entry, FromWorker, PickerState, Snapshot, State, StatSummary, ToWorker, Turn } from "./protocol.ts";
 import {
 	age,
 	attention,
@@ -76,7 +78,7 @@ const { values: args } = parseArgs({
 });
 if (!args.deck || !args.stage || !args.here) throw new UsageError("__roster: --deck, --stage, and --here are required");
 const deck = args.deck;
-/** Where swb was run: `n` starts there from a section row, including in an empty Deck. */
+/** Where swb was run: `-c` and `swb new` start there, and this Project keeps the Deck's layout. */
 const here = args.here;
 const stagePane = args.stage;
 if (!process.env.TMUX_PANE) throw new UsageError("__roster: runs only inside a Deck pane");
@@ -821,6 +823,20 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
 			shellWaits.delete(message.dir);
 			if (message.text) toast(`shell: ${message.text}`, "error");
 			break;
+		case "dirs": {
+			// The highlight stays on its directory through a fresh list.
+			const before = roster.choosing && roster.pickRows()[roster.choosing.choice];
+			dirTrees = message.trees;
+			if (roster.choosing?.mode === "pick") {
+				const rows = roster.pickRows();
+				// Before the first list landed there was nothing to highlight but the directory it opened on.
+				const path = before?.kind === "target" ? before.target.path : roster.choosing.pin;
+				const at = rows.findIndex((r) => r.kind === "target" && r.target.path === path);
+				roster.choosing.choice = at === -1 ? Math.min(roster.choosing.choice, rows.length - 1) : at;
+			}
+			tui.requestRender();
+			break;
+		}
 		case "groupFailed":
 			localGroups.clear();
 			toast(`group: ${message.text}`, "error");
@@ -929,6 +945,12 @@ class Roster implements Component {
 	name = new Input({ prompt: "> " });
 	/** `m`'s picker: the sessions it moves, the Group header it started on, and the highlighted choice. */
 	naming: { ids: string[]; header: HeaderRow | null; project: string; title: string; choice: number } | null = null;
+	/** The directory picker, `n` and `N`, which takes over the whole roster while it's open. */
+	choosing: Choosing | null = null;
+	search = new Input({ prompt: "/ " });
+	pickerTop = 0;
+	completed: { typed: string; rows: string[] } | null = null;
+	path = new Input({ prompt: "" });
 	/** A session being dragged by the mouse; `moved` once the pointer has left its row. */
 	dragging: { id: string; moved: boolean; drop: Drop } | null = null;
 	listTop = 2;
@@ -1075,6 +1097,12 @@ class Roster implements Component {
 		stage.keyAt = performance.now();
 		frameKeyAt = stage.keyAt;
 		toasts = [];
+		if (this.choosing) {
+			this.pickerInput(data);
+			stage.keyAt = 0;
+			tui.requestRender();
+			return;
+		}
 		if (this.naming) {
 			const choices = this.choices();
 			if (matchesKey(data, "up") || matchesKey(data, "down")) {
@@ -1122,7 +1150,7 @@ class Roster implements Component {
 		else if (k === "a") this.toggleArchived();
 		else if (k === "y" || k === "Y") this.copy(k === "y");
 		else if (k === "n") this.newAtCursor();
-		else if (k === "N") newSession(here, null);
+		else if (k === "N") this.openPicker("add", null, null);
 		else if (k === "/") this.filtering = true;
 		else if (k === "m") this.startNaming();
 		else if (k === "?") void showHelp();
@@ -1132,6 +1160,27 @@ class Roster implements Component {
 	}
 
 	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+		if (this.choosing) {
+			const listRow = this.pickerTop + event.y - 3;
+			if (event.type === "move") {
+				if (this.choosing.confirm || event.y < 3 || event.y >= 3 + this.listHeight) return { handled: true };
+				const count = this.choosing.mode === "pick" ? this.pickRows().length : this.addRows().length;
+				if (listRow < count && listRow !== this.choosing.choice) {
+					this.choosing.choice = listRow;
+					return { handled: true, render: true };
+				}
+				return { handled: true };
+			}
+			if (event.type === "wheel") this.pickerInput(event.wheelDelta && event.wheelDelta > 0 ? "\x1b[B" : "\x1b[A");
+			else if (event.button === "left" && event.type === "press")
+				this.pressed = this.targets.find((t) => t.y === event.y && event.x >= t.from && event.x < t.to) ?? null;
+			else if (event.button === "left" && event.type === "click") {
+				const target = this.pressed;
+				this.pressed = null;
+				target?.act();
+			}
+			return { handled: true, render: true };
+		}
 		if (event.type === "wheel") {
 			this.move(Math.sign(event.wheelDelta ?? 0));
 			this.syncStage(true);
@@ -1280,7 +1329,10 @@ class Roster implements Component {
 		);
 	}
 
-	/** n: in the cursor's directory, joining its Group: a Group header's newest session's directory, there being no other. */
+	/**
+	 * n: the directory picker, on the cursor's directory: a Group header's newest session's, there being no other.
+	 * Starting there joins its Group.
+	 */
 	newAtCursor(): void {
 		const row = this.selected();
 		if ((row?.kind === "section" && row.key === "operators") || (row?.kind === "session" && row.entry.operator)) {
@@ -1288,11 +1340,11 @@ class Roster implements Component {
 			return;
 		}
 		if (!row || row.kind === "section") {
-			newSession(here, null);
+			this.openPicker("pick", null, null);
 			return;
 		}
 		const group = row.kind === "session" ? groupOf(row.entry) : row.group;
-		newSession(row.kind === "session" ? row.entry.cwd : row.cwd, group?.kind === "custom" ? group.name : null);
+		this.openPicker("pick", row.kind === "session" ? row.entry.cwd : row.cwd, group?.kind === "custom" ? group.name : null);
 	}
 
 	/**
@@ -1413,9 +1465,282 @@ class Roster implements Component {
 		}
 	}
 
+	/** Opens the directory picker: on the directory `from`, or straight into adding one. */
+	openPicker(mode: "pick" | "add", from: string | null, group: string | null): void {
+		this.filtering = false;
+		this.search.setValue("");
+		this.path.setValue("");
+		this.pickerTop = 0;
+		this.completed = null;
+		this.choosing = { mode, opened: mode, choice: mode === "add" ? typedChoice("") : 0, from, group, pin: from, confirm: null };
+		// The last list shows at once; the worker's fresh one replaces it when its scan lands.
+		post({ type: "dirs" });
+		// Inside tmux pi-tui only tracks the mouse while a button is down; the picker follows it everywhere, so the
+		// highlight and its ✕ are wherever the pointer is.
+		process.stdout.write("\x1b[?1003h");
+		if (mode === "pick")
+			this.choosing.choice = Math.max(
+				0,
+				this.pickRows().findIndex((r) => r.kind === "target" && r.target.path === from),
+			);
+	}
+
+	/**
+	 * Each tree's main checkout, then its worktrees. A query keeps only matches, best match first, the way fzf and
+	 * VS Code's quick open rank them: a tree whose worktree matches keeps its root, dimmed, for context, and a
+	 * matching root brings all its worktrees.
+	 */
+	pickRows(): PickRow[] {
+		const choosing = this.choosing;
+		if (!choosing) return [];
+		const q = this.search.getValue().trim().toLowerCase();
+		const ranked: { score: number; rows: PickRow[] }[] = [];
+		// The directory it opened on is always offered, even before a first prompt or under an exclude.
+		const pin = choosing.pin;
+		const pinned: TargetTree[] =
+			pin !== null && !this.listed().has(pin) ? [{ root: { path: pin, repo: null, branch: null }, worktrees: [] }] : [];
+		for (const tree of [...pinned, ...(dirTrees ?? [])]) {
+			const root = match(targetName(tree.root), q);
+			const worktrees = tree.worktrees
+				.map((target) => ({ target, m: match(targetName(target), q) }))
+				.filter((w) => root || w.m)
+				.sort((x, y) => (x.m?.score ?? 9) - (y.m?.score ?? 9));
+			if (!root && worktrees.length === 0) continue;
+			const rows: PickRow[] = [{ kind: "target", target: tree.root, tree, context: !root, score: root?.score ?? 9, at: root?.at ?? [] }];
+			for (const w of worktrees)
+				rows.push({ kind: "target", target: w.target, tree: null, context: false, score: w.m?.score ?? 9, at: w.m?.at ?? [] });
+			ranked.push({ score: Math.min(root?.score ?? 9, ...worktrees.map((w) => w.m?.score ?? 9)), rows });
+		}
+		// Stable, so equal matches keep dirs.sort's order.
+		ranked.sort((x, y) => x.score - y.score);
+		return [...ranked.flatMap((r) => r.rows), { kind: "add" }];
+	}
+
+	/** The best-ranked row a query matched; trees keep their order, so it can sit below a dimmed repository. */
+	bestMatch(): number {
+		let best = 0;
+		let score = 10;
+		this.pickRows().forEach((row, i) => {
+			if (row.kind === "target" && !row.context && row.score < score) {
+				best = i;
+				score = row.score;
+			}
+		});
+		return best;
+	}
+
+	addRows(): string[] {
+		const typed = this.path.getValue();
+		// Asked for on every render, hover, and state read; the disk is read once per keystroke.
+		if (this.completed?.typed !== typed) this.completed = { typed, rows: completions(typed, scanBase()) };
+		return this.completed.rows;
+	}
+
+	/** Where Enter in add mode starts: the highlighted completion, or the directory typed. */
+	addTarget(): string {
+		const choosing = this.choosing as Choosing;
+		const typed = this.path.getValue();
+		const row = this.addRows()[choosing.choice];
+		if (row) return row;
+		const full = typed.startsWith("/") || typed.startsWith("~") ? expandHome(typed) : join(scanBase(), typed);
+		return full.length > 1 ? full.replace(/\/$/, "") : full;
+	}
+
+	listed(): Set<string> {
+		return new Set((dirTrees ?? []).flatMap((t) => [t.root.path, ...t.worktrees.map((w) => w.path)]));
+	}
+
+	start(path: string): void {
+		const choosing = this.choosing as Choosing;
+		this.closePicker();
+		newSession(path, path === choosing.from ? choosing.group : null);
+	}
+
+	/** M-a d or the row's ✕: asks before taking a directory, or a repository and all its worktrees, off the list. */
+	askRemove(): void {
+		const choosing = this.choosing;
+		if (choosing?.mode !== "pick") return;
+		const row = this.pickRows()[choosing.choice];
+		if (row?.kind !== "target" || row.context) return;
+		const worktrees = row.tree?.worktrees.map((w) => w.path) ?? [];
+		choosing.confirm = {
+			name: targetName(row.target),
+			worktrees: worktrees.length,
+			path: row.target.path,
+			covers: [row.target.path, ...worktrees],
+		};
+	}
+
+	finishRemove(yes: boolean): void {
+		const choosing = this.choosing;
+		if (!choosing?.confirm) return;
+		if (yes) {
+			const path = choosing.confirm.path;
+			post({ type: "removeDir", path });
+			if (choosing.pin !== null && choosing.confirm.covers.includes(choosing.pin)) choosing.pin = null;
+			// Gone at once; the worker's list, which follows, agrees.
+			dirTrees = (dirTrees ?? [])
+				.filter((t) => t.root.path !== path)
+				.map((t) => ({ root: t.root, worktrees: t.worktrees.filter((w) => w.path !== path) }));
+			choosing.choice = Math.min(choosing.choice, this.pickRows().length - 1);
+		}
+		choosing.confirm = null;
+	}
+
+	closePicker(): void {
+		this.choosing = null;
+		process.stdout.write("\x1b[?1003l\x1b[?1000h\x1b[?1002h");
+	}
+
+	pickerInput(data: string): void {
+		const choosing = this.choosing as Choosing;
+		if (choosing.confirm) {
+			const k = decodeKittyPrintable(data) ?? data;
+			if (k === "y" || matchesKey(data, "enter")) this.finishRemove(true);
+			else if (k === "n" || matchesKey(data, "escape")) this.finishRemove(false);
+			return;
+		}
+		const first = choosing.mode === "pick" ? 0 : -1;
+		const count = choosing.mode === "pick" ? this.pickRows().length : this.addRows().length;
+		if (matchesKey(data, "escape")) {
+			if (choosing.mode === "add" && choosing.opened === "pick") {
+				choosing.mode = "pick";
+				choosing.choice = this.pickRows().length - 1;
+			} else this.closePicker();
+		} else if (matchesKey(data, "up") || matchesKey(data, "down")) {
+			choosing.choice = Math.max(first, Math.min(count - 1, choosing.choice + (matchesKey(data, "up") ? -1 : 1)));
+		} else if (choosing.mode === "add" && matchesKey(data, "tab")) {
+			const match = this.addRows()[Math.max(0, choosing.choice)];
+			if (match) {
+				this.path.setValue(`${shortPath(match)}/`);
+				choosing.choice = -1;
+			}
+		} else if (matchesKey(data, "enter")) {
+			if (choosing.mode === "pick") {
+				const row = this.pickRows()[choosing.choice];
+				if (row?.kind === "add") {
+					choosing.mode = "add";
+					this.path.setValue("");
+					choosing.choice = typedChoice("");
+				} else if (row) this.start(row.target.path);
+				return;
+			}
+			const path = this.addTarget();
+			if (!statSync(path, { throwIfNoEntry: false })?.isDirectory()) {
+				toast(`no directory ${shortPath(path)}`, "error");
+				return;
+			}
+			if (!this.listed().has(path)) post({ type: "addDir", path });
+			this.start(path);
+		} else if (choosing.mode === "pick") {
+			this.search.handleInput(data);
+			const typed = this.search.getValue();
+			// A path typed into the search is an add.
+			if (typed.startsWith("/") || typed.startsWith("~")) {
+				choosing.mode = "add";
+				this.path.setValue(typed);
+				this.search.setValue("");
+				choosing.choice = typedChoice(typed);
+				return;
+			}
+			choosing.choice = this.bestMatch();
+		} else {
+			this.path.handleInput(data);
+			choosing.choice = typedChoice(this.path.getValue());
+		}
+	}
+
+	renderPicker(width: number, height: number): string[] {
+		const choosing = this.choosing as Choosing;
+		const adding = choosing.mode === "add";
+		this.targets = [];
+		const typed = this.path.getValue();
+		const absolute = typed.startsWith("/") || typed.startsWith("~");
+		const prompt = gray(absolute ? "› " : `› ${shortPath(scanBase())}/`);
+		const input = adding
+			? `${prompt}${this.path.render(Math.max(10, width - 2 - visibleWidth(prompt)))[0] ?? ""}`
+			: (this.search.render(Math.max(10, width - 2))[0] ?? "");
+		const bodyHeight = Math.max(1, height - 6 - DETAIL_LINES);
+		const lines = [` ${bold(adding ? "add a directory" : "new session in")}`, ` ${input}`, gray("─".repeat(width))];
+		let body: [string, (() => void) | null][];
+		let detail: string;
+		if (!adding) {
+			const rows = this.pickRows();
+			body = rows.map((row, i): [string, (() => void) | null] => {
+				const act = () => {
+					choosing.choice = i;
+					this.pickerInput("\r");
+				};
+				const line = truncateToWidth(pickLine(row, width, i === choosing.choice), width, "…", true);
+				return [i === choosing.choice ? cursorLine(line, true) : line, act];
+			});
+			const row = rows[choosing.choice];
+			detail = row?.kind === "target" ? ` ${gray(shortPath(row.target.path))}` : dirTrees === null ? ` ${dim("finding directories…")}` : "";
+		} else {
+			const listed = this.listed();
+			const matches = this.addRows();
+			body = matches.map((path, i): [string, (() => void) | null] => {
+				const name = `${basename(path)}/`;
+				const line = truncateToWidth(`   ${listed.has(path) ? dim(name) : name}`, width, "…", true);
+				const act = () => {
+					choosing.choice = i;
+					this.pickerInput("\r");
+				};
+				return [i === choosing.choice ? cursorLine(line, true) : line, act];
+			});
+			detail = ` ${gray(shortPath(this.addTarget()))}`;
+		}
+		// The window only scrolls to keep the highlight in view, so hovering never drags the list under the pointer.
+		let top = Math.min(this.pickerTop, Math.max(0, body.length - bodyHeight));
+		// -1 in add mode highlights nothing, and scrolls nowhere.
+		if (choosing.choice < top) top = Math.max(0, choosing.choice);
+		if (choosing.choice >= top + bodyHeight) top = choosing.choice - bodyHeight + 1;
+		this.pickerTop = top;
+		this.listHeight = bodyHeight;
+		const shown = body.slice(top, top + bodyHeight);
+		shown.forEach(([, act], i) => {
+			// The remove prompt is modal: only its own answers are buttons.
+			if (!act || choosing.confirm) return;
+			const y = 3 + i;
+			// The cursor row's ✕, at its right edge, removes it.
+			if (!adding && top + i === choosing.choice && this.pickRows()[choosing.choice]?.kind === "target")
+				this.targets.push({ y, from: width - 3, to: width, act: () => this.askRemove() });
+			this.targets.push({ y, from: 0, to: width, act });
+		});
+		const out = shown.map(([line]) => line);
+		while (out.length < bodyHeight) out.push("");
+		if (choosing.confirm) overlayConfirm(out, width, choosing.confirm, (yes) => this.finishRemove(yes), this.targets);
+		lines.push(...out, gray("─".repeat(width)), detail, "", "", this.messageLine(Date.now()));
+		// The remove prompt carries its own keys.
+		const hints: Hint[] = choosing.confirm
+			? []
+			: adding
+				? [
+						["⇥", "complete", () => this.pickerInput("\t")],
+						["⏎", "start", () => this.pickerInput("\r")],
+						["esc", choosing.opened === "pick" ? "back" : "cancel", () => this.pickerInput("\x1b")],
+					]
+				: [
+						["⏎", "start", () => this.pickerInput("\r")],
+						[`${config.prefix} d`, "remove", () => this.askRemove()],
+						["esc", "cancel", () => this.pickerInput("\x1b")],
+					];
+		lines.push(
+			this.clickable(
+				lines.length,
+				hints.flatMap(([name, label, act]): [string, (() => void) | null][] => [
+					[" ", null],
+					[key(name, label), act],
+				]),
+			),
+		);
+		return lines.map((line) => truncateToWidth(line, width, "…", true));
+	}
+
 	render(width: number): string[] {
 		const t0 = performance.now();
 		const height = tui.terminal.rows;
+		if (this.choosing) return this.renderPicker(width, height);
 		const now = Date.now();
 		const rows = this.rows();
 		const index = this.resolveCursor(rows);
@@ -1551,6 +1876,92 @@ class Roster implements Component {
 
 type Hint = [name: string, label: string, act: () => void];
 
+type PickRow = { kind: "target"; target: Target; tree: TargetTree | null; context: boolean; score: number; at: number[] } | { kind: "add" };
+
+/** The directory picker, `n` and `N`, which takes over the whole roster while it's open. */
+type Choosing = {
+	mode: "pick" | "add";
+	opened: "pick" | "add";
+	/** The highlighted row; in add mode -1 is the directory typed, highlighting nothing. */
+	choice: number;
+	/** The directory it opened on, whose Group a session started there joins. */
+	from: string | null;
+	group: string | null;
+	/** The directory it opened on, offered whether or not it's listed, until I remove it. */
+	pin: string | null;
+	confirm: { name: string; worktrees: number; path: string; covers: string[] } | null;
+};
+
+/**
+ * How well a name matches the query, lower is better, and which characters matched: the whole name's start, then a
+ * word's start, then anywhere. Scattered letters don't count; across a list of directory names they match too much.
+ */
+function match(name: string, q: string): { score: number; at: number[] } | null {
+	if (q === "") return { score: 0, at: [] };
+	const lower = name.toLowerCase();
+	const run = (from: number) => Array.from({ length: q.length }, (_, i) => from + i);
+	if (lower.startsWith(q)) return { score: 0, at: run(0) };
+	const word = [...lower.matchAll(/[-_./ ]/g)].map((m) => (m.index as number) + 1).find((i) => lower.startsWith(q, i));
+	if (word !== undefined) return { score: 1, at: run(word) };
+	const inside = lower.indexOf(q);
+	return inside === -1 ? null : { score: 2, at: run(inside) };
+}
+
+function marked(name: string, at: number[]): string {
+	return [...name].map((c, i) => (at.includes(i) ? cyan(c) : c)).join("");
+}
+
+/** The picker's list as the worker last found it; null until its first scan lands. */
+let dirTrees: TargetTree[] | null = null;
+
+/** A typed directory, ending in `/` or empty, is itself what Enter adds until a completion is highlighted. */
+function typedChoice(typed: string): number {
+	return typed === "" || typed.endsWith("/") ? -1 : 0;
+}
+
+function scanBase(): string {
+	return expandHome(config.dirs.scan[0] ?? "~");
+}
+
+function pickLine(row: PickRow, width: number, cursor: boolean): string {
+	if (row.kind === "add") return ` ${green("+ add a directory…")}`;
+	const name = marked(targetName(row.target), row.at);
+	const label = row.target.repo ? `   ${name}` : ` ${row.context ? dim(name) : bold(name)}`;
+	if (!cursor || row.context) return label;
+	return `${truncateToWidth(label, width - 3, "…", true)} ✕ `;
+}
+
+/** The remove prompt, boxed over the middle of the list; its buttons are click targets too. */
+function overlayConfirm(
+	out: string[],
+	width: number,
+	confirm: { name: string; worktrees: number },
+	answer: (yes: boolean) => void,
+	targets: { y: number; from: number; to: number; act: () => void }[],
+): void {
+	const inner = Math.min(width - 4, 34);
+	const left = Math.floor((width - inner - 2) / 2);
+	const pad = (text: string) => `${" ".repeat(left)}│${truncateToWidth(` ${text}`, inner, "…", true)}│`;
+	const lines = [
+		`${" ".repeat(left)}┌${"─".repeat(inner)}┐`,
+		pad(`Remove ${bold(confirm.name)}`),
+		pad(confirm.worktrees > 0 ? `and its ${confirm.worktrees} worktree${confirm.worktrees > 1 ? "s" : ""}` : ""),
+		pad("from this list?"),
+		pad(""),
+		pad(`${key("y", "remove")}  ${key("n", "keep")}`),
+		`${" ".repeat(left)}└${"─".repeat(inner)}┘`,
+	];
+	const top = Math.max(0, Math.floor((out.length - lines.length) / 3));
+	lines.forEach((line, i) => {
+		out[top + i] = line;
+	});
+	const y = 3 + top + 5;
+	targets.unshift(
+		{ y, from: left + 2, to: left + 10, act: () => answer(true) },
+		{ y, from: left + 12, to: left + 18, act: () => answer(false) },
+	);
+}
+
 function rowLine(row: Row, width: number, now: number): string {
 	if (row.kind === "header") {
 		const count = gray(` (${row.count})`);
@@ -1663,8 +2074,13 @@ async function prefixKey(k: string): Promise<void> {
 		await focusRoster();
 		roster.startNaming();
 	} else if (k === "j" || k === "k") roster.moveSession(k === "j" ? 1 : -1);
-	else if (k === "n") roster.newAtCursor();
-	else if (k === "N") newSession(here, null);
+	else if (k === "n") {
+		await focusRoster();
+		roster.newAtCursor();
+	} else if (k === "N") {
+		await focusRoster();
+		roster.openPicker("add", null, null);
+	} else if (k === "d") roster.askRemove();
 	else if (k === "w") roster.wake();
 	else if (k === "x") roster.stop();
 	else if (k === "a") roster.toggleArchived();
@@ -1850,6 +2266,29 @@ async function showView(e: Entry, next: View): Promise<void> {
 
 // ── view state ──────────────────────────────────────────────────────────
 
+function pickerState(): PickerState | null {
+	const choosing = roster.choosing;
+	if (!choosing) return null;
+	const listed = roster.listed();
+	const rows =
+		choosing.mode === "pick"
+			? roster
+					.pickRows()
+					.map((row) =>
+						row.kind === "add"
+							? { name: "+ add a directory…", path: null, worktree: false, dim: false }
+							: { name: targetName(row.target), path: row.target.path, worktree: row.target.repo !== null, dim: row.context },
+					)
+			: roster.addRows().map((path) => ({ name: `${basename(path)}/`, path, worktree: false, dim: listed.has(path) }));
+	return {
+		mode: choosing.mode,
+		input: (choosing.mode === "pick" ? roster.search : roster.path).getValue(),
+		rows,
+		choice: choosing.choice,
+		confirm: choosing.confirm?.name ?? null,
+	};
+}
+
 function viewState(): DeckState {
 	const rows = roster.rows();
 	const labels = new Map(rows.flatMap((row) => (row.kind === "header" && row.group ? [[row.key, groupLabel(row.group)]] : [])));
@@ -1864,7 +2303,8 @@ function viewState(): DeckState {
 		terminalFocused,
 		cursor: cursorRow?.kind === "session" ? cursorRow.entry.id : null,
 		cursorRow: index,
-		mode: roster.filtering ? "filter" : roster.naming ? "name" : "roster",
+		mode: roster.choosing ? "picker" : roster.filtering ? "filter" : roster.naming ? "name" : "roster",
+		picker: pickerState(),
 		drop: drop ? { project: projectName(drop.header.project), group: drop.header.group && groupLabel(drop.header.group) } : null,
 		filter: roster.query(),
 		focus:
@@ -1965,6 +2405,7 @@ Bun.serve({
 });
 
 post({ type: "init", deck, paths, config, here });
+post({ type: "dirs" });
 if (args.new) newSession(args.new, null);
 void layout();
 

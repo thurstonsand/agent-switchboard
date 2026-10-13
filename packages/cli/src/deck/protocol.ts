@@ -1,6 +1,7 @@
 import type { View } from "@swb/shared";
 import type { Config } from "../config.ts";
 import type { SessionState } from "../derive.ts";
+import type { TargetTree } from "../dirs.ts";
 import type { DeckLayout } from "../store.ts";
 
 /** One roster entry: a Session, or a live pi that has had no prompt yet (provisional, titled by its id). */
@@ -57,6 +58,15 @@ export type HeaderStateRow = { kind: "header"; project: string; group: string | 
 
 export type StateRow = SessionStateRow | HeaderStateRow | { kind: "section"; label: string; count: number; expanded: boolean };
 
+/** The directory picker: its rows as shown, the highlighted one (-1 in add mode is the typed path), and the remove prompt's name. */
+export type PickerState = {
+	mode: "pick" | "add";
+	input: string;
+	rows: { name: string; path: string | null; worktree: boolean; dim: boolean }[];
+	choice: number;
+	confirm: string | null;
+};
+
 /** What `GET /state` answers: the Deck as a driver sees it. */
 export type DeckState = {
 	deck: string;
@@ -65,7 +75,8 @@ export type DeckState = {
 	cursor: string | null;
 	/** The cursor's index in `rows`, headers included. */
 	cursorRow: number;
-	mode: "filter" | "name" | "roster";
+	mode: "filter" | "name" | "picker" | "roster";
+	picker: PickerState | null;
 	/** Mid-drag, the header a release would drop into: its Project, and its Group or worktree bucket, if any. */
 	drop: { project: string; group: string | null } | null;
 	filter: string;
@@ -102,7 +113,10 @@ export type ToWorker =
 	| { type: "view"; id: string; view: View }
 	| { type: "group"; ids: string[]; name: string | null }
 	| { type: "editor"; dir: string }
-	| { type: "shell"; dir: string };
+	| { type: "shell"; dir: string }
+	| { type: "dirs" }
+	| { type: "addDir"; path: string }
+	| { type: "removeDir"; path: string };
 
 export type FromWorker =
 	| { type: "restore"; layout: DeckLayout | null }
@@ -117,4 +131,5 @@ export type FromWorker =
 	| { type: "shell"; dir: string; name: string | null; text: string | null }
 	| { type: "viewFailed"; id: string; text: string }
 	| { type: "groupFailed"; text: string }
+	| { type: "dirs"; trees: TargetTree[] }
 	| { type: "error"; text: string };

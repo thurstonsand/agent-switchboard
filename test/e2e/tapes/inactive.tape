@@ -6,6 +6,9 @@ Type "swb" Sleep 400ms Enter
 Wait+Screen /▾ \S+ \(1\)/
 Sleep 2s
 Type "n"
+Wait+Screen /new session in/
+Sleep 800ms
+Enter
 Wait+Screen /faux-1/
 Sleep 1s
 Type "reply still busy over here" Sleep 400ms Enter

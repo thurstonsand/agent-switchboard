@@ -2,10 +2,7 @@
 Source common.tape
 
 Type "# archive with a: refused mid-turn, then archived, then unarchived" Sleep 1s Enter
-Type "swb" Sleep 400ms Enter
-Wait+Screen /Archived \(0\)/
-Sleep 1s
-Type "n"
+Type "swb new" Sleep 400ms Enter
 Wait+Screen /faux-1/
 Sleep 1s
 Type "hold busy" Sleep 400ms Enter

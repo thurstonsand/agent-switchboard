@@ -2,6 +2,7 @@ import { adopt } from "./commands/adopt.ts";
 import { archive } from "./commands/archive.ts";
 import { deckCommand, deckNotify, help } from "./commands/deck.ts";
 import { detached } from "./commands/detached.ts";
+import { dirs } from "./commands/dirs.ts";
 import { drive } from "./commands/drive.ts";
 import { gc } from "./commands/gc.ts";
 import { launch } from "./commands/launch.ts";
@@ -24,6 +25,7 @@ const USAGE = `swb: Agent Switchboard
   swb open ID                  open a Deck on a session
   swb adopt ID|TRANSCRIPT      track a session pi ran outside swb, then open it; quit that pi first
   swb ls [--json]              list sessions with derived state
+  swb dirs [--json]            list the directories the Deck's picker offers
   swb archive ID               archive a session
   swb unarchive ID             reopen an archived session
   swb launch --cwd DIR --session-id ID --model M
@@ -31,7 +33,7 @@ const USAGE = `swb: Agent Switchboard
   swb wake ID                  start a dormant session's pi in the background
   swb drive start [--size COLSxROWS] [--theme light|dark] [-- swb-args]
   swb drive keys [--delay MS] [-l TEXT]… [KEY…] | capture [--ansi] | theme light|dark | focus in|out
-            | click X Y | drag X1 Y1 X2 Y2 [--hold] | release X Y (0-based cells) | resize COLSxROWS | clipboard | stop
+            | click X Y | move X Y | drag X1 Y1 X2 Y2 [--hold] | release X Y (0-based cells) | resize COLSxROWS | clipboard | stop
   swb drive state | wait PATH=VALUE [--timeout MS]
   swb deck state [--deck NAME] [--json]
   swb migrate                  create or upgrade the db
@@ -64,6 +66,8 @@ async function main(args: string[]): Promise<void> {
 			return adopt(rest);
 		case "ls":
 			return ls(rest);
+		case "dirs":
+			return dirs(rest);
 		case "archive":
 			return archive(rest);
 		case "unarchive":

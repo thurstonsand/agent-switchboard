@@ -3,6 +3,7 @@ import { statSync } from "node:fs";
 import { bootId, type Db, operatorDir, projectRoot, type View } from "@swb/shared";
 import type { Config } from "../config.ts";
 import { derive, type RuntimeRecord, runtimeLive, runtimeRecords, type SessionRow, sessionRows, type World } from "../derive.ts";
+import { addDir, removeDir, targets } from "../dirs.ts";
 import { archive, ensureEditor, ensureSessionsServer, ensureShell, launch, stop, unarchive, wake } from "../sessions.ts";
 import { loadLayout, markVisited, openStore, saveLayout, setGroup, setView } from "../store.ts";
 import { listSessions, SESSIONS, tmuxTry } from "../tmux.ts";
@@ -319,6 +320,17 @@ function handle(message: ToWorker): void {
 			post({ type: "editor", dir: message.dir, name: up ? name : null, text: up ? null : `${config.editor} exited at once` });
 			return;
 		}
+		case "dirs":
+		case "addDir":
+		case "removeDir":
+			try {
+				if (message.type === "addDir") addDir(db, message.path);
+				if (message.type === "removeDir") removeDir(db, message.path);
+				post({ type: "dirs", trees: targets(db, config.dirs) });
+			} catch (error) {
+				post({ type: "error", text: `directories: ${(error as Error).message}` });
+			}
+			return;
 		case "shell": {
 			let name: string;
 			try {

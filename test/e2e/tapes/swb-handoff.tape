@@ -2,10 +2,7 @@
 Source common.tape
 
 Type "# a pi-sessions handoff becomes a managed Session; messaging it while dormant wakes it" Sleep 1s Enter
-Type "swb" Sleep 400ms Enter
-Wait+Screen /Archived \(0\)/
-Sleep 1s
-Type "n"
+Type "swb new" Sleep 400ms Enter
 Wait+Screen /faux-1/
 Sleep 1s
 Type "handoff scout" Sleep 400ms Enter

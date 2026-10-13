@@ -245,6 +245,12 @@ export async function drive(args: string[]): Promise<void> {
 			await raw(sgr(0, c1, r1), ...steps, ...(rest.includes("--hold") ? [] : [sgr(0, c2, r2, true)]));
 			break;
 		}
+		case "move": {
+			// The pointer moving with no button held, which tmux passes on only to a pane that asked for every motion.
+			const [col, row] = rest.map(Number) as [number, number];
+			await raw(sgr(35, col, row));
+			break;
+		}
 		case "release": {
 			const [col, row] = rest.map(Number) as [number, number];
 			await raw(sgr(0, col, row, true));

@@ -30,6 +30,7 @@ swb new [--cwd DIR]          open a Deck on a new pi session
 swb open ID                  open a Deck on a session
 swb adopt ID|TRANSCRIPT      track a session pi ran outside swb, then open it; quit that pi first
 swb ls [--json]              list sessions with derived state
+swb dirs [--json]            list the directories n offers for a new session
 swb archive ID               archive a session
 swb unarchive ID             reopen an archived session
 swb launch --cwd DIR --session-id ID --model M   start a session managed, in the background
@@ -40,7 +41,9 @@ swb wake ID                  start a dormant session's pi in the background
 
 Inside a managed session, the recorder registers swb as a pi-sessions host, so `session_handoff` offers `launch: "swb"` in place of tmux and Ghostty splits. The child starts managed and lands on the roster. `session_reachable` lists dormant sessions too, and `session_send_message` to one wakes it first. Subagents still run in their parent's tmux and never become sessions.
 
-In the roster, `j`/`k` move, `Enter` focuses the session (waking it if it's dormant), `w` wakes it in the background, `x` stops its pi and keeps it open, `n` starts a new session in the highlighted directory, `N` in the one you ran `swb` from, `a` archives or unarchives, `m` picks the session's Group from a list or names a new one (or renames one from its header), `/` filters, and `q` quits. `M-a` is the Deck's prefix from anywhere: `M-a h`/`M-a l` move between the roster and the Stage, `Tab` returns to the pane you left, `M-a e` swaps pi and the editor and focuses it, `M-a v` splits them, `M-a s` opens the directory's shell under pi (`ctrl-d` closes it), `M-a z` hides the roster, `M-a n`/`M-a N`/`M-a j`/`M-a k` and the other roster keys work after it too, `M-a q` closes the Deck, `M-a ?` lists the rest. `ctrl-h`/`j`/`k`/`l` move between panes; with nvim as the editor they walk its windows first and step off its edge into the Deck. Dragging a session onto a Group, or anywhere beneath one, moves it there. Clicking a session focuses it, and the tabs under the roster and its legend are clickable.
+In the roster, `j`/`k` move, `Enter` focuses the session (waking it if it's dormant), `w` wakes it in the background, `x` stops its pi and keeps it open, `n` picks a directory for a new session, starting from the highlighted one, `N` adds a directory and starts one there, `a` archives or unarchives, `m` picks the session's Group from a list or names a new one (or renames one from its header), `/` filters, and `q` quits. `M-a` is the Deck's prefix from anywhere: `M-a h`/`M-a l` move between the roster and the Stage, `Tab` returns to the pane you left, `M-a e` swaps pi and the editor and focuses it, `M-a v` splits them, `M-a s` opens the directory's shell under pi (`ctrl-d` closes it), `M-a z` hides the roster, `M-a n`/`M-a N`/`M-a j`/`M-a k` and the other roster keys work after it too, `M-a q` closes the Deck, `M-a ?` lists the rest. `ctrl-h`/`j`/`k`/`l` move between panes; with nvim as the editor they walk its windows first and step off its edge into the Deck. Dragging a session onto a Group, or anywhere beneath one, moves it there. Clicking a session focuses it, and the tabs under the roster and its legend are clickable.
+
+`n`'s picker lists each repository with its worktrees beneath it, alongside plain directories: those under `[dirs]`, every directory a session is in, and ones added with `N`. Typing filters it, best match first. `M-a d`, or the `✕` on the highlighted row, removes a directory from the list, and a repository's worktrees go with it; adding it again with `N` brings it back. A directory that no longer exists drops off on its own.
 
 ### Operators
 
@@ -58,6 +61,13 @@ reap_after = "30m"        # an idle live pi nobody is viewing is stopped after t
 clipboard = "wl-copy"     # defaults to wl-copy, else xclip, else pbcopy
 roster_width = 42         # columns, or a share of the Deck like "25%"; never more than half
 group_by = "project"      # "worktree" buckets each Project's ungrouped sessions by worktree branch
+
+[dirs]                    # what n offers, beside every directory a session is in and ones added with N
+scan = ["~/code"]         # git checkouts and their worktrees beneath these; none by default
+depth = 2                 # how far beneath each to look, 1 to 10; a checkout is never entered
+include = ["~/notes"]     # always offered, git or not
+exclude = ["dotfiles"]    # like .gitignore: a bare name anywhere, a pattern with a slash under each scan root, or one ~/ path
+sort = "name"             # "recent" puts directories with the latest session activity first
 
 [keys]
 prefix = "M-a"

@@ -2,10 +2,7 @@
 Source common.tape
 
 Type "# SIMULATED PROCESS LOSS: the sessions server is killed under one idle and one mid-turn pi" Sleep 1.5s Enter
-Type "swb" Sleep 400ms Enter
-Wait+Screen /Archived \(0\)/
-Sleep 1s
-Type "n"
+Type "swb new" Sleep 400ms Enter
 Wait+Screen /faux-1/
 Type "reply done for now" Sleep 300ms Enter
 Sleep 1s
@@ -14,6 +11,9 @@ Sleep 1s
 Alt+a
 Type "h"
 Type "n"
+Wait+Screen /new session in/
+Sleep 800ms
+Enter
 Wait+Screen /▾ \S+ \(2\)/
 Sleep 1s
 Type "reply starting the build" Sleep 300ms Enter

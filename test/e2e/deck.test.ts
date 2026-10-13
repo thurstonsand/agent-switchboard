@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState, SessionStateRow } from "../../packages/cli/src/deck/protocol.ts";
-import { config, cursorTo, entry, piSessions, reply, rowIndex, seed, sessionRows, state, waitState } from "./harness/deck.ts";
+import { config, cursorTo, entry, pickNew, piSessions, reply, rowIndex, seed, sessionRows, state, waitState } from "./harness/deck.ts";
 import { alive, budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -105,7 +105,7 @@ test("moving the cursor while n's pi starts stages that row, and the pi landing 
 	const below = rowIndex(state(s), b) > rowIndex(state(s), a) ? "j" : "k";
 	mkdirSync(join(s.home, "e2e-signals"), { recursive: true });
 	writeFileSync(join(s.home, "e2e-signals", "start.hold"), "");
-	s.keys("n");
+	await pickNew(s);
 	await until(() => s.signal("start.entered"), budgets.piReady, "the new pi held mid-start");
 	await waitState(s, "stage focus", (x) => x.focus === "stage");
 	s.keys("M-a", "h");
@@ -241,7 +241,7 @@ test("n and swb new show the new pi as a provisional row before any prompt; /new
 
 	s.keys("M-a", "h");
 	await waitState(s, "roster focus", (x) => x.focus === "roster");
-	s.keys("n");
+	await pickNew(s);
 	const third = await waitState(s, "n's pi live", (x) => x.staged.kind === "live" && x.staged.id !== moved.staged.id, budgets.piReady);
 	expect(third.focus).toBe("stage");
 	expect(

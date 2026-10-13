@@ -1,9 +1,22 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState, HeaderStateRow } from "../../packages/cli/src/deck/protocol.ts";
 import { VERSION } from "../../packages/cli/src/version.ts";
-import { cursorTo, entry, headerRows, piSessions, reply, rowIndex, seed, sessionRows, state, terminal, waitState } from "./harness/deck.ts";
+import {
+	cursorTo,
+	entry,
+	headerRows,
+	pickNew,
+	piSessions,
+	reply,
+	rowIndex,
+	seed,
+	sessionRows,
+	state,
+	terminal,
+	waitState,
+} from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -184,7 +197,7 @@ test("three Decks stay in sync: a wake, an archive, and a new session in one sho
 	const archived = (st: DeckState) => st.rows.find((r) => r.kind === "section" && r.label === "Archived");
 	for (const st of [state(s), two.state(), three.state()]) expect(archived(st)).toMatchObject({ count: 1 });
 
-	two.keys("n");
+	await pickNew(s, ["n"], two);
 	await until(() => sessionRows(two.state()).some((r) => r.provisional), budgets.piReady, "a new pi in Deck two");
 	await waitState(s, "the new pi in the drive Deck", (x) => sessionRows(x).some((r) => r.provisional));
 	await until(() => sessionRows(three.state()).some((r) => r.provisional), budgets.settle, "the new pi in Deck three");
@@ -359,64 +372,34 @@ test("roster navigation: h l space and a header click fold projects; g G jump; M
 	expect(s.ls().find((e) => e.id === b)?.live).toBe(true);
 });
 
-test("n in an empty Deck, and on a section row, starts a session where swb was run", async () => {
-	s = scenario("phase6", "n-here");
-	s.swb("drive", "start");
-	await waitState(s, "an empty roster", (x) => x.ready && x.cursor === null);
-	s.keys("n");
-	const first = await waitState(s, "n's pi live", (x) => x.staged.kind === "live" && x.staged.id !== null, budgets.piReady);
-	s.keys("M-a", "h");
-	await waitState(s, "roster focus", (x) => x.focus === "roster");
-	s.keys("G");
-	await waitState(s, "cursor on the Archived section", (x) => x.rows[x.cursorRow]?.kind === "section");
-	s.keys("n");
-	const second = await waitState(
-		s,
-		"a second pi live",
-		(x) => x.staged.kind === "live" && x.staged.id !== null && x.staged.id !== first.staged.id,
-		budgets.piReady,
-	);
-	s.save("n-here.txt", s.screen());
-	const cwds = () => s.query<{ cwd: string }>("select cwd from runtimes order by started_at").map((r) => r.cwd);
-	await until(() => cwds().length === 2, budgets.settle, "both pis registered");
-	expect(cwds()).toEqual([s.project, s.project]);
-	expect(second.focus).toBe("stage");
-	s.keys("M-a", "n");
-	const third = await waitState(
-		s,
-		"M-a n from pi starts a third",
-		(x) => x.staged.kind === "live" && x.staged.id !== null && x.staged.id !== second.staged.id && x.staged.id !== first.staged.id,
-		budgets.piReady,
-	);
-	expect(third.focus).toBe("stage");
-});
-
-test("n starts a session in the highlighted row's directory, N where swb was run", async () => {
+test("n and M-a n open the picker on the highlighted session's directory, before its first prompt too, and Enter starts there", async () => {
 	s = scenario("phase6", "n-cursor");
+	// The scenario's root is already its real path.
 	const elsewhere = join(s.home, "elsewhere");
 	mkdirSync(elsewhere);
 	s.swb("drive", "start", "--", "new", "--cwd", elsewhere);
 	const away = await waitState(s, "a pi elsewhere", (x) => x.staged.kind === "live" && x.staged.id !== null, budgets.piReady);
-	s.keys("M-a", "N");
-	const here = await waitState(
+	await pickNew(s, ["M-a", "n"]);
+	const beside = await waitState(
 		s,
-		"M-a N starts one where swb was run",
+		"M-a n from pi starts a second",
 		(x) => x.staged.kind === "live" && x.staged.id !== null && x.staged.id !== away.staged.id,
 		budgets.piReady,
 	);
+	expect(beside.focus).toBe("stage");
 	s.keys("M-a", "h");
 	await waitState(s, "roster focus", (x) => x.focus === "roster");
 	await cursorTo(s, away.staged.id as string);
-	s.keys("n");
-	const beside = await waitState(
+	await pickNew(s);
+	const third = await waitState(
 		s,
 		"n on the elsewhere row",
-		(x) => x.staged.kind === "live" && x.staged.id !== null && x.staged.id !== away.staged.id && x.staged.id !== here.staged.id,
+		(x) => x.staged.kind === "live" && x.staged.id !== null && x.staged.id !== away.staged.id && x.staged.id !== beside.staged.id,
 		budgets.piReady,
 	);
 	s.save("n-cursor.txt", s.screen());
 	const cwdOf = (id: string | null) => s.query<{ cwd: string }>("SELECT cwd FROM runtimes WHERE session_id = ?", id)[0]?.cwd;
-	expect([away, here, beside].map((x) => cwdOf(x.staged.id))).toEqual([realpathSync(elsewhere), s.project, realpathSync(elsewhere)]);
+	expect([away, beside, third].map((x) => cwdOf(x.staged.id))).toEqual([elsewhere, elsewhere, elsewhere]);
 });
 
 test("a newer swb takes over: idle pis stop, a working one keeps its turn, and empty servers restart; an older swb leaves a newer server alone and its Deck says so", async () => {

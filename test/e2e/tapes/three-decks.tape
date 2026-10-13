@@ -4,7 +4,7 @@ Set Height 1400
 
 Type "# three Decks, one switchboard" Sleep 1s Enter
 Hide
-Type "tmux -L demo -f /dev/null new -s demo swb \; split-window -v swb \; split-window -v swb \; select-layout even-vertical \; set -g status off" Enter
+Type "tmux -L demo -f /dev/null new -s demo swb new \; split-window -v swb \; split-window -v swb \; select-layout even-vertical \; set -g status off" Enter
 Show
 Wait+Screen /(?s)Archived \(0\).*Archived \(0\).*Archived \(0\)/
 Wait+Screen /(?s)Archived \(1\).*Archived \(1\).*Archived \(1\)/

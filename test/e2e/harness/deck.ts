@@ -44,6 +44,27 @@ export async function waitState(s: Scenario, what: string, probe: (st: DeckState
 	);
 }
 
+/**
+ * Opens the directory picker with `keys` (`n` by default) and starts a session in the directory it highlights: the
+ * highlighted row's. `deck` reads another terminal's Deck.
+ */
+export async function pickNew(
+	s: Scenario,
+	keys = ["n"],
+	deck: { keys: (...keys: string[]) => void; state: () => DeckState } = { keys: s.keys, state: () => state(s) },
+): Promise<void> {
+	deck.keys(...keys);
+	await until(
+		() => {
+			const picker = deck.state().picker;
+			return picker !== null && picker.rows[picker.choice]?.path != null;
+		},
+		budgets.settle,
+		"the picker on a directory",
+	);
+	deck.keys("Enter");
+}
+
 /** Prompts in the focused pi and waits for the scripted reply. */
 export async function reply(s: Scenario, text: string): Promise<void> {
 	s.keys("-l", `reply ${text}`, "Enter");

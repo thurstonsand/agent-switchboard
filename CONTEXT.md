@@ -5,16 +5,13 @@
 ### Lifecycle
 
 **Session**:
-One agent conversation, identified by its harness session id, tracked from its first turn. Shown by its title, or its id when it has none.
-
-**Open**:
-A session that has not been archived, whether or not its process is running.
+One agent conversation, identified by its harness session id, tracked from its first turn.
 
 **Archived**:
 A session that has been completed; it leaves the roster but stays listable and reversible.
 
 **Inactive**:
-An open session with no activity in the last 72 hours.
+An open session with no activity within `inactive_after` (72 hours).
 
 ### Runtime
 
@@ -22,7 +19,7 @@ An open session with no activity in the last 72 hours.
 A session whose agent process is running in this boot.
 
 **Dormant**:
-An open session with no running process; the roster shows it as not running unless it is **Interrupted**.
+An open session with no running process.
 
 **Interrupted**:
 A dormant session whose process ended mid-turn rather than while idle.
@@ -30,19 +27,13 @@ A dormant session whose process ended mid-turn rather than while idle.
 **Managed**:
 A session hosted by a pi process that `swb` started in its tmux server. Once a process is managed, every session it hosts counts, including after `/new`, `/resume`, or `/fork`. Processes it spawns, such as subagents, do not; only managed sessions can be reattached.
 
-**Viewer**:
-Anything attached to a managed session's tmux session, usually a **Stage**. Closing it detaches without ending the session, and several can share one session.
-
 ### Attention
 
 **Activity**:
-What a live session's agent is doing right now: **working**, **blocked** on me (e.g. permission prompt), or **idle**.
-
-**Idle**:
-The agent finished its turn and is waiting for my next prompt.
+What a live session's agent is doing right now: **working**, **blocked** on me (e.g. permission prompt), or **idle**, its turn finished and waiting for my next prompt.
 
 **Visit**:
-The moment I last looked at a session, by focusing its pi on the **Stage** for a second, or focusing its **Viewer**; a timestamp watermark.
+The moment I last looked at a session, by focusing its pi for a second, on the **Stage** or in any other tmux client attached to it; a timestamp watermark.
 
 **Unseen**:
 A session whose agent finished a turn after my last **Visit**.
@@ -52,14 +43,14 @@ A session whose agent finished a turn after my last **Visit**.
 **Deck**:
 What `swb` opens: the **Roster** beside a **Stage**, in one disposable layout. Each invocation gets its own.
 
-**Editor**:
-The text editor for one directory, shared by every session whose working directory it is; it shows on the **Stage** instead of, or beside, the session.
-
-**Shell**:
-A login shell for one directory, opened beneath pi on the **Stage** in one **Deck**. Hiding it keeps it running; exiting it ends it.
+**Roster**:
+The Deck's list of sessions, in sections: **Operators**, open sessions by **Project**, **Inactive**, then **Archived**.
 
 **Stage**:
 Internal term for the Deck's live, interactive view of the selected session; moving the Roster cursor changes which session it shows. Internal term (not in UI).
+
+**Editor**:
+The text editor for one directory, shared by every session whose working directory it is.
 
 **View**:
 What the **Stage** shows for a session: **pi**, its **Editor**, or a **split** of both. Each session remembers its own.
@@ -73,14 +64,9 @@ A session whose working directory is swb's Operator folder. It coordinates the o
 **Group**:
 A name I give a session, scoping it within its **Project**. A Group exists only while some session carries its name: the last one archived takes it away, and unarchiving one brings it back. A session with no Group falls back to its worktree's bucket under `group_by = "worktree"`, or sits directly under its **Project**.
 
-**Roster**:
-The TUI's sectioned list of sessions: **Operators**, then open sessions by **Project**, then **Inactive** by **Project**, then **Archived** flat by recency. Beneath each **Project**, its **Groups** and worktree buckets are siblings, one level deep.
-
 ## Relationships
 
 - A **Session** other than an **Operator** belongs to exactly one **Project**, derived from its working directory, and to at most one **Group** within it
-- A **Session** is either **Open** or **Archived**; independently, it is **Live** or **Dormant**
-- **Activity** and **Unseen** apply only to **Open** sessions
+- A **Session** is open or **Archived**; independently, it is **Live** or **Dormant**
+- **Activity** and **Unseen** apply only to open sessions
 - pi-sessions **subagents** are never **Sessions** here; their parent's ledger owns them
-- A **Managed** session has zero or more **Viewers**; **Live** without a **Viewer** is normal
-- A **Deck** has exactly one **Stage**, showing at most one session at a time

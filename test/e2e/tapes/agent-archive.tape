@@ -2,10 +2,7 @@
 Source common.tape
 
 Type "# pi archives its own session with swb_update_session" Sleep 1s Enter
-Type "swb" Sleep 400ms Enter
-Wait+Screen /Archived \(0\)/
-Sleep 1s
-Type "n"
+Type "swb new" Sleep 400ms Enter
 Wait+Screen /faux-1/
 Sleep 1s
 Type "reply the fix is merged" Sleep 400ms Enter

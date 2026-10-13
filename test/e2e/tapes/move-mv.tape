@@ -2,10 +2,7 @@
 Source common.tape
 
 Type "# /mv moves the session's directory; swb follows it to that project" Sleep 1s Enter
-Type "swb" Sleep 400ms Enter
-Wait+Screen /Archived \(0\)/
-Sleep 1s
-Type "n"
+Type "swb new" Sleep 400ms Enter
 Wait+Screen /faux-1/
 Sleep 1s
 Type "reply before the move" Sleep 400ms Enter

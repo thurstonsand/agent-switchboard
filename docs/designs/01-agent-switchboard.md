@@ -121,8 +121,8 @@ The final visual spec comes from the Deck mock rounds (see [ticket 09](../wayfin
 - `j`/`k`/arrows move; `g`/`G` jump to the ends.
 - `Enter` focuses the Stage. On a dormant session it wakes pi and moves the keyboard to the loading card at once; pi gets the keyboard the moment it's ready. `esc` on the loading card hands the keyboard back to the roster without stopping the wake, exactly as if I had pressed `w`. `esc` is never bound once pi has the keyboard, because it means something to pi.
 - `a` toggles: it archives an open session and unarchives an archived one. There is no separate undo key. After `a` the cursor stays in place, on the row that followed, instead of chasing the session into its new section.
-- `n` starts a new session: in the selected session's cwd on a session row, in the project root on a header, or where `swb` was run on a section row, as in an empty Deck.
-- `N` starts a new session where `swb` was run, whatever the cursor is on.
+- `n` opens the directory picker on the highlighted row's directory: the selected session's cwd, a header's newest session's, or nothing on a section row. A session started in that same directory joins the row's Group. On the Operators section, `n` starts an Operator instead.
+- `N` opens the picker straight into adding a directory.
 - `w` wakes a dormant session in the background and never takes the keyboard.
 - `m` names the selected session's Group, prefilled with its current one; on a Group header it renames the Group for every session carrying it, archived ones included. An empty name ungroups. `m rename` shows in the legend on a Group header only.
 - Dragging an open session with the mouse moves it between Groups. Hovering a header, or any session beneath one, lights that header as the drop and the legend line names it: `drop into <group>`, or `drop to ungroup` over the Project header, its loose sessions, or the session's own worktree bucket. Anywhere else (another Project, another branch's bucket, a section, Archived, empty space) shows `✗ not here`, and releasing there moves nothing.
@@ -150,6 +150,8 @@ Clicking a pane focuses it. The bindings target panes by index rather than `{lef
 
 **The bar** under the roster is three lines for the selected session: one status word (`failed to start`, `starting`, `blocked`, `working`, `unseen`, `idle`, `not running`, `interrupted`, `archived`), then path and branch, then the clickable view tabs `pi · editor · split` with the current one highlighted. Below it, the legend lists only what the row under the cursor does: its primary act (`⏎ focus` on a live session, `⏎ wake` on a dormant one, `⏎ open` archived, `⏎ expand` on headers), `a archive` or `a unarchive`, `n new`, and `? keys`. With the Stage focused it becomes `<prefix> h list · <prefix> z hide list · <prefix> ? keys`. Every other key lives behind `?`.
 
+**The directory picker** takes over the roster pane while it's open. It lists trees: each repository's main checkout with its worktrees indented beneath it (named by branch, from `git worktree list`), and plain directories. They come from `[dirs]` (scanned checkouts and `include`), every directory a session is in, and directories added in the picker, each only while it exists. `exclude` applies to everything but `include` and adds, worktrees included. The directory the picker opened on is always offered, so `n` on a session that has had no prompt yet, or one under an exclude, still starts beside it. The trees sort by name, or with `dirs.sort = "recent"` by their latest session activity. Typing filters by name: a name that starts with the query ranks first, then one with a word that does, then one that merely contains it, with the matched letters in cyan, and the highlight resets to the best match. A matching worktree keeps its repository above it, dimmed; a matching repository brings all its worktrees. `Enter` starts a session in the highlighted directory. `M-a d`, or clicking the `✕` on the highlighted row, asks before removing it from the list, and while it asks nothing else is clickable; removing a main checkout hides its worktrees too, including ones created later. The last row, `+ add a directory…`, or `N`, or a query starting with `/` or `~`, switches to adding: a path under the first scan root (or `~`, or anywhere from `/`), completed with `Tab`, with directories already listed dimmed but still selectable. With nothing highlighted, as after `Tab` or a trailing `/`, `Enter` takes the directory typed; otherwise the highlighted completion. It adds the directory, unless it's listed already, and starts a session there; adding one inside a removed repository brings the repository back. While the picker is open the roster asks tmux for every pointer movement (mode 1003), so the highlight and its `✕` follow the mouse; pi-tui asks only for button motion inside tmux, which the roster restores on close. Discovery runs in the roster's worker: the picker shows the last list at once and takes the fresh one when it lands. `swb dirs --json` prints the same list.
+
 **Stage states**: live (the real session), dormant (a card, below), loading (pi is starting), not running (pi quit while selected), empty (nothing selected). Archived rows show the dormant card and never start on their own.
 
 **The dormant card** shows the whole conversation: every prompt of mine and every text reply from pi, newest at the bottom, cropped from the top to fit, with no keys of its own: the legend carries them. The keyboard can still land on it, by `M-a j` from pi onto a dormant session; there, `esc` goes back to the roster and any other key wakes pi, as Enter would have. While the roster is on screen the card is the transcript alone; when the roster is hidden or the Deck is narrow, the card heads it with the title, the status word, and the path, since nothing else on screen says them. It skips tool calls and thinking for now; tool-call summaries may come later. It is read from the session's transcript by a small read-only adapter in `packages/cli` for pi's v3 session format: JSONL entries linked by `parentId`, walked back from the last entry so only the active branch shows, keeping `message` entries with role `user` or `assistant` and their text parts. The adapter lives in the roster's worker, cached by the file's mtime, so the card appears at once and fills in when the parse lands. Importing pi's `SessionManager` instead would compile pi's whole coding-agent graph into `swb`, and pin it to whatever pi version `swb` happened to bundle.
@@ -169,6 +171,13 @@ clipboard = "wl-copy"      # command that receives copied text on stdin; default
 
 [keys]
 prefix = "M-a"
+
+[dirs]                     # where the directory picker looks, beside directories sessions have used and ones added in it
+scan = []                  # roots to find git checkouts beneath
+depth = 2                  # 1 to 10 levels; hidden directories, node_modules, and symlinks are skipped, and a checkout is never entered
+include = []               # directories always offered, git or not
+exclude = []               # .gitignore-style: a bare name anywhere, a pattern with a slash under each scan root, a ~/ or / path exactly
+sort = "name"              # or "recent": latest session activity first
 ```
 
 Durations are an integer and a unit, `s`, `m`, `h`, or `d` (`"90s"`, `"30m"`). `editor` runs as `$SHELL -lic 'exec <editor>'` in the directory. `clipboard` runs under `/bin/sh -c`, with the text on stdin.
@@ -218,6 +227,11 @@ CREATE TABLE marks (
   visited_at  INTEGER,
   view        TEXT NOT NULL DEFAULT 'pi' CHECK (view IN ('pi','editor','split')),
   group_name  TEXT                  -- the session's Group within its Project; NULL when it has none
+);
+-- user intent: the directory picker's adds and removals, forgotten once the directory is gone (v4)
+CREATE TABLE dirs (
+  path  TEXT PRIMARY KEY,
+  state TEXT NOT NULL CHECK (state IN ('added','removed'))
 );
 ```
 

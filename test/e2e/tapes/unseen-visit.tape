@@ -2,10 +2,7 @@
 Source common.tape
 
 Type "# unseen: a turn finished while I looked elsewhere; a visit clears it" Sleep 1s Enter
-Type "swb" Sleep 400ms Enter
-Wait+Screen /Archived \(0\)/
-Sleep 1s
-Type "n"
+Type "swb new" Sleep 400ms Enter
 Wait+Screen /faux-1/
 Sleep 1s
 Type "hold background-job" Sleep 400ms Enter
@@ -14,6 +11,9 @@ Alt+a
 Type "h"
 Sleep 500ms
 Type "n"
+Wait+Screen /new session in/
+Sleep 800ms
+Enter
 Wait+Screen /▾ \S+ \(2\)/
 Sleep 1.5s
 Type "reply meanwhile, in front" Sleep 400ms Enter
