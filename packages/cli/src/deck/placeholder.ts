@@ -44,7 +44,7 @@ function draw(): void {
 	if (head.length > 0 && card.lines.length > 0) head.push("");
 	for (const line of card.lines) head.push(...(line === "" ? [""] : wrapTextWithAnsi(dim(line), width)));
 	const foot: string[] = [];
-	if (typedAt > now - 1500) foot.push("", yellow("input ignored: pi isn't running here"));
+	if (typedAt > now - 1500) foot.push("", yellow("input ignored until pi is up"));
 
 	// The conversation fills the room left between the head and the foot, newest at the bottom.
 	const room = Math.max(0, rows - 2 - head.length - foot.length - 1);
@@ -71,9 +71,9 @@ function draw(): void {
 	process.stdout.write(out);
 }
 
-async function esc(): Promise<void> {
+async function send(cmd: "esc" | "wake"): Promise<void> {
 	// The Deck may be gone; the placeholder dies with it.
-	await fetch("http://deck/cmd", { unix: sock, method: "POST", body: JSON.stringify({ cmd: "esc", args: [] }) }).catch(() => undefined);
+	await fetch("http://deck/cmd", { unix: sock, method: "POST", body: JSON.stringify({ cmd, args: [] }) }).catch(() => undefined);
 }
 
 process.stdout.write("\x1b[?1049h\x1b[?25l");
@@ -81,9 +81,10 @@ process.stdin.setRawMode(true);
 process.stdin.on("data", (data: Buffer) => {
 	const text = data.toString("utf8");
 	if (matchesKey(text, "escape")) {
-		void esc();
+		void send("esc");
 		return;
 	}
+	void send("wake");
 	typedAt = Date.now();
 	draw();
 });

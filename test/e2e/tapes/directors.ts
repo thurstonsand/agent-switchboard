@@ -106,6 +106,25 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"stage-key-wake": {
+		setup: async (s) => {
+			await seed(
+				s,
+				{ title: "Draft release notes", turns: ["notes drafted"] },
+				{ title: "Refactor the parser", turns: ["parser refactored"] },
+			);
+		},
+		run: async (s) => {
+			const ls = await waitLs(s, "both seeded", (x) => x.length === 2);
+			const notes = ls.find((e) => e.title === "Draft release notes")?.id;
+			await waitDeck(s, "the first one live with the keyboard", (x) => x.staged.kind === "live" && x.focus === "stage");
+			const asleep = await waitDeck(s, "M-a j onto the sleeping one", (x) => x.staged.id === notes);
+			expect(asleep.staged.kind).toBe("dormant");
+			expect(asleep.focus).toBe("stage");
+			await waitDeck(s, "a key woke it", (x) => x.staged.id === notes && x.staged.kind === "live" && x.focus === "stage");
+		},
+	},
+
 	"dormant-card": {
 		setup: async (s) => {
 			await seed(

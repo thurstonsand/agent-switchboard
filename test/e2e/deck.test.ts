@@ -74,6 +74,29 @@ test("Enter on a dormant row holds the keyboard on the loading card and hands it
 	expect(entry(s, a).live && entry(s, b).live).toBe(true);
 });
 
+test("M-a j from pi onto a dormant session leaves it asleep, and a key on its card wakes it into pi", async () => {
+	s = scenario("phase2", "stage-key-wake");
+	const [a, b] = (await seed(s, { turns: ["alpha"] }, { turns: ["beta"] })) as [string, string];
+	s.swb("drive", "start");
+	await cursorTo(s, a);
+	s.keys("Enter");
+	const live = await waitState(s, "a live with the keyboard", (x) => x.staged.id === a && x.staged.kind === "live", budgets.piReady);
+	expect(live.focus).toBe("stage");
+
+	s.keys("M-a", rowIndex(live, b) > rowIndex(live, a) ? "j" : "k");
+	const asleep = await waitState(s, "b's card on the Stage", (x) => x.staged.id === b);
+	await Bun.sleep(1000);
+	expect(state(s)).toMatchObject({ focus: "stage", staged: { id: b, kind: "dormant" } });
+	expect(asleep.waking).toEqual([]);
+	s.save("asleep.txt", s.screen());
+
+	s.keys("Enter");
+	await waitState(s, "b live", (x) => x.staged.id === b && x.staged.kind === "live", budgets.piReady);
+	expect(state(s).focus).toBe("stage");
+	await reply(s, "typed-after-key-wake");
+	s.save("woken.txt", s.screen());
+});
+
 test("moving the cursor while n's pi starts stages that row, and the pi landing doesn't take it back", async () => {
 	s = scenario("phase2", "new-then-move");
 	const [a, b] = (await seed(s, { turns: ["a"] }, { turns: ["b"] })) as [string, string];

@@ -1774,6 +1774,12 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 			await focusRoster();
 			apply();
 			break;
+		// A key typed on a session's card, which only the keyboard on the Stage can type, means to use it.
+		case "wake": {
+			const { kind, id } = stage.applied;
+			if (id !== null && (kind === "dormant" || kind === "exited" || kind === "failed")) wake(id, true);
+			break;
+		}
 		default:
 			throw new Error(`unknown deck command ${cmd}`);
 	}
