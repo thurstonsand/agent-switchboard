@@ -26,7 +26,8 @@ Wait+Screen /tool done w1/
 Sleep 1.5s
 Alt+a
 Type "h"
-Type "g"
-Type "j"
+Type "/child scout" Sleep 300ms Enter
+Sleep 300ms
+Escape
 Wait+Screen /child scout done/
 Sleep 4s

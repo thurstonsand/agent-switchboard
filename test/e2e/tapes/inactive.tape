@@ -14,8 +14,9 @@ Sleep 3s
 Alt+a
 Type "h"
 Sleep 800ms
-Type "g"
-Type "j"
+Type "/Spike" Sleep 300ms Enter
+Sleep 300ms
+Escape
 Sleep 1.5s
 Enter
 Sleep 2s
