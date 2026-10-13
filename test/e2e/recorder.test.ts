@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { copyFileSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { SCHEMA_VERSION } from "../../packages/shared/src/index.ts";
 import { budgets, type LsEntry, release, repo, type Scenario, scenario, until, which } from "./harness/index.ts";
@@ -271,6 +271,31 @@ test("Alt+Enter arrives as CSI-u and Shift+Enter still works", async () => {
 	await startManaged();
 	expect(await typed("M-Enter")).toEqual(["\x1b[13;3u"]);
 	expect(await typed("S-Enter")).toEqual(["\x1b[13;2u"]);
+});
+
+test("clicking a link in fullscreen pi opens it, though pi started with no client to ask whether tmux forwards hyperlinks", async () => {
+	s = scenario("phase1", "links");
+	const settings = join(s.env.PI_CODING_AGENT_DIR as string, "settings.json");
+	writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, "utf8")), tuiMode: "fullscreen" }));
+	const opened = join(s.home, "opened");
+	for (const opener of ["xdg-open", "open"]) {
+		writeFileSync(join(s.bin, opener), `#!/bin/sh\nprintf %s "$1" > ${opened}\n`, { mode: 0o755 });
+	}
+	await startManaged();
+	await prompt("reply see [the docs](mailto:ops@example.com)");
+	await waitFor("replied.see [the docs](mailto:ops@example.com)");
+	const lines = await until(
+		() => {
+			const screen = s.screen().split("\n");
+			return screen.findLastIndex((line) => line.includes("see the docs")) >= 0 && screen;
+		},
+		budgets.settle,
+		"the reply's link",
+	);
+	const row = lines.findLastIndex((line) => line.includes("see the docs"));
+	s.swb("drive", "click", `${(lines[row] as string).indexOf("the docs") + 1}`, `${row}`);
+	await until(() => existsSync(opened), budgets.settle, "the opener");
+	expect(readFileSync(opened, "utf8")).toBe("mailto:ops@example.com");
 });
 
 test("a user tmux.conf binding M-z and setting window-style changes nothing inside pi", async () => {

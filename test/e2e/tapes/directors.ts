@@ -67,6 +67,22 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	links: {
+		run: async (s) => {
+			await until(() => s.signal("replied.see [the docs](mailto:ops@example.com) for the deploy steps") !== "", TAPE, "the reply");
+			const pi = s
+				.tmux(s.servers.sessions, "list-panes", "-a", "-F", "#{@swb_kind} #{pane_id}")
+				.split("\n")
+				.find((line) => line.startsWith("pi "))
+				?.split(" ")[1] as string;
+			await until(
+				() => s.tmux(s.servers.sessions, "capture-pane", "-p", "-e", "-t", pi).includes("\x1b]8;;mailto:ops@example.com\x1b\\the docs"),
+				TAPE,
+				"the link as an OSC 8 hyperlink",
+			);
+		},
+	},
+
 	"tool-turn": {
 		run: async (s) => {
 			await waitLs(s, "the tool turn done", (ls) => ls[0]?.activity === "idle");

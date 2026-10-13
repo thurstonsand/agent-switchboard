@@ -210,6 +210,9 @@ export function launch(cwd: string, resume: string | null, piArgs: string[]): st
 		`SWB_BIN=${SWB}`,
 		"-e",
 		"PI_IMAGE_PROTOCOL=none",
+		// pi asks tmux whether its client forwards hyperlinks, but it starts with no client; both servers always forward them.
+		"-e",
+		"PI_HYPERLINKS=1",
 		`exec env -u TMUX -u TMUX_PANE SHELL=${shell} ${shell} -lic ${quote(pi)}`,
 		";",
 		"set",
