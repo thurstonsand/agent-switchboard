@@ -133,7 +133,8 @@ export function scenario(
 	writeFileSync(
 		join(agentDir, "settings.json"),
 		JSON.stringify({
-			packages: [...(options.recorder ? [join(repo, "dist/pi")] : []), ...options.packages.map(requireHostPackage)],
+			// The recorder last, as `pi install` leaves it when added after pi-sessions: its handlers then run after theirs.
+			packages: [...options.packages.map(requireHostPackage), ...(options.recorder ? [join(repo, "dist/pi")] : [])],
 			...(options.packages.includes("pi-sessions")
 				? // Only what subagents and handoffs need: the rest would spend faux turns on titles and indexing.
 					{ sessions: { autoTitle: { enable: false }, ask: { enable: false }, search: { enable: false } } }

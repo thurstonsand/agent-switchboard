@@ -298,6 +298,7 @@ export const directors: Record<string, Director> = {
 			await entered(s, "child.scout");
 			const child = await until(() => s.ls().find((e) => e.title === "child scout"), TAPE, "the child tracked");
 			await Bun.sleep(3000);
+			expect(s.ls().find((e) => e.id === child.id)).toMatchObject({ live: true, activity: "working" });
 			release(s, "child.scout");
 			await waitLs(s, "the child idle", (ls) => ls.find((e) => e.id === child.id)?.activity === "idle");
 			await Bun.sleep(2000);

@@ -196,8 +196,10 @@ export default function (pi: ExtensionAPI) {
 			const transcript = ctx.sessionManager.getSessionFile();
 			if (!transcript) throw new Error("pi is running without a session file");
 			// /mv and /wt switch to the same session id in another directory, with its transcript rewritten there.
+			// A turn can already be running: a pi-sessions handoff child's starts in pi-sessions' session_start, which may run first.
 			db.run(
-				"UPDATE sessions SET phase = 'idle', cwd = ?, project_root = ?, branch = ?, transcript = ? WHERE session_id = ?",
+				"UPDATE sessions SET phase = CASE WHEN ? THEN 'idle' ELSE phase END, cwd = ?, project_root = ?, branch = ?, transcript = ? WHERE session_id = ?",
+				ctx.isIdle() ? 1 : 0,
 				ctx.cwd,
 				projectRoot(ctx.cwd),
 				branch(ctx.cwd),

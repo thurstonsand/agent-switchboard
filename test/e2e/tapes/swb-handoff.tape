@@ -8,6 +8,7 @@ Sleep 1s
 Type "handoff scout" Sleep 400ms Enter
 Wait+Screen /▾ \S+ \(2\)/
 Sleep 1.5s
+Screenshot ../artifacts/phase6/videos/swb-handoff-child-working.png
 Alt+a
 Type "h"
 Type "k"
