@@ -28,12 +28,12 @@ function snapshot(s: Scenario): void {
 }
 
 async function render(name: string): Promise<void> {
-	for (const ext of ["mp4", "gif"]) rmSync(join(videos, `${name}.${ext}`), { force: true });
+	rmSync(join(videos, `${name}.mp4`), { force: true });
 	const director = directors[name] ?? {};
 	const s = scenario("phase6", `video-${name}`, { packages: director.packages ?? [], recorder: true });
 	try {
 		await director.setup?.(s);
-		const proc = Bun.spawn([vhs, "-q", join(tapes, `${name}.tape`), "-o", join(videos, `${name}.mp4`), "-o", join(videos, `${name}.gif`)], {
+		const proc = Bun.spawn([vhs, "-q", join(tapes, `${name}.tape`), "-o", join(videos, `${name}.mp4`)], {
 			cwd: tapes,
 			env: { ...s.env, PATH: `${s.env.PATH}:${toolPath}`, SWB_DEMO_PROJECT: s.project },
 			stdout: "pipe",
