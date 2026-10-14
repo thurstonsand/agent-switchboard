@@ -8,7 +8,7 @@ import { archive, ensureEditor, ensureSessionsServer, ensureShell, launch, stop,
 import { loadLayout, markVisited, openStore, saveLayout, setGroup, setView } from "../store.ts";
 import { listSessions, SESSIONS, tmuxTry } from "../tmux.ts";
 import { ensurePlaceholder, placeholderName } from "./deck.ts";
-import type { Entry, FromWorker, Snapshot, ToWorker, Turn } from "./protocol.ts";
+import type { Diff, Entry, FromWorker, Snapshot, ToWorker, Turn } from "./protocol.ts";
 import { readTranscript } from "./transcript.ts";
 
 // The roster's worker owns the db and everything slow: a held writer lock or a 50 MB transcript stalls this
@@ -132,6 +132,7 @@ function snapshot(): Polled {
 			unseen: false,
 			interrupted: false,
 			inactive: false,
+			createdAt: runtime.started_at,
 			activityAt: runtime.started_at,
 			visitedAt: null,
 			archivedAt: null,
@@ -206,20 +207,53 @@ function tick(): Set<string> {
 	return names;
 }
 
+/** A transcript's turns, read again only once it has changed on disk. */
+function turnsOf(path: string): Turn[] {
+	const { mtimeMs } = statSync(path);
+	const cached = transcripts.get(path);
+	if (cached?.mtimeMs === mtimeMs) return cached.turns;
+	const turns = readTranscript(path);
+	transcripts.set(path, { mtimeMs, turns });
+	return turns;
+}
+
 function transcript(id: string, path: string): void {
 	try {
-		const { mtimeMs } = statSync(path);
-		const cached = transcripts.get(path);
-		if (cached?.mtimeMs === mtimeMs) {
-			post({ type: "transcript", id, turns: cached.turns, error: null });
-			return;
-		}
-		const turns = readTranscript(path);
-		transcripts.set(path, { mtimeMs, turns });
-		post({ type: "transcript", id, turns, error: null });
+		post({ type: "transcript", id, turns: turnsOf(path), error: null });
 	} catch (error) {
 		post({ type: "transcript", id, turns: null, error: (error as Error).message });
 	}
+}
+
+const DIFF_MS = 2000;
+const diffs = new Map<string, { at: number; diff: Promise<Diff | null> }>();
+
+/** `git diff --shortstat HEAD` in a directory, at most once per DIFF_MS; null outside git or with nothing changed. */
+function diffOf(cwd: string): Promise<Diff | null> {
+	const cached = diffs.get(cwd);
+	if (cached && Date.now() - cached.at < DIFF_MS) return cached.diff;
+	const diff = (async () => {
+		const git = Bun.spawn(["git", "-C", cwd, "diff", "--shortstat", "HEAD"], { stdout: "pipe", stderr: "ignore" });
+		const out = await new Response(git.stdout).text();
+		if ((await git.exited) !== 0) return null;
+		const count = (re: RegExp) => Number(re.exec(out)?.[1] ?? 0);
+		const files = count(/(\d+) files? changed/);
+		return files === 0 ? null : { files, add: count(/(\d+) insertions?/), del: count(/(\d+) deletions?/) };
+	})();
+	diffs.set(cwd, { at: Date.now(), diff });
+	return diff;
+}
+
+/** A Peek's extras. A transcript that won't read says so in place of the last turn, and the rest still shows. */
+async function peek(id: string, cwd: string, path: string | null): Promise<void> {
+	let last: Turn | null = null;
+	let error: string | null = null;
+	try {
+		if (path) last = turnsOf(path).at(-1) ?? null;
+	} catch (e) {
+		error = (e as Error).message;
+	}
+	post({ type: "peek", id, info: { last, diff: await diffOf(cwd), error } });
 }
 
 function handle(message: ToWorker): void {
@@ -279,6 +313,9 @@ function handle(message: ToWorker): void {
 			break;
 		case "transcript":
 			transcript(message.id, message.path);
+			break;
+		case "peek":
+			void peek(message.id, message.cwd, message.transcript);
 			return;
 		case "background":
 			background = message.color;

@@ -29,6 +29,18 @@ export type Snapshot = {
 
 export type Turn = { who: "you" | "pi"; text: string };
 
+/** A worktree's uncommitted changes against HEAD. */
+export type Diff = { files: number; add: number; del: number };
+
+/** What a Peek shows that the snapshot doesn't carry: the last turn, or why it won't read, and its directory's uncommitted changes. */
+export type PeekInfo = { last: Turn | null; diff: Diff | null; error: string | null };
+
+/** The Peek as `swb __peek` draws it, written whole to a file it watches. */
+export type PeekView = { id: string; lines: string[]; buttons: PeekButton[] };
+
+/** A Peek's button: where it is on its line, the roster key it runs, and its line with it lit. */
+export type PeekButton = { y: number; from: number; to: number; key: string; hot: string };
+
 /** What the Stage shows when it shows no live session; the placeholder renders it. */
 export type Card = {
 	/** Title, state, and path, only while the roster is off-screen; its detail bar owns them otherwise. */
@@ -80,6 +92,10 @@ export type DeckState = {
 	/** Mid-drag, the header a release would drop into: its Project, and its Group or worktree bucket, if any. */
 	drop: { project: string; group: string | null } | null;
 	filter: string;
+	/** The session row under the pointer, or null once the pointer has left the roster. */
+	hover: string | null;
+	/** The Peek beside a row: whose, why, and what it says, its lines stripped of color. */
+	peek: { id: string; source: "pointer" | "cursor"; lines: string[] } | null;
 	focus: "roster" | "stage" | "editor" | "shell";
 	staged: {
 		id: string | null;
@@ -96,8 +112,8 @@ export type DeckState = {
 	perf: { render: StatSummary; switchClient: StatSummary; keyToSwitch: StatSummary; keyToFrame: StatSummary };
 };
 
-/** `side` is the target file of the Stage's second pane, which exists only while split is showing. */
-export type DeckPaths = { sock: string; card: string; target: string; side: string; below: string };
+/** `side` is the target file of the Stage's second pane, which exists only while split is showing; `peek` is the Peek's. */
+export type DeckPaths = { sock: string; card: string; target: string; side: string; below: string; peek: string };
 
 export type ToWorker =
 	| { type: "init"; deck: string; paths: DeckPaths; config: Config; here: string }
@@ -109,6 +125,7 @@ export type ToWorker =
 	| { type: "unarchive"; id: string }
 	| { type: "stop"; id: string }
 	| { type: "transcript"; id: string; path: string }
+	| { type: "peek"; id: string; cwd: string; transcript: string | null }
 	| { type: "background"; color: string }
 	| { type: "view"; id: string; view: View }
 	| { type: "group"; ids: string[]; name: string | null }
@@ -124,6 +141,7 @@ export type FromWorker =
 	| { type: "woke"; id: string; host: string }
 	| { type: "created"; host: string }
 	| { type: "transcript"; id: string; turns: Turn[] | null; error: string | null }
+	| { type: "peek"; id: string; info: PeekInfo }
 	| { type: "launchFailed"; id: string | null; text: string }
 	| { type: "toggled"; error: string | null }
 	| { type: "stopped"; error: string | null }

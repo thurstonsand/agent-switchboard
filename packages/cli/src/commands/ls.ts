@@ -21,6 +21,7 @@ Lists every Session, open and archived, with its derived state.
   unseen       open, and its agent finished a turn after my last Visit
   interrupted  not live, and its process ended mid-turn
   inactive     open, not an Operator, no activity within inactive_after, neither blocked nor unseen
+  createdAt    epoch ms of its first prompt
   activityAt   epoch ms of the last prompt or settle
   visitedAt    epoch ms of my last Visit, or null
   archivedAt   epoch ms it was archived, or null when open`;

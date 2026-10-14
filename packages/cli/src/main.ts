@@ -96,6 +96,9 @@ async function main(args: string[]): Promise<void> {
 		case "__placeholder":
 			await import("./deck/placeholder.ts");
 			return;
+		case "__peek":
+			await import("./deck/peek.ts");
+			return;
 		case "__help":
 			return help();
 		case "__nav":

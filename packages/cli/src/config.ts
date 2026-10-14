@@ -6,7 +6,8 @@ import type { DirsConfig } from "./dirs.ts";
 import { SwbError } from "./errors.ts";
 
 export type Config = {
-	hover: "lazy" | "eager";
+	/** The cursor resting 500 ms on a dormant session starts its pi in the background. */
+	wakeOnHighlight: boolean;
 	editor: string;
 	inactiveAfterMs: number;
 	reapAfterMs: number;
@@ -52,7 +53,7 @@ export function loadConfig(): Config {
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new SwbError(`config: ${path}: ${(error as Error).message}`);
 	}
 	const config: Config = {
-		hover: "lazy",
+		wakeOnHighlight: false,
 		editor: process.env.EDITOR || "nvim",
 		inactiveAfterMs: UNITS.h * 72,
 		reapAfterMs: UNITS.m * 30,
@@ -64,10 +65,9 @@ export function loadConfig(): Config {
 	};
 	for (const [key, value] of Object.entries(raw)) {
 		switch (key) {
-			case "hover":
-				if (value !== "lazy" && value !== "eager")
-					throw new SwbError(`config: hover must be "lazy" or "eager", got ${JSON.stringify(value)}`);
-				config.hover = value;
+			case "wake_on_highlight":
+				if (typeof value !== "boolean") throw new SwbError(`config: wake_on_highlight must be true or false, got ${JSON.stringify(value)}`);
+				config.wakeOnHighlight = value;
 				break;
 			case "group_by":
 				if (value !== "project" && value !== "worktree")

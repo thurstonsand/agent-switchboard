@@ -47,6 +47,39 @@ async function waitLs(s: Scenario, what: string, probe: (ls: LsEntry[]) => boole
 	);
 }
 
+/** The Deck the drive harness's terminal is attached to, which the tape watches. */
+function drive(s: Scenario): DeckState {
+	return JSON.parse(s.swb("drive", "state"));
+}
+
+async function waitDrive(s: Scenario, what: string, probe: (st: DeckState) => boolean): Promise<DeckState> {
+	return until(
+		() => {
+			try {
+				const st = drive(s);
+				return probe(st) && st;
+			} catch {
+				return false;
+			}
+		},
+		TAPE,
+		what,
+	);
+}
+
+/** A cell inside the first `text` between columns `from` and `cols`, for `swb drive`. */
+async function onScreen(s: Scenario, text: string, cols: number, from = 0): Promise<[number, number]> {
+	return until(
+		() => {
+			const lines = s.swb("drive", "capture").split("\n");
+			const at = lines.findIndex((line) => line.slice(from, cols).includes(text));
+			return at !== -1 && ([(lines[at] as string).indexOf(text, from) + 1, at] as [number, number]);
+		},
+		TAPE,
+		`${text} on screen`,
+	);
+}
+
 const entered = (s: Scenario, name: string) => until(() => s.signal(`${name}.entered`) !== "", TAPE, `${name} held`);
 
 function files(s: Scenario): void {
@@ -530,63 +563,121 @@ export const directors: Record<string, Director> = {
 		},
 		run: async (s) => {
 			// The tape only watches; the clicks are the director's, through the drive harness the tape attached to.
-			/** Clicks `text` in the first `cols` columns, the roster's unless told otherwise. */
-			const click = async (text: string, right = false, cols = 42) => {
+			const click = async (text: string, cols = 42) => {
 				await Bun.sleep(1500);
-				const [x, y] = await until(
-					() => {
-						const lines = s.swb("drive", "capture").split("\n");
-						const at = lines.findIndex((line) => line.slice(0, cols).includes(text));
-						return at !== -1 && [(lines[at] as string).indexOf(text) + 1, at];
-					},
-					TAPE,
-					`${text} on screen`,
-				);
-				s.swb("drive", "click", ...(right ? ["--right"] : []), String(x), String(y));
+				const [x, y] = await onScreen(s, text, cols);
+				s.swb("drive", "click", String(x), String(y));
 			};
-			const drive = (): DeckState => JSON.parse(s.swb("drive", "state"));
-			const waitDrive = (what: string, probe: (x: DeckState) => boolean) =>
-				until(
-					() => {
-						try {
-							return probe(drive());
-						} catch {
-							return false;
-						}
-					},
-					TAPE,
-					what,
-				);
-			await waitDrive("the Deck up", (x) => x.ready);
-			await click("Refactor", true);
-			await click("Wake");
-			await waitDrive("woken from the menu", (x) => x.staged.kind === "live");
+			await waitDrive(s, "the Deck up", (x) => x.ready);
 			await click("Refactor");
-			await waitDrive("its pi focused by a click", (x) => x.focus === "stage");
+			await waitDrive(s, "its pi focused by a click", (x) => x.focus === "stage" && x.staged.kind === "live");
 			await click("hide list");
-			await waitDrive("the roster hidden", (x) => x.layout.rosterHidden);
+			await waitDrive(s, "the roster hidden", (x) => x.layout.rosterHidden);
 			await Bun.sleep(1000);
 			await click("show list");
-			await waitDrive("the roster back", (x) => !x.layout.rosterHidden);
+			await waitDrive(s, "the roster back", (x) => !x.layout.rosterHidden);
 			await click(" shell ");
-			await waitDrive("the shell", (x) => x.layout.shell && x.focus === "shell");
+			await waitDrive(s, "the shell", (x) => x.layout.shell && x.focus === "shell");
 			s.keys("-l", "echo the shell came from a click", "Enter");
 			await Bun.sleep(1000);
 			await click(" shell ");
-			await waitDrive("the shell closed", (x) => !x.layout.shell);
+			await waitDrive(s, "the shell closed", (x) => !x.layout.shell);
 			await click("? keys");
-			await click("any key or click closes", false, 1000);
+			await click("any key or click closes", 1000);
 			await until(() => !s.swb("drive", "capture").includes("any key or click closes"), TAPE, "help closed by a click");
-			await click("Draft", true);
-			await Bun.sleep(3000);
-			s.keys("Escape");
 			s.swb("drive", "resize", "90x30");
-			await waitDrive("a narrow Deck, the roster alone", (x) => x.layout.rosterOnly);
-			await click("Refactor");
-			await waitDrive("pi alone", (x) => x.focus === "stage");
+			await waitDrive(s, "a narrow Deck, the roster alone", (x) => x.layout.rosterOnly && x.focus === "roster");
+			// No Stage beside the roster: the roster draws the Peek itself, at its right edge.
+			const [dx, dy] = await onScreen(s, "Draft", 90);
+			s.swb("drive", "move", String(dx), String(dy));
+			await waitDrive(s, "Draft's Peek in the narrow roster", (x) => x.peek?.lines[0]?.startsWith("╭") === true);
+			await Bun.sleep(3000);
+			await click("Refactor", 20);
+			await waitDrive(s, "pi alone", (x) => x.focus === "stage");
 			await Bun.sleep(1000);
-			await click("show list");
-			await waitDrive("the roster alone again", (x) => x.focus === "roster");
+			await click("show list", 90);
+			await waitDrive(s, "the roster alone again", (x) => x.focus === "roster");
+		},
+	},
+
+	peek: {
+		setup: async (s) => {
+			gitRepo(s, s.project);
+			files(s);
+			git(s, s.project, "add", ".");
+			git(s, s.project, "commit", "-q", "-m", "files");
+			writeFileSync(
+				join(s.project, "README.md"),
+				"# project\n\nA small project for the switchboard to look after.\nIt now has a parser.\nAnd release notes.\n",
+			);
+			config(s, `editor = "${NVIM} --clean ."\n`);
+			await seed(
+				s,
+				{ turns: ["the parser is refactored"], title: "Refactor the parser so error recovery survives nested blocks" },
+				{ turns: ["notes drafted"], title: "Draft release notes" },
+				{ turns: ["the retry test is stable now"], title: "Fix the flaky retry test" },
+			);
+		},
+		run: async (s) => {
+			const idOf = (title: string) => {
+				const row = drive(s).rows.find((r) => r.kind === "session" && r.title.startsWith(title));
+				if (row?.kind !== "session") throw new Error(`no row ${title}`);
+				return row.id;
+			};
+			/** The pointer onto `text`: on the roster, or right of it, on a Peek. */
+			const point = async (text: string, right = false) => {
+				const [x, y] = await onScreen(s, text, right ? 1000 : 42, right ? 43 : 0);
+				s.swb("drive", "move", String(x), String(y));
+			};
+			const cursorTo = async (id: string) => {
+				for (let st = drive(s); st.cursor !== id; st = drive(s)) {
+					const at = st.rows.findIndex((r) => r.kind === "session" && r.id === id);
+					s.keys(at > st.cursorRow ? "j" : "k");
+					await Bun.sleep(300);
+				}
+			};
+			await waitDrive(s, "the Deck up", (x) => x.ready);
+			const [refactor, notes, flaky] = [idOf("Refactor"), idOf("Draft"), idOf("Fix")];
+			await cursorTo(flaky);
+			// Leave the cursor's own Peek to the keys, for now.
+			await point("Refactor");
+			await waitDrive(s, "Refactor's Peek, the cursor still on Fix", (x) => x.peek?.id === refactor && x.cursor === flaky);
+			await Bun.sleep(2500);
+			await point("Wake w", true);
+			await Bun.sleep(2500);
+			const [x, y] = await onScreen(s, "Wake w", 1000, 43);
+			s.swb("drive", "click", String(x), String(y));
+			await waitDrive(s, "Refactor woken from its Peek", (st) => st.peek?.lines.some((line) => line.includes("Stop x")) === true);
+			await Bun.sleep(2500);
+			s.swb("drive", "move", "100", "30");
+			await waitDrive(s, "the Peek gone with the pointer", (st) => st.peek === null && st.hover === null);
+			await Bun.sleep(2000);
+			// The tabs under the roster light up under the pointer too.
+			await point("editor");
+			await Bun.sleep(2500);
+			await cursorTo(notes);
+			await waitDrive(s, "the cursor's Peek", (st) => st.peek?.id === notes && st.peek.source === "cursor");
+			await Bun.sleep(3000);
+
+			// Wide enough for split: the Peek over pi, the editor beside it.
+			s.swb("drive", "resize", "180x45");
+			await waitDrive(s, "a wide Deck", (st) => st.layout.width === 180);
+			s.keys("M-a", "v");
+			await waitDrive(s, "split", (st) => st.layout.split && st.staged.view === "split");
+			await Bun.sleep(1500);
+			await point("Fix");
+			await waitDrive(s, "Fix's Peek beside the split", (st) => st.peek?.id === flaky);
+			await Bun.sleep(3000);
+
+			// Too short for the Peek beside its row: it stays on the Stage, as close to the row as fits.
+			s.swb("drive", "resize", "180x14");
+			await waitDrive(s, "a short Deck", (st) => !st.layout.rosterOnly);
+			await Bun.sleep(1000);
+			await point("Fix");
+			await waitDrive(s, "Fix's Peek in a short Deck", (st) => st.peek?.id === flaky);
+			await Bun.sleep(3000);
+			s.swb("drive", "move", "150", "10");
+			await waitDrive(s, "gone", (st) => st.peek === null);
 		},
 	},
 

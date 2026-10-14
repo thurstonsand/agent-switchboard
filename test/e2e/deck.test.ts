@@ -152,12 +152,18 @@ test("a dormant card shows the whole conversation, newest at the bottom, cropped
 	await until(() => s.screen().includes("turn-11"), budgets.settle, "the newest turn on the card");
 	const screen = s.screen();
 	s.save("dormant-card.txt", screen);
-	expect(screen).toContain("not running");
-	expect(screen.match(/not running/g)).toHaveLength(1);
 	expect(screen).toContain("you");
 	expect(screen).not.toContain("turn-0-");
 	expect(screen.indexOf("reply turn-10")).toBeLessThan(screen.lastIndexOf("turn-11"));
 	expect(screen).toContain("…");
+	// Its state is the Peek's to say, and the card doesn't say it again.
+	expect(screen).not.toContain("not running");
+	const y = screen.split("\n").findIndex((line) => line.includes(id.slice(0, 8)));
+	s.swb("drive", "move", "10", String(y));
+	await waitState(s, "its Peek", (x) => x.peek?.id === id);
+	await until(() => s.screen().includes("not running"), budgets.settle, "the Peek drawn");
+	expect(s.screen().match(/not running/g)).toHaveLength(1);
+	s.save("dormant-card-peek.txt", s.screen());
 });
 
 test("an idle, unviewed pi is reaped after reap_after; the one on view is not", async () => {

@@ -247,7 +247,7 @@ test("a pi that dies before it's ready says failed to start, and w retries once 
 	s.keys("w");
 	const failed = await waitState(s, "failed", (x) => x.staged.kind === "failed", budgets.piReady);
 	expect(failed.toasts).toEqual([]);
-	await until(() => s.screen().includes("failed to start"), budgets.settle, "the failed card");
+	await until(() => s.screen().includes("pi quit before it was ready"), budgets.settle, "the failed card");
 	expect(s.screen().split("pi: broken on purpose")).toHaveLength(2);
 	expect(entry(s, a).live).toBe(false);
 	expect(piSessions(s)).toHaveLength(0);

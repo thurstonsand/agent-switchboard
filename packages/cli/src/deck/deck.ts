@@ -32,6 +32,7 @@ export function deckPaths(deck: string): DeckPaths {
 		target: join(dir, `${deck}.target`),
 		side: join(dir, `${deck}.side`),
 		below: join(dir, `${deck}.below`),
+		peek: join(dir, `${deck}.peek.json`),
 	};
 }
 
@@ -92,6 +93,24 @@ export function editorNav(k: string, editor: string): void {
 	if (result.exitCode !== 0) throw new SwbError(`__nav: ${result.stderr.toString().trim()}`);
 }
 
+/**
+ * The Peek is a popup on the Stage's own client, so the roster keeps the keyboard; but a popup owns its client, and
+ * while one is up pi gets no clicks and no keys. So the UI server looks at every event first: the pointer leaving
+ * both the roster and the Peek, or a key typed outside the roster, closes the Peek before the event goes on, and tells
+ * the roster. The roster sets @swb_roster to its pane, @swb_watch while it wants to hear of the pointer leaving, and
+ * the @swb_peek_* options to where its Peek is and how to close it.
+ */
+const OVER_PEEK =
+	"#{&&:#{==:#{mouse_pane},#{@swb_peek_pane}},#{&&:#{e|<:#{mouse_x},#{@swb_peek_r}},#{&&:#{e|>=:#{mouse_y},#{@swb_peek_t}},#{e|<:#{mouse_y},#{@swb_peek_b}}}}}";
+const POINTER_AWAY = `#{&&:#{@swb_watch},#{&&:#{!=:#{mouse_pane},#{@swb_roster}},#{!:${OVER_PEEK}}}}`;
+const KEY_AWAY = "#{&&:#{@swb_watch},#{!=:#{pane_id},#{@swb_roster}}}";
+const LEAVE = `set -u @swb_watch ; run-shell '#{@swb_peek_close}' ; ${deckCmd("pointer-out")}`;
+
+/** A mouse binding whose event stays with the Peek while the pointer is over it, and closes the Peek first otherwise. */
+function peekAware(key: string, otherwise: string): string {
+	return `bind -n ${key} if -F '${OVER_PEEK}' { send-keys -M } { if -F '${POINTER_AWAY}' { ${LEAVE} } ; ${otherwise} }`;
+}
+
 /** The whole config of the UI server. Prefix bindings and hooks report to the Deck's roster through its socket. */
 function uiConf(config: Config): string {
 	const prefix = config.prefix;
@@ -114,6 +133,14 @@ function uiConf(config: Config): string {
 		`set -g status-format[0] "#[range=user|roster] #[bold]◂ ${prefix} z#[nobold] #[dim]show list#[nodim] #[norange]"`,
 		`bind -n MouseDown1Status if -F '#{==:#{mouse_status_range},roster}' { if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { set -u @swb_hidden ; ${roster("focus")} } }`,
 		"set -g mouse on",
+		`bind -n Any if -F '#{mouse_pane}' { if -F '${POINTER_AWAY}' { ${LEAVE} } ; send-keys -M } { if -F '${KEY_AWAY}' { ${LEAVE} } ; send-keys }`,
+		// tmux's own defaults, but for the Peek; a right click on a pane that takes no mouse no longer opens tmux's menu.
+		peekAware("MouseDown1Pane", "select-pane -t= ; send-keys -M"),
+		peekAware("MouseDown2Pane", "select-pane -t= ; if -F '#{||:#{pane_in_mode},#{mouse_any_flag}}' { send-keys -M } { paste-buffer -p }"),
+		peekAware("MouseDown3Pane", "if -F '#{mouse_any_flag}' { select-pane -t= ; send-keys -M }"),
+		peekAware("WheelUpPane", "if -F '#{||:#{alternate_on},#{||:#{pane_in_mode},#{mouse_any_flag}}}' { send-keys -M } { copy-mode -e }"),
+		peekAware("DoubleClick1Pane", "select-pane -t= ; if -F '#{||:#{pane_in_mode},#{mouse_any_flag}}' { send-keys -M }"),
+		peekAware("TripleClick1Pane", "select-pane -t= ; if -F '#{||:#{pane_in_mode},#{mouse_any_flag}}' { send-keys -M }"),
 		"set -g history-limit 0",
 		"set -g destroy-unattached off",
 		"set -g detach-on-destroy on",
@@ -323,7 +350,7 @@ export function liveDecks(): string[] {
 
 export function removeDeckFiles(deck: string): void {
 	const paths = deckPaths(deck);
-	for (const path of [paths.sock, paths.card, paths.target, paths.side, paths.below]) rmSync(path, { force: true });
+	for (const path of [paths.sock, paths.card, paths.target, paths.side, paths.below, paths.peek]) rmSync(path, { force: true });
 }
 
 export async function fetchState(deck: string): Promise<DeckState> {

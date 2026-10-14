@@ -57,7 +57,7 @@ function keys(prefix: string): [string, string][] {
 		["a", "archive; unarchive an archived one"],
 		["y Y", "copy swb open <id>; @session:<id>"],
 		["m", "pick the session's Group; rename a Group"],
-		["right-click", "a row's menu of these keys"],
+		["hover", "a session's Peek beside it; its buttons are these keys"],
 		["drag", "into a Group, or out onto its Project"],
 		["/", "filter; esc clears"],
 		["q", "close the Deck (sessions keep running)"],

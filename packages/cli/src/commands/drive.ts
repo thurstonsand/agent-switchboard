@@ -234,9 +234,8 @@ export async function drive(args: string[]): Promise<void> {
 			await raw(rest[0] === "out" ? "\x1b[O" : "\x1b[I");
 			break;
 		case "click": {
-			const button = rest.includes("--right") ? 2 : 0;
-			const [col, row] = rest.filter((arg) => arg !== "--right").map(Number) as [number, number];
-			await raw(sgr(button, col, row), sgr(button, col, row, true));
+			const [col, row] = rest.map(Number) as [number, number];
+			await raw(sgr(0, col, row), sgr(0, col, row, true));
 			break;
 		}
 		case "drag": {

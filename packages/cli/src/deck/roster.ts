@@ -14,15 +14,17 @@ import {
 	type TuiMouseEventResult,
 	truncateToWidth,
 	visibleWidth,
+	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { operatorDir, projectRoot, type View } from "@swb/shared";
+import type { Subprocess } from "bun";
 import { loadConfig } from "../config.ts";
 import { displayName, projectName } from "../derive.ts";
 import { completions, expandHome, type Target, type TargetTree, targetName } from "../dirs.ts";
 import { UsageError } from "../errors.ts";
-import { newer, notify, nvimEditor } from "../sessions.ts";
+import { newer, nvimEditor, SWB } from "../sessions.ts";
 import type { DeckLayout } from "../store.ts";
-import { quote, SESSIONS, tmux, tmuxAsync, tmuxTry, UI } from "../tmux.ts";
+import { CLIENT_CWD, cleanEnv, quote, SESSIONS, tmux, tmuxAsync, tmuxBin, tmuxTry, UI } from "../tmux.ts";
 import { VERSION } from "../version.ts";
 import { Control } from "./control.ts";
 import {
@@ -38,7 +40,20 @@ import {
 	writeAtomic,
 	writeCard,
 } from "./deck.ts";
-import type { Card, DeckState, Entry, FromWorker, PickerState, Snapshot, State, StatSummary, ToWorker, Turn } from "./protocol.ts";
+import type {
+	Card,
+	DeckState,
+	Entry,
+	FromWorker,
+	PeekInfo,
+	PeekView,
+	PickerState,
+	Snapshot,
+	State,
+	StatSummary,
+	ToWorker,
+	Turn,
+} from "./protocol.ts";
 import {
 	age,
 	attention,
@@ -59,9 +74,8 @@ import {
 } from "./style.ts";
 
 const VISIT_MS = 1000;
-const HOVER_MS = 500;
+const HIGHLIGHT_MS = 500;
 const TOAST_MS = 3500;
-const DETAIL_LINES = 3;
 const LAYOUT_SETTLE_MS = 500;
 const VIEWS: View[] = ["pi", "editor", "split"];
 
@@ -271,6 +285,12 @@ function status(e: Entry): string {
 
 const archivedKey = (e: Entry) => Math.max(e.activityAt, e.archivedAt ?? 0);
 
+/** How long a session has been starting, while it is. */
+function launchElapsed(e: Entry, now: number): string {
+	const launch = launchFor(e.id);
+	return launch && !e.live ? gray(` ${((now - launch.since) / 1000).toFixed(1)} s`) : "";
+}
+
 // ── stage ───────────────────────────────────────────────────────────────
 
 type Applied = {
@@ -325,7 +345,7 @@ const stage = {
 	watched: null as string | null,
 	visited: false,
 	visitTimer: null as Timer | null,
-	hoverTimer: null as Timer | null,
+	highlightTimer: null as Timer | null,
 	keyAt: 0,
 };
 
@@ -559,6 +579,8 @@ function apply(): void {
 		}
 	}
 	tui.requestRender();
+	// A pane coming or going moves the Stage's panes out from under the Peek; render puts it back.
+	if (d.side !== prev.side || d.below !== prev.below) closePeek();
 	if (d.side !== prev.side || d.side !== (side?.target ?? null)) syncSide();
 	if (d.below !== (below?.target ?? null) || d.side !== prev.side) syncBelow();
 	if (nvimEditor(config.editor) && (d.view !== "pi") !== (prev.view !== "pi")) tagEditor(d.view !== "pi");
@@ -603,20 +625,20 @@ function stageSession(id: string): void {
 	editorsLost.clear();
 	const e = entries.get(id);
 	if (e && !e.live && e.transcript) post({ type: "transcript", id, path: e.transcript });
-	scheduleHover();
+	scheduleHighlightWake();
 	apply();
 }
 
-function scheduleHover(): void {
-	if (stage.hoverTimer) clearTimeout(stage.hoverTimer);
-	stage.hoverTimer = null;
+function scheduleHighlightWake(): void {
+	if (stage.highlightTimer) clearTimeout(stage.highlightTimer);
+	stage.highlightTimer = null;
 	const e = stage.staged === null ? undefined : entries.get(stage.staged);
-	if (config.hover !== "eager" || !e || !e.open || e.live || launchFor(e.id) || stage.ended?.id === e.id) return;
+	if (!config.wakeOnHighlight || !e?.open || e.live || launchFor(e.id) || stage.ended?.id === e.id) return;
 	const id = e.id;
-	stage.hoverTimer = setTimeout(() => {
-		stage.hoverTimer = null;
+	stage.highlightTimer = setTimeout(() => {
+		stage.highlightTimer = null;
 		if (stage.staged === id) wake(id, false);
-	}, HOVER_MS);
+	}, HIGHLIGHT_MS);
 }
 
 function wake(id: string, keyboard: boolean): void {
@@ -818,6 +840,9 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
 			transcripts.set(message.id, { turns: message.turns, error: message.error });
 			apply();
 			break;
+		case "peek":
+			onPeekInfo(message.id, message.info);
+			break;
 		case "toggled":
 			if (message.error === null) {
 				if (roster.pin) roster.pin.answered = true;
@@ -919,10 +944,8 @@ type HeaderRow = {
 	collapsed: boolean;
 };
 
-type Row =
-	| HeaderRow
-	| { kind: "session"; key: string; entry: Entry; depth: number; header: string }
-	| { kind: "section"; key: SectionKey; label: string; count: number; expanded: boolean };
+type SessionRow = { kind: "session"; key: string; entry: Entry; depth: number; header: string };
+type Row = HeaderRow | SessionRow | { kind: "section"; key: SectionKey; label: string; count: number; expanded: boolean };
 
 const isHeader = (row: Row) => row.kind !== "session";
 const isCollapsed = (row: Row) => (row.kind === "header" ? row.collapsed : row.kind === "section" ? !row.expanded : false);
@@ -945,14 +968,21 @@ function groupKey(group: Group): string {
 type Drop = { header: HeaderRow; name: string | null } | null;
 
 // The cursor's background is mixed from the terminal's own background and foreground, as pi's system theme
-// does. Until the terminal reports its colors, reverse video stands in.
-let cursorBg: { focused: string; unfocused: string } | null = null;
+// does. Until the terminal reports its colors, reverse video stands in. The row under the pointer gets a fainter mix
+// than the cursor's, focused or not; the cursor also has the ▌ bar while its session is on the Stage.
+let cursorBg: { focused: string; unfocused: string; hover: string } | null = null;
 let colors: { background: string | null; scheme: string | null } = { background: null, scheme: null };
 
 function cursorLine(line: string, focused: boolean): string {
 	if (!cursorBg) return focused ? sgrBg("7", line) : sgrBg("4", line);
 	return sgrBg(focused ? cursorBg.focused : cursorBg.unfocused, line);
 }
+
+function hoverLine(line: string): string {
+	return cursorBg ? sgrBg(cursorBg.hover, line) : line;
+}
+
+type ClickTarget = { y: number; from: number; to: number; act: () => void };
 
 class Roster implements Component {
 	selectedKey = "";
@@ -975,11 +1005,17 @@ class Roster implements Component {
 	path = new Input({ prompt: "" });
 	/** A session being dragged by the mouse; `moved` once the pointer has left its row. */
 	dragging: { id: string; moved: boolean; drop: Drop } | null = null;
+	/** The session row under the pointer. A key clears it until the pointer moves again, and so does the pointer leaving. */
+	hover: string | null = null;
+	/** Where the pointer rests, which lights the control under it; null after a key or once it leaves. */
+	pointer: { x: number; y: number } | null = null;
+	/** A narrow Deck's Peek, as the last render drew it. */
+	inline: InlinePeek | null = null;
 	listTop = 2;
 	listHeight = 0;
 	/** What a click does, by row and column range, as of the last render. */
-	targets: { y: number; from: number; to: number; act: () => void }[] = [];
-	pressed: { y: number; from: number; to: number; act: () => void } | null = null;
+	targets: ClickTarget[] = [];
+	pressed: ClickTarget | null = null;
 
 	constructor() {
 		this.filter.onSubmit = () => {
@@ -1116,6 +1152,8 @@ class Roster implements Component {
 
 	handleInput(data: string): void {
 		if (isKeyRelease(data)) return;
+		this.hover = null;
+		this.pointer = null;
 		stage.keyAt = performance.now();
 		frameKeyAt = stage.keyAt;
 		toasts = [];
@@ -1171,7 +1209,7 @@ class Roster implements Component {
 		else if (k === "x") this.stop();
 		else if (k === "a") this.toggleArchived();
 		else if (k === "y" || k === "Y") this.copy(k === "y");
-		else if (k === "n") this.newAtCursor();
+		else if (k === "n") this.newAt();
 		else if (k === "N") this.openPicker("add", null, null);
 		else if (k === "/") this.filtering = true;
 		else if (k === "m") this.startNaming();
@@ -1181,17 +1219,29 @@ class Roster implements Component {
 		tui.requestRender();
 	}
 
+	/** The click target under a point, as of the last render. */
+	targetAt(p: { x: number; y: number } | null): ClickTarget | undefined {
+		return p ? this.targets.find((t) => t.y === p.y && p.x >= t.from && p.x < t.to) : undefined;
+	}
+
 	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+		// A control under the pointer lights up, wherever it is.
+		let relit = false;
+		if (event.type === "move") {
+			const before = this.targetAt(this.pointer);
+			this.pointer = { x: event.x, y: event.y };
+			relit = this.targetAt(this.pointer) !== before;
+		}
 		if (this.choosing) {
 			const listRow = this.pickerTop + event.y - 3;
 			if (event.type === "move") {
-				if (this.choosing.confirm || event.y < 3 || event.y >= 3 + this.listHeight) return { handled: true };
+				if (this.choosing.confirm || event.y < 3 || event.y >= 3 + this.listHeight) return { handled: true, render: relit };
 				const count = this.choosing.mode === "pick" ? this.pickRows().length : this.addRows().length;
 				if (listRow < count && listRow !== this.choosing.choice) {
 					this.choosing.choice = listRow;
 					return { handled: true, render: true };
 				}
-				return { handled: true };
+				return { handled: true, render: relit };
 			}
 			if (event.type === "wheel") this.pickerInput(event.wheelDelta && event.wheelDelta > 0 ? "\x1b[B" : "\x1b[A");
 			else if (event.button === "left" && event.type === "press")
@@ -1203,24 +1253,20 @@ class Roster implements Component {
 			}
 			return { handled: true, render: true };
 		}
+		if (event.type === "move") {
+			const inline = this.inline;
+			// On a narrow Deck's Peek, the pointer is still on the Peek's row.
+			const onPeek = inline && event.x >= inline.left && event.y >= inline.top && event.y < inline.top + inline.view.lines.length;
+			const row = this.rowAt(event.y);
+			const hover = onPeek ? inline.id : row?.kind === "session" ? row.key : null;
+			if (hover === this.hover) return { handled: true, render: relit };
+			this.hover = hover;
+			return { handled: true, render: true };
+		}
 		if (event.type === "wheel") {
 			this.move(Math.sign(event.wheelDelta ?? 0));
 			this.syncStage(true);
 			return { handled: true };
-		}
-		// On the click, not the press: a menu already open when the button comes up would take the release as a choice.
-		if (event.button === "right") {
-			if (event.type !== "click") return { handled: true };
-			const row = this.rowAt(event.y);
-			this.filtering = false;
-			this.naming = null;
-			if (!row) return { handled: true, render: true };
-			this.selectedKey = row.key;
-			this.lastIndex = this.scrollTop + (event.y - this.listTop);
-			stage.holdForNew = false;
-			this.syncStage(true);
-			void showMenu(row, event.screenX, event.screenY);
-			return { handled: true, render: true };
 		}
 		if (event.button !== "left") return undefined;
 		// Clicking the roster focuses it, and its focus hook can re-render the legend before the release: the target is the
@@ -1264,12 +1310,55 @@ class Roster implements Component {
 		return { handled: true };
 	}
 
+	/**
+	 * Where a Peek belongs: beside the row under the pointer, else, after a navigation key, beside the cursor's while the
+	 * roster has the keyboard. Only a session's row on screen has one.
+	 */
+	peekSpot(rows: Row[], index: number): PeekSpot | null {
+		if (rosterHidden || (narrow && focus !== "roster") || this.choosing || this.naming || this.dragging) return null;
+		const spot = (i: number, source: "pointer" | "cursor"): PeekSpot | null => {
+			const row = rows[i];
+			if (row?.kind !== "session" || i < this.scrollTop || i >= this.scrollTop + this.listHeight) return null;
+			return { id: row.key, source, y: this.listTop + i - this.scrollTop };
+		};
+		if (this.hover !== null)
+			return spot(
+				rows.findIndex((r) => r.key === this.hover),
+				"pointer",
+			);
+		return peek.byKeys && focus === "roster" ? spot(index, "cursor") : null;
+	}
+
+	/**
+	 * A narrow Deck's Peek, drawn over the roster's own lines at the right edge, as out of the way as it can be. Its
+	 * buttons are click targets ahead of everything beneath it, and the rest of it swallows clicks.
+	 */
+	drawPeek(lines: string[], rows: Row[], spot: PeekSpot, width: number, height: number): InlinePeek | null {
+		const row = rows.find((r) => r.key === spot.id);
+		if (row?.kind !== "session" || width < PEEK_MIN_COLS) return null;
+		const w = Math.max(PEEK_MIN_COLS, Math.min(PEEK_COLS, width - 16));
+		const view = peekView(row, w, height, "right");
+		const top = Math.max(0, Math.min(spot.y - 1, height - view.lines.length));
+		const left = width - w;
+		const p = this.pointer;
+		const hot = view.buttons.find((b) => p?.y === top + b.y && p.x >= left + b.from && p.x < left + b.to);
+		view.lines.forEach((line, i) => {
+			lines[top + i] = `${truncateToWidth(lines[top + i] ?? "", left, "", true)}\x1b[0m${hot && hot.y === i ? hot.hot : line}`;
+		});
+		this.targets.unshift(
+			...view.buttons.map((b) => ({ y: top + b.y, from: left + b.from, to: left + b.to, act: () => void prefixKey(b.key, view.id) })),
+			...view.lines.map((_, i) => ({ y: top + i, from: left, to: width, act: () => {} })),
+		);
+		return { ...spot, view, top, left };
+	}
+
 	rowAt(y: number): Row | undefined {
 		if (y < this.listTop || y >= this.listTop + this.listHeight) return undefined;
 		return this.rows()[this.scrollTop + (y - this.listTop)];
 	}
 
 	move(delta: number): void {
+		peek.byKeys = true;
 		const rows = this.rows();
 		if (rows.length === 0) return;
 		const index = this.resolveCursor(rows);
@@ -1318,30 +1407,31 @@ class Roster implements Component {
 		if (row && row.kind !== "session") this.setExpanded(row, false);
 	}
 
-	wake(): void {
-		const e = this.cursorEntry();
+	/** The actions below act on the cursor's row unless given one: a Peek's buttons act on its row, wherever the cursor is. */
+	wake(row = this.selected()): void {
+		const e = row?.kind === "session" ? row.entry : null;
 		if (!e) return;
 		if (e.live) toast("already running", "info");
 		else wake(e.id, false);
 	}
 
 	/** x: the counterpart to w. Frees the process and keeps the session open; any unsent prompt is saved as a draft. */
-	stop(): void {
-		const e = this.cursorEntry();
+	stop(row = this.selected()): void {
+		const e = row?.kind === "session" ? row.entry : null;
 		if (!e) return;
 		if (!e.live) toast("not running", "info");
 		else post({ type: "stop", id: e.id });
 	}
 
-	toggleArchived(): void {
-		const row = this.selected();
+	toggleArchived(row = this.selected()): void {
 		if (row?.kind !== "session" || this.pin) return;
 		const e = row.entry;
 		if (e.provisional) {
 			toast("nothing to archive before the first prompt", "error");
 			return;
 		}
-		this.pin = { index: this.resolveCursor(this.rows()), answered: false };
+		// Only the cursor's own row moving takes the cursor along.
+		if (row.key === this.selected()?.key) this.pin = { index: this.resolveCursor(this.rows()), answered: false };
 		post({ type: e.open ? "archive" : "unarchive", id: e.id });
 	}
 
@@ -1357,8 +1447,8 @@ class Roster implements Component {
 		this.lastIndex = index;
 	}
 
-	copy(command: boolean): void {
-		const e = this.cursorEntry();
+	copy(command: boolean, row = this.selected()): void {
+		const e = row?.kind === "session" ? row.entry : null;
 		if (!e) return;
 		const text = command ? `swb open ${e.id}` : `@session:${e.id}`;
 		void clip(text).then(
@@ -1371,8 +1461,7 @@ class Roster implements Component {
 	 * n: the directory picker, on the cursor's directory: a Group header's newest session's, there being no other.
 	 * Starting there joins its Group.
 	 */
-	newAtCursor(): void {
-		const row = this.selected();
+	newAt(row = this.selected()): void {
 		if ((row?.kind === "section" && row.key === "operators") || (row?.kind === "session" && row.entry.operator)) {
 			newSession(operatorDir(), null);
 			return;
@@ -1389,8 +1478,7 @@ class Roster implements Component {
 	 * m: picks the Group for the session under the cursor, or for every session under the Group header it's on, which
 	 * merges into an existing Group or renames to a new one.
 	 */
-	startNaming(): void {
-		const row = this.selected();
+	startNaming(row = this.selected()): void {
 		this.filtering = false;
 		this.name.setValue("");
 		if (row?.kind === "session" && row.entry.operator) toast("Operators don't take Groups", "info");
@@ -1513,9 +1601,6 @@ class Roster implements Component {
 		this.choosing = { mode, opened: mode, choice: mode === "add" ? typedChoice("") : 0, from, group, pin: from, confirm: null };
 		// The last list shows at once; the worker's fresh one replaces it when its scan lands.
 		post({ type: "dirs" });
-		// Inside tmux pi-tui only tracks the mouse while a button is down; the picker follows it everywhere, so the
-		// highlight and its ✕ are wherever the pointer is.
-		process.stdout.write("\x1b[?1003h");
 		if (mode === "pick")
 			this.choosing.choice = Math.max(
 				0,
@@ -1627,7 +1712,6 @@ class Roster implements Component {
 
 	closePicker(): void {
 		this.choosing = null;
-		process.stdout.write("\x1b[?1003l\x1b[?1000h\x1b[?1002h");
 	}
 
 	pickerInput(data: string): void {
@@ -1698,7 +1782,8 @@ class Roster implements Component {
 		const input = adding
 			? `${prompt}${this.path.render(Math.max(10, width - 2 - visibleWidth(prompt)))[0] ?? ""}`
 			: (this.search.render(Math.max(10, width - 2))[0] ?? "");
-		const bodyHeight = Math.max(1, height - 6 - DETAIL_LINES);
+		// The picker's detail is its path and two blank lines.
+		const bodyHeight = Math.max(1, height - 9);
 		const lines = [` ${bold(adding ? "add a directory" : "new session in")}`, ` ${input}`, gray("─".repeat(width))];
 		let body: [string, (() => void) | null][];
 		let detail: string;
@@ -1778,16 +1863,26 @@ class Roster implements Component {
 	render(width: number): string[] {
 		const t0 = performance.now();
 		const height = tui.terminal.rows;
-		if (this.choosing) return this.renderPicker(width, height);
+		if (this.choosing) {
+			syncPeek(wantPeek(null));
+			this.inline = null;
+			return this.renderPicker(width, height);
+		}
 		const now = Date.now();
 		const rows = this.rows();
 		const index = this.resolveCursor(rows);
 		this.targets = [];
-		const bodyHeight = Math.max(1, height - 5 - DETAIL_LINES);
+		// A wide Deck's Peek says what the session is; the narrow one's roster has no Stage beside it to show one.
+		const detailLines = narrow ? 3 : 1;
+		const bodyHeight = Math.max(1, height - 5 - detailLines);
 		const detail = this.detail(width, now, 3 + bodyHeight);
 		const lines = [this.header(width), gray("─".repeat(width))];
 		lines.push(...this.list(rows, index, width, bodyHeight, now));
-		lines.push(gray("─".repeat(width)), ...detail, this.messageLine(now), this.hints(3 + bodyHeight + DETAIL_LINES + 1));
+		lines.push(gray("─".repeat(width)), ...detail, this.messageLine(now), this.hints(3 + bodyHeight + detailLines + 1));
+		// A wide Deck's Peek is a popup over the Stage; a narrow Deck has no Stage beside the roster, so the roster draws it.
+		const spot = wantPeek(this.peekSpot(rows, index));
+		syncPeek(narrow ? null : spot);
+		this.inline = narrow && spot ? this.drawPeek(lines, rows, spot, width, height) : null;
 		const out = lines.map((line) => truncateToWidth(line, width, "…", true));
 		perf.render.add(performance.now() - t0);
 		if (frameKeyAt > 0) {
@@ -1838,7 +1933,8 @@ class Roster implements Component {
 			}
 			const line = truncateToWidth(rowLine(row, width, now), width, "…", true);
 			if (this.dragging?.drop?.header.key === row.key) out.push(cursorLine(line, true));
-			else out.push(this.scrollTop + i === index ? cursorLine(line, focus === "roster") : line);
+			else if (this.scrollTop + i === index) out.push(cursorLine(line, focus === "roster"));
+			else out.push(row.key === this.hover ? hoverLine(line) : line);
 		}
 		if (rows.length === 0) out[0] = dim(snapshot ? (this.query() ? "   no matches" : "   no sessions yet · n new") : "   loading…");
 		return [...out, ...picker.map(([line]) => line)];
@@ -1848,21 +1944,20 @@ class Roster implements Component {
 	clickable(y: number, parts: [string, (() => void) | null][]): string {
 		let x = 0;
 		let line = "";
+		const p = this.pointer;
 		for (const [text, act] of parts) {
 			const w = visibleWidth(text);
 			if (act) this.targets.push({ y, from: x, to: x + w, act });
-			line += text;
+			line += act && p?.y === y && p.x >= x && p.x < x + w ? cursorLine(text, true) : text;
 			x += w;
 		}
 		return line;
 	}
 
+	/** The Stage's bar: its views and the shell toggle. A narrow Deck, which has no Peek, also states the session and its place. */
 	detail(width: number, now: number, top: number): string[] {
 		const e = this.cursorEntry() ?? (stage.staged === null ? null : (entries.get(stage.staged) ?? null));
-		if (!e) return ["", "", ""];
-		const launch = launchFor(e.id);
-		const elapsed = launch && !e.live ? gray(` ${((now - launch.since) / 1000).toFixed(1)} s`) : "";
-		const where = `${shortPath(e.cwd)}${e.branch ? ` ${magenta(`⎇ ${e.branch}`)}` : ""}`;
+		if (!e) return narrow ? ["", "", ""] : [""];
 		let tabs = "";
 		if (stage.staged === e.id && e.open) {
 			const parts: [string, (() => void) | null][] = [[" ", null]];
@@ -1872,10 +1967,12 @@ class Roster implements Component {
 			}
 			// The shell is a toggle beside the views, not one of them.
 			if (!narrow)
-				parts.push(["  ", null], [stage.applied.below ? cursorLine(" shell ", true) : gray(" shell "), () => void toggleShell()]);
-			tabs = this.clickable(top + 2, parts);
+				parts.push([gray(" · "), null], [stage.applied.below ? cursorLine(" shell ", true) : gray(" shell "), () => void toggleShell()]);
+			tabs = this.clickable(narrow ? top + 2 : top, parts);
 		}
-		return [` ${status(e)}${elapsed}`, ` ${gray(where)}`, tabs].map((line) => truncateToWidth(line, width, "…"));
+		if (!narrow) return [truncateToWidth(tabs, width, "…")];
+		const where = `${shortPath(e.cwd)}${e.branch ? ` ${magenta(`⎇ ${e.branch}`)}` : ""}`;
+		return [` ${status(e)}${launchElapsed(e, now)}`, ` ${gray(where)}`, tabs].map((line) => truncateToWidth(line, width, "…"));
 	}
 
 	messageLine(now: number): string {
@@ -1896,7 +1993,7 @@ class Roster implements Component {
 			return drag.drop.name === null ? ` ⇢ out of its Group` : ` ⇢ into ${bold(target ? groupLabel(target) : "")}`;
 		}
 		const help: Hint = ["?", "keys", () => void showHelp()];
-		const newAtCursor: Hint = ["n", "new", () => this.newAtCursor()];
+		const newAtCursor: Hint = ["n", "new", () => this.newAt()];
 		const enter = (label: string): Hint => ["⏎", label, () => this.activate(true)];
 		const row = this.selected();
 		let hints: Hint[];
@@ -1916,7 +2013,7 @@ class Roster implements Component {
 			hints = [enter(row.collapsed ? "expand" : "collapse"), ["m", "rename", () => this.startNaming()], newAtCursor, help];
 		else if (row.kind === "header") hints = [enter(row.collapsed ? "expand" : "collapse"), newAtCursor, help];
 		else if (row.kind === "section" && row.key === "operators")
-			hints = [enter(row.expanded ? "collapse" : "expand"), ["n", "new operator", () => this.newAtCursor()], help];
+			hints = [enter(row.expanded ? "collapse" : "expand"), ["n", "new operator", () => this.newAt()], help];
 		else if (row.kind === "section") hints = [enter(row.expanded ? "collapse" : "expand"), help];
 		else if (!row.entry.open) hints = [enter("open"), ["a", "unarchive", () => this.toggleArchived()], help];
 		else hints = [enter(row.entry.live ? "focus" : "wake"), ["a", "archive", () => this.toggleArchived()], newAtCursor, help];
@@ -1995,7 +2092,7 @@ function overlayConfirm(
 	width: number,
 	confirm: { name: string; worktrees: number },
 	answer: (yes: boolean) => void,
-	targets: { y: number; from: number; to: number; act: () => void }[],
+	targets: ClickTarget[],
 ): void {
 	const inner = Math.min(width - 4, 34);
 	const left = Math.floor((width - inner - 2) / 2);
@@ -2043,6 +2140,312 @@ function rowLine(row: Row, width: number, now: number): string {
 	const titleWidth = width - visibleWidth(lead) - 2 - visibleWidth(right);
 	const title = truncateToWidth(e.provisional ? gray(displayName(e)) : displayName(e), titleWidth, "…", true);
 	return `${lead}${glyph(stateOf(e), now)} ${title}${right}`;
+}
+
+// ── Peek ────────────────────────────────────────────────────────────────
+
+// A Peek is a session's particulars and keys in a popup beside its row: a tmux popup on the Stage's own nested client,
+// so it never covers the roster and never takes the roster's keyboard. The UI server's bindings close it when the
+// pointer leaves (see deck.ts); `swb __peek` draws it from paths.peek and posts its buttons back as keys.
+
+const PEEK_COLS = 48;
+/** Narrower than this, as the roster is for a moment while tmux zooms a pane over it, there is no Peek. */
+const PEEK_MIN_COLS = 28;
+/** The pointer rests this long on a row before its Peek opens. */
+const PEEK_OPEN_MS = 80;
+/** ...and this long before an open Peek follows it to another row, so a diagonal path into the Peek doesn't drag it along. */
+const PEEK_SWITCH_MS = 150;
+/** How long a Peek waits for its last turn and diff before opening without them. */
+const PEEK_INFO_WAIT_MS = 200;
+/** How long a session's last turn and diff stand before a Peek asks again. */
+const PEEK_INFO_MS = 2000;
+
+type PeekSpot = { id: string; source: "pointer" | "cursor"; y: number };
+type InlinePeek = PeekSpot & { view: PeekView; top: number; left: number };
+type ShownPeek = PeekSpot & { proc: Subprocess; tty: string; width: number; maxHeight: number; json: string; view: PeekView };
+
+const peek = {
+	shown: null as ShownPeek | null,
+	pending: null as { spot: PeekSpot; timer: Timer } | null,
+	/** Where the last render wanted the Peek. */
+	spot: null as PeekSpot | null,
+	/** The Peek put away when the keyboard went to the Stage; it stays away until its row changes. */
+	dismissed: null as string | null,
+	/** Set by a navigation key: the cursor's row has a Peek while the roster has the keyboard. */
+	byKeys: false,
+	/** Whether the UI server reports the pointer leaving; it stops by itself when it reports. */
+	watching: false,
+	info: new Map<string, { info: PeekInfo; at: number }>(),
+	asked: new Set<string>(),
+	infoWaits: new Map<string, () => void>(),
+	ops: Promise.resolve(),
+};
+
+const spotKey = (spot: PeekSpot | null | undefined) => (spot ? `${spot.id}@${spot.y}` : null);
+
+function cancelPendingPeek(): void {
+	if (peek.pending) clearTimeout(peek.pending.timer);
+	peek.pending = null;
+}
+
+/** Where render wants a Peek, unless it was put away; asks for what it shows, and for word of the pointer leaving. */
+function wantPeek(want: PeekSpot | null): PeekSpot | null {
+	let spot = want;
+	if (spot?.id !== peek.dismissed) peek.dismissed = null;
+	else spot = null;
+	peek.spot = spot;
+	// Anything the pointer lights, a row, a control, or the Peek, goes out when the pointer leaves the roster.
+	syncWatch(roster.pointer !== null || spot !== null);
+	if (spot) askPeekInfo(spot.id);
+	return spot;
+}
+
+/** Brings the popup Peek to `spot`: at once to close, after the pointer rests to open or move. */
+function syncPeek(spot: PeekSpot | null): void {
+	const shown = peek.shown;
+	if (shown && spot && spotKey(shown) === spotKey(spot)) {
+		shown.source = spot.source;
+		cancelPendingPeek();
+		refreshPeek(shown);
+		return;
+	}
+	if (peek.pending && spotKey(peek.pending.spot) === spotKey(spot)) return;
+	cancelPendingPeek();
+	if (!spot) {
+		closePeek();
+		return;
+	}
+	const target = spot;
+	const timer = setTimeout(
+		() => {
+			peek.pending = null;
+			openPeek(target);
+		},
+		shown ? PEEK_SWITCH_MS : PEEK_OPEN_MS,
+	);
+	peek.pending = { spot: target, timer };
+}
+
+function syncWatch(want: boolean): void {
+	if (want === peek.watching) return;
+	peek.watching = want;
+	void tmuxAsync(UI, "set", "-t", deck, ...(want ? ["@swb_watch", "1"] : ["-u", "@swb_watch"])).catch((error: Error) =>
+		toast(`peek: ${error.message}`, "error"),
+	);
+}
+
+function askPeekInfo(id: string): void {
+	const e = entries.get(id);
+	const have = peek.info.get(id);
+	if (!e || peek.asked.has(id) || (have && Date.now() - have.at < PEEK_INFO_MS)) return;
+	peek.asked.add(id);
+	post({ type: "peek", id, cwd: e.cwd, transcript: e.transcript });
+}
+
+function onPeekInfo(id: string, info: PeekInfo): void {
+	peek.asked.delete(id);
+	peek.info.set(id, { info, at: Date.now() });
+	peek.infoWaits.get(id)?.();
+	peek.infoWaits.delete(id);
+	tui.requestRender();
+}
+
+/** Opens the Peek at `spot`, closing the one shown in the same tmux command; a later render may have moved on already. */
+function openPeek(spot: PeekSpot): void {
+	peek.ops = peek.ops.then(async () => {
+		try {
+			if (spotKey(peek.spot) !== spotKey(spot)) return;
+			if (!peek.info.has(spot.id))
+				await Promise.race([new Promise<void>((resolve) => peek.infoWaits.set(spot.id, resolve)), Bun.sleep(PEEK_INFO_WAIT_MS)]);
+			const panes = (
+				await tmuxAsync(
+					UI,
+					"list-panes",
+					"-t",
+					stagePane,
+					"-F",
+					"#{pane_id}\t#{pane_left}\t#{pane_top}\t#{pane_width}\t#{pane_height}\t#{pane_tty}",
+				)
+			)
+				.split("\n")
+				.map((line) => {
+					const [id, left, top, width, height, tty] = line.split("\t") as [string, string, string, string, string, string];
+					return { id, left: Number(left), top: Number(top), width: Number(width), height: Number(height), tty };
+				})
+				.filter((pane) => pane.id !== rosterPane);
+			// The Stage's panes against the roster's edge: pi's, and the shell's under it.
+			const edge = Math.min(...panes.map((pane) => pane.left));
+			const host = panes.find((pane) => pane.left === edge && spot.y >= pane.top && spot.y < pane.top + pane.height);
+			const row = roster.rows().find((r) => r.key === spot.id);
+			if (!host || host.width < PEEK_MIN_COLS || row?.kind !== "session" || spotKey(peek.spot) !== spotKey(spot)) return;
+			const width = Math.min(PEEK_COLS, host.width);
+			const view = peekView(row, width, host.height, "left");
+			const height = view.lines.length;
+			// Its title, under the top edge, level with the row.
+			const top = Math.max(0, Math.min(spot.y - host.top - 1, host.height - height));
+			const json = JSON.stringify(view);
+			writeAtomic(paths.peek, json);
+			const close = `${quote(tmuxBin())} -L ${quote(SESSIONS)} display-popup -C -c ${quote(host.tty)} >/dev/null 2>&1`;
+			const set = (name: string, value: string | number) => ["set", "-t", deck, name, String(value)];
+			await tmuxAsync(
+				UI,
+				...[set("@swb_peek_pane", host.id), set("@swb_peek_t", top), set("@swb_peek_b", top + height), set("@swb_peek_r", width)].flatMap(
+					(command) => [...command, ";"],
+				),
+				...set("@swb_peek_close", close),
+			);
+			const old = peek.shown;
+			// display-popup waits for its popup to close; -y is the popup's bottom edge.
+			const proc = Bun.spawn(
+				[
+					tmuxBin(),
+					"-L",
+					SESSIONS,
+					...(old ? ["display-popup", "-C", "-c", old.tty, ";"] : []),
+					...["display-popup", "-B", "-c", host.tty, "-x", "0", "-y", String(top + height), "-w", String(width), "-h", String(height)],
+					`exec ${[SWB, "__peek", "--file", paths.peek, "--sock", paths.sock].map(quote).join(" ")}`,
+				],
+				{ cwd: CLIENT_CWD, env: cleanEnv(), stdout: "ignore", stderr: "pipe" },
+			);
+			const shown: ShownPeek = { ...spot, proc, tty: host.tty, width, maxHeight: host.height, json, view };
+			peek.shown = shown;
+			// A popup closed by -C ends its display-popup with status 1; only something said on stderr is a failure.
+			void proc.exited.then(async () => {
+				const error = (await new Response(proc.stderr).text()).trim();
+				if (error) toast(`peek: ${error}`, "error");
+				if (peek.shown !== shown) return;
+				peek.shown = null;
+				tui.requestRender();
+			});
+		} catch (error) {
+			toast(`peek: ${(error as Error).message}`, "error");
+		}
+		tui.requestRender();
+	});
+}
+
+/** Rewrites what an open Peek shows; one that changed height reopens in its place. */
+function refreshPeek(shown: ShownPeek): void {
+	const row = roster.rows().find((r) => r.key === shown.id);
+	if (row?.kind !== "session") return;
+	const view = peekView(row, shown.width, shown.maxHeight, "left");
+	const json = JSON.stringify(view);
+	if (json === shown.json) return;
+	const resized = view.lines.length !== shown.view.lines.length;
+	shown.json = json;
+	shown.view = view;
+	if (resized) openPeek(shown);
+	else writeAtomic(paths.peek, json);
+}
+
+function closePeek(): void {
+	const shown = peek.shown;
+	cancelPendingPeek();
+	if (!shown) return;
+	peek.shown = null;
+	peek.ops = peek.ops.then(async () => {
+		try {
+			await tmuxAsync(UI, "set", "-u", "-t", deck, "@swb_peek_pane");
+			await tmuxAsync(SESSIONS, "display-popup", "-C", "-c", shown.tty);
+		} catch (error) {
+			toast(`peek: ${(error as Error).message}`, "error");
+		}
+	});
+}
+
+/** A path too long for the Peek keeps its end, where the directories that tell sessions apart are. */
+function tailOf(path: string, width: number): string {
+	return visibleWidth(path) <= width ? path : `…${path.slice(path.length - width + 1)}`;
+}
+
+function ago(at: number, now: number): string {
+	const a = age(at, now);
+	return a === "now" ? "just now" : `${a} ago`;
+}
+
+/**
+ * What a Peek shows, framed on three sides. Beside the roster it opens to the left, onto the roster's border; drawn by
+ * the roster itself, at the terminal's right edge, it opens to the right. A Peek too short for everything loses the last
+ * turn first.
+ */
+function peekView(row: SessionRow, width: number, maxHeight: number, open: "left" | "right"): PeekView {
+	const e = row.entry;
+	const now = Date.now();
+	const inner = width - 3;
+	const rule = gray("─".repeat(inner));
+	const head: string[] = [];
+	const title = wrapTextWithAnsi(displayName(e), inner);
+	const titleLines = title.length > 2 ? [title[0] as string, truncateToWidth(title.slice(1).join(" "), inner, "…")] : title;
+	head.push(...titleLines.map((line) => bold(line)));
+	head.push(`${glyph(stateOf(e), now)} ${status(e)}${launchElapsed(e, now)}`);
+	head.push(
+		gray(`created ${ago(e.createdAt, now)} · ${e.open ? `active ${ago(e.activityAt, now)}` : `archived ${ago(archivedKey(e), now)}`}`),
+	);
+	head.push(rule, gray(tailOf(shortPath(e.cwd), inner)));
+	const info = peek.info.get(e.id)?.info;
+	if (e.branch) {
+		const diff = info?.diff;
+		const changes = diff ? `  ${green(`+${diff.add}`)} ${red(`−${diff.del}`)}${gray(" uncommitted")}` : "";
+		head.push(`${magenta(`⎇ ${e.branch}`)}${changes}`);
+	}
+	const group = groupOf(e);
+	if (group?.kind === "custom") head.push(`${gray("Group")} ${group.name}`);
+	const turn: string[] = [];
+	if (info?.error) turn.push(rule, ...wrapTextWithAnsi(red(`✗ ${info.error}`), inner).slice(0, 3));
+	else if (info?.last) {
+		const label = info.last.who === "you" ? "you " : "pi  ";
+		const text = wrapTextWithAnsi(info.last.text.replace(/\s+/g, " ").trim(), inner - 4);
+		const shown = text.length > 3 ? [...text.slice(0, 2), truncateToWidth(text.slice(2).join(" "), inner - 4, "…")] : text;
+		turn.push(rule, ...shown.map((line, i) => `${gray(i === 0 ? label : "    ")}${line}`));
+	}
+	// The buttons, wrapped; each is the row's key, so the Peek teaches them too.
+	const buttons: { y: number; from: number; to: number; key: string; text: string }[] = [];
+	const buttonLines: string[] = [];
+	let line = "";
+	let x = 0;
+	for (const [label, k] of peekButtons(row)) {
+		const text = ` ${label} ${dim(k)} `;
+		const w = visibleWidth(text);
+		if (x > 0 && x + 1 + w > inner) {
+			buttonLines.push(line);
+			line = "";
+			x = 0;
+		}
+		if (x > 0) {
+			line += " ";
+			x += 1;
+		}
+		buttons.push({ y: buttonLines.length, from: x, to: x + w, key: k, text });
+		line += text;
+		x += w;
+	}
+	if (line !== "") buttonLines.push(line);
+	const body = [...head, ...(head.length + turn.length + 1 + buttonLines.length + 2 <= maxHeight ? turn : []), rule];
+	const buttonsAt = body.length;
+	body.push(...buttonLines);
+	const frame = (content: string) =>
+		open === "left"
+			? ` ${truncateToWidth(content, inner, "…", true)} ${gray("│")}`
+			: `${gray("│")} ${truncateToWidth(content, inner, "…", true)} `;
+	const edge = "─".repeat(width - 1);
+	const lines = [
+		gray(open === "left" ? `${edge}╮` : `╭${edge}`),
+		...body.slice(0, maxHeight - 2).map(frame),
+		gray(open === "left" ? `${edge}╯` : `╰${edge}`),
+	];
+	const margin = open === "left" ? 1 : 2;
+	return {
+		id: e.id,
+		lines,
+		buttons: buttons
+			.filter((b) => 1 + buttonsAt + b.y < lines.length - 1)
+			.map((b) => {
+				const y = 1 + buttonsAt + b.y;
+				// The line again with this one button lit, for the pointer resting on it.
+				const lit = (buttonLines[b.y] as string).replace(b.text, cursorLine(b.text, true));
+				return { y, from: margin + b.from, to: margin + b.to, key: b.key, hot: frame(lit) };
+			}),
+	};
 }
 
 // ── Deck actions ────────────────────────────────────────────────────────
@@ -2124,26 +2527,31 @@ function syncRoster(toRoster: boolean): Promise<void> {
 	return stageOps;
 }
 
-/** The roster's own keys, from anywhere after the prefix. j and k step over headers, and the keyboard stays put. */
-async function prefixKey(k: string): Promise<void> {
+/**
+ * The roster's own keys, from anywhere after the prefix. j and k step over headers, and the keyboard stays put. Given a
+ * session, from a Peek's buttons, the key acts on that session's row instead of the cursor's.
+ */
+async function prefixKey(k: string, id: string | undefined): Promise<void> {
+	const row = id === undefined ? roster.selected() : roster.rows().find((r) => r.key === id);
+	if (id !== undefined && !row) throw new Error(`no session ${id} in the roster`);
 	if (k === "/") {
 		await focusRoster();
 		roster.filtering = true;
 	} else if (k === "m") {
 		await focusRoster();
-		roster.startNaming();
+		roster.startNaming(row);
 	} else if (k === "j" || k === "k") roster.moveSession(k === "j" ? 1 : -1);
 	else if (k === "n") {
 		await focusRoster();
-		roster.newAtCursor();
+		roster.newAt(row);
 	} else if (k === "N") {
 		await focusRoster();
 		roster.openPicker("add", null, null);
 	} else if (k === "d") roster.askRemove();
-	else if (k === "w") roster.wake();
-	else if (k === "x") roster.stop();
-	else if (k === "a") roster.toggleArchived();
-	else if (k === "y" || k === "Y") roster.copy(k === "y");
+	else if (k === "w") roster.wake(row);
+	else if (k === "x") roster.stop(row);
+	else if (k === "a") roster.toggleArchived(row);
+	else if (k === "y" || k === "Y") roster.copy(k === "y", row);
 	else throw new Error(`unknown deck key ${k}`);
 	roster.syncStage(true);
 }
@@ -2157,18 +2565,16 @@ async function showHelp(): Promise<void> {
 	if (client) await tmuxAsync(UI, "display-popup", "-c", client, "-E", ...HELP_POPUP);
 }
 
-/** A menu item and the roster key it stands for; null is a separator. */
-type MenuItem = [label: string, key: string] | null;
-
-function menuItems(row: Row): MenuItem[] {
+/** A Peek's buttons: each one's label and the roster key it runs. */
+function peekButtons(row: Row): [label: string, key: string][] {
 	if (row.kind === "section") return row.key === "operators" ? [["New Operator", "n"]] : [];
 	if (row.kind === "header") {
-		const items: MenuItem[] = [["New session here", "n"]];
+		const items: [string, string][] = [["New session here", "n"]];
 		if (row.group?.kind === "custom") items.push(["Rename Group…", "m"]);
 		return items;
 	}
 	const e = row.entry;
-	const items: MenuItem[] = [];
+	const items: [string, string][] = [];
 	if (!e.open) items.push(["Unarchive", "a"]);
 	else {
 		items.push(e.live ? ["Stop", "x"] : ["Wake", "w"]);
@@ -2176,44 +2582,13 @@ function menuItems(row: Row): MenuItem[] {
 		if (!e.operator) items.push(["Group…", "m"]);
 		items.push([e.operator ? "New Operator" : "New session here", "n"]);
 	}
-	items.push(null, ["Copy swb open <id>", "y"], ["Copy @session:<id>", "Y"]);
+	items.push(["Copy swb open <id>", "y"], ["Copy @session:<id>", "Y"]);
 	return items;
-}
-
-/** Right-click: the row's menu at the pointer. Its items run the prefix keys on the cursor's row, which the click moved there. */
-async function showMenu(row: Row, x: number, y: number): Promise<void> {
-	const items = menuItems(row);
-	const client = await deckClient();
-	if (items.length === 0 || !client) return;
-	const title =
-		row.kind === "session"
-			? displayName(row.entry)
-			: row.kind === "section"
-				? row.label
-				: row.group
-					? groupLabel(row.group)
-					: projectName(row.project);
-	const args = items.flatMap((item) => (item === null ? [""] : [item[0], item[1], notify(`__deck ${deck} key ${item[1]}`)]));
-	// -M takes clicks though no mouse binding opened it. -y is the menu's bottom edge; it opens just below the row.
-	const bottom = y + 1 + items.length + 2;
-	await tmuxAsync(
-		UI,
-		"display-menu",
-		"-M",
-		"-c",
-		client,
-		"-T",
-		` ${title.replaceAll("#", "##")} `,
-		"-x",
-		String(x),
-		"-y",
-		String(bottom),
-		...args,
-	);
 }
 
 /** Below NARROW_BELOW columns the roster stands alone, and focus moves zoom along. */
 function layout(): Promise<void> {
+	closePeek();
 	return sizingRoster(async () => {
 		deckWidth = Number(await tmuxAsync(UI, "display", "-p", "-t", stagePane, "#{window_width}"));
 		apply();
@@ -2275,6 +2650,11 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 			// Moving onto a dormant session, by click or key, means to use it.
 			const onView = stage.staged === null ? undefined : entries.get(stage.staged);
 			if (was === "roster" && focus === "stage" && onView?.open && !onView.live) wake(onView.id, true);
+			// Going to the Stage, by click or key, puts the Peek away: the pointer may still rest on the row it came from.
+			if (was === "roster" && focus === "stage") {
+				peek.dismissed = peek.spot?.id ?? null;
+				peek.byKeys = false;
+			}
 			syncStatus();
 			apply();
 			break;
@@ -2303,7 +2683,22 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 			await toggleShell();
 			break;
 		case "key":
-			await prefixKey(argv[0] ?? "");
+			await prefixKey(argv[0] ?? "", argv[1]);
+			break;
+		// The UI server saw the pointer leave both the roster and the Peek, or a key typed elsewhere; it closed the
+		// Peek, and stopped watching, on its way here.
+		case "pointer-out":
+			roster.hover = null;
+			roster.pointer = null;
+			peek.byKeys = false;
+			peek.watching = false;
+			break;
+		// The pointer came into the Peek: it holds the Peek where it is, as if it were still on the Peek's row.
+		case "peek-in":
+			if (argv[0] !== undefined && peek.shown?.id === argv[0]) {
+				cancelPendingPeek();
+				roster.hover = argv[0];
+			}
 			break;
 		case "esc":
 			for (const launch of launches) launch.keyboard = false;
@@ -2427,6 +2822,11 @@ function viewState(): DeckState {
 		picker: pickerState(),
 		drop: drop ? { project: projectName(drop.header.project), group: drop.header.group && groupLabel(drop.header.group) } : null,
 		filter: roster.query(),
+		hover: roster.hover,
+		peek: (() => {
+			const shown = peek.shown ?? roster.inline;
+			return shown ? { id: shown.id, source: shown.source, lines: shown.view.lines.map((line) => Bun.stripANSI(line)) } : null;
+		})(),
 		focus:
 			focus === "roster"
 				? "roster"
@@ -2483,6 +2883,9 @@ const roster = new Roster();
 tui.setLayoutRoot(roster);
 tui.setFocus(roster);
 tui.start();
+// Inside tmux pi-tui asks only for motion with a button down. The roster wants every motion, for the hover, the Peek,
+// and the picker's highlight, and asking for it here is what makes tmux pass the pointer's motion to the UI server.
+process.stdout.write("\x1b[?1003h");
 
 // Like pi: query the colors, and again on every light/dark report (997). The roster starts before the Deck's
 // client attaches, so the first query gets nothing; tmux sends a 997 on attach, and that query gets everything.
@@ -2491,7 +2894,14 @@ tui.start();
 async function queryColors(scheme: string | null): Promise<void> {
 	const { foreground, background, palette } = await tui.queryTerminalColors({ timeoutMs: 200 });
 	if (palette) await tmuxAsync(SESSIONS, ...palette.flatMap((color, i) => [";", "set", "-g", `pane-colours[${i}]`, hex(color)]).slice(1));
-	cursorBg = background && foreground ? { focused: mix(background, foreground, 0.2), unfocused: mix(background, foreground, 0.08) } : null;
+	cursorBg =
+		background && foreground
+			? {
+					focused: mix(background, foreground, 0.2),
+					unfocused: mix(background, foreground, 0.12),
+					hover: mix(background, foreground, 0.06),
+				}
+			: null;
 	colors = { background: background ? hex(background as RgbColor) : null, scheme: scheme ?? colors.scheme };
 	if (colors.background) post({ type: "background", color: colors.background });
 	tui.requestRender();
@@ -2501,6 +2911,7 @@ tui.setTerminalColorSchemeNotifications(true);
 void queryColors(null);
 
 main.tty = tmux(UI, "display", "-p", "-t", stagePane, "#{pane_tty}");
+tmux(UI, "set", "-t", deck, "@swb_roster", rosterPane, ";", "set", "-t", deck, "@swb_peek_close", "true");
 focusedPane = rosterPane;
 rmSync(paths.sock, { force: true });
 Bun.serve({

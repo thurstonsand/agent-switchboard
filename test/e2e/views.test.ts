@@ -352,8 +352,8 @@ test("an editor that won't start says so, keeps pi on the Stage, and the key sti
 	s.save("refused.txt", `${s.screen()}\n${JSON.stringify(state(s).toasts)}`);
 });
 
-test("lazy hover starts nothing; eager hover starts pi 500 ms after the cursor lands", async () => {
-	s = scenario("phase4", "hover");
+test("by default a highlighted row starts nothing; wake_on_highlight starts pi 500 ms after the cursor lands", async () => {
+	s = scenario("phase4", "wake-on-highlight");
 	const [a, b] = (await seed(s, { turns: ["a"] }, { turns: ["b"] })) as [string, string];
 	s.swb("drive", "start");
 	await cursorTo(s, a);
@@ -363,7 +363,7 @@ test("lazy hover starts nothing; eager hover starts pi 500 ms after the cursor l
 	expect(piSessions(s)).toEqual([]);
 	s.swb("drive", "stop");
 
-	config(s, 'hover = "eager"');
+	config(s, "wake_on_highlight = true");
 	s.swb("drive", "start");
 	await cursorTo(s, a);
 	await waitState(s, "a live", (x) => x.staged.id === a && x.staged.kind === "live", budgets.piReady);
@@ -406,7 +406,7 @@ test("a bad config key fails loudly, naming the key", async () => {
 	const cases: [string, string][] = [
 		['colour = "dark"', "unknown key colour"],
 		['[keys]\nbogus = "C-b"', "unknown key keys.bogus"],
-		['hover = "sometimes"', 'hover must be "lazy" or "eager"'],
+		['wake_on_highlight = "eager"', "wake_on_highlight must be true or false"],
 		['reap_after = "soon"', "reap_after must be a duration"],
 	];
 	const out: string[] = [];

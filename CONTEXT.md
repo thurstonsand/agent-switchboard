@@ -52,6 +52,9 @@ Internal term for the Deck's live, interactive view of the selected session; mov
 **Editor**:
 The text editor for one directory, shared by every session whose working directory it is.
 
+**Peek**:
+A session's particulars and keys, shown beside its Roster row over the **Stage** while the pointer rests on the row or the cursor has just moved onto it. It never covers the Roster.
+
 **View**:
 What the **Stage** shows for a session: **pi**, its **Editor**, or a **split** of both. Each session remembers its own.
 

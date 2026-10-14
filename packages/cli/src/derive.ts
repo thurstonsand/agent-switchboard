@@ -18,6 +18,7 @@ export type SessionState = {
 	unseen: boolean;
 	interrupted: boolean;
 	inactive: boolean;
+	createdAt: number;
 	activityAt: number;
 	visitedAt: number | null;
 	archivedAt: number | null;
@@ -44,6 +45,7 @@ export type SessionRow = {
 	branch: string | null;
 	transcript: string;
 	phase: Phase;
+	created_at: number;
 	last_prompt_at: number;
 	last_settled_at: number | null;
 	archived_at: number | null;
@@ -56,7 +58,7 @@ export type SessionRow = {
 export function sessionRows(db: Db): SessionRow[] {
 	return db
 		.all(
-			`SELECT s.session_id, s.title, s.project_root, s.cwd, s.branch, s.transcript, s.phase, s.last_prompt_at, s.last_settled_at,
+			`SELECT s.session_id, s.title, s.project_root, s.cwd, s.branch, s.transcript, s.phase, s.created_at, s.last_prompt_at, s.last_settled_at,
 		        m.archived_at, m.visited_at, m.view, m.group_name, r.tmux_session, r.boot_id, r.pid
 		 FROM sessions s LEFT JOIN marks m USING (session_id) LEFT JOIN runtimes r USING (session_id)`,
 		)
@@ -68,6 +70,7 @@ export function sessionRows(db: Db): SessionRow[] {
 			branch: r.branch as string | null,
 			transcript: r.transcript as string,
 			phase: r.phase as Phase,
+			created_at: r.created_at as number,
 			last_prompt_at: r.last_prompt_at as number,
 			last_settled_at: r.last_settled_at as number | null,
 			archived_at: r.archived_at as number | null,
@@ -123,6 +126,7 @@ export function derive(row: SessionRow, w: World): SessionState {
 		unseen,
 		interrupted: !live && row.phase !== "idle",
 		inactive: open && !operator && activityAt < w.now - w.inactiveAfterMs && activity !== "blocked" && !unseen,
+		createdAt: row.created_at,
 		activityAt,
 		visitedAt: row.visited_at,
 		archivedAt: open ? null : row.archived_at,
