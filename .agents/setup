@@ -45,6 +45,8 @@ EOF
 install_tools() {
   mise trust --quiet "$repo/mise.toml"
   mise install
+  # Harnesses are npm globals behind node shims, and swb starts them in any project directory.
+  mise use -g --quiet "node@$(mise current node)"
 }
 
 # Mirrors CI: pi itself, plus the two host packages the e2e scenarios load.
@@ -53,6 +55,18 @@ install_pi() {
   root="$(mise x -- npm root -g)"
   [ -f "$root/@earendil-works/pi-coding-agent/package.json" ] ||
     mise x -- npm install -g --no-fund --no-audit @earendil-works/pi-coding-agent
+  mise reshim
+}
+
+# The other harnesses swb hosts, for spikes and e2e against fake model servers.
+install_harnesses() {
+  local root missing=()
+  root="$(mise x -- npm root -g)"
+  [ -f "$root/@anthropic-ai/claude-code/package.json" ] || missing+=(@anthropic-ai/claude-code)
+  [ -f "$root/@openai/codex/package.json" ] || missing+=(@openai/codex)
+  # Claude's postinstall swaps its Node wrapper for the native binary.
+  [ ${#missing[@]} -eq 0 ] ||
+    mise x -- npm install -g --no-fund --no-audit --allow-scripts=@anthropic-ai/claude-code "${missing[@]}"
   mise reshim
 }
 
@@ -78,4 +92,5 @@ step "build" mise run build
 step "dist:pi" mise run dist:pi
 step "link swb" link_swb
 step "pi" install_pi
+step "claude and codex" install_harnesses
 step "pi packages" configure_pi

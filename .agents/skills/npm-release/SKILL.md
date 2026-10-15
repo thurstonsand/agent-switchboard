@@ -8,7 +8,7 @@ description: "Prepare, tag, publish, and verify a release of Agent Switchboard: 
 One `vX.Y.Z` tag on `main` produces three things, all from `.github/workflows/release.yml`:
 
 - a GitHub release with `swb-linux-x64` and `swb-darwin-arm64` attached
-- the `pi` branch, force-replaced with the bundled recorder extension
+- the `pi` branch, force-replaced with the bundled pi line
 - `@thurstonsand/pi-agent-switchboard` on npm, the same bundle, through Trusted Publishing (OIDC)
 
 ## Prerequisites

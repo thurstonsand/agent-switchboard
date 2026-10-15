@@ -24,7 +24,7 @@ export default function peek(pi) {
 }
 `;
 
-test("n on Operators starts a trusted pi that reads only swb's current AGENTS.md and can't start subagents", async () => {
+test("n then Enter on Operators starts a trusted pi that reads only swb's current AGENTS.md and can't start subagents", async () => {
 	s = scenario("phase6", "operators", { packages: ["pi-sessions"], recorder: true });
 	const agentDir = s.env.PI_CODING_AGENT_DIR as string;
 	// A symlinked config dir, as dotfile managers leave it: pi's cwd is the physical path.
@@ -46,6 +46,8 @@ test("n on Operators starts a trusted pi that reads only swb's current AGENTS.md
 	s.keys("g");
 	await waitState(s, "cursor on the Operators section", (x) => x.cursorRow === 0);
 	s.keys("n");
+	await waitState(s, "the picker, on pi", (x) => x.picker !== null && x.picker.harness === "pi");
+	s.keys("Enter");
 	const st = await waitState(
 		s,
 		"the Operator's pi live with the keyboard",
@@ -59,11 +61,13 @@ test("n on Operators starts a trusted pi that reads only swb's current AGENTS.md
 	expect(readFileSync(join(operator, "AGENTS.md"), "utf8")).toContain("CAPCOM");
 
 	const before = s.ls().map((e) => e.id);
-	for (const launch of ["subagent", "deferred"]) {
-		s.keys("-l", `${launch} ${launch}1`, "Enter");
-		await until(() => s.screen().includes(`tool done ${launch}1`), budgets.piReady, `the refused ${launch} handoff`);
-		expect(s.screen()).toContain("launch: must be equal to constant");
-	}
+	s.keys("-l", "tools", "Enter");
+	await until(() => s.signal("tools") !== "", budgets.settle, "the Operator's tool list");
+	const tools = JSON.parse(s.signal("tools")) as string[];
+	expect(tools).toContain("session_launch");
+	expect(tools.filter((name) => name.startsWith("subagent_") || name === "session_handoff")).toEqual([]);
+	s.keys("-l", "subagent subagent1", "Enter");
+	await until(() => s.screen().includes("tool done subagent1"), budgets.piReady, "the refused subagent");
 	expect(s.signal("child.subagent1.entered")).toBe("");
 	expect(s.ls().map((e) => e.id)).toEqual(before);
 	const rows = state(s).rows;

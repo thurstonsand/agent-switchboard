@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, Type } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { agentStep } from "./fakes/agent.ts";
 
 // Scripted turns for e2e scenarios. The user's prompt picks the script:
 //   reply <text>      answer with <text>
@@ -10,10 +11,13 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 //   attention <name>  like hold, inside a glimpse attention span
 //   subagent <name>   launch a real pi-sessions subagent whose task is `reply child <name>`; the child holds like
 //                     `hold child.<name>` before answering
-//   deferred <name>   prepare a deferred pi-sessions handoff whose task is `reply child <name>`
-//   handoff <name>    hand off to the swb host, with the task `reply child <name>`
-//   message <id> <n>  send session <id> a pi-sessions message, which it answers like `reply <n>`
+//   handoff <name>    launch a new pi session through swb's session_launch, with the goal `reply child <name>`
+//   message <id> <n>  send session <id> a message with swb's session_send_message, which it answers like `reply <n>`
 //   reach <n>         find the first dormant session through session_reachable and message it like `message`
+//   call <tool> <json>  call any tool with those arguments, then answer "tool done call"
+//   tools             signal the active tool names as `tools`, and answer "tools listed"
+//   tell <harness> <m>, launch <harness> <title>   use swb's tools as fakes/agent.ts scripts them
+// A message from another session (it starts "Message from session") whose body is `reply <n>` is answered like it.
 //   archive <text>    call swb_update_session to archive itself, then answer "tool done <text>"
 // A pi that starts while start.hold exists signals start.entered and blocks until start.release.
 // pi-sessions' handoff extraction is answered with a fixed briefing.
@@ -58,14 +62,21 @@ export default function (pi: ExtensionAPI) {
 	const script = async (context: { messages: Message[] }, options: { signal?: AbortSignal } | undefined) => {
 		const last = context.messages.at(-1);
 		if (!last) throw new Error("scenario: empty context");
+		const typed = context.messages.findLast((message) => message.role === "user");
+		const step = typed ? agentStep(text(typed).trim(), last.role === "toolResult" ? text(last) : null) : null;
+		if (step && "tool" in step) return fauxAssistantMessage(fauxToolCall(step.tool, step.args as never), { stopReason: "toolUse" });
+		if (step) return fauxAssistantMessage(step.text);
 		if (last.role === "toolResult") {
 			const prompt = text(context.messages.findLast((message) => message.role === "user") as Message);
 			if ((last as { toolName?: string }).toolName === "session_reachable") {
-				const { sessions } = JSON.parse(text(last)) as { sessions: { sessionId: string; state: string }[] };
-				const dormant = sessions.find((session) => session.state === "dormant");
-				if (!dormant) throw new Error("scenario: nothing dormant to reach");
+				const dormant = /^- (\S+) · .* · dormant · /m.exec(text(last))?.[1];
+				if (!dormant) throw new Error(`scenario: nothing dormant to reach in ${text(last)}`);
 				return fauxAssistantMessage(
-					fauxToolCall("session_send_message", { session: dormant.sessionId, message: `wake-reply ${prompt.split(" ")[1]}` }),
+					fauxToolCall("session_send_message", {
+						session: dormant,
+						message: `wake-reply ${prompt.split(" ")[1]}`,
+						requestResponse: false,
+					}),
 					{ stopReason: "toolUse" },
 				);
 			}
@@ -92,6 +103,15 @@ export default function (pi: ExtensionAPI) {
 			await released(`child.${child[1]}`, options?.signal);
 			return fauxAssistantMessage(`child ${child[1]} done`);
 		}
+		if (prompt.startsWith("Message from session")) {
+			const body = prompt.split("\n\n")[1] ?? "";
+			const replied = /^reply (\S+)/.exec(body);
+			if (replied) {
+				signal(`replied.${replied[1]}`);
+				return fauxAssistantMessage(`got ${replied[1]}`);
+			}
+			return fauxAssistantMessage(`got ${body}`);
+		}
 		const [verb, ...rest] = prompt.split(" ");
 		const arg = rest.join(" ");
 		switch (verb) {
@@ -105,19 +125,30 @@ export default function (pi: ExtensionAPI) {
 				await released(arg, options?.signal);
 				return fauxAssistantMessage(`released ${arg}`);
 			case "subagent":
-			case "deferred":
+				return fauxAssistantMessage(
+					fauxToolCall("subagent_launch", { title: `child ${arg}`, goal: `reply child ${arg}`, requestResponse: true }),
+					{
+						stopReason: "toolUse",
+					},
+				);
 			case "handoff":
 				return fauxAssistantMessage(
-					fauxToolCall("session_handoff", {
-						title: `child ${arg}`,
-						goal: `reply child ${arg}`,
-						launch: verb === "handoff" ? "swb" : verb,
-					}),
-					{ stopReason: "toolUse" },
+					fauxToolCall("session_launch", { harness: "pi", title: `child ${arg}`, goal: `reply child ${arg}`, requestResponse: false }),
+					{
+						stopReason: "toolUse",
+					},
 				);
+			case "call":
+				return fauxAssistantMessage(fauxToolCall(rest[0] as string, JSON.parse(rest.slice(1).join(" ") || "{}")), {
+					stopReason: "toolUse",
+				});
+			case "tools":
+				signal("tools");
+				writeFileSync(join(signals, "tools"), JSON.stringify(pi.getActiveTools()));
+				return fauxAssistantMessage("tools listed");
 			case "message":
 				return fauxAssistantMessage(
-					fauxToolCall("session_send_message", { session: rest[0] as string, message: `wake-reply ${rest[1]}` }),
+					fauxToolCall("session_send_message", { session: rest[0] as string, message: `wake-reply ${rest[1]}`, requestResponse: false }),
 					{
 						stopReason: "toolUse",
 					},

@@ -1,6 +1,6 @@
 import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { stateDir } from "@swb/shared";
+import { type Harness, stateDir } from "@swb/shared";
 import { type Config, loadConfig, type RosterWidth } from "../config.ts";
 import { SwbError } from "../errors.ts";
 import { ensureOperatorDir } from "../operator.ts";
@@ -256,7 +256,7 @@ export function stageScript(deck: string, targetPath: string, closes = false): s
 }
 
 /** `continue`: pi takes the keyboard on the most recent session in this Project, or a new one. */
-export type DeckIntent = { select: string | null; newCwd: string | null; continue: boolean };
+export type DeckIntent = { select: string | null; newCwd: string | null; continue: boolean; harness?: Harness };
 
 /** Builds a Deck (roster pane and Stage pane) and attaches this terminal to it. */
 export async function openDeck(intent: DeckIntent): Promise<void> {
@@ -271,7 +271,7 @@ export async function openDeck(intent: DeckIntent): Promise<void> {
 	const deck = `deck-${randomHex(3)}`;
 	const paths = deckPaths(deck);
 	mkdirSync(decksDir(), { recursive: true, mode: 0o700 });
-	writeCard(paths, { head: [], lines: ["Deck starting…"], turns: null });
+	writeCard(paths, { head: [], lines: ["Deck starting…"], turns: null, agent: "" });
 	writeAtomic(paths.target, placeholderName(deck));
 	ensurePlaceholder(deck);
 
@@ -297,6 +297,7 @@ export async function openDeck(intent: DeckIntent): Promise<void> {
 	const roster = [SWB, "__roster", "--deck", deck, "--stage", stage, "--here", process.cwd()];
 	if (intent.select) roster.push("--select", intent.select);
 	if (intent.newCwd) roster.push("--new", intent.newCwd);
+	if (intent.harness) roster.push("--harness", intent.harness);
 	if (intent.continue) roster.push("--continue");
 	const rosterPane = tmux(
 		UI,

@@ -1,10 +1,13 @@
 import { basename } from "node:path";
-import { bootId, type Db, operatorDir, type Phase, pidAlive, type View } from "@swb/shared";
+import { bootId, type Db, type Harness, operatorDir, type Phase, pidAlive, type View } from "@swb/shared";
 import { listSessions, SESSIONS } from "./tmux.ts";
 
 /** One Session with every derived state, as `swb ls --json` prints it. */
 export type SessionState = {
 	id: string;
+	harness: Harness;
+	/** The session that launched this one, if one did. */
+	parentId: string | null;
 	title: string | null;
 	project: string;
 	cwd: string;
@@ -39,6 +42,8 @@ export function runtimeLive(runtime: RuntimeRow, boot: string, hosts: Set<string
 
 export type SessionRow = {
 	session_id: string;
+	harness: Harness;
+	parent_id: string | null;
 	title: string | null;
 	project_root: string;
 	cwd: string;
@@ -58,12 +63,14 @@ export type SessionRow = {
 export function sessionRows(db: Db): SessionRow[] {
 	return db
 		.all(
-			`SELECT s.session_id, s.title, s.project_root, s.cwd, s.branch, s.transcript, s.phase, s.created_at, s.last_prompt_at, s.last_settled_at,
+			`SELECT s.session_id, s.harness, s.parent_id, s.title, s.project_root, s.cwd, s.branch, s.transcript, s.phase, s.created_at, s.last_prompt_at, s.last_settled_at,
 		        m.archived_at, m.visited_at, m.view, m.group_name, r.tmux_session, r.boot_id, r.pid
 		 FROM sessions s LEFT JOIN marks m USING (session_id) LEFT JOIN runtimes r USING (session_id)`,
 		)
 		.map((r) => ({
 			session_id: r.session_id as string,
+			harness: r.harness as Harness,
+			parent_id: r.parent_id as string | null,
 			title: r.title as string | null,
 			project_root: r.project_root as string,
 			cwd: r.cwd as string,
@@ -86,6 +93,7 @@ export function sessionRows(db: Db): SessionRow[] {
 export type RuntimeRecord = {
 	tmux_session: string;
 	session_id: string;
+	harness: Harness;
 	cwd: string;
 	project_root: string;
 	boot_id: string;
@@ -94,9 +102,10 @@ export type RuntimeRecord = {
 };
 
 export function runtimeRecords(db: Db): RuntimeRecord[] {
-	return db.all("SELECT tmux_session, session_id, cwd, project_root, boot_id, pid, started_at FROM runtimes").map((r) => ({
+	return db.all("SELECT tmux_session, session_id, harness, cwd, project_root, boot_id, pid, started_at FROM runtimes").map((r) => ({
 		tmux_session: r.tmux_session as string,
 		session_id: r.session_id as string,
+		harness: r.harness as Harness,
 		cwd: r.cwd as string,
 		project_root: r.project_root as string,
 		boot_id: r.boot_id as string,
@@ -114,6 +123,8 @@ export function derive(row: SessionRow, w: World): SessionState {
 	const operator = row.cwd === operatorDir();
 	return {
 		id: row.session_id,
+		harness: row.harness,
+		parentId: row.parent_id,
 		title: row.title,
 		project: row.project_root,
 		cwd: row.cwd,

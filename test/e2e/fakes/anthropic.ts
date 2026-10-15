@@ -1,0 +1,154 @@
+// A fake Anthropic Messages API that scripts a real Claude Code TUI offline. The latest user text picks the script:
+//   reply <text>         answer "<text>"
+//   hold <name>          signal <name>.entered, wait for <name>.release through Bash, answer "released <name>"
+//   call <tool> <json>   call the tool whose name is <tool> or ends in __<tool> with <json>, then answer "tool done"
+// A message from another session (its text contains "Message from session") is answered "got <its last line>".
+// Requests without tools (titles) get a short reply, and prompt suggestions none. Every request is appended to $FAKE_LOG as one
+// JSON line: the latest prompt, whether it carried a tool result, the tools offered, every swb message marker seen, and
+// the conversation as sent, instructions included.
+import { appendFileSync } from "node:fs";
+import { agentStep, titleOf } from "./agent.ts";
+
+const port = Number(process.env.FAKE_PORT ?? 0);
+const log = process.env.FAKE_LOG ?? "/dev/null";
+const signals = process.env.FAKE_SIGNALS ?? "/tmp";
+let n = 0;
+
+type Block = { type: string; text?: string; content?: unknown; name?: string };
+type Msg = { role: string; content: string | Block[] };
+
+const blocks = (m: Msg): Block[] => (typeof m.content === "string" ? [{ type: "text", text: m.content }] : m.content);
+
+/** The text a person or plugin typed: user text that isn't a reminder Claude Code inserted. */
+function typed(m: Msg): string | undefined {
+	if (m.role !== "user") return undefined;
+	const texts = blocks(m)
+		.filter((b) => b.type === "text" && !(b.text ?? "").startsWith("<system-reminder>") && !(b.text ?? "").startsWith("<local-command"))
+		.map((b) => b.text ?? "");
+	return texts.length > 0 ? texts.join("\n") : undefined;
+}
+
+/** The session Claude Code asks a title for, between its <session> tags. */
+function title(request: string): string {
+	return titleOf(/<session>\n([\s\S]*?)\n<\/session>/.exec(request)?.[1] ?? "Session");
+}
+
+function lastLine(text: string, after: string): string {
+	const from = text.slice(text.lastIndexOf(after));
+	return (
+		from
+			.split("\n")
+			.map((line) => line.trim())
+			.filter((line) => line && !line.startsWith("This is how") && !line.startsWith("Response requested"))
+			.at(-1) ?? ""
+	);
+}
+
+const server = Bun.serve({
+	port,
+	hostname: "127.0.0.1",
+	idleTimeout: 0,
+	async fetch(req) {
+		const url = new URL(req.url);
+		if (url.pathname.endsWith("/count_tokens")) return Response.json({ input_tokens: 10 });
+		if (req.method !== "POST" || !url.pathname.endsWith("/v1/messages")) return Response.json({ data: [] });
+		const body = (await req.json()) as { messages: Msg[]; stream?: boolean; model: string; tools?: { name: string }[] };
+		const id = `msg_${++n}`;
+		const messages = body.messages ?? [];
+		const last = messages.at(-1);
+		const tools = (body.tools ?? []).map((tool) => tool.name);
+		const toolResult = last ? blocks(last).some((b) => b.type === "tool_result") : false;
+		const lastTyped =
+			[...messages]
+				.reverse()
+				.map(typed)
+				.find((text) => text !== undefined) ?? "";
+		const raw = JSON.stringify(messages);
+		const markers = [...new Set([...raw.matchAll(/SWB-[A-Za-z0-9-]+/g)].map((m) => m[0]))];
+		// Context a plugin added after a tool result rides in the same user message as that result.
+		const lastText = last
+			? blocks(last)
+					.flatMap((b) => (b.type === "text" ? [b.text ?? ""] : []))
+					.join("\n")
+			: "";
+		// What the tools answered in this request's last message, as the model reads it.
+		const toolOutput = last
+			? blocks(last)
+					.filter((b) => b.type === "tool_result")
+					.map((b) => (typeof b.content === "string" ? b.content : JSON.stringify(b.content)))
+					.join("\n")
+			: "";
+		appendFileSync(
+			log,
+			`${JSON.stringify({ n, prompt: lastTyped.slice(0, 400), toolResult, toolOutput: toolOutput.slice(0, 4000), lastText: lastText.slice(0, 400), tools, markers, context: raw.slice(0, 200_000) })}\n`,
+		);
+
+		const [verb, ...rest] = lastTyped.trim().split(" ");
+		const answered = messages.findLastIndex((m) => m.role === "assistant") > messages.findLastIndex((m) => typed(m) !== undefined);
+		let content: object[];
+		const step = tools.length > 0 && (toolResult || !answered) ? agentStep(lastTyped, toolResult ? toolOutput : null) : null;
+		if (step && "tool" in step) {
+			const name = tools.find((candidate) => candidate.endsWith(`__${step.tool}`)) ?? step.tool;
+			content = [{ type: "tool_use", id: `toolu_${n}`, name, input: step.args }];
+		} else if (step) {
+			content = [{ type: "text", text: step.text }];
+		} else if (tools.length > 0 && !toolResult && !answered && verb === "hold") {
+			const name = rest.join(" ");
+			const command = `echo entered > ${signals}/${name}.entered; until [ -e ${signals}/${name}.release ]; do sleep 0.1; done`;
+			content = [{ type: "tool_use", id: `toolu_${n}`, name: "Bash", input: { command, description: "Hold", timeout: 600000 } }];
+		} else if (tools.length > 0 && !toolResult && !answered && verb === "call") {
+			const [tool, ...json] = rest;
+			const name = tools.find((candidate) => candidate === tool || candidate.endsWith(`__${tool}`)) ?? (tool as string);
+			content = [{ type: "tool_use", id: `toolu_${n}`, name, input: JSON.parse(json.join(" ") || "{}") }];
+		} else {
+			const inbound = lastText.includes("Message from session") ? lastText : lastTyped.includes("Message from session") ? lastTyped : "";
+			const text = inbound
+				? `got ${lastLine(inbound, "Message from session")}`
+				: lastTyped.startsWith("[SUGGESTION MODE")
+					? ""
+					: tools.length === 0 && lastTyped.startsWith("<session>")
+						? JSON.stringify({ title: title(lastTyped) })
+						: tools.length === 0
+							? "ok"
+							: verb === "hold"
+								? `released ${rest.join(" ")}`
+								: verb === "reply"
+									? rest.join(" ")
+									: toolResult
+										? "tool done"
+										: `ack ${lastTyped.slice(0, 60)}`;
+			content = [{ type: "text", text }];
+		}
+		const stop = content.some((c) => (c as { type: string }).type === "tool_use") ? "tool_use" : "end_turn";
+		const message = {
+			id,
+			type: "message",
+			role: "assistant",
+			model: body.model,
+			content,
+			stop_reason: stop,
+			stop_sequence: null,
+			usage: { input_tokens: 10, output_tokens: 5 },
+		};
+		if (!body.stream) return Response.json(message);
+		const events: object[] = [{ type: "message_start", message: { ...message, content: [], stop_reason: null } }];
+		content.forEach((block, index) => {
+			const b = block as { type: string; text?: string; id?: string; name?: string; input?: object };
+			if (b.type === "text") {
+				events.push({ type: "content_block_start", index, content_block: { type: "text", text: "" } });
+				events.push({ type: "content_block_delta", index, delta: { type: "text_delta", text: b.text } });
+			} else {
+				events.push({ type: "content_block_start", index, content_block: { type: "tool_use", id: b.id, name: b.name, input: {} } });
+				events.push({ type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: JSON.stringify(b.input) } });
+			}
+			events.push({ type: "content_block_stop", index });
+		});
+		events.push({ type: "message_delta", delta: { stop_reason: stop, stop_sequence: null }, usage: { output_tokens: 5 } });
+		events.push({ type: "message_stop" });
+		return new Response(events.map((e) => `event: ${(e as { type: string }).type}\ndata: ${JSON.stringify(e)}\n\n`).join(""), {
+			headers: { "content-type": "text/event-stream" },
+		});
+	},
+});
+// The harness reads the port the server bound.
+console.log(server.port);

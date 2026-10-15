@@ -3,7 +3,8 @@
 	"private": true,
 	"type": "module",
 	"workspaces": [
-		"packages/*"
+		"packages/*",
+		"packages/lines/*"
 	],
 	"devDependencies": {
 		"@earendil-works/pi-ai": "1.0.4",

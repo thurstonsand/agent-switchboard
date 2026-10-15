@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { operatorDir } from "@swb/shared";
 import agents from "./operator.md" with { type: "text" };
 
@@ -25,10 +26,44 @@ export default function operator(pi) {
 }
 `;
 
-// An Operator's new work goes to swb-managed sessions: a subagent or a deferred handoff is work the Deck can't see.
-const SETTINGS = `${JSON.stringify({ sessions: { subagents: { enable: false }, handoff: { deferred: { enable: false } } } }, null, "\t")}\n`;
+// An Operator's new work goes to swb-managed sessions: a subagent is work the Deck can't see.
+const SETTINGS = `${JSON.stringify({ sessions: { subagents: { enable: false } } }, null, "\t")}\n`;
 
-/** The Operator folder: swb owns its AGENTS.md, extension, and pi settings, and keeps them current. */
+/**
+ * What keeps a Claude Code Operator to its folder, as `claude --settings`: every instruction file but the folder's
+ * AGENTS.md excluded, the user's and any above it, and no subagents, which the Deck can't see.
+ */
+export function claudeOperatorSettings(): string {
+	const ancestors: string[] = [];
+	for (let dir = dirname(operatorDir()); ; dir = dirname(dir)) {
+		ancestors.push(dir);
+		if (dir === dirname(dir)) break;
+	}
+	const home = join(homedir(), ".claude");
+	return JSON.stringify({
+		claudeMdExcludes: [
+			join(home, "CLAUDE.md"),
+			join(home, "rules", "**"),
+			...ancestors.flatMap((dir) =>
+				["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", ".claude/CLAUDE.md", ".claude/rules/**"].map((f) => join(dir, f)),
+			),
+		],
+		permissions: { deny: ["Agent"] },
+	});
+}
+
+/**
+ * A Codex Operator's `-c` overrides: the folder trusted, which Codex requires before it reads a folder's AGENTS.md,
+ * and no subagents. Codex has no way to skip the user's ~/.codex/AGENTS.md, so that one still loads.
+ */
+export function codexOperatorConfig(): string[] {
+	// agents.enabled is the switch a model's own multi-agent setting can't override; multi_agent_v2 overrides it.
+	return [`projects={${JSON.stringify(operatorDir())}={trust_level="trusted"}}`, "agents.enabled=false", "features.multi_agent_v2=false"];
+}
+
+const CLAUDE = "@AGENTS.md\n";
+
+/** The Operator folder: swb owns its AGENTS.md, CLAUDE.md, extension, and pi settings, and keeps them current. */
 export function ensureOperatorDir(): void {
 	const dir = operatorDir();
 	const extensions = join(dir, ".pi", "extensions");
@@ -39,4 +74,7 @@ export function ensureOperatorDir(): void {
 	if (!existsSync(settingsPath) || readFileSync(settingsPath, "utf8") !== SETTINGS) writeFileSync(settingsPath, SETTINGS);
 	const agentsPath = join(dir, "AGENTS.md");
 	if (!existsSync(agentsPath) || readFileSync(agentsPath, "utf8") !== agents) writeFileSync(agentsPath, agents);
+	// Claude Code reads a CLAUDE.md here or above in place of AGENTS.md; this one makes sure it's the Operator's.
+	const claudePath = join(dir, "CLAUDE.md");
+	if (!existsSync(claudePath) || readFileSync(claudePath, "utf8") !== CLAUDE) writeFileSync(claudePath, CLAUDE);
 }

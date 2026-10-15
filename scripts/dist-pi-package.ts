@@ -1,6 +1,6 @@
 import { copyFileSync, readFileSync, writeFileSync } from "node:fs";
 
-const source = JSON.parse(readFileSync("packages/pi/package.json", "utf8"));
+const source = JSON.parse(readFileSync("packages/lines/pi/package.json", "utf8"));
 const manifest = {
 	name: source.name,
 	version: source.version,

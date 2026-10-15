@@ -10,7 +10,7 @@ if (!args.card || !args.sock) throw new UsageError("__placeholder: --card and --
 const cardPath = args.card;
 const sock = args.sock;
 
-let card: Card = { head: [], lines: [], turns: null };
+let card: Card = { head: [], lines: [], turns: null, agent: "" };
 let raw = "";
 let typedAt = 0;
 let frame = "";
@@ -31,8 +31,11 @@ function load(): boolean {
 
 function turnLines(turn: Turn, width: number): string[] {
 	const wrapped = turn.text.split("\n").flatMap((line) => (line === "" ? [""] : wrapTextWithAnsi(line, width - 5)));
-	const label = turn.who === "you" ? cyan("you") : gray("pi");
-	return wrapped.map((line, i) => `${i === 0 ? `${label}${" ".repeat(5 - turn.who.length)}` : "     "}${line}`);
+	const who = turn.who === "you" ? "you" : card.agent;
+	const label = turn.who === "you" ? cyan(who) : gray(who);
+	// One column for both labels, so the conversation lines up.
+	const pad = Math.max(4, card.agent.length) + 1;
+	return wrapped.map((line, i) => `${i === 0 ? `${label}${" ".repeat(pad - who.length)}` : " ".repeat(pad)}${line}`);
 }
 
 function draw(): void {

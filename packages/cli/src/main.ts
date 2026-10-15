@@ -1,11 +1,13 @@
+import { codexHost } from "./codex/host.ts";
 import { adopt } from "./commands/adopt.ts";
 import { archive } from "./commands/archive.ts";
+import { launch, reachable, send } from "./commands/coordinate.ts";
 import { deckCommand, deckNotify, help } from "./commands/deck.ts";
 import { detached } from "./commands/detached.ts";
 import { dirs } from "./commands/dirs.ts";
 import { drive } from "./commands/drive.ts";
 import { gc } from "./commands/gc.ts";
-import { launch } from "./commands/launch.ts";
+import { ack, inbox, record } from "./commands/line.ts";
 import { LS_HELP, ls } from "./commands/ls.ts";
 import { migrate } from "./commands/migrate.ts";
 import { newSession } from "./commands/new.ts";
@@ -21,16 +23,20 @@ const USAGE = `swb: Agent Switchboard
 
   swb                          open a Deck where the last one in this Project left off
   swb -c, --continue           open a Deck in pi on this Project's most recent session, or a new one
-  swb new [--cwd DIR]          open a Deck on a new pi session
+  swb new [--cwd DIR] [--harness H]  open a Deck on a new session
   swb open ID                  open a Deck on a session
   swb adopt ID|TRANSCRIPT      track a session pi ran outside swb, then open it; quit that pi first
   swb ls [--json]              list sessions with derived state
   swb dirs [--json]            list the directories the Deck's picker offers
   swb archive ID               archive a session
   swb unarchive ID             reopen an archived session
-  swb launch --cwd DIR --session-id ID --model M
-                               start pi on a session in the background, managed (pi-sessions handoffs)
-  swb wake ID                  start a dormant session's pi in the background
+  swb wake ID                  start a dormant session in the background
+  swb launch --harness pi|claude|codex [--cwd DIR] [--from ID] [--title T] [--model M] [--request-response]
+                               start a new session in the background; its goal on stdin
+  swb send --from ID --to ID [--request-response] [--request-id KEY] [--cancel]
+                               message a session, waking it if dormant; the body on stdin
+  swb reachable --from ID      every open session but the caller, as a line's tool reads it
+  swb mcp                      the MCP server a Codex session's app-server runs for swb's tools
   swb drive start [--size COLSxROWS] [--theme light|dark] [-- swb-args]
   swb drive keys [--delay MS] [-l TEXT]… [KEY…] | capture [--ansi] | theme light|dark | focus in|out
             | click X Y | move X Y | drag X1 Y1 X2 Y2 [--hold] | release X Y (0-based cells) | resize COLSxROWS | clipboard | stop
@@ -74,6 +80,10 @@ async function main(args: string[]): Promise<void> {
 			return unarchive(rest);
 		case "launch":
 			return launch(rest);
+		case "send":
+			return send(rest);
+		case "reachable":
+			return reachable(rest);
 		case "wake":
 			return wake(rest);
 		case "deck":
@@ -99,6 +109,17 @@ async function main(args: string[]): Promise<void> {
 		case "__peek":
 			await import("./deck/peek.ts");
 			return;
+		case "mcp":
+			// The MCP SDK costs every other command 40 ms of startup; only `swb mcp` loads it.
+			return (await import("./codex/mcp.ts")).mcp();
+		case "__codex":
+			return codexHost(rest);
+		case "__record":
+			return record(rest);
+		case "__inbox":
+			return inbox(rest);
+		case "__ack":
+			return ack(rest);
 		case "__help":
 			return help();
 		case "__nav":

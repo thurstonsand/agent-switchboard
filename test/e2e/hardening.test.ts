@@ -27,12 +27,20 @@ afterEach(async () => {
 	await s.cleanup();
 });
 
-test("a pi-sessions subagent and a deferred handoff never become Sessions, and the subagent runs on the default tmux server", async () => {
+test("a pi-sessions subagent never becomes a Session and runs on the default tmux server; swb's tools replace pi-sessions' peer tools", async () => {
 	s = scenario("phase5", "subagents", { packages: ["pi-sessions"], recorder: true });
 	s.swb("drive", "start", "--", "new");
 	await waitState(s, "the parent live", (x) => x.staged.kind === "live" && x.focus === "stage", budgets.piReady);
 	await reply(s, "parent");
 	const [parent] = s.ls().map((e) => e.id) as [string];
+
+	s.keys("-l", "tools", "Enter");
+	await until(() => s.signal("tools") !== "", budgets.settle, "the tool list");
+	const tools = JSON.parse(s.signal("tools")) as string[];
+	for (const name of ["session_reachable", "session_send_message", "session_cancel", "session_launch", "swb_update_session"])
+		expect(tools).toContain(name);
+	for (const name of ["subagent_list", "subagent_send", "subagent_cancel", "subagent_launch"]) expect(tools).toContain(name);
+	expect(tools).not.toContain("session_handoff");
 
 	s.keys("-l", "subagent s1", "Enter");
 	await until(() => s.signal("child.s1.entered") !== "", budgets.piReady, "the subagent's turn");
@@ -42,24 +50,12 @@ test("a pi-sessions subagent and a deferred handoff never become Sessions, and t
 	expect(piSessions(s)).toHaveLength(1);
 	expect(s.ls().map((e) => e.id)).toEqual([parent]);
 	expect(sessionRows(state(s)).map((r) => r.id)).toEqual([parent]);
+	expect(s.query("select 1 from runtimes")).toHaveLength(1);
 	s.save("subagent-running.txt", `${s.screen()}\n--- default tmux server\n${defaultServer}`);
 	release(s, "child.s1");
-
-	s.keys("-l", "deferred d1", "Enter");
-	await until(() => s.screen().includes("tool done d1"), budgets.piReady, "the deferred handoff");
-	const handoff = /--session-id '([^']+)'/.exec(s.screen())?.[1] as string;
-	expect(s.screen()).toContain("session_handoff [deferred]");
-	expect(handoff).toMatch(/^[0-9a-f-]{36}$/);
-	// Time for the recorder to wrongly record the handoff's session, if it were going to.
-	await Bun.sleep(1000);
-	expect(s.query<{ id: string }>("select session_id as id from sessions").map((r) => r.id)).toEqual([parent]);
-	expect(s.query("select 1 from runtimes where session_id = ?", handoff)).toHaveLength(0);
-	expect(s.query("select 1 from runtimes")).toHaveLength(1);
-	expect(sessionRows(state(s)).map((r) => r.id)).toEqual([parent]);
-	s.save("deferred.txt", s.screen());
 });
 
-test("a pi-sessions handoff launches through swb as a managed Session, and messaging it while dormant wakes it", async () => {
+test("session_launch starts a managed pi Session that records its parent, and messaging it while dormant wakes it", async () => {
 	s = scenario("phase5", "swb-host", { packages: ["pi-sessions"], recorder: true });
 	s.swb("drive", "start", "--", "new");
 	await waitState(s, "the parent live", (x) => x.staged.kind === "live" && x.focus === "stage", budgets.piReady);
@@ -69,12 +65,26 @@ test("a pi-sessions handoff launches through swb as a managed Session, and messa
 	s.keys("-l", "handoff h1", "Enter");
 	await until(() => s.signal("child.h1.entered") !== "", budgets.piReady, "the handoff child's first turn");
 	const child = await until(() => s.ls().find((e) => e.id !== parent), budgets.settle, "the child tracked");
-	expect(child).toMatchObject({ open: true, live: true, activity: "working", title: "child h1", cwd: s.project });
+	expect(child).toMatchObject({ harness: "pi", parentId: parent, open: true, live: true, cwd: s.project });
+	await until(() => entry(s, child.id).title === "child h1", budgets.settle, "the child titled");
 	expect(piSessions(s)).toHaveLength(2);
 	await waitState(s, "the child on the Roster", (x) => sessionRows(x).some((r) => r.id === child.id));
 	s.save("handoff-running.txt", s.screen());
+	// pi to pi, mid-turn: the message steers the child's held turn, which answers it once released.
+	s.keys("-l", `message ${child.id} m1`, "Enter");
+	await until(
+		() => s.query("select 1 from messages where target_id = ? and delivered_at is not null", child.id).length === 1,
+		budgets.settle,
+		"the message delivered mid-turn",
+	);
+	expect(entry(s, child.id).activity).toBe("working");
 	release(s, "child.h1");
+	await until(() => s.signal("replied.m1") !== "", budgets.settle, "the child's answer to the steer");
 	await until(() => entry(s, child.id).activity === "idle", budgets.settle, "the child idle");
+	// And idle: the message starts the child's next turn.
+	s.keys("-l", `message ${child.id} i1`, "Enter");
+	await until(() => s.signal("replied.i1") !== "", budgets.settle, "the idle child's answer");
+	await until(() => entry(s, child.id).activity === "idle", budgets.settle, "the child idle again");
 
 	const host = s.query<{ tmux_session: string }>("select tmux_session from runtimes where session_id = ?", child.id)[0]?.tmux_session;
 	s.tmux(s.servers.sessions, "kill-session", "-t", `=${host}`);

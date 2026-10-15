@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { configDir } from "@swb/shared";
+import { configDir, HARNESSES, type Harness } from "@swb/shared";
 import { parse } from "smol-toml";
 import type { DirsConfig } from "./dirs.ts";
 import { SwbError } from "./errors.ts";
@@ -18,6 +18,8 @@ export type Config = {
 	groupBy: "project" | "worktree";
 	/** Where the directory picker looks for places to start sessions, beyond the ones sessions have used. */
 	dirs: DirsConfig;
+	/** What `n` starts by default; the picker's Tab cycles it. */
+	harness: Harness;
 };
 
 /** The roster's width: columns, or a share of the Deck. */
@@ -62,6 +64,7 @@ export function loadConfig(): Config {
 		rosterWidth: { cols: 42 },
 		groupBy: "project",
 		dirs: { scan: [], depth: 2, exclude: [], include: [], sort: "name" },
+		harness: "pi",
 	};
 	for (const [key, value] of Object.entries(raw)) {
 		switch (key) {
@@ -76,6 +79,11 @@ export function loadConfig(): Config {
 				break;
 			case "editor":
 				config.editor = string(key, value);
+				break;
+			case "harness":
+				if (!(HARNESSES as readonly unknown[]).includes(value))
+					throw new SwbError(`config: harness must be one of ${HARNESSES.join(", ")}, got ${JSON.stringify(value)}`);
+				config.harness = value as Harness;
 				break;
 			case "inactive_after":
 				config.inactiveAfterMs = duration(key, value);

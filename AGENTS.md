@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Agent Switchboard (`swb`) keeps track of every coding-agent session I start, from its first turn until I archive it, across quits, crashes, and reboots, and gets me back into any of them in one keystroke. Sessions run headless in a dedicated tmux server. `swb` opens a Deck: a roster of those sessions, showing which ones need me, beside the selected session's real, interactive pi.
+Agent Switchboard (`swb`) keeps track of every coding-agent session I start, from its first turn until I archive it, across quits, crashes, and reboots, and gets me back into any of them in one keystroke. Sessions run headless in a dedicated tmux server. `swb` opens a Deck: a roster of those sessions, showing which ones need me, beside the selected session's real, interactive pi, Claude Code, or Codex.
 
 ## Motivation
 
@@ -13,11 +13,11 @@ See @CONTEXT.md for project vocabulary.
 ## Tenets
 
 - Persistence first: a session stays tracked through every exit, crash, and reboot until I archive it
-- pi is a black box: `swb` never draws into or alters pi's own screen. The only exception is anything in scope for the recorder extension
+- The harness is a black box: `swb` never draws into or alters pi's, Claude Code's, or Codex's own screen, and never modifies the harness. The only exception is what a harness's line does through that harness's own extension API
 - tmux is an execution engine and should not be directly interactible in a tmux-y way
 - The TUI must be snappy: move processing to the background as much as possible, keeping the TUI fast to navigate, with loaders in place as needed
 - Say it once: each piece of state appears in exactly one place on screen. A second badge, line, or header saying the same thing costs space and splits attention
-- Fail loudly: a recorder that can't record says so in pi's footer instead of silently drifting
+- Fail loudly: a line that can't record says so in its harness instead of silently drifting
 
 ## Features
 
@@ -26,7 +26,7 @@ See @CONTEXT.md for project vocabulary.
 - Operators: sessions in swb's Operator folder that coordinate the rest, reading only that folder's AGENTS.md
 - `swb new`, `open`, `adopt`, `archive`, `unarchive`, `ls --json`, `dirs --json`: the scriptable surface
 - `swb drive` and `swb deck state`: an agent drives a Deck exactly as a human does, and captures its screen as text
-- The pi recorder extension: lifecycle, activity, and attention written to the shared db; it also registers swb as a pi-sessions host for handoffs, dormant discovery, and wake
+- Lines for pi, Claude Code, and Codex: lifecycle, activity, and attention written to the shared db, the same coordination tools in every harness, and delivery of messages between sessions. In pi, swb claims peer coordination from pi-sessions, which keeps its subagents
 
 ## Developer notes
 

@@ -3,6 +3,12 @@
 	"private": true,
 	"type": "module",
 	"exports": {
-		".": "./src/index.ts"
+		".": "./src/index.ts",
+		"./record": "./src/record.ts",
+		"./tools": "./src/tools.ts",
+		"./mailbox": "./src/mailbox.ts"
+	},
+	"dependencies": {
+		"typebox": "1.3.27"
 	}
 }

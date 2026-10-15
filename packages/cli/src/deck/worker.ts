@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import { statSync } from "node:fs";
-import { bootId, type Db, operatorDir, projectRoot, type View } from "@swb/shared";
+import { bootId, type Db, type Harness, operatorDir, projectRoot, type View } from "@swb/shared";
 import type { Config } from "../config.ts";
 import { derive, type RuntimeRecord, runtimeLive, runtimeRecords, type SessionRow, sessionRows, type World } from "../derive.ts";
 import { addDir, removeDir, targets } from "../dirs.ts";
@@ -9,7 +9,7 @@ import { loadLayout, markVisited, openStore, saveLayout, setGroup, setView } fro
 import { listSessions, SESSIONS, tmuxTry } from "../tmux.ts";
 import { ensurePlaceholder, placeholderName } from "./deck.ts";
 import type { Diff, Entry, FromWorker, Snapshot, ToWorker, Turn } from "./protocol.ts";
-import { readTranscript } from "./transcript.ts";
+import { locateTranscript, readTranscript } from "./transcript.ts";
 
 // The roster's worker owns the db and everything slow: a held writer lock or a 50 MB transcript stalls this
 // thread, never the roster's cursor.
@@ -120,6 +120,8 @@ function snapshot(): Polled {
 		if (known.has(runtime.session_id) || !runtimeLive(runtime, w.bootId, w.hosts)) continue;
 		entries.push({
 			id: runtime.session_id,
+			harness: runtime.harness,
+			parentId: null,
 			title: null,
 			project: runtime.project_root,
 			cwd: runtime.cwd,
@@ -173,7 +175,7 @@ function reap(snap: Snapshot, attached: Map<string, boolean>): void {
 		const lastTouched = Math.max(row?.last_settled_at ?? 0, row?.visited_at ?? 0, runtime?.started_at ?? 0);
 		if (now - lastTouched < config.reapAfterMs) continue;
 		if (!runtime) continue;
-		// SIGTERM rather than closing the pane, so the recorder saves any draft; see stopPis.
+		// SIGTERM rather than closing the pane, so pi's and Claude's lines save any draft; Codex's is lost. See stopPis.
 		tmuxTry(SESSIONS, "if-shell", "-F", "-t", `=${entry.host}:`, "#{?session_attached,0,1}", `run-shell -b 'kill -TERM ${runtime.pid}'`);
 	}
 }
@@ -208,18 +210,19 @@ function tick(): Set<string> {
 }
 
 /** A transcript's turns, read again only once it has changed on disk. */
-function turnsOf(path: string): Turn[] {
+function turnsOf(recorded: string, harness: Harness): Turn[] {
+	const path = locateTranscript(recorded, harness);
 	const { mtimeMs } = statSync(path);
 	const cached = transcripts.get(path);
 	if (cached?.mtimeMs === mtimeMs) return cached.turns;
-	const turns = readTranscript(path);
+	const turns = readTranscript(path, harness);
 	transcripts.set(path, { mtimeMs, turns });
 	return turns;
 }
 
-function transcript(id: string, path: string): void {
+function transcript(id: string, recorded: string, harness: Harness): void {
 	try {
-		post({ type: "transcript", id, turns: turnsOf(path), error: null });
+		post({ type: "transcript", id, turns: turnsOf(recorded, harness), error: null });
 	} catch (error) {
 		post({ type: "transcript", id, turns: null, error: (error as Error).message });
 	}
@@ -245,11 +248,11 @@ function diffOf(cwd: string): Promise<Diff | null> {
 }
 
 /** A Peek's extras. A transcript that won't read says so in place of the last turn, and the rest still shows. */
-async function peek(id: string, cwd: string, path: string | null): Promise<void> {
+async function peek(id: string, cwd: string, path: string | null, harness: Harness): Promise<void> {
 	let last: Turn | null = null;
 	let error: string | null = null;
 	try {
-		if (path) last = turnsOf(path).at(-1) ?? null;
+		if (path) last = turnsOf(path, harness).at(-1) ?? null;
 	} catch (e) {
 		error = (e as Error).message;
 	}
@@ -281,7 +284,7 @@ function handle(message: ToWorker): void {
 		case "new":
 			try {
 				ensureSessionsServer();
-				const host = launch(message.cwd, null, []);
+				const host = launch({ harness: message.harness, cwd: message.cwd, resume: null });
 				launched.add(host);
 				if (message.group !== null) hostGroups.set(host, message.group);
 				post({ type: "created", host });
@@ -312,10 +315,10 @@ function handle(message: ToWorker): void {
 			}
 			break;
 		case "transcript":
-			transcript(message.id, message.path);
+			transcript(message.id, message.path, message.harness);
 			break;
 		case "peek":
-			void peek(message.id, message.cwd, message.transcript);
+			void peek(message.id, message.cwd, message.transcript, message.harness);
 			return;
 		case "background":
 			background = message.color;

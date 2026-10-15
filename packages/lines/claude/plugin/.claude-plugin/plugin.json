@@ -1,0 +1,6 @@
+{
+	"name": "swb",
+	"version": "0.0.0",
+	"description": "Agent Switchboard's line: records this Claude Code session and connects it to the other sessions on the switchboard",
+	"author": { "name": "Agent Switchboard" }
+}

@@ -80,7 +80,7 @@ export async function adopt(args: string[]): Promise<void> {
 	db.tx(() => {
 		if (db.get("SELECT 1 FROM sessions WHERE session_id = ?", id)) throw new SwbError(`adopt: ${id} is already tracked; swb open ${id}`);
 		db.run(
-			`INSERT INTO sessions (session_id, tool, cwd, project_root, transcript, title, branch, phase, created_at, last_prompt_at, last_settled_at)
+			`INSERT INTO sessions (session_id, harness, cwd, project_root, transcript, title, branch, phase, created_at, last_prompt_at, last_settled_at)
 			 VALUES (?, 'pi', ?, ?, ?, ?, ?, 'idle', ?, ?, ?)`,
 			id,
 			cwd,

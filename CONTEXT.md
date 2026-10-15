@@ -25,7 +25,18 @@ An open session with no running process.
 A dormant session whose process ended mid-turn rather than while idle.
 
 **Managed**:
-A session hosted by a pi process that `swb` started in its tmux server. Once a process is managed, every session it hosts counts, including after `/new`, `/resume`, or `/fork`. Processes it spawns, such as subagents, do not; only managed sessions can be reattached.
+A session hosted by a harness process that `swb` started in its tmux server. Once a process is managed, every session it hosts counts, including after `/new`, `/resume`, `/clear`, or `/fork`. Processes it spawns, such as subagents, do not; only managed sessions can be reattached.
+
+**Harness**:
+The agent program a Session runs in: pi, Claude Code, or Codex.
+
+**Line**:
+A harness's integration with swb, shipped by swb: it records the harness's sessions, gives its agent swb's tools, and delivers its messages. Internal term (not in UI).
+
+### Messages
+
+**Message**:
+Text one Session sends another through swb. It waits in swb's db until the recipient's line delivers it: mid-turn when the recipient is working and its harness allows, as a new turn when it's idle, and after waking it when it's dormant.
 
 ### Attention
 
@@ -72,4 +83,5 @@ A name I give a session, scoping it within its **Project**. A Group exists only 
 - A **Session** other than an **Operator** belongs to exactly one **Project**, derived from its working directory, and to at most one **Group** within it
 - A **Session** is open or **Archived**; independently, it is **Live** or **Dormant**
 - **Activity** and **Unseen** apply only to open sessions
-- pi-sessions **subagents** are never **Sessions** here; their parent's ledger owns them
+- pi-sessions **subagents**, and Claude Code's and Codex's own subagents, are never **Sessions** here; their parent owns them
+- A **Session** started by another records it as its parent

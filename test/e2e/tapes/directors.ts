@@ -7,6 +7,8 @@ import { git, gitRepo, gitWorktree, type HostPackage, type LsEntry, release, typ
 
 export type Director = {
 	packages?: HostPackage[];
+	/** Claude Code and Codex, each with its fake model server. */
+	harnesses?: ("claude" | "codex")[];
 	/** Runs before the tape starts. */
 	setup?: (s: Scenario) => Promise<void>;
 	/** Runs alongside the tape, playing everything that isn't the human at the keyboard. */
@@ -88,7 +90,132 @@ function files(s: Scenario): void {
 	writeFileSync(join(s.project, "src/main.ts"), 'console.log("hello");\n');
 }
 
+/** Starts a session the way session_launch does, titled, and waits for its first turn to settle; returns its id. */
+async function launch(s: Scenario, harness: "pi" | "claude" | "codex", title: string): Promise<string> {
+	const proc = Bun.spawn([`${s.bin}/swb`, "launch", "--harness", harness, "--cwd", s.project, "--title", title], {
+		env: s.env,
+		cwd: s.project,
+		stdin: new Blob([`reply ${title}`]),
+		stdout: "pipe",
+		stderr: "inherit",
+	});
+	const id = (JSON.parse(await proc.stdout.text()) as { details: { id: string } }).details.id;
+	await waitLs(s, `${title} idle`, (ls) => ls.find((e) => e.id === id)?.activity === "idle");
+	return id;
+}
+
+function hostOf(s: Scenario, id: string): string {
+	return s.query<{ tmux_session: string }>("select tmux_session from runtimes where session_id = ?", id)[0]?.tmux_session as string;
+}
+
+/** Types into a session's own TUI, as the agent's user would, while the tape's human is elsewhere. */
+function typeInto(s: Scenario, id: string, text: string): void {
+	s.tmux(s.servers.sessions, "send-keys", "-t", `=${hostOf(s, id)}:`, "-l", text);
+	Bun.sleepSync(300);
+	s.tmux(s.servers.sessions, "send-keys", "-t", `=${hostOf(s, id)}:`, "Enter");
+}
+
 export const directors: Record<string, Director> = {
+	"harness-picker": {
+		harnesses: ["claude", "codex"],
+		setup: async (s) => {
+			files(s);
+			await seed(s, { turns: ["plan the v3 migration"], title: "Plan the v3 migration" });
+		},
+		run: async (s) => {
+			const ls = await waitLs(s, "a Claude Code and a Codex session", (ls) =>
+				["claude", "codex"].every((h) => ls.some((e) => e.harness === h && e.activity === "idle")),
+			);
+			expect(ls.map((e) => e.harness).sort()).toEqual(["claude", "codex", "pi"]);
+			await Bun.sleep(4000);
+		},
+	},
+
+	"cross-harness": {
+		harnesses: ["claude", "codex"],
+		setup: async (s) => {
+			files(s);
+			// One after another, so the roster lists them newest first: Docs writer, API worker, Planner.
+			await launch(s, "pi", "Planner");
+			await launch(s, "claude", "API worker");
+			await launch(s, "codex", "Docs writer");
+		},
+		run: async (s) => {
+			const ids = Object.fromEntries(s.ls().map((e) => [e.harness, e.id])) as Record<string, string>;
+			await until(
+				() => s.query("select 1 from messages where target_id = ? and delivered_at is not null", ids.codex as string).length > 0,
+				TAPE,
+				"Claude's message delivered to Codex",
+			);
+			await until(
+				() => s.query("select 1 from messages where target_id = ? and delivered_at is not null", ids.pi as string).length > 0,
+				TAPE,
+				"Codex's message delivered to pi",
+			);
+			// pi is held mid-turn when Claude's agent messages it.
+			await entered(s, "review");
+			await Bun.sleep(1500);
+			typeInto(s, ids.claude as string, "tell pi Stop: review against v3");
+			await until(
+				() =>
+					s.query("select 1 from messages where target_id = ? and body like 'Stop:%' and delivered_at is not null", ids.pi as string)
+						.length > 0,
+				TAPE,
+				"the steer delivered into pi's running turn",
+			);
+			await Bun.sleep(2500);
+			release(s, "review");
+			const sent = s.query<{ source_id: string; target_id: string }>("select source_id, target_id from messages order by created_at");
+			expect(sent).toEqual([
+				{ source_id: ids.claude as string, target_id: ids.codex as string },
+				{ source_id: ids.codex as string, target_id: ids.pi as string },
+				{ source_id: ids.claude as string, target_id: ids.pi as string },
+			]);
+		},
+	},
+
+	"operator-harness": {
+		harnesses: ["claude", "codex"],
+		setup: async (s) => {
+			files(s);
+			await launch(s, "codex", "Docs writer");
+			// Claude Code asks once to trust a folder, the Operator's included.
+			s.trust(join(s.env.XDG_CONFIG_HOME as string, "agent-switchboard", "operator"));
+		},
+		run: async (s) => {
+			const operator = await waitLs(s, "a Claude Code Operator", (ls) => ls.some((e) => e.operator && e.harness === "claude")).then(
+				(ls) => ls.find((e) => e.operator) as LsEntry,
+			);
+			const codex = s.ls().find((e) => e.harness === "codex")?.id as string;
+			await until(
+				() =>
+					s.query("select 1 from messages where source_id = ? and target_id = ? and delivered_at is not null", operator.id, codex).length >
+					0,
+				TAPE,
+				"the Operator's message delivered to Codex",
+			);
+		},
+	},
+
+	"launch-wake-archive": {
+		harnesses: ["claude", "codex"],
+		setup: async (s) => {
+			files(s);
+			await launch(s, "claude", "API worker");
+		},
+		run: async (s) => {
+			const claude = s.ls()[0]?.id as string;
+			const child = await waitLs(s, "the launched Codex session idle", (ls) =>
+				ls.some((e) => e.parentId === claude && e.harness === "codex" && e.activity === "idle"),
+			).then((ls) => ls.find((e) => e.parentId === claude) as LsEntry);
+			await Bun.sleep(1500);
+			s.tmux(s.servers.sessions, "kill-session", "-t", `=${hostOf(s, child.id)}`);
+			await waitLs(s, "the Codex session dormant", (ls) => ls.find((e) => e.id === child.id)?.live === false);
+			await waitLs(s, "the Codex session woken", (ls) => ls.find((e) => e.id === child.id)?.live === true);
+			await waitLs(s, "the Codex session archived", (ls) => ls.find((e) => e.id === child.id)?.open === false);
+		},
+	},
+
 	"first-turn": {
 		run: async (s) => {
 			await entered(s, "first");

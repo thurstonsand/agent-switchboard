@@ -5,10 +5,17 @@ import { dirname, join } from "node:path";
 
 export { Db, type Param, type Row } from "./db.ts";
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export type Phase = "idle" | "working" | "blocked";
 export type View = "pi" | "editor" | "split";
+export const HARNESSES = ["pi", "claude", "codex"] as const;
+export type Harness = (typeof HARNESSES)[number];
+
+export function harness(name: string): Harness {
+	if (!(HARNESSES as readonly string[]).includes(name)) throw new Error(`unknown harness ${name}: one of ${HARNESSES.join(", ")}`);
+	return name as Harness;
+}
 
 /** Suffix every tmux server name with the instance, so tests never touch a real server. */
 export function instanced(name: string): string {

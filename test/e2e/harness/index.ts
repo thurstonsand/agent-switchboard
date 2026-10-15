@@ -21,9 +21,15 @@ const tools = (() => {
 	const node = which("node");
 	const tmux = which("tmux");
 	const wt = which("wt");
-	const piCli =
-		process.env.SWB_E2E_PI_CLI ?? join(run(["mise", "x", "--", "npm", "root", "-g"]), "@earendil-works/pi-coding-agent/dist/bundle/cli.js");
-	return { node, tmux, wt, piCli };
+	const npmRoot = run(["mise", "x", "--", "npm", "root", "-g"]);
+	const piCli = process.env.SWB_E2E_PI_CLI ?? join(npmRoot, "@earendil-works/pi-coding-agent/dist/bundle/cli.js");
+	// The native binaries, not npm's node wrappers, so a pane's pid is the harness itself.
+	const claude = join(npmRoot, "@anthropic-ai/claude-code/bin/claude.exe");
+	const codexVendor = join(npmRoot, "@openai/codex/node_modules/@openai");
+	const codex = existsSync(codexVendor)
+		? ([...new Bun.Glob("codex-*/vendor/*/bin/codex").scanSync({ cwd: codexVendor, absolute: true })][0] ?? "")
+		: "";
+	return { node, tmux, wt, piCli, claude, codex, bun: process.execPath };
 })();
 
 export type HostPackage = "pi-sessions" | "@thurstonsand/pi-wt";
@@ -49,6 +55,8 @@ function hostPackage(name: HostPackage): string | null {
 
 export type LsEntry = {
 	id: string;
+	harness: "pi" | "claude" | "codex";
+	parentId: string | null;
 	title: string | null;
 	project: string;
 	cwd: string;
@@ -88,6 +96,10 @@ export type Scenario = {
 	keys: (...keys: string[]) => void;
 	signal: (name: string) => string;
 	servers: { sessions: string; ui: string; drive: string };
+	/** Every request the fake model servers saw, one JSON object each, for the harnesses this scenario runs. */
+	requests: (harness: "claude" | "codex") => Record<string, unknown>[];
+	/** Trusts a directory for Claude Code and Codex, as a person would have once. */
+	trust: (dir: string) => void;
 	save: (file: string, content: string) => void;
 	cleanup: () => Promise<void>;
 };
@@ -101,7 +113,7 @@ const servers = new Set<string>();
 export function scenario(
 	phase: string,
 	name: string,
-	options: { packages: HostPackage[]; recorder: boolean } = { packages: [], recorder: true },
+	options: { packages: HostPackage[]; recorder: boolean; harnesses?: ("claude" | "codex")[] } = { packages: [], recorder: true },
 ): Scenario {
 	// Not tmpdir(): macOS's /var/folders/... pushes tmux sockets under root past the 104-byte sun_path limit.
 	// Resolved because /tmp is a symlink there, and swb records the real cwd.
@@ -120,6 +132,11 @@ export function scenario(
 	symlinkSync(tools.tmux, join(bin, "tmux"));
 	symlinkSync(join(repo, "dist/swb"), join(bin, "swb"));
 	symlinkSync(tools.wt, join(bin, "wt"));
+	const harnesses = options.harnesses ?? [];
+	for (const harness of harnesses) {
+		if (!tools[harness]) throw new Error(`this scenario needs ${harness}, and this host has no npm-global install of it`);
+		symlinkSync(tools[harness], join(bin, harness));
+	}
 
 	const path = `${bin}:/usr/local/bin:/usr/bin:/bin`;
 	const profile = `export PATH=${path}\n`;
@@ -133,7 +150,7 @@ export function scenario(
 	writeFileSync(
 		join(agentDir, "settings.json"),
 		JSON.stringify({
-			// The recorder last, as `pi install` leaves it when added after pi-sessions: its handlers then run after theirs.
+			// The pi line last, as `pi install` leaves it when added after pi-sessions: its handlers then run after theirs.
 			packages: [...options.packages.map(requireHostPackage), ...(options.recorder ? [join(repo, "dist/pi")] : [])],
 			...(options.packages.includes("pi-sessions")
 				? // Only what subagents and handoffs need: the rest would spend faux turns on titles and indexing.
@@ -160,7 +177,13 @@ export function scenario(
 		PI_CODING_AGENT_DIR: agentDir,
 		TMUX_TMPDIR: join(root, "tmux"),
 		SWB_INSTANCE: instance,
+		// No session bus here: without an address, every Claude Code and Codex start autolaunches a dbus-daemon that
+		// outlives the scenario. One that doesn't exist makes them go without.
+		DBUS_SESSION_BUS_ADDRESS: `unix:path=${join(root, "no-session-bus")}`,
 	};
+	const fakes = startFakes(root, home, harnesses, env);
+	const trust = (dir: string) => trustHarnesses(home, harnesses, dir);
+	trust(project);
 
 	const tmux = (server: string, ...args: string[]) => {
 		servers.add(`${env.TMUX_TMPDIR}\0${server}`);
@@ -213,6 +236,15 @@ export function scenario(
 			return existsSync(file) ? readFileSync(file, "utf8") : "";
 		},
 		servers: named,
+		requests: (harness) => {
+			const log = join(root, `${harness}-requests.jsonl`);
+			if (!existsSync(log)) return [];
+			return readFileSync(log, "utf8")
+				.split("\n")
+				.filter(Boolean)
+				.map((line) => JSON.parse(line) as Record<string, unknown>);
+		},
+		trust,
 		save: (file, content) => writeFileSync(join(artifacts, file), content),
 		cleanup: async () => {
 			const pids: number[] = [];
@@ -227,6 +259,7 @@ export function scenario(
 				pids.push(...panes.stdout.toString().trim().split("\n").filter(Boolean).map(Number));
 				Bun.spawnSync([tools.tmux, "-L", server, "kill-server"], { env });
 			}
+			for (const fake of fakes) fake.kill();
 			await until(() => pids.every((pid) => !alive(pid)), 5000, `pids ${pids.join(",")} to die`);
 			rmSync(root, { recursive: true, force: true });
 		},
@@ -290,3 +323,91 @@ export function gitWorktree(s: Scenario, main: string, branch: string, path = `$
 }
 
 export const budgets = { piReady: 30_000, settle: 10_000, deckReady: 5_000 };
+
+/** A port nothing listens on, from the kernel. */
+function freePort(): number {
+	const probe = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response() });
+	const port = probe.port as number;
+	probe.stop(true);
+	return port;
+}
+
+/**
+ * The fake model servers that script Claude Code and Codex, each logging every request it answers. Their env reaches
+ * every pane through the sessions server.
+ */
+function startFakes(root: string, home: string, harnesses: ("claude" | "codex")[], env: Record<string, string>): Bun.Subprocess[] {
+	const signals = join(home, "e2e-signals");
+	mkdirSync(signals, { recursive: true });
+	return harnesses.map((harness) => {
+		const port = freePort();
+		const fake = Bun.spawn([tools.bun, join(repo, `test/e2e/fakes/${harness === "claude" ? "anthropic" : "openai"}.ts`)], {
+			env: { ...process.env, FAKE_PORT: String(port), FAKE_LOG: join(root, `${harness}-requests.jsonl`), FAKE_SIGNALS: signals },
+			stdout: "ignore",
+			stderr: "inherit",
+		});
+		if (harness === "claude") {
+			env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${port}`;
+			env.ANTHROPIC_API_KEY = CLAUDE_KEY;
+			env.DISABLE_AUTOUPDATER = "1";
+			// Offline: no plugin marketplace download.
+			env.CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL = "1";
+			mkdirSync(join(home, ".claude"), { recursive: true });
+			writeFileSync(
+				join(home, ".claude/settings.json"),
+				JSON.stringify({ permissions: { allow: ["Bash", "mcp__swb"], defaultMode: "default" } }),
+			);
+		} else {
+			env.FAKE_OPENAI_KEY = "fake";
+			mkdirSync(join(home, ".codex"), { recursive: true });
+			writeFileSync(
+				join(home, ".codex/config.toml"),
+				[
+					'model = "gpt-5.5"',
+					'model_provider = "fake"',
+					'approval_policy = "never"',
+					'sandbox_mode = "danger-full-access"',
+					"",
+					"[model_providers.fake]",
+					'name = "fake"',
+					`base_url = "http://127.0.0.1:${port}/v1"`,
+					'wire_api = "responses"',
+					'env_key = "FAKE_OPENAI_KEY"',
+					"requires_openai_auth = false",
+					"",
+					// Without these, every new TUI stops on a model announcement first.
+					"[notice.model_migrations]",
+					'"gpt-5.5" = "gpt-6-sol"',
+					"",
+					"[tui.model_availability_nux]",
+					'"gpt-6-sol" = 1',
+					'"gpt-6.1-sol" = 1',
+					"",
+				].join("\n"),
+			);
+		}
+		return fake;
+	});
+}
+
+const CLAUDE_KEY = "sk-ant-api03-e2e-fake-key-0000000000000000";
+
+function trustHarnesses(home: string, harnesses: ("claude" | "codex")[], dir: string): void {
+	if (harnesses.includes("claude")) {
+		const path = join(home, ".claude.json");
+		const config = existsSync(path)
+			? (JSON.parse(readFileSync(path, "utf8")) as { projects: Record<string, unknown> })
+			: {
+					hasCompletedOnboarding: true,
+					theme: "dark",
+					customApiKeyResponses: { approved: [CLAUDE_KEY.slice(-20)], rejected: [] },
+					projects: {} as Record<string, unknown>,
+				};
+		config.projects[dir] = { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true };
+		writeFileSync(path, JSON.stringify(config));
+	}
+	if (harnesses.includes("codex")) {
+		const path = join(home, ".codex/config.toml");
+		writeFileSync(path, `${readFileSync(path, "utf8")}\n[projects.${JSON.stringify(dir)}]\ntrust_level = "trusted"\n`);
+	}
+}

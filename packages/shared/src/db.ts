@@ -37,7 +37,8 @@ export class Db {
 			throw new Error(`no db at ${path}`);
 		}
 		this.#driver = connect(path);
-		this.#driver.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;");
+		// The timeout first: several processes opening a new db at once all switch it to WAL, which takes the write lock.
+		this.#driver.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON;");
 	}
 
 	get(sql: string, ...params: Param[]): Row | undefined {

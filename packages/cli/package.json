@@ -4,6 +4,7 @@
 	"type": "module",
 	"dependencies": {
 		"@earendil-works/pi-tui": "1.0.4",
+		"@modelcontextprotocol/sdk": "1.32.1",
 		"@swb/shared": "workspace:*",
 		"smol-toml": "1.9.0"
 	}

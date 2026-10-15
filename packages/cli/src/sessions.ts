@@ -1,8 +1,12 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { bootId, type Db, dbPath, projectRoot, stateDir } from "@swb/shared";
+import { bootId, type Db, dbPath, type Harness, operatorDir, projectRoot, stateDir } from "@swb/shared";
+import { markArchived } from "@swb/shared/record";
+import { archivedInCodex } from "./deck/transcript.ts";
 import { type RuntimeRow, runtimeLive } from "./derive.ts";
 import { SwbError } from "./errors.ts";
+import { writeClaudeLine } from "./lines.ts";
+import { claudeOperatorSettings } from "./operator.ts";
 import { openStore } from "./store.ts";
 import { CLIENT_CWD, cleanEnv, killServer, listSessions, quote, SESSIONS, tmux, tmuxBin, tmuxTry } from "./tmux.ts";
 import { VERSION } from "./version.ts";
@@ -111,7 +115,7 @@ function current(server: string, version: string): boolean {
 	return newer(running, VERSION) || (running === VERSION && conf.out === version);
 }
 
-/** An upgrade ends every idle pi, so the next wake runs the new swb. Their shutdown writes the db, so this runs outside its lock. */
+/** An upgrade ends every idle session, so the next wake runs the new swb. Their shutdown writes the db, so this runs outside its lock. */
 function stopIdlePis(): void {
 	const hosts = new Set(listSessions(SESSIONS).map(([name]) => name as string));
 	const db = openStore();
@@ -187,11 +191,58 @@ export function randomHex(bytes: number): string {
 	return [...crypto.getRandomValues(new Uint8Array(bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Starts a managed pi in the background and returns its tmux session; pi comes up on its own time. */
-export function launch(cwd: string, launchId: string | null, piArgs: string[]): string {
+export type LaunchSpec = {
+	harness: Harness;
+	cwd: string;
+	/** The session to resume, when it has run before, and its recorded transcript. */
+	resume: { id: string; transcript: string } | null;
+	/** A new session's id, for the harnesses that take one up front (pi, Claude Code). */
+	sessionId?: string;
+	/** The first turn's prompt. */
+	prompt?: string;
+	model?: string;
+	/** The session that launched this one; an agent launch also skips pi's trust prompt. */
+	parentId?: string;
+};
+
+/** The harness's own command line for a launch, run by the user's login shell. */
+function harnessCommand(spec: LaunchSpec, host: string): string[] {
+	const model = spec.model ? ["--model", spec.model] : [];
+	const prompt = spec.prompt ? [spec.prompt] : [];
+	switch (spec.harness) {
+		case "pi": {
+			// --session-id only searches the starting directory's sessions, and a moved-away one would mint a fresh
+			// session under this id. The transcript reaches pi's own missing-cwd prompt instead.
+			const id = spec.resume ? ["--session", spec.resume.transcript] : spec.sessionId ? ["--session-id", spec.sessionId] : [];
+			// An agent's launch has no one at the trust prompt.
+			const approve = spec.parentId || spec.sessionId ? ["--approve"] : [];
+			return ["pi", ...id, ...approve, ...model, ...prompt];
+		}
+		case "claude": {
+			const id = spec.resume ? ["--resume", spec.resume.id] : spec.sessionId ? ["--session-id", spec.sessionId] : [];
+			const operator = spec.cwd === operatorDir() ? ["--settings", claudeOperatorSettings()] : [];
+			return ["claude", ...id, "--plugin-dir", writeClaudeLine(), ...operator, ...model, ...prompt];
+		}
+		case "codex":
+			return [
+				SWB,
+				"__codex",
+				"--host",
+				host,
+				...(spec.resume ? ["--resume", spec.resume.id] : []),
+				...(spec.cwd === operatorDir() ? ["--operator"] : []),
+				...model,
+				...prompt.flatMap((p) => ["--prompt", p]),
+			];
+	}
+}
+
+/** Starts a managed session in the background and returns its tmux session; the harness comes up on its own time. */
+export function launch(spec: LaunchSpec): string {
+	const { cwd, resume } = spec;
 	const name = `${basename(projectRoot(cwd)).replaceAll(/[.:]/g, "_")}-${randomHex(2)}`;
 	const shell = loginShell();
-	const pi = ["exec pi", ...piArgs.map(quote)].join(" ");
+	const command = `exec ${harnessCommand(spec, name).map(quote).join(" ")}`;
 	tmux(
 		SESSIONS,
 		"new-session",
@@ -213,7 +264,8 @@ export function launch(cwd: string, launchId: string | null, piArgs: string[]): 
 		// pi asks tmux whether its client forwards hyperlinks, but it starts with no client; both servers always forward them.
 		"-e",
 		"PI_HYPERLINKS=1",
-		`exec env -u TMUX -u TMUX_PANE SHELL=${shell} ${shell} -lic ${quote(pi)}`,
+		...(spec.parentId ? ["-e", `SWB_PARENT=${spec.parentId}`] : []),
+		`exec env -u TMUX -u TMUX_PANE SHELL=${shell} ${shell} -lic ${quote(command)}`,
 		";",
 		"set",
 		"-t",
@@ -235,7 +287,7 @@ export function launch(cwd: string, launchId: string | null, piArgs: string[]): 
 		`=${name}:`,
 		"remain-on-exit-format",
 		"",
-		...(launchId ? [";", "set", "-t", name, "@swb_launch_id", launchId] : []),
+		...(resume ? [";", "set", "-t", name, "@swb_launch_id", resume.id] : []),
 	);
 	return name;
 }
@@ -343,12 +395,11 @@ export function wake(db: Db, id: string): string {
 		const recorded = new Set(db.all("SELECT tmux_session FROM runtimes").map((row) => row.tmux_session as string));
 		const inFlight = hosts.find(([name, kind, launchId]) => kind === "pi" && launchId === id && !recorded.has(name as string));
 		if (inFlight) return inFlight[0] as string;
-		const session = db.get("SELECT cwd, project_root, transcript FROM sessions WHERE session_id = ?", id);
+		const session = db.get("SELECT cwd, project_root, harness, transcript FROM sessions WHERE session_id = ?", id);
 		if (!session) throw new SwbError(`no session ${id}`);
-		// --session-id only searches the starting directory's sessions, and tmux starts a missing directory in $HOME,
-		// where pi would mint a fresh session under this id. The transcript reaches pi's own missing-cwd prompt instead.
+		// tmux starts a missing directory in $HOME, away from the session's Project.
 		const cwd = existsSync(session.cwd as string) ? (session.cwd as string) : (session.project_root as string);
-		return launch(cwd, id, ["--session", session.transcript as string]);
+		return launch({ harness: session.harness as Harness, cwd, resume: { id, transcript: session.transcript as string } });
 	});
 }
 
@@ -370,11 +421,7 @@ export function archive(db: Db, id: string): void {
 		if (!session) throw new SwbError(`no session ${id}`);
 		const runtime = liveRuntime(db, id, hosts);
 		if (runtime && session.phase !== "idle") throw new SwbError("turn running: wait for it to complete");
-		db.run(
-			"INSERT INTO marks (session_id, archived_at) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET archived_at = excluded.archived_at",
-			id,
-			Date.now(),
-		);
+		markArchived(db, id);
 		return runtime;
 	});
 	if (runtime) stopPis([runtime]);
@@ -394,8 +441,14 @@ export function stop(db: Db, id: string): void {
 
 /** Back to open; nothing restarts. */
 export function unarchive(db: Db, id: string): void {
+	const session = db.get("SELECT harness, transcript FROM sessions WHERE session_id = ?", id);
+	if (!session) throw new SwbError(`no session ${id}`);
+	// A thread Codex archived itself is unarchived there too, so Codex's own picker lists it again.
+	if (session.harness === "codex" && archivedInCodex(session.transcript as string)) {
+		const result = Bun.spawnSync(["codex", "unarchive", id], { stdout: "pipe", stderr: "pipe" });
+		if (result.exitCode !== 0) throw new SwbError(`codex unarchive ${id}: ${result.stderr.toString().trim()}`);
+	}
 	db.tx(() => {
-		if (!db.get("SELECT 1 FROM sessions WHERE session_id = ?", id)) throw new SwbError(`no session ${id}`);
 		db.run("INSERT INTO marks (session_id, archived_at) VALUES (?, NULL) ON CONFLICT (session_id) DO UPDATE SET archived_at = NULL", id);
 	});
 }

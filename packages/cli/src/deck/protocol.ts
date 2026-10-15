@@ -1,4 +1,4 @@
-import type { View } from "@swb/shared";
+import type { Harness, View } from "@swb/shared";
 import type { Config } from "../config.ts";
 import type { SessionState } from "../derive.ts";
 import type { TargetTree } from "../dirs.ts";
@@ -27,7 +27,7 @@ export type Snapshot = {
 	swbVersion: string;
 };
 
-export type Turn = { who: "you" | "pi"; text: string };
+export type Turn = { who: "you" | "agent"; text: string };
 
 /** A worktree's uncommitted changes against HEAD. */
 export type Diff = { files: number; add: number; del: number };
@@ -48,6 +48,8 @@ export type Card = {
 	lines: string[];
 	/** The whole conversation, oldest first; null while it is still being read. */
 	turns: Turn[] | null;
+	/** What labels the agent's replies: its harness. */
+	agent: string;
 };
 
 export type State = "loading" | "blocked" | "working" | "unseen" | "idle" | "dormant" | "interrupted" | "archived";
@@ -77,6 +79,8 @@ export type PickerState = {
 	rows: { name: string; path: string | null; worktree: boolean; dim: boolean }[];
 	choice: number;
 	confirm: string | null;
+	/** What a session started from it runs in. */
+	harness: Harness;
 };
 
 /** What `GET /state` answers: the Deck as a driver sees it. */
@@ -119,13 +123,13 @@ export type ToWorker =
 	| { type: "init"; deck: string; paths: DeckPaths; config: Config; here: string }
 	| { type: "layout"; layout: DeckLayout }
 	| { type: "wake"; id: string }
-	| { type: "new"; cwd: string; group: string | null }
+	| { type: "new"; cwd: string; group: string | null; harness: Harness }
 	| { type: "visit"; id: string }
 	| { type: "archive"; id: string }
 	| { type: "unarchive"; id: string }
 	| { type: "stop"; id: string }
-	| { type: "transcript"; id: string; path: string }
-	| { type: "peek"; id: string; cwd: string; transcript: string | null }
+	| { type: "transcript"; id: string; path: string; harness: Harness }
+	| { type: "peek"; id: string; cwd: string; transcript: string | null; harness: Harness }
 	| { type: "background"; color: string }
 	| { type: "view"; id: string; view: View }
 	| { type: "group"; ids: string[]; name: string | null }

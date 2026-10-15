@@ -16,7 +16,7 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { operatorDir, projectRoot, type View } from "@swb/shared";
+import { harness as asHarness, HARNESSES, type Harness, operatorDir, projectRoot, type View } from "@swb/shared";
 import type { Subprocess } from "bun";
 import { loadConfig } from "../config.ts";
 import { displayName, projectName } from "../derive.ts";
@@ -86,6 +86,7 @@ const { values: args } = parseArgs({
 		stage: { type: "string" },
 		select: { type: "string" },
 		new: { type: "string" },
+		harness: { type: "string" },
 		here: { type: "string" },
 		continue: { type: "boolean" },
 	},
@@ -330,7 +331,7 @@ let side: (StageClient & { target: string }) | null = null;
 /** The shell's pane, under whichever pane holds pi. It closes with its shell, so it needs no client tracking. */
 let below: { pane: string; target: string; parent: string } | null = null;
 
-const EMPTY: Card = { head: [], lines: ["Nothing selected."], turns: [] };
+const EMPTY: Card = { head: [], lines: ["Nothing selected."], turns: [], agent: "" };
 
 const stage = {
 	/** The session on the Stage, or the pending new session (id null) when `new` is starting. */
@@ -373,6 +374,7 @@ function card(e: Entry, lines: string[] = []): Card {
 		head: rosterOffScreen() ? [bold(displayName(e)), status(e), gray(shortPath(e.cwd))] : [],
 		lines: [...lines, ...extra],
 		turns: transcript ? (transcript.turns ?? []) : null,
+		agent: e.harness,
 	};
 }
 
@@ -389,7 +391,7 @@ function piStage(): Applied {
 		if (pending.host) return starting(null, pending.host);
 		// A new session has no row yet, so its card is the only place that says it's starting.
 		const lines = pending.keyboard && rosterOffScreen() ? [ESC_LINE] : [];
-		return onCard("loading", null, { head: [cyan("starting a new session")], lines, turns: [] });
+		return onCard("loading", null, { head: [cyan("starting a new session")], lines, turns: [], agent: "" });
 	}
 	const e = stage.staged === null ? undefined : entries.get(stage.staged);
 	if (!e) return onCard("empty", null, EMPTY);
@@ -624,7 +626,7 @@ function stageSession(id: string): void {
 	editorsAsked.clear();
 	editorsLost.clear();
 	const e = entries.get(id);
-	if (e && !e.live && e.transcript) post({ type: "transcript", id, path: e.transcript });
+	if (e && !e.live && e.transcript) post({ type: "transcript", id, path: e.transcript, harness: e.harness });
 	scheduleHighlightWake();
 	apply();
 }
@@ -655,7 +657,7 @@ function wake(id: string, keyboard: boolean): void {
 	apply();
 }
 
-function newSession(cwd: string, group: string | null): void {
+function newSession(cwd: string, group: string | null, harness: Harness = config.harness): void {
 	if (newLaunch()) {
 		toast("a new session is already starting", "info");
 		return;
@@ -664,7 +666,7 @@ function newSession(cwd: string, group: string | null): void {
 	stage.holdForNew = true;
 	stage.staged = null;
 	stage.ended = null;
-	post({ type: "new", cwd, group });
+	post({ type: "new", cwd, group, harness });
 	apply();
 	void focusStage();
 }
@@ -789,7 +791,8 @@ function onSnapshot(next: Snapshot): void {
 	roster.settlePin();
 	if (!started) startCursor();
 	const e = stage.staged === null ? undefined : entries.get(stage.staged);
-	if (e && !e.live && e.transcript && !transcripts.has(e.id)) post({ type: "transcript", id: e.id, path: e.transcript });
+	if (e && !e.live && e.transcript && !transcripts.has(e.id))
+		post({ type: "transcript", id: e.id, path: e.transcript, harness: e.harness });
 	apply();
 	roster.syncStage(false);
 	// A turn that lands while I'm already watching is seen as it lands.
@@ -1462,8 +1465,9 @@ class Roster implements Component {
 	 * Starting there joins its Group.
 	 */
 	newAt(row = this.selected()): void {
+		// On the Operator folder, so Tab picks its harness as anywhere else.
 		if ((row?.kind === "section" && row.key === "operators") || (row?.kind === "session" && row.entry.operator)) {
-			newSession(operatorDir(), null);
+			this.openPicker("pick", operatorDir(), null);
 			return;
 		}
 		if (!row || row.kind === "section") {
@@ -1598,7 +1602,16 @@ class Roster implements Component {
 		this.path.setValue("");
 		this.pickerTop = 0;
 		this.completed = null;
-		this.choosing = { mode, opened: mode, choice: mode === "add" ? typedChoice("") : 0, from, group, pin: from, confirm: null };
+		this.choosing = {
+			mode,
+			opened: mode,
+			choice: mode === "add" ? typedChoice("") : 0,
+			from,
+			group,
+			pin: from,
+			confirm: null,
+			harness: config.harness,
+		};
 		// The last list shows at once; the worker's fresh one replaces it when its scan lands.
 		post({ type: "dirs" });
 		if (mode === "pick")
@@ -1676,7 +1689,7 @@ class Roster implements Component {
 	start(path: string): void {
 		const choosing = this.choosing as Choosing;
 		this.closePicker();
-		newSession(path, path === choosing.from ? choosing.group : null);
+		newSession(path, path === choosing.from ? choosing.group : null, choosing.harness);
 	}
 
 	/** M-a d or the row's ✕: asks before taking a directory, or a repository and all its worktrees, off the list. */
@@ -1731,6 +1744,10 @@ class Roster implements Component {
 			} else this.closePicker();
 		} else if (matchesKey(data, "up") || matchesKey(data, "down")) {
 			choosing.choice = Math.max(first, Math.min(count - 1, choosing.choice + (matchesKey(data, "up") ? -1 : 1)));
+		} else if (choosing.mode === "pick" && (matchesKey(data, "tab") || matchesKey(data, "shift+tab"))) {
+			// Tab picks what runs the new session; in add mode it completes the path instead.
+			const step = matchesKey(data, "shift+tab") ? -1 : 1;
+			choosing.harness = HARNESSES[(HARNESSES.indexOf(choosing.harness) + step + HARNESSES.length) % HARNESSES.length] as Harness;
 		} else if (choosing.mode === "add" && matchesKey(data, "tab")) {
 			const match = this.addRows()[Math.max(0, choosing.choice)];
 			if (match) {
@@ -1784,7 +1801,8 @@ class Roster implements Component {
 			: (this.search.render(Math.max(10, width - 2))[0] ?? "");
 		// The picker's detail is its path and two blank lines.
 		const bodyHeight = Math.max(1, height - 9);
-		const lines = [` ${bold(adding ? "add a directory" : "new session in")}`, ` ${input}`, gray("─".repeat(width))];
+		const which = HARNESSES.map((h) => (h === choosing.harness ? cyan(h) : gray(h))).join(gray(" · "));
+		const lines = [` ${bold(adding ? "add a directory" : "new session in")}  ${which} ${gray("⇥")}`, ` ${input}`, gray("─".repeat(width))];
 		let body: [string, (() => void) | null][];
 		let detail: string;
 		if (!adding) {
@@ -1962,7 +1980,8 @@ class Roster implements Component {
 		if (stage.staged === e.id && e.open) {
 			const parts: [string, (() => void) | null][] = [[" ", null]];
 			for (const view of VIEWS) {
-				const label = ` ${view} `;
+				// The first view is the session's own TUI, whichever harness that is.
+				const label = ` ${view === "pi" ? e.harness : view} `;
 				parts.push([view === stage.applied.view ? cursorLine(label, true) : gray(label), () => void showView(e, view)]);
 			}
 			// The shell is a toggle beside the views, not one of them.
@@ -1971,7 +1990,8 @@ class Roster implements Component {
 			tabs = this.clickable(narrow ? top + 2 : top, parts);
 		}
 		if (!narrow) return [truncateToWidth(tabs, width, "…")];
-		const where = `${shortPath(e.cwd)}${e.branch ? ` ${magenta(`⎇ ${e.branch}`)}` : ""}`;
+		// The first tab names the harness; without tabs, the path line does.
+		const where = `${tabs ? "" : `${e.harness} · `}${shortPath(e.cwd)}${e.branch ? ` ${magenta(`⎇ ${e.branch}`)}` : ""}`;
 		return [` ${status(e)}${launchElapsed(e, now)}`, ` ${gray(where)}`, tabs].map((line) => truncateToWidth(line, width, "…"));
 	}
 
@@ -2045,6 +2065,8 @@ type Choosing = {
 	/** The directory it opened on, offered whether or not it's listed, until I remove it. */
 	pin: string | null;
 	confirm: { name: string; worktrees: number; path: string; covers: string[] } | null;
+	/** What the new session runs in. */
+	harness: Harness;
 };
 
 /**
@@ -2239,7 +2261,7 @@ function askPeekInfo(id: string): void {
 	const have = peek.info.get(id);
 	if (!e || peek.asked.has(id) || (have && Date.now() - have.at < PEEK_INFO_MS)) return;
 	peek.asked.add(id);
-	post({ type: "peek", id, cwd: e.cwd, transcript: e.transcript });
+	post({ type: "peek", id, cwd: e.cwd, transcript: e.transcript, harness: e.harness });
 }
 
 function onPeekInfo(id: string, info: PeekInfo): void {
@@ -2381,7 +2403,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	head.push(
 		gray(`created ${ago(e.createdAt, now)} · ${e.open ? `active ${ago(e.activityAt, now)}` : `archived ${ago(archivedKey(e), now)}`}`),
 	);
-	head.push(rule, gray(tailOf(shortPath(e.cwd), inner)));
+	head.push(rule, gray(tailOf(`${e.harness} · ${shortPath(e.cwd)}`, inner)));
 	const info = peek.info.get(e.id)?.info;
 	if (e.branch) {
 		const diff = info?.diff;
@@ -2393,10 +2415,11 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	const turn: string[] = [];
 	if (info?.error) turn.push(rule, ...wrapTextWithAnsi(red(`✗ ${info.error}`), inner).slice(0, 3));
 	else if (info?.last) {
-		const label = info.last.who === "you" ? "you " : "pi  ";
-		const text = wrapTextWithAnsi(info.last.text.replace(/\s+/g, " ").trim(), inner - 4);
-		const shown = text.length > 3 ? [...text.slice(0, 2), truncateToWidth(text.slice(2).join(" "), inner - 4, "…")] : text;
-		turn.push(rule, ...shown.map((line, i) => `${gray(i === 0 ? label : "    ")}${line}`));
+		const label = `${(info.last.who === "you" ? "you" : e.harness).padEnd(Math.max(3, e.harness.length))} `;
+		const pad = visibleWidth(label);
+		const text = wrapTextWithAnsi(info.last.text.replace(/\s+/g, " ").trim(), inner - pad);
+		const shown = text.length > 3 ? [...text.slice(0, 2), truncateToWidth(text.slice(2).join(" "), inner - pad, "…")] : text;
+		turn.push(rule, ...shown.map((line, i) => `${gray(i === 0 ? label : " ".repeat(pad))}${line}`));
 	}
 	// The buttons, wrapped; each is the row's key, so the Peek teaches them too.
 	const buttons: { y: number; from: number; to: number; key: string; text: string }[] = [];
@@ -2801,6 +2824,7 @@ function pickerState(): PickerState | null {
 		rows,
 		choice: choosing.choice,
 		confirm: choosing.confirm?.name ?? null,
+		harness: choosing.harness,
 	};
 }
 
@@ -2937,7 +2961,7 @@ Bun.serve({
 
 post({ type: "init", deck, paths, config, here });
 post({ type: "dirs" });
-if (args.new) newSession(args.new, null);
+if (args.new) newSession(args.new, null, args.harness ? asHarness(args.harness) : config.harness);
 void layout();
 
 // Ready once the first snapshot is in and the Stage's nested client is attached to the sessions server.
