@@ -143,9 +143,10 @@ test("an idle Codex session nobody is viewing is reaped after reap_after, as pi 
 	await cursorTo(s, other);
 	await until(() => !entry(s, codex.id).live, 15_000, "Codex reaped");
 	expect(entry(s, codex.id)).toMatchObject({ open: true, interrupted: false });
+	// Launched outside this Deck, its pane stays on exit until the Deck's orphan sweep, ten seconds on, closes it.
 	await until(
 		() => !s.tmux(s.servers.sessions, "list-sessions", "-F", "#{session_name}").split("\n").includes(hostName),
-		budgets.settle,
+		10_000 + budgets.settle,
 		"its pane closed",
 	);
 });
