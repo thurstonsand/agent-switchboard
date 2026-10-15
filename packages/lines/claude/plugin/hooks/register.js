@@ -233,6 +233,12 @@ async function restoreDraft($) {
 	if (draft) await $.prompt.fill({ text: draft });
 }
 
+async function trackDraft(_$, e, next) {
+	const result = await next(e);
+	line.draft = result.text;
+	return result;
+}
+
 async function saveDraft($) {
 	if (line.draft.trim()) await $.fs.write(await draftPath($, line.session), line.draft);
 }
@@ -317,11 +323,9 @@ export function register(on) {
 		return { ...result, context: [...(result.context ?? []), ...batch.map((m) => m.text)] };
 	});
 
-	on("prompt.edit", async (_$, e, next) => {
-		const result = await next(e);
-		line.draft = result.text;
-		return result;
-	});
+	// A typed edit raises prompt.edit; a submit, a clear, a recall, or a fill raises prompt.change.
+	on("prompt.edit", trackDraft);
+	on("prompt.change", trackDraft);
 
 	on("session.end", async ($, e, next) => {
 		if (line.managed && e.reason !== "clear" && e.reason !== "resume") {

@@ -107,6 +107,18 @@ test("Claude Code waiting on a permission prompt reads as blocked, and an upgrad
 	s.swb("wake", claude.id);
 	await until(() => entry(s, claude.id).live && pane(claude.id).includes("half a thought"), ready, "the draft back");
 	s.save("draft-restored.txt", pane(claude.id));
+
+	// A prompt cleared, or sent, is no draft for the next stop to keep.
+	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(claude.id)}:`, "-l", ", finished");
+	await until(() => pane(claude.id).includes("half a thought, finished"), budgets.settle, "the draft edited");
+	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(claude.id)}:`, "Escape");
+	Bun.sleepSync(300);
+	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(claude.id)}:`, "Escape");
+	await until(() => !pane(claude.id).includes("half a thought"), budgets.settle, "the draft cleared");
+	s.tmux(s.servers.sessions, "set", "-gu", "@swb_version");
+	s.swb("drive", "start");
+	await until(() => !entry(s, claude.id).live, budgets.settle, "Claude stopped again");
+	expect(readFileSync(`${s.env.XDG_STATE_HOME}/agent-switchboard/drafts/${claude.id}`, "utf8")).toBe("");
 });
 
 test("Codex's /new moves its host to the new thread: that one is recorded, and the old one goes dormant", async () => {
