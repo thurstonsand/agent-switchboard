@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.2 — 2026-10-15
+
+### Added
+
+- `swb adopt` takes Claude Code and Codex sessions too, by id or transcript path. Subagent threads are refused.
+
+### Fixed
+
+- In Claude Code, swb's tools could fail with `--from is required`, and the session go unrecorded, when the line missed Claude Code's `SessionStart` event. The line now asks Claude Code which session it is.
+- The cursor flickered while a session worked: neither of swb's tmux servers sent the terminal synchronized frames, so it drew each redraw partway.
+- A Claude Code session launched with a title keeps it, instead of Claude Code's generated one replacing it.
+- Codex asked permission before every call to swb's tools. They now declare themselves read-only, or non-destructive and closed-world, which Codex's default policy runs without asking.
+- A Codex session swb had just started could have an error printed over its screen: swb read its thread before Codex had written it. A read now has five seconds to succeed before swb says so.
+
 ## 0.6.1 — 2026-10-15
 
 The first release of these changes: v0.6.0 stopped in CI, which lacked Claude Code and Codex, before it published anything.
