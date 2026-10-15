@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.6.0 — 2026-10-15
+
+Schema v5: update swb and the pi line together. With pi-sessions, needs pi-sessions 0.19.0 or later: an older one registers the same tool names, and pi refuses to start with both.
+
+### Added
+
+- **Claude Code and Codex** — on the roster beside pi, as their real TUIs. `n`'s picker cycles harnesses with `Tab`; `harness` sets the default; `swb new --harness`. The dormant card reads all three transcripts.
+- **Messages between sessions** — every session, in any harness, gets `session_reachable`, `session_send_message`, `session_cancel`, `session_launch`, and `swb_update_session`. A message reaches a working session mid-turn, starts a turn in an idle one, and wakes a dormant one; it waits in the db until delivered.
+- Codex's own `/archive` archives the session in swb, and `swb unarchive` unarchives it in Codex too. swb's Codex tools come from a plugin that only swb's sessions enable, so Codex titles its threads itself.
+- Idle Codex sessions stop after `reap_after` and on upgrade like the others, but lose an unsent prompt: Codex gives swb no way to read it.
+- `swb send`, `swb reachable`, and `swb launch --harness` for scripts.
+- A session started by another records it as its parent, in `swb ls --json` as `parentId`, and for pi also in the transcript, where pi-sessions sees it.
+- **Peek** — hovering a session, or landing on it with `j` and `k`, shows its full title, state, harness, age, directory and branch with uncommitted changes, Group, last turn, and its keys as buttons. A wide Deck shows it as a popup beside the roster; a narrow one draws it over the roster's edge.
+- Every navigation has a mouse path: with the roster hidden, the status bar's `◂ M-a z show list` brings it back; the bar's tabs gain a shell toggle; the Group picker has a ✕; the filter's tag clears the filter.
+- `swb ls --json` gains `createdAt`.
+
+### Changed
+
+- The recorder is now the pi line, in `packages/lines/pi`. It claims peer coordination from pi-sessions, which keeps only its subagent tools.
+- `swb launch --session-id` is gone with the pi-sessions host API it served.
+- An Operator's new sessions are `session_launch`es, in any harness.
+- Operators run in pi, Claude Code, or Codex: `n` on the Operators section opens the picker on the Operator folder. A Claude Code Operator reads only the folder's AGENTS.md, through a CLAUDE.md swb writes there; a Codex one also reads `~/.codex/AGENTS.md`, which Codex can't skip. Neither can start subagents.
+- `hover = "lazy" | "eager"` is now `wake_on_highlight = false | true`.
+- The bar under a wide Deck's roster holds only the view tabs and the shell toggle; the state, path, and branch are the Peek's.
+- A starting session is on the Stage, so a prompt it raises before it registers, such as a missing directory or project trust, can be answered. `esc` no longer backs out of a start; `M-a h` does.
+
+### Fixed
+
+- Waking a pi session whose directory is gone resumes it from the Project root, where pi asks what to do, instead of starting a fresh, empty session under its id.
+- A pi whose first turn starts during another extension's startup shows as working for that turn, not idle.
+- pi's links are clickable hyperlinks on the Stage.
+
 ## 0.5.0 — 2026-10-10
 
 Needs pi-sessions 0.17.0 or later for Operators.
