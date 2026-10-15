@@ -58,7 +58,12 @@ export async function mcp(): Promise<void> {
 				"Agent Switchboard: the other sessions the user runs, in pi, Claude Code, and Codex. Use these tools to reach them; messages from them arrive as user messages that start 'Message from session'.",
 		},
 	);
-	server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: toolsAsJson() }));
+	// Codex asks before every tool call unless the tool is read-only, or neither destructive nor open-world.
+	const annotations = (name: ToolName) =>
+		TOOLS[name].readOnly ? { readOnlyHint: true } : { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
+	server.setRequestHandler(ListToolsRequestSchema, () => ({
+		tools: toolsAsJson().map((tool) => ({ ...tool, annotations: annotations(tool.name) })),
+	}));
 	server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
 		const meta = params._meta as { threadId?: unknown; callId?: unknown } | undefined;
 		if (typeof meta?.threadId !== "string")

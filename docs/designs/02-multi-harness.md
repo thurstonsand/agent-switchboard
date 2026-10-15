@@ -30,7 +30,6 @@ Research ([thread](https://ampcode.com/threads/T-01a13611-7076-75bb-b88f-f1d6a01
 
 - Session search and ask across harnesses.
 - Cross-harness handoffs that translate one transcript into another. A launch carries a brief, not history.
-- `swb adopt` for Claude or Codex sessions.
 - Patching Claude Code or Codex, or depending on Claude's private inbox socket protocol.
 
 ## Exposed Shape

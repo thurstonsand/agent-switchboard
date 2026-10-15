@@ -108,14 +108,15 @@ function readClaude(path: string): Turn[] {
 	return turns.reverse();
 }
 
-/** The title Claude Code gave the session, or the one it was renamed to, whichever came last. */
+/** The session's latest given name (`--name`, `/rename`), else the latest title Claude Code generated for it. */
 export function claudeTitle(path: string): string | null {
-	let title: string | null = null;
+	let custom: string | null = null;
+	let ai: string | null = null;
 	for (const entry of lines(path) as { type?: string; aiTitle?: string; customTitle?: string }[]) {
-		if (entry.type === "custom-title" && entry.customTitle) title = entry.customTitle;
-		else if (entry.type === "ai-title" && entry.aiTitle) title = entry.aiTitle;
+		if (entry.type === "custom-title" && entry.customTitle) custom = entry.customTitle;
+		else if (entry.type === "ai-title" && entry.aiTitle) ai = entry.aiTitle;
 	}
-	return title;
+	return custom ?? ai;
 }
 
 type CodexEntry = { type?: string; payload?: { type?: string; role?: string; content?: unknown } };

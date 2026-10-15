@@ -449,6 +449,34 @@ test("Enter, then a prompt typed in the Stage, shows working then idle in the ro
 	s.save("idle.txt", s.screen());
 });
 
+test("a working session's frames reach the terminal synchronized through both tmux layers, the cursor shown only inside one", async () => {
+	s = scenario("phase2", "synchronized");
+	s.swb("drive", "start", "--", "new");
+	await waitState(s, "the new pi live with the keyboard", (x) => x.staged.kind === "live" && x.focus === "stage", budgets.piReady);
+	// What the Deck writes to the terminal, while pi's spinner redraws through both tmux servers.
+	const stream = join(s.root, "terminal.bin");
+	s.tmux(s.servers.drive, "pipe-pane", "-O", "-t", "=drive:", `cat > ${stream}`);
+	s.keys("-l", "hold sync", "Enter");
+	await until(() => s.signal("sync.entered") !== "", budgets.settle, "the held turn");
+	await Bun.sleep(1500);
+	release(s, "sync");
+	await until(() => s.screen().includes("released sync"), budgets.settle, "the turn's end");
+	s.tmux(s.servers.drive, "pipe-pane", "-t", "=drive:");
+	const bytes = readFileSync(stream, "latin1");
+	let frames = 0;
+	let open = false;
+	const outside: number[] = [];
+	const esc = String.fromCharCode(27);
+	for (const m of bytes.matchAll(new RegExp(`${esc}\\[\\?(2026|25)([hl])`, "g"))) {
+		if (m[1] === "2026") {
+			open = m[2] === "h";
+			if (open) frames++;
+		} else if (m[2] === "h" && !open) outside.push(m.index);
+	}
+	expect(frames).toBeGreaterThan(5);
+	expect(outside).toEqual([]);
+});
+
 test("two Decks waking one session start exactly one pi", async () => {
 	s = scenario("phase2", "two-decks");
 	const [a] = (await seed(s, { turns: ["a"] })) as [string];

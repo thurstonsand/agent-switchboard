@@ -1,4 +1,6 @@
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { pidAlive } from "@swb/shared";
 import { frame, markDelivered, markOffered, pendingFor, sender } from "@swb/shared/mailbox";
@@ -13,6 +15,17 @@ import { SESSIONS, tmux, tmuxTry } from "../tmux.ts";
 /** Claude Code writes its transcript with the first message, so a turn may start before there is one. */
 function title(transcript: string): string | null {
 	return existsSync(transcript) ? claudeTitle(transcript) : null;
+}
+
+/**
+ * Where Claude Code keeps a session's transcript, for a line that wasn't told: classic.SessionStart names it, and
+ * another mod can keep that event from the line. Claude names a project's folder after its path, every other
+ * character a dash; a session moved since keeps its file where it started, so an existing one wins.
+ */
+function claudeTranscript(id: string, cwd: string): string {
+	const projects = join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), "projects");
+	const [found] = new Bun.Glob(`*/${id}.jsonl`).scanSync({ cwd: projects, absolute: true });
+	return found ?? join(projects, cwd.replaceAll(/[^A-Za-z0-9]/g, "-"), `${id}.jsonl`);
 }
 
 /** The process in a host's pane: the harness itself, since its login shell execs it. */
@@ -35,11 +48,12 @@ export function record(args: string[]): void {
 	});
 	const host = values.host;
 	if (!host) throw new UsageError("__record: --host is required");
-	const need = (name: "session" | "cwd" | "transcript"): string => {
+	const need = (name: "session" | "cwd"): string => {
 		const value = values[name];
 		if (!value) throw new UsageError(`__record ${event}: --${name} is required`);
 		return value;
 	};
+	const transcript = (): string => values.transcript || claudeTranscript(need("session"), need("cwd"));
 	const db = openStore();
 	switch (event) {
 		case "start":
@@ -48,19 +62,19 @@ export function record(args: string[]): void {
 				harness: "claude",
 				sessionId: need("session"),
 				cwd: need("cwd"),
-				transcript: need("transcript"),
+				transcript: transcript(),
 				pid: panePid(host),
 				idle: true,
 			});
 			return;
 		case "turn": {
-			const transcript = need("transcript");
+			const path = transcript();
 			startTurn(db, {
 				harness: "claude",
 				sessionId: need("session"),
 				cwd: need("cwd"),
-				transcript,
-				title: title(transcript),
+				transcript: path,
+				title: title(path),
 				parentId: values.parent ?? null,
 			});
 			return;
@@ -72,7 +86,7 @@ export function record(args: string[]): void {
 			return;
 		}
 		case "settled": {
-			const { archived } = settle(db, { host, sessionId: need("session"), cwd: need("cwd"), title: title(need("transcript")) });
+			const { archived } = settle(db, { host, sessionId: need("session"), cwd: need("cwd"), title: title(transcript()) });
 			// Archived during its turn: stop it now the turn is over, in the background, since Claude Code waits on this.
 			if (archived) tmuxTry(SESSIONS, "run-shell", "-b", `kill -TERM ${panePid(host)}`);
 			console.log(JSON.stringify({ archived }));

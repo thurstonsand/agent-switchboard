@@ -14,6 +14,8 @@ const line = {
 	session: "",
 	cwd: "",
 	transcript: "",
+	/** The session whose start swb has recorded, so a late environment records it once. */
+	recorded: "",
 	busy: false,
 	turnId: "",
 	blocked: false,
@@ -51,7 +53,7 @@ async function ack($, ids) {
 }
 
 function receipt($, m, how) {
-	$.ui.log(`↘ swb: ${m.title} (${how}): ${m.body.length > 200 ? `${m.body.slice(0, 200)}…` : m.body}`);
+	$.ui.log(`↘ ${m.title} (${how}): ${m.body.length > 200 ? `${m.body.slice(0, 200)}…` : m.body}`);
 }
 
 /** The held messages for the session this process shows now; any others wait for theirs. */
@@ -128,7 +130,9 @@ async function drain($) {
 }
 
 async function useTool($, name, e) {
-	const from = ["--from", line.session];
+	// The caller is whoever Claude Code says this session is now, never a value cached from an event that can be missed.
+	const self = await $.session.id();
+	const from = ["--from", self];
 	switch (name) {
 		case "session_reachable":
 			return swb($, ["reachable", ...from]);
@@ -157,24 +161,52 @@ async function useTool($, name, e) {
 				e.goal,
 			);
 		default:
-			return swb($, [e.archived ? "archive" : "unarchive", e.session ?? line.session, ...from]);
+			return swb($, [e.archived ? "archive" : "unarchive", e.session ?? self, ...from]);
 	}
 }
 
 /**
- * Reads swb's launch environment, until it's there. Claude Code's hook order isn't fixed, and session.start can run
- * before the process environment reaches the mod, so every hook asks, and the first to see it starts the inbox.
+ * Reads swb's launch environment and the session this process shows, and records that session's start once. Every
+ * hook asks, since none is sure to arrive: another mod can answer classic.SessionStart without passing it on.
  */
-async function init($) {
-	if (line.managed) return;
-	line.bin = await env($, "SWB_BIN");
-	line.host = await env($, "SWB_TMUX_SESSION");
-	line.parent = await env($, "SWB_PARENT");
-	line.managed = Boolean(line.bin && line.host);
-	if (line.managed && !line.started) {
-		line.started = true;
-		void pump($);
+async function init($, start) {
+	if (!line.managed) {
+		line.bin = await env($, "SWB_BIN");
+		line.host = await env($, "SWB_TMUX_SESSION");
+		line.parent = await env($, "SWB_PARENT");
+		line.managed = Boolean(line.bin && line.host);
+		if (line.managed && !line.started) {
+			line.started = true;
+			void pump($);
+		}
 	}
+	if (!line.managed) return;
+	await follow($, start);
+	await begin($);
+}
+
+/** Moves to the session Claude Code shows now; /clear and /resume change it. classic.SessionStart also names its transcript. */
+async function follow($, start) {
+	const id = start?.session_id ?? (await $.session.id());
+	if (id !== line.session) {
+		// Messages held for a session this process left stay undelivered, for when that session runs again.
+		line.pending = line.pending.filter((m) => m.target === id);
+		line.session = id;
+		line.cwd = start?.cwd ?? (await $.session.cwd());
+		line.transcript = "";
+		line.busy = false;
+		line.blocked = false;
+	}
+	if (start?.transcript_path) line.transcript = start.transcript_path;
+}
+
+/** Records the start of the session this process shows, once. */
+async function begin($) {
+	if (line.recorded === line.session) return;
+	line.recorded = line.session;
+	await record($, ["start", "--session", line.session, "--cwd", line.cwd, "--transcript", line.transcript]);
+	await restoreDraft($);
+	void submitPending($);
 }
 
 /** swb is the only thing that loads this plugin, so its tools are always offered; a call outside swb says so. */
@@ -215,19 +247,7 @@ export function register(on) {
 
 	// Fires at startup and again after /clear and /resume, which move this process to another session.
 	on("classic.SessionStart", async ($, e, next) => {
-		await init($);
-		if (line.managed) {
-			// Messages held for a session this process left stay undelivered, for when that session runs again.
-			line.pending = line.pending.filter((m) => m.target === e.session_id);
-			line.session = e.session_id;
-			line.cwd = e.cwd;
-			line.transcript = e.transcript_path;
-			line.busy = false;
-			line.blocked = false;
-			await record($, ["start", "--session", line.session, "--cwd", line.cwd, "--transcript", line.transcript]);
-			await restoreDraft($);
-			void submitPending($);
-		}
+		await init($, e);
 		return next(e);
 	});
 

@@ -25,7 +25,7 @@ const USAGE = `swb: Agent Switchboard
   swb -c, --continue           open a Deck in pi on this Project's most recent session, or a new one
   swb new [--cwd DIR] [--harness H]  open a Deck on a new session
   swb open ID                  open a Deck on a session
-  swb adopt ID|TRANSCRIPT      track a session pi ran outside swb, then open it; quit that pi first
+  swb adopt ID|TRANSCRIPT      track a pi, Claude Code, or Codex session run outside swb, then open it; quit it first
   swb ls [--json]              list sessions with derived state
   swb dirs [--json]            list the directories the Deck's picker offers
   swb archive ID               archive a session

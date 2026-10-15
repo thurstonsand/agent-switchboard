@@ -146,12 +146,13 @@ export async function launchSession(db: Db, l: Launch): Promise<ToolResult> {
 		resume: null,
 		...(sessionId ? { sessionId } : {}),
 		prompt,
+		...(l.title && l.harness === "claude" ? { title: l.title } : {}),
 		...(l.model ? { model: l.model } : {}),
 		...(l.from ? { parentId: l.from } : {}),
 	});
 	const id = await registered(db, host, 60_000);
 	if (l.title && l.harness === "codex") await nameThread(host, id, l.title);
-	else if (l.title) await titled(db, id, l.title);
+	else if (l.title && l.harness === "pi") await titled(db, id, l.title);
 	const text = `Launched a ${harnessName(l.harness)} session (session: ${id}) in ${dir}.${l.requestResponse ? " It will report back as a message; end your turn rather than waiting." : ""}`;
 	return { text, details: { id, harness: l.harness, host, cwd: dir } };
 }

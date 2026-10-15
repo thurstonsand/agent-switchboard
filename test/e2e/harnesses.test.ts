@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { config, cursorTo, entry, seed, state, waitState } from "./harness/deck.ts";
 import { budgets, type LsEntry, release, type Scenario, scenario, until } from "./harness/index.ts";
 
@@ -264,6 +264,52 @@ test("pi, Claude Code, and Codex message each other: idle sessions start a turn,
 	release(s, "p1");
 	await until(() => s.signal("replied.SWB-mid-pi") !== "", budgets.settle, "pi answering the steer");
 	s.save("mid-turn.txt", [pane(pi.id), pane(claude.id), pane(codex.id)].join("\n=====\n"));
+});
+
+test("swb adopt tracks Claude Code and Codex sessions run outside swb, and wakes each on its own conversation", async () => {
+	s = scenario("harnesses", "adopt", { packages: [], recorder: true, harnesses: ["claude", "codex"] });
+	const outside = (argv: string[]) => {
+		const proc = Bun.spawnSync(argv, { cwd: s.project, env: s.env, stdout: "pipe", stderr: "pipe" });
+		if (proc.exitCode !== 0)
+			throw new Error(`${argv[0]} exited ${proc.exitCode}: ${proc.stderr.toString().slice(-1500)}${proc.stdout.toString().slice(-1500)}`);
+	};
+	outside([join(s.bin, "claude"), "-p", "reply claude outside"]);
+	outside([join(s.bin, "codex"), "exec", "--skip-git-repo-check", "reply codex outside"]);
+	const [claudeFile] = [...new Bun.Glob("*/*.jsonl").scanSync({ cwd: join(s.home, ".claude/projects"), absolute: true })];
+	const [codexFile] = [...new Bun.Glob("sessions/*/*/*/rollout-*.jsonl").scanSync({ cwd: join(s.home, ".codex"), absolute: true })];
+	const ids = {
+		claude: basename(claudeFile as string, ".jsonl"),
+		codex: /([0-9a-f-]{36})\.jsonl$/.exec(codexFile as string)?.[1] as string,
+	};
+	expect(s.ls()).toHaveLength(0);
+
+	for (const harness of ["claude", "codex"] as const) {
+		const id = ids[harness];
+		s.swb("drive", "start", "--", "adopt", id);
+		await waitState(s, `the adopted ${harness} session on the Stage`, (x) => x.cursor === id && x.staged.kind === "dormant");
+		expect(entry(s, id)).toMatchObject({ harness, open: true, live: false, interrupted: false, cwd: s.project });
+		s.keys("Enter");
+		await waitState(s, `${harness} live`, (x) => x.staged.id === id && x.staged.kind === "live", ready);
+		await until(() => pane(id).includes(`${harness} outside`), ready, `${harness}'s outside conversation on screen`);
+		type(id, `reply ${harness} inside`);
+		// The model is asked inside swb with the conversation from outside it.
+		await until(
+			() =>
+				s
+					.requests(harness)
+					.some(
+						(r) =>
+							String(r.prompt ?? (r.texts as string[]).at(-1)) === `reply ${harness} inside` &&
+							String(r.context).includes(`${harness} outside`),
+					),
+			ready,
+			`${harness}'s turn inside swb, on its outside conversation`,
+		);
+		await until(() => entry(s, id).activity === "idle", ready, `${harness} idle`);
+		s.save(`adopted-${harness}.txt`, pane(id));
+		s.swb("drive", "stop");
+	}
+	expect(s.swbTry("adopt", ids.claude).err.trim()).toBe(`swb: adopt: ${ids.claude} is already tracked; swb open ${ids.claude}`);
 });
 
 test("agents use swb's tools across harnesses: list, message, launch, and cancel, with the caller as the sender", async () => {

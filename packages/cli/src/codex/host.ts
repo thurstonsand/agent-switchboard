@@ -117,6 +117,8 @@ export async function codexHost(args: string[]): Promise<void> {
 	process.exit(code);
 }
 
+const UNREAD_GRACE_MS = 5000;
+
 class CodexLine {
 	/** The thread the TUI shows. */
 	bound: Thread | null = null;
@@ -126,6 +128,8 @@ class CodexLine {
 	stopping = false;
 	seenVersion = -1;
 	polling = false;
+	/** When reading the shown thread first failed, while it still does. */
+	unreadSince: number | null = null;
 
 	constructor(
 		readonly db: Db,
@@ -224,7 +228,16 @@ class CodexLine {
 		const { data } = await this.client.request<{ data: string[] }>("thread/loaded/list", {});
 		const matches = data.filter((id) => id.startsWith(prefix));
 		if (matches.length !== 1) return;
-		const { thread } = await this.client.request<{ thread: Thread & { path: string | null } }>("thread/read", { threadId: matches[0] });
+		let thread: Thread & { path: string | null };
+		try {
+			({ thread } = await this.client.request<{ thread: Thread & { path: string | null } }>("thread/read", { threadId: matches[0] }));
+			this.unreadSince = null;
+		} catch (error) {
+			// A thread just started has no metadata in its rollout yet; only a failure that outlasts that is worth saying.
+			this.unreadSince ??= Date.now();
+			if (Date.now() - this.unreadSince < UNREAD_GRACE_MS) return;
+			throw error;
+		}
 		if (thread.ephemeral || thread.parentThreadId) return;
 		this.bound = { id: thread.id, cwd: thread.cwd, path: thread.path, name: thread.name, ephemeral: false, parentThreadId: null };
 		this.busy = false;

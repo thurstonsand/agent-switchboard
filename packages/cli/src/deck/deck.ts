@@ -117,7 +117,7 @@ function uiConf(config: Config): string {
 	return [
 		"set -g default-terminal tmux-256color",
 		"set -g default-shell /bin/sh",
-		"set -as terminal-features ',*:RGB:hyperlinks:extkeys'",
+		"set -as terminal-features ',*:RGB:hyperlinks:extkeys:sync'",
 		"set -s extended-keys always",
 		"set -s extended-keys-format csi-u",
 		"set -g allow-passthrough all",

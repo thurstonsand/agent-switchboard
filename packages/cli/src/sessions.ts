@@ -29,7 +29,7 @@ function sessionsConf(): string {
 	return [
 		"set -g default-terminal tmux-256color",
 		"set -g default-shell /bin/sh",
-		"set -as terminal-features ',*:RGB:hyperlinks:extkeys'",
+		"set -as terminal-features ',*:RGB:hyperlinks:extkeys:sync'",
 		"set -s extended-keys always",
 		"set -s extended-keys-format csi-u",
 		"set -s escape-time 0",
@@ -200,6 +200,8 @@ export type LaunchSpec = {
 	sessionId?: string;
 	/** The first turn's prompt. */
 	prompt?: string;
+	/** The name a launcher gave it; Claude Code keeps it as the session's own. */
+	title?: string;
 	model?: string;
 	/** The session that launched this one; an agent launch also skips pi's trust prompt. */
 	parentId?: string;
@@ -221,7 +223,8 @@ function harnessCommand(spec: LaunchSpec, host: string): string[] {
 		case "claude": {
 			const id = spec.resume ? ["--resume", spec.resume.id] : spec.sessionId ? ["--session-id", spec.sessionId] : [];
 			const operator = spec.cwd === operatorDir() ? ["--settings", claudeOperatorSettings()] : [];
-			return ["claude", ...id, "--plugin-dir", writeClaudeLine(), ...operator, ...model, ...prompt];
+			const name = spec.title ? ["--name", spec.title] : [];
+			return ["claude", ...id, "--plugin-dir", writeClaudeLine(), ...operator, ...name, ...model, ...prompt];
 		}
 		case "codex":
 			return [

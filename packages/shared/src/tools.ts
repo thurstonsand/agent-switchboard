@@ -5,7 +5,8 @@ import { HARNESSES } from "./index.ts";
 // The coordination tools every line gives its agent, defined once. pi takes these schemas as they are; Claude Code
 // and Codex take them as JSON Schema. Each tool runs an swb command and returns its text to the model unchanged.
 
-export type ToolSpec = { description: string; guidelines: string[]; parameters: TSchema };
+/** `readOnly`: it only reads. The rest change only the user's own sessions, and never destroy one. */
+export type ToolSpec = { description: string; guidelines: string[]; parameters: TSchema; readOnly: boolean };
 
 const session = Type.String({ description: "The target session's id, from session_reachable." });
 
@@ -17,6 +18,7 @@ export const TOOLS = {
 			"Sessions in other projects and other harnesses are all reachable; a dormant one wakes when messaged.",
 		],
 		parameters: Type.Object({}),
+		readOnly: true,
 	},
 	session_send_message: {
 		description:
@@ -30,11 +32,13 @@ export const TOOLS = {
 			message: Type.String({ description: "The message, self-contained: the recipient doesn't see this conversation." }),
 			requestResponse: Type.Boolean({ description: "Whether the recipient should reply to this session." }),
 		}),
+		readOnly: false,
 	},
 	session_cancel: {
 		description: "Interrupt another session's running turn. The session stays open.",
 		guidelines: ["Only cancel another session's turn when the user asks for it."],
 		parameters: Type.Object({ session }),
+		readOnly: false,
 	},
 	session_launch: {
 		description:
@@ -53,6 +57,7 @@ export const TOOLS = {
 			title: Type.String({ description: "A short title for the roster." }),
 			requestResponse: Type.Boolean({ description: "Whether it should report back to this session when done." }),
 		}),
+		readOnly: false,
 	},
 	swb_update_session: {
 		description: "Archive or unarchive a session. Omit session to update the current session.",
@@ -65,6 +70,7 @@ export const TOOLS = {
 			session: Type.Optional(Type.String({ description: "Session id; omit for the current session." })),
 			archived: Type.Boolean(),
 		}),
+		readOnly: false,
 	},
 } satisfies Record<string, ToolSpec>;
 
