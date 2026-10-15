@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.6.0 — 2026-10-15
+## 0.6.1 — 2026-10-15
+
+The first release of these changes: v0.6.0 stopped in CI, which lacked Claude Code and Codex, before it published anything.
 
 Schema v5: update swb and the pi line together. With pi-sessions, needs pi-sessions 0.19.0 or later: an older one registers the same tool names, and pi refuses to start with both.
 
