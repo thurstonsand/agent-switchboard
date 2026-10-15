@@ -89,6 +89,9 @@ test("Claude Code waiting on a permission prompt reads as blocked, and an upgrad
 	const note = `${s.project}/note.txt`;
 	type(claude.id, `call Write {"file_path":"${note}","content":"hi"}`);
 	await until(() => entry(s, claude.id).activity === "blocked", budgets.settle, "Claude blocked on the prompt");
+	// Blocked is recorded before the dialog shows, and Claude Code drops a key sent the moment it does.
+	await until(() => pane(claude.id).includes("Do you want to create note.txt?"), budgets.settle, "the permission dialog");
+	Bun.sleepSync(1000);
 	s.save("blocked.txt", pane(claude.id));
 	// The first choice allows it.
 	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(claude.id)}:`, "Enter");
