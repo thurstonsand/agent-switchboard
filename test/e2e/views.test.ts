@@ -457,7 +457,7 @@ test("m names a session's Group, n joins it; dragging moves it between Groups be
 	s.keys("-l", "review", "Enter");
 	let st = await waitState(s, "alpha in review", (x) => groups(x).review?.join() === a && x.mode === "roster");
 	expect(groups(st)).toEqual({ review: [a], "⎇ main": [b], "⎇ wt": [w] });
-	expect(entry(s, a).group).toBe("review");
+	await until(() => entry(s, a).group === "review", budgets.settle, "a\'s Group review in the db");
 	s.save("named.ansi", s.swb("drive", "capture", "--ansi"));
 
 	const bravo = lineOf(st, (r) => r.kind === "session" && r.id === b);
@@ -472,7 +472,7 @@ test("m names a session's Group, n joins it; dragging moves it between Groups be
 	s.swb("drive", "release", "8", `${alpha}`);
 	st = await waitState(s, "bravo dropped into review", (x) => groups(x).review?.length === 2 && x.drop === null);
 	expect(groups(st)).toEqual({ review: sorted(a, b), "⎇ wt": [w] });
-	expect(entry(s, b).group).toBe("review");
+	await until(() => entry(s, b).group === "review", budgets.settle, "b\'s Group review in the db");
 	s.save("dropped.ansi", s.swb("drive", "capture", "--ansi"));
 
 	const wt = lineOf(st, (r) => r.kind === "header" && r.group === "⎇ wt");
@@ -489,7 +489,7 @@ test("m names a session's Group, n joins it; dragging moves it between Groups be
 	s.swb("drive", "drag", "8", `${from}`, "8", `${project}`);
 	st = await waitState(s, "bravo back in its bucket", (x) => groups(x)["⎇ main"]?.join() === b);
 	expect(groups(st)).toEqual({ review: [a], "⎇ main": [b], "⎇ wt": [w] });
-	expect(entry(s, b).group).toBeNull();
+	await until(() => entry(s, b).group === null, budgets.settle, "b out of its Group in the db");
 
 	// The picker narrows to the Project's Groups as I type, offering a new one until a name matches exactly.
 	await cursorTo(s, b);
@@ -501,7 +501,7 @@ test("m names a session's Group, n joins it; dragging moves it between Groups be
 	s.save("picker.ansi", s.swb("drive", "capture", "--ansi"));
 	s.keys("Enter");
 	st = await waitState(s, "bravo picked into review", (x) => groups(x).review?.length === 2 && x.mode === "roster");
-	expect(entry(s, b).group).toBe("review");
+	await until(() => entry(s, b).group === "review", budgets.settle, "b\'s Group review in the db");
 	await cursorTo(s, b);
 	s.keys("m");
 	await waitState(s, "picking again", (x) => x.mode === "name");
@@ -511,7 +511,7 @@ test("m names a session's Group, n joins it; dragging moves it between Groups be
 		.findIndex((line) => line.includes("(no Group)"));
 	s.swb("drive", "click", "6", `${none}`);
 	st = await waitState(s, "bravo clicked back to its bucket", (x) => groups(x)["⎇ main"]?.join() === b && x.mode === "roster");
-	expect(entry(s, b).group).toBeNull();
+	await until(() => entry(s, b).group === null, budgets.settle, "b out of its Group in the db");
 
 	s.swb("archive", a);
 	await waitState(s, "review gone with its last session", (x) => !x.rows.some((r) => r.kind === "header" && r.group === "review"));
@@ -527,7 +527,7 @@ test("m names a session's Group, n joins it; dragging moves it between Groups be
 	st = await waitState(s, "review renamed triage", (x) => groups(x).triage?.join() === a);
 	const at = st.rows[st.cursorRow];
 	expect(at?.kind === "header" && at.group).toBe("triage");
-	expect(entry(s, a).group).toBe("triage");
+	await until(() => entry(s, a).group === "triage", budgets.settle, "a\'s Group triage in the db");
 	s.save("renamed.ansi", s.swb("drive", "capture", "--ansi"));
 
 	await pickNew(s);
