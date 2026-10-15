@@ -535,7 +535,15 @@ test("a drag in regular-mode pi reaches drive clipboard through both tmux layers
 	s.swb("drive", "start", "--", "new");
 	await waitState(s, "the new pi live", (x) => x.staged.kind === "live");
 	await reply(s, "copy-me-please");
-	const rows = s.screen().split("\n");
+	// The reply signals when pi asks for it, and pi draws a turn typed during startup only once startup ends.
+	const rows = await until(
+		() => {
+			const screen = s.screen().split("\n");
+			return screen.some((line) => line.includes("copy-me-please")) && screen;
+		},
+		budgets.settle,
+		"the reply on screen",
+	);
 	const row = rows.findLastIndex((line) => line.includes("copy-me-please"));
 	const col = (rows[row] as string).lastIndexOf("copy-me-please");
 	s.swb("drive", "drag", String(col), String(row), String(col + "copy-me-please".length - 1), String(row));
