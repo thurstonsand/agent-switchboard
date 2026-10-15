@@ -26,8 +26,8 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: jdx/mise-action@v3
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
       - run: bun install --frozen-lockfile
 
       - name: Version and release notes from the tag

@@ -10,19 +10,21 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: jdx/mise-action@v3
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
       - run: bun install --frozen-lockfile
-      - run: npm install -g @earendil-works/pi-coding-agent pi-sessions @thurstonsand/pi-wt @openai/codex
+      # The e2e runs the harnesses from npm's global root, at the versions bun.lock resolves.
       # Claude's postinstall swaps its Node wrapper for the native binary.
-      - run: npm install -g --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code
       - run: |
-          echo "SWB_E2E_PI_SESSIONS=$(npm root -g)/pi-sessions" >> "$GITHUB_ENV"
-          echo "SWB_E2E_PI_WT=$(npm root -g)/@thurstonsand/pi-wt" >> "$GITHUB_ENV"
+          locked() { echo "$1@$(jq -r .version "node_modules/$1/package.json")"; }
+          npm install -g "$(locked @earendil-works/pi-coding-agent)" "$(locked @openai/codex)"
+          npm install -g --allow-scripts=@anthropic-ai/claude-code "$(locked @anthropic-ai/claude-code)"
+          echo "SWB_E2E_PI_SESSIONS=$PWD/node_modules/pi-sessions" >> "$GITHUB_ENV"
+          echo "SWB_E2E_PI_WT=$PWD/node_modules/@thurstonsand/pi-wt" >> "$GITHUB_ENV"
       - run: mise run check
       - run: mise run e2e
       - if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-artifacts
           path: test/e2e/artifacts

@@ -1,4 +1,23 @@
 {
 	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
-	"extends": ["config:recommended", "security:minimumReleaseAgeNpm"]
+	"extends": ["config:recommended", "security:minimumReleaseAgeNpm"],
+	"packageRules": [
+		{
+			"description": "The harnesses swb runs. Each takes its latest release as soon as it ships, so swb meets a new harness before its users do; everything else keeps the release-age gate.",
+			"matchDatasources": ["npm"],
+			"matchPackageNames": [
+				"@earendil-works/*",
+				"@anthropic-ai/claude-code",
+				"@anthropic-ai/claude-agent-sdk",
+				"@openai/codex",
+				"@openai/codex-sdk"
+			],
+			"minimumReleaseAge": null
+		},
+		{
+			"description": "Pinned to the version pi ships. Pi's extension loader aliases typebox to its own bundled copy, so our declaration only types what pi executes and must match it. It moves when pi moves, not on Renovate's schedule.",
+			"matchPackageNames": ["typebox"],
+			"enabled": false
+		}
+	]
 }
