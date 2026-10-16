@@ -1,6 +1,5 @@
 import { Database } from "bun:sqlite";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 export const repo = resolve(import.meta.dir, "../../..");
@@ -32,25 +31,12 @@ const tools = (() => {
 	return { node, tmux, wt, piCli, claude, codex, bun: process.execPath };
 })();
 
-export type HostPackage = "pi-sessions" | "@thurstonsand/pi-wt";
-const overrides: Record<HostPackage, string> = { "pi-sessions": "SWB_E2E_PI_SESSIONS", "@thurstonsand/pi-wt": "SWB_E2E_PI_WT" };
+export type PiPackage = "pi-sessions" | "@thurstonsand/pi-wt";
+const overrides: Record<PiPackage, string> = { "pi-sessions": "SWB_E2E_PI_SESSIONS", "@thurstonsand/pi-wt": "SWB_E2E_PI_WT" };
 
-/** The host's own install of a pi package, as its pi settings name it; null when it has none. */
-function hostPackage(name: HostPackage): string | null {
-	const override = process.env[overrides[name]];
-	if (override) return override;
-	const agentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi/agent");
-	const settings = join(agentDir, "settings.json");
-	if (!existsSync(settings)) return null;
-	const packages = (JSON.parse(readFileSync(settings, "utf8")) as { packages?: (string | { source: string })[] }).packages ?? [];
-	for (const entry of packages) {
-		const source = typeof entry === "string" ? entry : entry.source;
-		if (source === `npm:${name}`) return join(agentDir, "npm/node_modules", name);
-		const dir = source.replace(/^~/, homedir());
-		const manifest = join(dir, "package.json");
-		if (existsSync(manifest) && JSON.parse(readFileSync(manifest, "utf8")).name === name) return dir;
-	}
-	return null;
+/** A pi package at the version bun.lock pins, or the checkout its override names. */
+function piPackage(name: PiPackage): string {
+	return process.env[overrides[name]] || join(repo, "node_modules", name);
 }
 
 export type LsEntry = {
@@ -107,13 +93,13 @@ export type Scenario = {
 const servers = new Set<string>();
 
 /**
- * `packages` installs the host's real copies of those pi packages; a scenario that asks for one the host lacks throws.
+ * `packages` installs those pi packages, at the versions bun.lock pins.
  * Without `recorder`, pi starts with no recorder until the scenario installs one.
  */
 export function scenario(
 	phase: string,
 	name: string,
-	options: { packages: HostPackage[]; recorder: boolean; harnesses?: ("claude" | "codex")[] } = { packages: [], recorder: true },
+	options: { packages: PiPackage[]; recorder: boolean; harnesses?: ("claude" | "codex")[] } = { packages: [], recorder: true },
 ): Scenario {
 	// Not tmpdir(): macOS's /var/folders/... pushes tmux sockets under root past the 104-byte sun_path limit.
 	// Resolved because /tmp is a symlink there, and swb records the real cwd.
@@ -151,7 +137,7 @@ export function scenario(
 		join(agentDir, "settings.json"),
 		JSON.stringify({
 			// The pi line last, as `pi install` leaves it when added after pi-sessions: its handlers then run after theirs.
-			packages: [...options.packages.map(requireHostPackage), ...(options.recorder ? [join(repo, "dist/pi")] : [])],
+			packages: [...options.packages.map(piPackage), ...(options.recorder ? [join(repo, "dist/pi")] : [])],
 			...(options.packages.includes("pi-sessions")
 				? // Only what subagents and handoffs need: the rest would spend faux turns on titles and indexing.
 					{ sessions: { autoTitle: { enable: false }, ask: { enable: false }, search: { enable: false } } }
@@ -296,12 +282,6 @@ export function capture(s: Scenario, server: string, target: string): string {
 export function release(s: Scenario, name: string): void {
 	mkdirSync(join(s.home, "e2e-signals"), { recursive: true });
 	writeFileSync(join(s.home, "e2e-signals", `${name}.release`), "");
-}
-
-function requireHostPackage(name: HostPackage): string {
-	const path = hostPackage(name);
-	if (!path) throw new Error(`this scenario needs ${name}, and this host's pi settings install none (set ${overrides[name]})`);
-	return path;
 }
 
 export function git(s: Scenario, cwd: string, ...args: string[]): string {

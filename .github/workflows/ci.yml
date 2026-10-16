@@ -19,8 +19,6 @@ jobs:
           locked() { echo "$1@$(jq -r .version "node_modules/$1/package.json")"; }
           npm install -g "$(locked @earendil-works/pi-coding-agent)" "$(locked @openai/codex)"
           npm install -g --allow-scripts=@anthropic-ai/claude-code "$(locked @anthropic-ai/claude-code)"
-          echo "SWB_E2E_PI_SESSIONS=$PWD/node_modules/pi-sessions" >> "$GITHUB_ENV"
-          echo "SWB_E2E_PI_WT=$PWD/node_modules/@thurstonsand/pi-wt" >> "$GITHUB_ENV"
       - run: mise run check
       - run: mise run e2e
       - if: failure()

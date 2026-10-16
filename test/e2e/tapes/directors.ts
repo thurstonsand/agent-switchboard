@@ -3,10 +3,10 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState } from "../../../packages/cli/src/deck/protocol.ts";
 import { config, seed } from "../harness/deck.ts";
-import { git, gitRepo, gitWorktree, type HostPackage, type LsEntry, release, type Scenario, until, which } from "../harness/index.ts";
+import { git, gitRepo, gitWorktree, type LsEntry, type PiPackage, release, type Scenario, until, which } from "../harness/index.ts";
 
 export type Director = {
-	packages?: HostPackage[];
+	packages?: PiPackage[];
 	/** Claude Code and Codex, each with its fake model server. */
 	harnesses?: ("claude" | "codex")[];
 	/** Runs before the tape starts. */

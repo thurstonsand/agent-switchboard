@@ -19,7 +19,7 @@ mise run release:check  # build every release artifact into a scratch dir and sm
 mise run evidence       # render the VHS tapes in test/e2e/tapes to test/e2e/artifacts/phase6/videos
 ```
 
-Some scenarios install the host's own pi-sessions and pi-wt, found through its pi settings; point `SWB_E2E_PI_SESSIONS` or `SWB_E2E_PI_WT` at a checkout when the settings don't name one, or name an older one. Scenarios for Claude Code and Codex run the host's npm-global installs against fake model servers in `test/e2e/fakes`, which log every request they answer.
+Some scenarios install pi-sessions and pi-wt from `node_modules`, at the versions bun.lock pins; point `SWB_E2E_PI_SESSIONS` or `SWB_E2E_PI_WT` at a checkout to test another. Scenarios for Claude Code and Codex run the host's npm-global installs against fake model servers in `test/e2e/fakes`, which log every request they answer.
 
 ## Layout
 
