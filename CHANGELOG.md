@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.3 — 2026-10-16
+
+Requires Claude Code 2.1.300 or later, and pi 1.2.0 or later.
+
+### Changed
+
+- Copying text in pi now works when your terminal is on another machine.
+
+### Fixed
+
+- Claude Code: after an upgrade restarted a session, a prompt you'd already sent could reappear in the input box, and a restored draft could be lost at the next restart.
+
 ## 0.6.2 — 2026-10-15
 
 ### Added
