@@ -49,6 +49,13 @@ function sessionsConf(): string {
 		"set -g detach-on-destroy on",
 		"set -g status off",
 		"set -g pane-border-status off",
+		// tmux 3.8 restyled popups and copy mode in its own theme colours, whatever the terminal's: the Peek a dark grey
+		// box, copy mode's highlights fixed X11 colours. These are 3.7's, which take the terminal's palette.
+		"set -g popup-style default",
+		"set -g mode-style noattr,bg=yellow,fg=black",
+		"set -g copy-mode-match-style bg=cyan,fg=black",
+		"set -g copy-mode-current-match-style bg=magenta,fg=black",
+		"set -g copy-mode-mark-style bg=red,fg=black",
 		"set -g set-titles off",
 		// Nested tmux turns Alt+Enter into a legacy ESC CR, which pi reads as Enter.
 		"bind-key -n M-Enter if-shell -F '#{m:*Ext*,#{pane_key_mode}}' 'send-keys -H 1b 5b 31 33 3b 33 75' 'send-keys M-Enter'",

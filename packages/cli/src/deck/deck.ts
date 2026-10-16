@@ -147,6 +147,9 @@ function uiConf(config: Config): string {
 		"set -g pane-border-lines single",
 		"set -g pane-border-style fg=brightblack",
 		"set -g pane-active-border-style fg=cyan",
+		// tmux 3.8 paints popups dark grey by default, whatever the terminal's theme; help wears the terminal's own.
+		"set -g popup-style default",
+		"set -g popup-border-style default",
 		"set -g set-titles on",
 		"set -g set-titles-string swb",
 		`set -g prefix ${prefix}`,
