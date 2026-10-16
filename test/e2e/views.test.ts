@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState } from "../../packages/cli/src/deck/protocol.ts";
 import { config, cursorTo, entry, pickNew, piSessions, reply, seed, sessionRows, state, waitState } from "./harness/deck.ts";
@@ -602,12 +603,25 @@ test("M-a s puts the directory's shell under pi, right of the split editor; ctrl
 
 test.skipIf(!NVIM)("ctrl-hjkl move between nvim's windows, and off its edge into the Deck's panes", async () => {
 	s = scenario("phase7", "nvim-nav");
+	// LazyVim maps ctrl-hjkl to wincmd at lazy.nvim's VeryLazy, which fires on the first UIEnter, after swb's -c.
+	const init = join(s.root, "init.lua");
+	writeFileSync(
+		init,
+		`vim.api.nvim_create_autocmd("User", { pattern = "VeryLazy", callback = function()
+  for _, k in ipairs({ "h", "j", "k", "l" }) do vim.keymap.set("n", "<C-" .. k .. ">", "<C-w>" .. k) end
+end })
+vim.api.nvim_create_autocmd("UIEnter", { once = true, callback = function()
+  vim.schedule(function() vim.api.nvim_exec_autocmds("User", { pattern = "VeryLazy" }) end)
+end })
+`,
+	);
 	// A directory opens in netrw, whose own ctrl-h and ctrl-l maps are in the way.
-	config(s, `editor = "${NVIM} --clean ."`);
+	config(s, `editor = "${NVIM} --clean -u ${init} ."`);
 	await started(s, "--", "new");
 	await prefixKeys(s, "M-a", "e", "the editor", (x) => x.staged.view === "editor" && x.focus === "editor");
 	await until(() => s.screen().includes("~"), budgets.settle, "nvim drawn");
-	s.keys("-l", ":vsplit", "Enter", "C-l");
+	// netrw on the right, an empty buffer with only the global maps on the left.
+	s.keys("-l", ":vsplit", "Enter", "-l", ":enew", "Enter", "C-l");
 	await Bun.sleep(500);
 	expect(state(s).focus).toBe("editor");
 	s.keys("C-h");

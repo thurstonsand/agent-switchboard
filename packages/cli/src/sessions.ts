@@ -373,6 +373,8 @@ local function maps(buffer)
   end
 end
 maps(false)
+-- LazyVim maps its own window keys at lazy.nvim's VeryLazy, after -c ran this, so take them back once it has.
+vim.api.nvim_create_autocmd("User", { pattern = "VeryLazy", once = true, callback = function() maps(false) end })
 -- netrw maps <C-h> and <C-l> in its own buffers, over the global ones.
 vim.api.nvim_create_autocmd("FileType", { pattern = "netrw", callback = function(ev) maps(ev.buf) end })
 `;
