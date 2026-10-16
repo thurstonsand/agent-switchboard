@@ -18,10 +18,11 @@ export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$PATH"
 export MISE_YES=1
 
 # pi downloads fd on its first run when the system has none, and Codex warns without bubblewrap.
+# grim screenshots the orb Desktop, for evidence that lives outside the terminal grid, like the Deck's title.
 install_packages() {
-  dpkg -s fd-find bubblewrap >/dev/null 2>&1 && return
+  dpkg -s fd-find bubblewrap grim >/dev/null 2>&1 && return
   sudo apt-get update -qq
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fd-find bubblewrap
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fd-find bubblewrap grim
 }
 
 install_mise() {
