@@ -17,11 +17,11 @@ step() {
 export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$PATH"
 export MISE_YES=1
 
-# pi downloads fd on its first run when the system has none.
-install_fd() {
-  dpkg -s fd-find >/dev/null 2>&1 && return
+# pi downloads fd on its first run when the system has none, and Codex warns without bubblewrap.
+install_packages() {
+  dpkg -s fd-find bubblewrap >/dev/null 2>&1 && return
   sudo apt-get update -qq
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fd-find
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fd-find bubblewrap
 }
 
 install_mise() {
@@ -47,6 +47,8 @@ install_tools() {
   mise install
   # Harnesses are npm globals behind node shims, and swb starts them in any project directory.
   mise use -g --quiet "node@$(mise current node)"
+  # swb needs tmux 3.7 outside this repo too; the system's 3.3a is too old.
+  mise use -g --quiet "aqua:tmux/tmux-builds@$(mise current aqua:tmux/tmux-builds)"
 }
 
 # Mirrors CI: pi itself, plus the two host packages the e2e scenarios load.
@@ -78,12 +80,34 @@ configure_pi() {
   done
 }
 
+# Real-model spot tests run Codex through the subscription proxy, when its key is in the env.
+configure_codex() {
+  [ -n "${CLI_PROXY_API_KEY:-}" ] || return 0
+  local config="$HOME/.codex/config.toml"
+  mkdir -p "$HOME/.codex"
+  touch "$config"
+  grep -Fq "[model_providers.cli_proxy]" "$config" && return
+  {
+    printf 'model_provider = "cli_proxy"\nmodel = "gpt-6.1-sol"\n\n'
+    cat "$config"
+    cat <<'EOF'
+
+[model_providers.cli_proxy]
+name = "CLIProxyAPI"
+base_url = "https://aig.thurstons.house/v1"
+env_key = "CLI_PROXY_API_KEY"
+wire_api = "responses"
+EOF
+  } >"$config.tmp"
+  mv "$config.tmp" "$config"
+}
+
 link_swb() {
   mkdir -p "$HOME/.local/bin"
   ln -sfn "$repo/dist/swb" "$HOME/.local/bin/swb"
 }
 
-step "fd" install_fd
+step "apt packages" install_packages
 step "mise" install_mise
 step "persist PATH" persist_path
 step "mise install" install_tools
@@ -93,4 +117,5 @@ step "dist:pi" mise run dist:pi
 step "link swb" link_swb
 step "pi" install_pi
 step "claude and codex" install_harnesses
+step "codex via the subscription proxy" configure_codex
 step "pi packages" configure_pi
