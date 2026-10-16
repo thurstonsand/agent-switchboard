@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.4 — 2026-10-16
+
+### Fixed
+
+- On tmux 3.8, a row's Peek and the `?` help were dark grey boxes on a light terminal, their dim text hard to read, and copy mode highlighted search matches in its own colours instead of your terminal's. All of them wear your terminal's colours again, as on tmux 3.7.
+- ctrl-hjkl move out of an nvim Editor again when your config is LazyVim, whose own window keys used to replace swb's.
+
 ## 0.6.3 — 2026-10-16
 
 Requires Claude Code 2.1.300 or later, and pi 1.2.0 or later.
