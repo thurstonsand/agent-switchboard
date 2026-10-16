@@ -15,6 +15,11 @@ export function state(s: Scenario): DeckState {
 	return JSON.parse(s.swb("drive", "state"));
 }
 
+/** The title the Deck's tmux gives its terminal. */
+export function title(s: Scenario): string {
+	return s.tmux(s.servers.ui, "display", "-p", "-t", `=${state(s).deck}:`, "#{T:set-titles-string}");
+}
+
 export function entry(s: Scenario, id: string): LsEntry {
 	return s.ls().find((e) => e.id === id) as LsEntry;
 }

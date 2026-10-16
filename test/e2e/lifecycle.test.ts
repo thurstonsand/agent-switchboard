@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { config, cursorTo, entry, piSessions, reply, rowIndex, seed, sessionRows, state, waitState } from "./harness/deck.ts";
+import { config, cursorTo, entry, piSessions, reply, rowIndex, seed, sessionRows, state, title, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -198,16 +198,19 @@ test("Inactive after inactive_after, never while blocked or unseen", async () =>
 	expect(entry(s, blocked).inactive).toBe(false);
 	expect(entry(s, unseen)).toMatchObject({ unseen: true, inactive: false });
 	expect(state(s).rows.some((r) => r.kind === "section" && r.label === "Inactive")).toBe(false);
+	await until(() => title(s) === "swb ◆1 ●1", budgets.settle, "the title counting both");
 	s.save("blocked-and-unseen.txt", s.screen());
 
 	release(s, "b1");
 	await until(() => entry(s, blocked).inactive, 8000, "the released session goes inactive once seen and quiet");
+	await until(() => title(s) === "swb ●1", budgets.settle, "the title counting only the unseen");
 	s.keys("M-a", "h");
 	await waitState(s, "roster focus", (x) => x.focus === "roster");
 	await cursorTo(s, unseen);
 	s.keys("Enter");
 	await waitState(s, "unseen live on view", (x) => x.staged.id === unseen && x.staged.kind === "live", budgets.piReady);
 	await until(() => entry(s, unseen).inactive, 8000, "visited, then inactive");
+	await until(() => title(s) === "swb", budgets.settle, "the title counting nothing");
 	const st = await waitState(s, "Inactive section", (x) => x.rows.some((r) => r.kind === "section" && r.label === "Inactive"));
 	s.save("inactive.txt", `${s.screen()}\n${JSON.stringify(st.rows, null, 2)}`);
 });

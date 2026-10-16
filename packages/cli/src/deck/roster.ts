@@ -367,6 +367,26 @@ function syncStatus(): void {
 	);
 }
 
+let titleShown = "swb";
+let titleOps = Promise.resolve();
+/** The terminal's title counts what needs me, for the times the Deck isn't the tab I'm looking at. */
+function syncTitle(): void {
+	const states = [...entries.values()].map(stateOf);
+	const count = (state: State, mark: string) => {
+		const n = states.filter((s) => s === state).length;
+		return n > 0 ? ` ${mark}${n}` : "";
+	};
+	const want = `swb${count("blocked", "◆")}${count("unseen", "●")}`;
+	if (want === titleShown) return;
+	titleShown = want;
+	titleOps = titleOps.then(() =>
+		tmuxAsync(UI, "set", "-t", deck, "set-titles-string", want).then(
+			() => {},
+			(error: Error) => toast(`title: ${error.message}`, "error"),
+		),
+	);
+}
+
 function card(e: Entry, lines: string[] = []): Card {
 	const transcript = transcripts.get(e.id);
 	const extra = transcript?.error ? [red(transcript.error)] : [];
@@ -2984,6 +3004,7 @@ setInterval(() => {
 	if (ready && !wasReady && continueTo) roster.focusEntry(continueTo);
 	const now = Date.now();
 	keepLayout(now);
+	syncTitle();
 	if (toasts.some((t) => t.until <= now) || launches.length > 0 || [...entries.values()].some((e) => e.activity === "blocked"))
 		tui.requestRender();
 }, 100);
