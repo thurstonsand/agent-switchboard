@@ -267,6 +267,9 @@ export function launch(spec: LaunchSpec): string {
 		// pi asks tmux whether its client forwards hyperlinks, but it starts with no client; both servers always forward them.
 		"-e",
 		"PI_HYPERLINKS=1",
+		// The terminal attached to the Deck may be on another machine, which pi can't see through tmux; OSC 52 reaches it.
+		"-e",
+		"PI_CLIPBOARD_OSC52=1",
 		...(spec.parentId ? ["-e", `SWB_PARENT=${spec.parentId}`] : []),
 		`exec env -u TMUX -u TMUX_PANE SHELL=${shell} ${shell} -lic ${quote(command)}`,
 		";",

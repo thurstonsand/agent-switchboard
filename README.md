@@ -6,7 +6,7 @@ Sessions run headless in a dedicated tmux server. `swb` opens a Deck: a roster o
 
 ## Install
 
-`swb` needs tmux 3.7 or newer and pi 1.0.4 or newer.
+`swb` needs tmux 3.7 or newer and pi 1.2.0 or newer.
 
 1. The `swb` binary, for linux-x64 or darwin-arm64, from the [latest release](https://github.com/thurstonsand/agent-switchboard/releases/latest), or with mise:
 
