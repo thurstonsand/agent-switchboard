@@ -21,6 +21,8 @@ const line = {
 	blocked: false,
 	draft: "",
 	pending: [],
+	/** The last record in flight; each waits for the one before, so swb sees them in order. */
+	recording: Promise.resolve(""),
 };
 
 async function env($, name) {
@@ -37,8 +39,17 @@ async function swb($, args, stdin) {
 	return result.stdout;
 }
 
+/**
+ * Records in order, after any still in flight. A turn's hooks don't wait for theirs: each is an swb process to boot,
+ * which Claude's next model request would wait out.
+ */
+function record($, args) {
+	line.recording = line.recording.then(() => recordNow($, args));
+	return line.recording;
+}
+
 /** Recording never fails a hook: it says so where the person looks, and Claude carries on. */
-async function record($, args) {
+async function recordNow($, args) {
 	try {
 		return await swb($, ["__record", ...args, "--host", line.host]);
 	} catch (error) {
@@ -301,7 +312,7 @@ export function register(on) {
 			// The launcher is recorded with the first turn, which makes the session's row.
 			const parent = line.parent ? ["--parent", line.parent] : [];
 			line.parent = "";
-			await record($, ["turn", "--session", line.session, "--cwd", line.cwd, "--transcript", line.transcript, ...parent]);
+			void record($, ["turn", "--session", line.session, "--cwd", line.cwd, "--transcript", line.transcript, ...parent]);
 		}
 		return next(e);
 	});
@@ -309,7 +320,7 @@ export function register(on) {
 	on("classic.PermissionRequest", async ($, e, next) => {
 		if (line.managed && line.busy && !line.blocked) {
 			line.blocked = true;
-			await record($, ["phase", "blocked", "--session", line.session]);
+			void record($, ["phase", "blocked", "--session", line.session]);
 		}
 		return next(e);
 	});
@@ -318,7 +329,7 @@ export function register(on) {
 	on("turn.step", async function* ($, e, next) {
 		if (line.managed && !e.agentId && line.blocked) {
 			line.blocked = false;
-			await record($, ["phase", "working", "--session", line.session]);
+			void record($, ["phase", "working", "--session", line.session]);
 		}
 		return yield* next(e);
 	});
@@ -329,7 +340,7 @@ export function register(on) {
 			line.busy = false;
 			line.blocked = false;
 			// swb stops this session after recording, when it was archived during the turn.
-			await record($, ["settled", "--session", line.session, "--cwd", line.cwd, "--transcript", line.transcript]);
+			void record($, ["settled", "--session", line.session, "--cwd", line.cwd, "--transcript", line.transcript]);
 			void submitPending($);
 		}
 		return result;
