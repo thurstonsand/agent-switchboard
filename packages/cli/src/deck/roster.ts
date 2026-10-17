@@ -17,6 +17,7 @@ import {
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { harness as asHarness, HARNESSES, type Harness, operatorDir, projectRoot, type View } from "@swb/shared";
+import { mark } from "@swb/shared/trace";
 import type { Subprocess } from "bun";
 import { loadConfig } from "../config.ts";
 import { displayName, projectName } from "../derive.ts";
@@ -797,6 +798,7 @@ function keepLayout(now: number): void {
 }
 
 function onSnapshot(next: Snapshot): void {
+	if (snapshot === null) mark("roster.first-snapshot");
 	snapshot = next;
 	entries = new Map(next.entries.map((e) => [e.id, e]));
 	for (const [id, view] of localViews) if (entries.get(id)?.view === view) localViews.delete(id);
@@ -1922,6 +1924,7 @@ class Roster implements Component {
 		syncPeek(narrow ? null : spot);
 		this.inline = narrow && spot ? this.drawPeek(lines, rows, spot, width, height) : null;
 		const out = lines.map((line) => truncateToWidth(line, width, "…", true));
+		if (perf.render.n === 0) mark("roster.first-frame");
 		perf.render.add(performance.now() - t0);
 		if (frameKeyAt > 0) {
 			perf.keyToFrame.add(performance.now() - frameKeyAt);
@@ -3000,6 +3003,7 @@ setInterval(() => {
 	}
 	const wasReady = ready;
 	ready = snapshot !== null && main.up;
+	if (ready && !wasReady) mark("roster.ready");
 	if (ready && !wasReady && args.select) reveal(args.select);
 	if (ready && !wasReady && continueTo) roster.focusEntry(continueTo);
 	const now = Date.now();

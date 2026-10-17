@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { bootId, type Db, dbPath, type Harness, operatorDir, projectRoot, stateDir } from "@swb/shared";
 import { markArchived } from "@swb/shared/record";
+import { now, since } from "@swb/shared/trace";
 import { archivedInCodex } from "./deck/transcript.ts";
 import { type RuntimeRow, runtimeLive } from "./derive.ts";
 import { SwbError } from "./errors.ts";
@@ -249,6 +250,7 @@ function harnessCommand(spec: LaunchSpec, host: string): string[] {
 
 /** Starts a managed session in the background and returns its tmux session; the harness comes up on its own time. */
 export function launch(spec: LaunchSpec): string {
+	const at = now();
 	const { cwd, resume } = spec;
 	const name = `${basename(projectRoot(cwd)).replaceAll(/[.:]/g, "_")}-${randomHex(2)}`;
 	const shell = loginShell();
@@ -302,6 +304,7 @@ export function launch(spec: LaunchSpec): string {
 		"",
 		...(resume ? [";", "set", "-t", name, "@swb_launch_id", resume.id] : []),
 	);
+	since(`launch.${spec.harness}`, at);
 	return name;
 }
 

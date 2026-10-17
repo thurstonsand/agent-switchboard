@@ -1,3 +1,4 @@
+import { booted, span } from "@swb/shared/trace";
 import { codexHost } from "./codex/host.ts";
 import { adopt } from "./commands/adopt.ts";
 import { archive } from "./commands/archive.ts";
@@ -115,7 +116,7 @@ async function main(args: string[]): Promise<void> {
 		case "__codex":
 			return codexHost(rest);
 		case "__record":
-			return record(rest);
+			return span(`record.${rest[0]}`, () => record(rest));
 		case "__inbox":
 			return inbox(rest);
 		case "__ack":
@@ -129,6 +130,7 @@ async function main(args: string[]): Promise<void> {
 	}
 }
 
+booted(`boot ${process.argv[2] ?? "deck"}`);
 try {
 	await main(process.argv.slice(2));
 } catch (error) {

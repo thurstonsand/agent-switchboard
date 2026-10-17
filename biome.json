@@ -1,6 +1,6 @@
 {
 	"$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
-	"files": { "includes": ["**", "!docs/wayfinding", "!dist", "!test/e2e/artifacts"] },
+	"files": { "includes": ["**", "!docs/wayfinding", "!dist", "!test/e2e/artifacts", "!test/perf/results"] },
 	"formatter": { "indentStyle": "tab", "lineWidth": 140 },
 	"linter": { "rules": { "preset": "recommended" } },
 	"assist": { "actions": { "source": { "organizeImports": "on" } } }

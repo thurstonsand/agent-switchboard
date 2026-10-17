@@ -86,3 +86,12 @@ run = "bun test --timeout 180000 --max-concurrency 1 test/e2e"
 description = "Render every VHS tape"
 depends = ["build", "dist:pi"]
 run = "bun test/e2e/tapes/render.ts"
+
+[tasks.perf]
+description = "Measure what a person waits for in swb, on real harnesses; `mise run perf -- --help` for options"
+depends = ["build", "dist:pi"]
+run = "bun test/perf/run.ts"
+
+[tasks."perf:compare"]
+description = "Compare two perf results files"
+run = "bun test/perf/run.ts compare"

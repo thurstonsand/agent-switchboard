@@ -95,11 +95,15 @@ const servers = new Set<string>();
 /**
  * `packages` installs those pi packages, at the versions bun.lock pins.
  * Without `recorder`, pi starts with no recorder until the scenario installs one.
+ * `dist` is the build of swb and the pi line to run, this checkout's by default.
  */
 export function scenario(
 	phase: string,
 	name: string,
-	options: { packages: PiPackage[]; recorder: boolean; harnesses?: ("claude" | "codex")[] } = { packages: [], recorder: true },
+	options: { packages: PiPackage[]; recorder: boolean; harnesses?: ("claude" | "codex")[]; dist?: string } = {
+		packages: [],
+		recorder: true,
+	},
 ): Scenario {
 	// Not tmpdir(): macOS's /var/folders/... pushes tmux sockets under root past the 104-byte sun_path limit.
 	// Resolved because /tmp is a symlink there, and swb records the real cwd.
@@ -110,13 +114,14 @@ export function scenario(
 	const instance = `e2e-${root.slice(-6).toLowerCase()}`;
 	const artifacts = join(repo, "test/e2e/artifacts", phase, name);
 	const agentDir = join(home, ".pi/agent");
+	const dist = options.dist ?? join(repo, "dist");
 	rmSync(artifacts, { recursive: true, force: true });
 	for (const dir of [home, bin, project, agentDir, join(root, "tmux"), artifacts]) mkdirSync(dir, { recursive: true });
 
 	writeFileSync(join(bin, "pi"), `#!/bin/sh\nPI_OFFLINE=1 exec ${tools.node} ${tools.piCli} "$@"\n`);
 	chmodSync(join(bin, "pi"), 0o755);
 	symlinkSync(tools.tmux, join(bin, "tmux"));
-	symlinkSync(join(repo, "dist/swb"), join(bin, "swb"));
+	symlinkSync(join(dist, "swb"), join(bin, "swb"));
 	symlinkSync(tools.wt, join(bin, "wt"));
 	const harnesses = options.harnesses ?? [];
 	for (const harness of harnesses) {
@@ -137,7 +142,7 @@ export function scenario(
 		join(agentDir, "settings.json"),
 		JSON.stringify({
 			// The pi line last, as `pi install` leaves it when added after pi-sessions: its handlers then run after theirs.
-			packages: [...options.packages.map(piPackage), ...(options.recorder ? [join(repo, "dist/pi")] : [])],
+			packages: [...options.packages.map(piPackage), ...(options.recorder ? [join(dist, "pi")] : [])],
 			...(options.packages.includes("pi-sessions")
 				? // Only what subagents and handoffs need: the rest would spend faux turns on titles and indexing.
 					{ sessions: { autoTitle: { enable: false }, ask: { enable: false }, search: { enable: false } } }

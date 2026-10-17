@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 import { type Db, stateDir } from "@swb/shared";
 import { frame, markDelivered, pendingFor } from "@swb/shared/mailbox";
 import { endHosting, markArchived, recordTx, setPhase, setTitle, settle, startHosting, startTurn } from "@swb/shared/record";
+import { mark, now, since } from "@swb/shared/trace";
 import { archivedInCodex, readTranscript } from "../deck/transcript.ts";
 import { SwbError, UsageError } from "../errors.ts";
 import { CODEX_PLUGIN, writeCodexLine } from "../lines.ts";
@@ -52,6 +53,7 @@ export async function codexHost(args: string[]): Promise<void> {
 	const dir = dirname(socket);
 	mkdirSync(dir, { recursive: true, mode: 0o700 });
 	rmSync(socket, { force: true });
+	const starting = now();
 	const server = Bun.spawn(
 		[
 			codex,
@@ -72,6 +74,7 @@ export async function codexHost(args: string[]): Promise<void> {
 		if (Date.now() > deadline) throw new SwbError("codex app-server didn't start within 15 s");
 		await Bun.sleep(50);
 	}
+	since("codex.app-server", starting);
 	const client = await CodexClient.connect(socket, "swb");
 	const db = openStore();
 	// Archived in Codex behind swb's back, by `codex archive` or another client: swb opening it means it's open.
@@ -244,6 +247,7 @@ class CodexLine {
 		this.blocked = false;
 		this.seenVersion = -1;
 		const bound = this.bound;
+		mark("codex.bound");
 		this.guard(() => {
 			startHosting(this.db, {
 				host: this.host,

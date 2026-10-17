@@ -17,9 +17,19 @@ mise run install        # build swb from this checkout into ~/.local/bin
 mise run dist:pi        # build the pi extension bundle exactly as the release publishes it
 mise run release:check  # build every release artifact into a scratch dir and smoke-test this host's binary
 mise run evidence       # render the VHS tapes in test/e2e/tapes to test/e2e/artifacts/phase6/videos
+mise run perf           # time what a person waits for, on real harnesses; `-- --help` for options
+mise run perf:compare   # two results files side by side
 ```
 
 Some scenarios install pi-sessions and pi-wt from `node_modules`, at the versions bun.lock pins; point `SWB_E2E_PI_SESSIONS` or `SWB_E2E_PI_WT` at a checkout to test another. Scenarios for Claude Code and Codex run the host's npm-global installs against fake model servers in `test/e2e/fakes`, which log every request they answer.
+
+## Performance
+
+`mise run perf` runs the probes in `test/perf/suites`. Each one is something a person or an agent waits for: opening a Deck, a keystroke in the roster, starting or waking a session in each harness, a message reaching its recipient. Every probe types into a real terminal (a tmux pane at a shell prompt) and times the screen through a control-mode client, from the key going in to the last output before the screen went still. Each probe takes several samples, writes `test/perf/results/<date>-<sha>.json` with an HTML report beside it, and prints a table and the slowest probes.
+
+- `--only deck,start.claude` narrows the run; `--list` shows every probe and what it measures
+- `--against main` builds main in a scratch worktree and interleaves its samples with this checkout's, so a change's cost comes out of one run on one machine; `--baseline FILE` compares with an earlier run instead
+- `SWB_TRACE=FILE` makes every swb process and line append marks and spans (`@swb/shared/trace`) to FILE. The runner sets it, and its reports show what filled each probe. Add a span where a probe's time goes unexplained
 
 ## Layout
 

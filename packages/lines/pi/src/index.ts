@@ -17,6 +17,7 @@ import {
 	startTurn,
 } from "@swb/shared/record";
 import { TOOLS, type ToolName, type ToolResult } from "@swb/shared/tools";
+import { mark, span } from "@swb/shared/trace";
 
 type Launch = { readonly db: string; readonly tmuxSession: string; readonly bin: string };
 // Outlives /reload, which re-imports this module with a fresh module cache.
@@ -79,6 +80,7 @@ function swb(bin: string, args: string[], stdin = ""): Promise<ToolResult> {
 type IncomingDetails = { from: string; title: string; body: string };
 
 export default function (pi: ExtensionAPI) {
+	mark("pi-line.load");
 	// swb writes the Operator folder's extension itself; without this, every new Operator would stop on pi's trust prompt.
 	pi.on("project_trust", (event) => ({ trusted: event.cwd === operatorDir() ? "yes" : "undecided" }));
 	const claimed = claim();
@@ -199,19 +201,21 @@ export default function (pi: ExtensionAPI) {
 				pi.appendEntry(LINEAGE, { parentSessionId: proc.parent });
 			delete proc.parent;
 		}
-		writeFor(ctx, (db, id) => {
-			const transcript = ctx.sessionManager.getSessionFile();
-			if (!transcript) throw new Error("pi is running without a session file");
-			startHosting(db, {
-				host: proc.launch.tmuxSession,
-				harness: "pi",
-				sessionId: id,
-				cwd: ctx.cwd,
-				transcript,
-				pid: process.pid,
-				idle: ctx.isIdle(),
-			});
-		});
+		span("pi-line.start-hosting", () =>
+			writeFor(ctx, (db, id) => {
+				const transcript = ctx.sessionManager.getSessionFile();
+				if (!transcript) throw new Error("pi is running without a session file");
+				startHosting(db, {
+					host: proc.launch.tmuxSession,
+					harness: "pi",
+					sessionId: id,
+					cwd: ctx.cwd,
+					transcript,
+					pid: process.pid,
+					idle: ctx.isIdle(),
+				});
+			}),
+		);
 		if (proc.inbox) clearInterval(proc.inbox);
 		proc.inbox = setInterval(deliver, 250);
 		proc.inbox.unref();

@@ -1,6 +1,7 @@
 import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Harness, stateDir } from "@swb/shared";
+import { now, since, span } from "@swb/shared/trace";
 import { type Config, loadConfig, type RosterWidth } from "../config.ts";
 import { SwbError } from "../errors.ts";
 import { ensureOperatorDir } from "../operator.ts";
@@ -264,19 +265,20 @@ export type DeckIntent = { select: string | null; newCwd: string | null; continu
 /** Builds a Deck (roster pane and Stage pane) and attaches this terminal to it. */
 export async function openDeck(intent: DeckIntent): Promise<void> {
 	if (!process.stdout.isTTY) throw new SwbError("swb needs a terminal");
-	const config = loadConfig();
-	openStore();
-	ensureOperatorDir();
+	const config = span("deck.config", loadConfig);
+	span("deck.store", openStore);
+	span("deck.operator", ensureOperatorDir);
 	// Reap a crashed Deck's placeholder first; left standing, it holds the sessions server back from restarting.
-	liveDecks();
-	ensureSessionsServer();
-	ensureUiServer(config);
+	span("deck.reap", liveDecks);
+	span("deck.sessions-server", ensureSessionsServer);
+	span("deck.ui-server", () => ensureUiServer(config));
 	const deck = `deck-${randomHex(3)}`;
 	const paths = deckPaths(deck);
 	mkdirSync(decksDir(), { recursive: true, mode: 0o700 });
 	writeCard(paths, { head: [], lines: ["Deck starting…"], turns: null, agent: "" });
 	writeAtomic(paths.target, placeholderName(deck));
-	ensurePlaceholder(deck);
+	span("deck.placeholder", () => ensurePlaceholder(deck));
+	const panes = now();
 
 	const cols = process.stdout.columns;
 	const rows = process.stdout.rows;
@@ -319,6 +321,7 @@ export async function openDeck(intent: DeckIntent): Promise<void> {
 	);
 	tmux(UI, "select-pane", "-t", rosterPane);
 	if (cols < NARROW_BELOW) tmux(UI, "set", "-t", deck, "@swb_narrow", "1", ";", "resize-pane", "-Z", "-t", rosterPane);
+	since("deck.panes", panes);
 
 	const attach = Bun.spawn([tmuxBin(), "-L", UI, "attach", "-t", `=${deck}`], {
 		cwd: CLIENT_CWD,

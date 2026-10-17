@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 import { statSync } from "node:fs";
 import { bootId, type Db, type Harness, operatorDir, projectRoot, type View } from "@swb/shared";
+import { span } from "@swb/shared/trace";
 import type { Config } from "../config.ts";
 import { derive, type RuntimeRecord, runtimeLive, runtimeRecords, type SessionRow, sessionRows, type World } from "../derive.ts";
 import { addDir, removeDir, targets } from "../dirs.ts";
@@ -222,7 +223,7 @@ function turnsOf(recorded: string, harness: Harness): Turn[] {
 
 function transcript(id: string, recorded: string, harness: Harness): void {
 	try {
-		post({ type: "transcript", id, turns: turnsOf(recorded, harness), error: null });
+		post({ type: "transcript", id, turns: span("worker.transcript", () => turnsOf(recorded, harness)), error: null });
 	} catch (error) {
 		post({ type: "transcript", id, turns: null, error: (error as Error).message });
 	}
@@ -267,7 +268,7 @@ function handle(message: ToWorker): void {
 			db = openStore();
 			layoutRoot = projectRoot(message.here);
 			post({ type: "restore", layout: loadLayout(db, layoutRoot) });
-			setInterval(tick, TICK_MS);
+			setInterval(() => span("worker.tick", tick), TICK_MS);
 			break;
 		case "layout":
 			saveLayout(db, layoutRoot, message.layout);

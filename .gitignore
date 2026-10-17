@@ -3,3 +3,4 @@ dist/
 test/e2e/artifacts/
 *.bun-build
 .amp/portals/*
+test/perf/results/
