@@ -89,13 +89,14 @@ export async function send(db: Db, m: Send): Promise<ToolResult> {
 	return { text, details: { id, delivered, woke, target: { id: target.id, title: target.title, harness: target.harness } } };
 }
 
+/** A live line delivers within milliseconds of the ring, which the sending agent waits for; a lookup costs microseconds. */
 async function deliveredWithin(db: Db, id: string, timeoutMs: number): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs;
 	for (;;) {
 		const row = db.get("SELECT delivered_at FROM messages WHERE id = ?", id);
 		if (row?.delivered_at !== null && row?.delivered_at !== undefined) return true;
 		if (Date.now() > deadline) return false;
-		await Bun.sleep(100);
+		await Bun.sleep(10);
 	}
 }
 
