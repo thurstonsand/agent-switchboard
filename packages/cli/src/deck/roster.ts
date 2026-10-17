@@ -895,6 +895,8 @@ function onSnapshot(next: Snapshot): void {
 	roster.syncStage(false);
 	// A turn that lands while I'm already watching is seen as it lands.
 	if (stage.watched && stage.visited && entries.get(stage.watched)?.unseen) post({ type: "visit", id: stage.watched });
+	// Setting it repaints the whole Deck, best done with the snapshot's own frame than a tick later.
+	syncTitle();
 	checkReady();
 }
 
