@@ -23,7 +23,7 @@ run = "bun x tsc -p tsconfig.json --noEmit"
 
 [tasks.build]
 description = "Compile swb into dist/swb"
-run = "bun build --compile --minify --splitting --sourcemap packages/cli/src/main.ts packages/cli/src/deck/worker.ts --outfile dist/swb"
+run = "bun build --compile --minify --splitting --sourcemap --bytecode --format=esm packages/cli/src/main.ts packages/cli/src/deck/worker.ts --outfile dist/swb"
 
 [tasks."dist:pi"]
 description = "Bundle the pi line exactly as the release publishes it"
@@ -43,7 +43,7 @@ set -eu
 out="$usage_out"
 mkdir -p "$out"
 for target in linux-x64 darwin-arm64; do
-  bun build --compile --minify --splitting --sourcemap --target="bun-$target" packages/cli/src/main.ts packages/cli/src/deck/worker.ts --outfile "$out/swb-$target"
+  bun build --compile --minify --splitting --sourcemap --bytecode --format=esm --target="bun-$target" packages/cli/src/main.ts packages/cli/src/deck/worker.ts --outfile "$out/swb-$target"
 done
 cp -R dist/pi "$out/pi"
 npm pack ./dist/pi --pack-destination "$out"
@@ -73,7 +73,7 @@ depends = ["lint", "typecheck", "build", "dist:pi"]
 [tasks.install]
 description = "Build swb from this checkout into ~/.local/bin"
 run = [
-  "bun build --compile --minify --splitting --sourcemap --define SWB_INSTALL_VERSION=\\\"$(git describe --tags --match 'v*' | sed 's/^v//')\\\" packages/cli/src/main.ts packages/cli/src/deck/worker.ts --outfile dist/swb",
+  "bun build --compile --minify --splitting --sourcemap --bytecode --format=esm --define SWB_INSTALL_VERSION=\\\"$(git describe --tags --match 'v*' | sed 's/^v//')\\\" packages/cli/src/main.ts packages/cli/src/deck/worker.ts --outfile dist/swb",
   "install -m 0755 dist/swb ~/.local/bin/swb",
 ]
 
