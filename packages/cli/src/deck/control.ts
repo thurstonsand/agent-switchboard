@@ -5,12 +5,15 @@ type Pending = { resolve: (out: string) => void; reject: (error: Error) => void 
 
 /**
  * One control-mode client on the sessions server, attached to its swb-ctl session: a command costs about a
- * millisecond, against ~11 ms to spawn tmux. It respawns on the next command after the server dies.
+ * millisecond, against ~11 ms to spawn tmux. It respawns on the next command after the server dies. It also hears
+ * the server's notifications, such as another client attaching, from when it attaches until the server dies.
  */
 export class Control {
 	private proc: Bun.Subprocess<"pipe", "pipe", "ignore"> | null = null;
 	private pending: Pending[] = [];
 	private block: { flags: number; lines: string[] } | null = null;
+
+	constructor(private readonly notified: (line: string) => void) {}
 
 	private spawn(): Bun.Subprocess<"pipe", "pipe", "ignore"> {
 		ensureSessionsServer();
@@ -58,6 +61,7 @@ export class Control {
 			return;
 		}
 		if (line.startsWith("%begin ")) this.block = { flags: Number(line.split(" ")[3]), lines: [] };
+		else this.notified(line);
 	}
 
 	run(command: string): Promise<string> {

@@ -145,7 +145,10 @@ const perf = { render: new Stat(), switchClient: new Stat(), keyToSwitch: new St
 
 // ── tmux ────────────────────────────────────────────────────────────────
 
-const ctl = new Control();
+const ctl = new Control((line) => {
+	const [kind, tty] = line.split(" ");
+	if (kind === "%client-session-changed" && tty) stageUp([tty]);
+});
 
 // ── model ───────────────────────────────────────────────────────────────
 
@@ -892,6 +895,7 @@ function onSnapshot(next: Snapshot): void {
 	roster.syncStage(false);
 	// A turn that lands while I'm already watching is seen as it lands.
 	if (stage.watched && stage.visited && entries.get(stage.watched)?.unseen) post({ type: "visit", id: stage.watched });
+	checkReady();
 }
 
 // ── worker ──────────────────────────────────────────────────────────────
@@ -3505,25 +3509,40 @@ post({ type: "dirs" });
 if (args.new) newSession(args.new, null, args.harness ? asHarness(args.harness) : config.harness);
 void layout();
 
-// Ready once the first snapshot is in and the Stage's nested client is attached to the sessions server.
+/** A Stage's nested client is up once it attaches to the sessions server, which the control client hears. */
+function stageUp(ttys: string[]): void {
+	if (!main.up && ttys.includes(main.tty)) {
+		main.up = true;
+		switchStage(main, stage.applied.target, true);
+	}
+	if (side && !side.up && ttys.includes(side.tty)) {
+		side.up = true;
+		switchStage(side, side.target, true);
+	}
+	checkReady();
+}
+
+/** Ready once the first snapshot is in and the Stage's nested client is attached to the sessions server. */
+function checkReady(): void {
+	if (ready || snapshot === null || !main.up) return;
+	ready = true;
+	mark("roster.ready");
+	if (args.select) reveal(args.select);
+	if (continueTo) roster.focusEntry(continueTo);
+}
+
+// Attached before it lists them, the control client hears every client that attaches after the list.
+void ctl.run("list-clients -F '#{client_tty}'").then(
+	(out) => stageUp(out.split("\n")),
+	(error: Error) => toast(`stage: ${error.message}`, "error"),
+);
+
 setInterval(() => {
+	// The control client misses attaches while it respawns after the sessions server restarts.
 	if (!main.up || (side && !side.up)) {
 		const clients = tmuxTry(SESSIONS, "list-clients", "-F", "#{client_tty}");
-		const ttys = clients.ok ? clients.out.split("\n") : [];
-		if (!main.up && ttys.includes(main.tty)) {
-			main.up = true;
-			switchStage(main, stage.applied.target, true);
-		}
-		if (side && !side.up && ttys.includes(side.tty)) {
-			side.up = true;
-			switchStage(side, side.target, true);
-		}
+		stageUp(clients.ok ? clients.out.split("\n") : []);
 	}
-	const wasReady = ready;
-	ready = snapshot !== null && main.up;
-	if (ready && !wasReady) mark("roster.ready");
-	if (ready && !wasReady && args.select) reveal(args.select);
-	if (ready && !wasReady && continueTo) roster.focusEntry(continueTo);
 	const now = Date.now();
 	keepLayout(now);
 	syncTitle();
