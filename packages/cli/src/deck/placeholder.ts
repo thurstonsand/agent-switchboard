@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { span } from "@swb/shared/trace";
 import { UsageError } from "../errors.ts";
 import type { Card, Turn } from "./protocol.ts";
 import { cyan, dim, gray, yellow } from "./style.ts";
@@ -100,6 +101,6 @@ process.on("SIGHUP", () => process.exit(0));
 load();
 draw();
 setInterval(() => {
-	const changed = load();
-	if (changed || typedAt > Date.now() - 2000) draw();
+	const changed = span("placeholder.load", load);
+	if (changed || typedAt > Date.now() - 2000) span("placeholder.draw", draw);
 }, 80);

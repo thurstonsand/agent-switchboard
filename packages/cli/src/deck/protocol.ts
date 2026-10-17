@@ -49,7 +49,7 @@ export type Card = {
 	/** Title, state, and path, only while the roster is off-screen; its detail bar owns them otherwise. */
 	head: string[];
 	lines: string[];
-	/** The whole conversation, oldest first; null while it is still being read. */
+	/** The conversation's newest turns, as many as could fill the screen, oldest first; null while it is still being read. */
 	turns: Turn[] | null;
 	/** What labels the agent's replies: its harness. */
 	agent: string;

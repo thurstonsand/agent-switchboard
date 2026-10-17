@@ -18,7 +18,7 @@ import {
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { harness as asHarness, HARNESSES, type Harness, operatorDir, projectRoot, type SnoozePreset, type View } from "@swb/shared";
-import { mark } from "@swb/shared/trace";
+import { mark, span } from "@swb/shared/trace";
 import type { Subprocess } from "bun";
 import { loadConfig } from "../config.ts";
 import { displayName, projectName } from "../derive.ts";
@@ -434,7 +434,8 @@ function card(e: Entry, lines: string[] = []): Card {
 	return {
 		head: rosterOffScreen() ? [bold(displayName(e)), status(e), gray(shortPath(e.cwd))] : [],
 		lines: [...lines, ...extra],
-		turns: transcript ? (transcript.turns ?? []) : null,
+		// A screen shows at most a turn per two rows, and the Stage is no taller than the roster.
+		turns: transcript ? (transcript.turns?.slice(-process.stdout.rows) ?? []) : null,
 		agent: e.harness,
 	};
 }
@@ -656,7 +657,7 @@ function writeStageCard(d: Applied): void {
 
 function apply(): void {
 	const d = desired();
-	writeStageCard(d);
+	span("roster.card", () => writeStageCard(d));
 	const prev = stage.applied;
 	stage.applied = d;
 	syncVisit();
