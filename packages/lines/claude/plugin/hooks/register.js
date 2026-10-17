@@ -160,8 +160,38 @@ async function useTool($, name, e) {
 				],
 				e.goal,
 			);
-		default:
+		case "session_schedule":
+			return swb(
+				$,
+				[
+					"schedule",
+					...from,
+					"--label",
+					e.label,
+					"--request-id",
+					e.tool_use_id,
+					...(e.at !== undefined ? ["--at", e.at] : []),
+					...(e.cron !== undefined ? ["--cron", e.cron] : []),
+					...(e.session !== undefined ? ["--to", e.session] : []),
+					...(e.launch
+						? ["--launch-harness", e.launch.harness, "--launch-title", e.launch.title, "--launch-cwd", e.launch.cwd ?? line.cwd]
+						: []),
+					...(e.requestResponse ? ["--request-response"] : []),
+					...(e.snooze ? ["--snooze"] : []),
+				],
+				e.message,
+			);
+		case "session_schedules":
+			return swb($, ["schedules", ...from]);
+		case "session_unschedule":
+			return swb($, ["unschedule", e.id, ...from]);
+		case "swb_update_session":
+			if ((e.archived === undefined) === (e.snooze === undefined)) throw new Error("give archived or snooze: one of them");
+			if (e.snooze !== undefined)
+				return swb($, ["snooze", e.session ?? self, typeof e.snooze === "string" ? e.snooze : e.snooze.until, ...from]);
 			return swb($, [e.archived ? "archive" : "unarchive", e.session ?? self, ...from]);
+		default:
+			throw new Error(`swb: no tool ${name}`);
 	}
 }
 

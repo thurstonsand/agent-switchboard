@@ -440,6 +440,41 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	snooze: {
+		setup: async (s) => {
+			const [ci, spike] = await seed(
+				s,
+				{ title: "Wait on CI for #142", turns: ["CI is still running the e2e matrix"] },
+				{ title: "Spike: FTS5 ranking", turns: ["asked the codex session for its API shape"] },
+				{ title: "Bump pi to 0.71", turns: ["bumped; tests are green"] },
+			);
+			const schedule = (from: string, body: string, ...args: string[]) => {
+				const result = Bun.spawnSync([`${s.bin}/swb`, "schedule", "--from", from, ...args], {
+					env: s.env,
+					cwd: s.project,
+					stdin: new Blob([body]),
+					stderr: "pipe",
+				});
+				if (result.exitCode !== 0) throw new Error(`swb schedule: ${result.stderr.toString()}`);
+			};
+			schedule(ci as string, "Check CI on #142; if green, merge it.", "--at", "PT2H", "--label", "Check CI on #142", "--snooze");
+			schedule(ci as string, "Post a one-line status to triage.", "--cron", "57 8 * * 1-5", "--label", "Weekdays, 8:57 AM");
+			s.swb("snooze", spike as string, "next_message");
+		},
+		run: async (s) => {
+			const bump = (ls: LsEntry[]) => ls.find((e) => e.title === "Bump pi to 0.71") as LsEntry & { snoozed: boolean };
+			await waitDrive(s, "the Snoozed section, folded", (x) =>
+				x.rows.some((r) => r.kind === "section" && r.label === "Snoozed" && r.count === 2 && !r.expanded),
+			);
+			await waitLs(s, "Bump snoozed from the roster", (ls) => bump(ls)?.snoozed === true);
+			await waitDrive(
+				s,
+				"Snoozed open, with the CI session's Peek",
+				(x) => x.peek?.lines.some((l) => l.includes("Weekdays, 8:57 AM")) ?? false,
+			);
+		},
+	},
+
 	"simulated-process-loss": {
 		run: async (s) => {
 			await entered(s, "long-build");

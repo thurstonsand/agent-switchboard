@@ -13,6 +13,9 @@ A session that has been completed; it leaves the roster but stays listable and r
 **Inactive**:
 An open session with no activity within `inactive_after` (72 hours).
 
+**Snoozed**:
+An open session put out of the way until a time or its next message. A timed snooze holds through any conversation; a next-message one ends with the next message or prompt. A blocked or interrupted session shows anyway, and one whose time runs out comes back Unseen.
+
 ### Runtime
 
 **Live**:
@@ -38,7 +41,13 @@ A harness's integration with swb, shipped by swb: it records the harness's sessi
 **Message**:
 Text one Session sends another through swb. It waits in swb's db until the recipient's line delivers it: mid-turn when the recipient is working and its harness allows, as a new turn when it's idle, and after waking it when it's dormant.
 
-### Attention
+#**Schedule**:
+A Message one Session sets up for later, once or on a cron, to itself, another Session, or a new Session it launches each time. A run missed while the machine slept fires once when it wakes, saying when it was due.
+
+**Clock**:
+The process in swb's tmux server that fires Schedules and starts dormant sessions with Messages waiting. Internal term (not in UI).
+
+## Attention
 
 **Activity**:
 What a live session's agent is doing right now: **working**, **blocked** on me (e.g. permission prompt), or **idle**, its turn finished and waiting for my next prompt.
@@ -55,7 +64,7 @@ A session whose agent finished a turn after my last **Visit**.
 What `swb` opens: the **Roster** beside a **Stage**, in one disposable layout. Each invocation gets its own.
 
 **Roster**:
-The Deck's list of sessions, in sections: **Operators**, open sessions by **Project**, **Inactive**, then **Archived**.
+The Deck's list of sessions, in sections: **Operators**, open sessions by **Project**, **Inactive**, **Snoozed**, then **Archived**.
 
 **Stage**:
 Internal term for the Deck's live, interactive view of the selected session; moving the Roster cursor changes which session it shows. Internal term (not in UI).
@@ -82,6 +91,6 @@ A name I give a session, scoping it within its **Project**. A Group exists only 
 
 - A **Session** other than an **Operator** belongs to exactly one **Project**, derived from its working directory, and to at most one **Group** within it
 - A **Session** is open or **Archived**; independently, it is **Live** or **Dormant**
-- **Activity** and **Unseen** apply only to open sessions
+- **Activity**, **Unseen**, and **Snoozed** apply only to open sessions; a Snoozed session is neither Unseen nor Inactive while it holds
 - pi-sessions **subagents**, and Claude Code's and Codex's own subagents, are never **Sessions** here; their parent owns them
 - A **Session** started by another records it as its parent

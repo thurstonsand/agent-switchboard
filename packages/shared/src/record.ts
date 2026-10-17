@@ -140,15 +140,20 @@ export function isArchived(db: Db, sessionId: string): boolean {
 	);
 }
 
-/** Marks a session archived and cancels what it hasn't received; false before its first turn, when there is nothing to archive. */
+/**
+ * Marks a session archived and cancels what it hasn't received, schedules aimed at it included, and its snooze; false
+ * before its first turn, when there is nothing to archive.
+ */
 export function markArchived(db: Db, sessionId: string): boolean {
 	if (!db.get("SELECT 1 FROM sessions WHERE session_id = ?", sessionId)) return false;
 	const now = Date.now();
 	db.run(
-		"INSERT INTO marks (session_id, archived_at) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET archived_at = excluded.archived_at",
+		`INSERT INTO marks (session_id, archived_at) VALUES (?, ?)
+		 ON CONFLICT (session_id) DO UPDATE SET archived_at = excluded.archived_at, snoozed_at = NULL, snoozed_until = NULL`,
 		sessionId,
 		now,
 	);
 	db.run("UPDATE messages SET cancelled_at = ? WHERE target_id = ? AND delivered_at IS NULL AND cancelled_at IS NULL", now, sessionId);
+	db.run("UPDATE schedules SET cancelled_at = ? WHERE target_id = ? AND next_at IS NOT NULL AND cancelled_at IS NULL", now, sessionId);
 	return true;
 }

@@ -5,6 +5,7 @@ import { span } from "@swb/shared/trace";
 import type { Config } from "../config.ts";
 import { derive, type RuntimeRecord, runtimeLive, runtimeRecords, type SessionRow, sessionRows, type World } from "../derive.ts";
 import { addDir, removeDir, targets } from "../dirs.ts";
+import { type ScheduleView, schedulesBySession, snooze } from "../schedules.ts";
 import { archive, ensureEditor, ensureSessionsServer, ensureShell, launch, stop, unarchive, wake } from "../sessions.ts";
 import { loadLayout, markVisited, openStore, saveLayout, setGroup, setView } from "../store.ts";
 import { listSessions, SESSIONS, tmuxTry } from "../tmux.ts";
@@ -29,6 +30,7 @@ let lastJson = "";
 let dataVersion = -1;
 let rows: SessionRow[] = [];
 let runtimes: RuntimeRecord[] = [];
+let schedules = new Map<string, ScheduleView[]>();
 let background: string | null = null;
 let mirroredServer = "";
 const transcripts = new Map<string, { mtimeMs: number; turns: Turn[] }>();
@@ -53,6 +55,7 @@ function readDb(): void {
 	dataVersion = version;
 	rows = sessionRows(db);
 	runtimes = runtimeRecords(db);
+	schedules = schedulesBySession(db);
 	for (const [id, view] of pendingViews) {
 		if (!rows.some((row) => row.session_id === id)) continue;
 		pendingViews.delete(id);
@@ -115,6 +118,7 @@ function snapshot(): Polled {
 			transcript: row.transcript,
 			host: state.live ? (row.runtime?.tmux_session ?? null) : null,
 			provisional: false,
+			schedules: schedules.get(row.session_id) ?? [],
 		};
 	});
 	for (const runtime of runtimes) {
@@ -135,6 +139,8 @@ function snapshot(): Polled {
 			unseen: false,
 			interrupted: false,
 			inactive: false,
+			snoozed: false,
+			snoozedUntil: null,
 			createdAt: runtime.started_at,
 			activityAt: runtime.started_at,
 			visitedAt: null,
@@ -143,6 +149,7 @@ function snapshot(): Polled {
 			transcript: null,
 			host: runtime.tmux_session,
 			provisional: true,
+			schedules: [],
 		});
 	}
 	return {
@@ -302,6 +309,14 @@ function handle(message: ToWorker): void {
 		case "unarchive":
 			try {
 				(message.type === "archive" ? archive : unarchive)(db, message.id);
+				post({ type: "toggled", error: null });
+			} catch (error) {
+				post({ type: "toggled", error: (error as Error).message });
+			}
+			break;
+		case "snooze":
+			try {
+				snooze(db, null, message.id, message.snooze);
 				post({ type: "toggled", error: null });
 			} catch (error) {
 				post({ type: "toggled", error: (error as Error).message });

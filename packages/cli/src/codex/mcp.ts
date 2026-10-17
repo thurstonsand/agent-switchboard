@@ -2,7 +2,9 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { parsed, TOOLS, type ToolName, type ToolResult, toolsAsJson } from "@swb/shared/tools";
-import { launchSession, reachable, send, update } from "../coordinate.ts";
+import { launchSession, reachable, send, update, updateOf } from "../coordinate.ts";
+import { SwbError } from "../errors.ts";
+import { listSchedules, schedule, unschedule } from "../schedules.ts";
 import { openStore } from "../store.ts";
 import { VERSION } from "../version.ts";
 
@@ -40,11 +42,34 @@ async function call(name: ToolName, args: unknown, from: string, callId: string 
 				title: a.title,
 				requestResponse: a.requestResponse,
 				model: null,
+				scheduled: null,
 			});
 		}
+		case "session_schedule": {
+			const a = parsed(name, args);
+			// A retried call must not schedule twice, which only the call's id can tell.
+			if (!callId) throw new SwbError("swb: Codex gave this call no id");
+			return schedule(db, {
+				from,
+				to: a.session ?? null,
+				launch: a.launch ? { harness: a.launch.harness, cwd: a.launch.cwd ?? null, title: a.launch.title } : null,
+				body: a.message,
+				at: a.at ?? null,
+				cron: a.cron ?? null,
+				label: a.label,
+				requestResponse: a.requestResponse ?? false,
+				snooze: a.snooze ?? false,
+				requestId: callId,
+			});
+		}
+		case "session_schedules":
+			parsed(name, args);
+			return listSchedules(db, from);
+		case "session_unschedule":
+			return unschedule(db, from, parsed(name, args).id);
 		case "swb_update_session": {
 			const a = parsed(name, args);
-			return update(db, from, a.session ?? from, a.archived);
+			return update(db, from, a.session ?? from, updateOf(a));
 		}
 	}
 }

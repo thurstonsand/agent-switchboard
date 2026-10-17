@@ -75,6 +75,30 @@ const MIGRATIONS: string[] = [
 		UNIQUE (source_id, request_id)
 	);
 	CREATE INDEX messages_pending ON messages (target_id) WHERE delivered_at IS NULL AND cancelled_at IS NULL;`,
+	// A schedule delivers to a session, or launches a new one, on each fire; next_at is null once it has finished.
+	`CREATE TABLE schedules (
+		id               TEXT PRIMARY KEY,
+		source_id        TEXT NOT NULL,
+		target_id        TEXT,
+		launch           TEXT,
+		body             TEXT NOT NULL,
+		request_response INTEGER NOT NULL,
+		label            TEXT NOT NULL,
+		cron             TEXT,
+		request_id       TEXT,
+		created_at       INTEGER NOT NULL,
+		next_at          INTEGER,
+		last_fired_at    INTEGER,
+		cancelled_at     INTEGER,
+		UNIQUE (source_id, request_id),
+		CHECK ((target_id IS NULL) != (launch IS NULL))
+	);
+	CREATE INDEX schedules_due ON schedules (next_at) WHERE next_at IS NOT NULL AND cancelled_at IS NULL;
+	ALTER TABLE messages ADD COLUMN schedule_id TEXT;
+	ALTER TABLE messages ADD COLUMN scheduled_for INTEGER;
+	CREATE INDEX messages_target ON messages (target_id, created_at);
+	ALTER TABLE marks ADD COLUMN snoozed_at INTEGER;
+	ALTER TABLE marks ADD COLUMN snoozed_until INTEGER;`,
 ];
 
 if (MIGRATIONS.length !== SCHEMA_VERSION) throw new Error(`${MIGRATIONS.length} migrations for schema v${SCHEMA_VERSION}`);

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { bootId, type Db, dbPath, type Harness, operatorDir, projectRoot, stateDir } from "@swb/shared";
 import { markArchived } from "@swb/shared/record";
@@ -177,10 +177,86 @@ export function ensureSessionsServer(): void {
 	ensureServer(
 		SESSIONS,
 		sessionsConf(),
-		(path) =>
-			startScrubbed(SESSIONS, ["-f", path, "new-session", "-d", "-s", "swb-ctl", ";", "set", "-t", "swb-ctl", "@swb_kind", "control"]),
+		(path) => startScrubbed(SESSIONS, ["-f", path, "new-session", "-d", "-s", CONTROL, ...clockArgs()]),
 		() => onlyControl(SESSIONS),
 	);
+	ensureClock();
+}
+
+/** The sessions server's own session, whose pane runs the clock that fires schedules. */
+const CONTROL = "swb-ctl";
+
+/** Which swb the clock runs: its release, and this binary's mtime, which a reinstall of the same release still moves. */
+function clockStamp(): string {
+	return `${VERSION}:${statSync(SWB).mtimeMs}`;
+}
+
+/** The clock command, then its session's options: a clock that exits leaves its pane, for the next swb to respawn. */
+function clockArgs(): string[] {
+	const target = `=${CONTROL}:`;
+	return [
+		`exec ${quote(SWB)} __clock`,
+		";",
+		"set",
+		"-t",
+		CONTROL,
+		"@swb_kind",
+		"control",
+		";",
+		"set",
+		"-t",
+		CONTROL,
+		"@swb_clock",
+		clockStamp(),
+		";",
+		"set",
+		"-p",
+		"-t",
+		target,
+		"remain-on-exit",
+		"on",
+	];
+}
+
+/**
+ * Starts the clock if it's gone, or restarts it on this swb if it runs another; a newer swb's is left alone. Two swbs
+ * at once serialize on the db's write lock, so the second finds the first's clock instead of replacing it.
+ */
+function ensureClock(): void {
+	if (clockCurrent()) return;
+	const db = openStore();
+	try {
+		db.tx(() => {
+			const current = clockCurrent();
+			if (current) return;
+			if (current === null) tmux(SESSIONS, "new-session", "-d", "-s", CONTROL, ...clockArgs());
+			else
+				tmux(
+					SESSIONS,
+					"respawn-pane",
+					"-k",
+					"-t",
+					`=${CONTROL}:`,
+					`exec ${quote(SWB)} __clock`,
+					";",
+					"set",
+					"-t",
+					CONTROL,
+					"@swb_clock",
+					clockStamp(),
+				);
+		});
+	} finally {
+		db.close();
+	}
+}
+
+/** Whether the clock runs this swb or a newer one; null when its session is gone. */
+function clockCurrent(): boolean | null {
+	const info = tmuxTry(SESSIONS, "display", "-p", "-t", `=${CONTROL}:`, "#{pane_dead}\t#{@swb_clock}");
+	if (!info.ok) return null;
+	const [dead, stamp = ""] = info.out.split("\t");
+	return dead !== "1" && (stamp === clockStamp() || newer(stamp.split(":")[0] ?? "", VERSION));
 }
 
 /**
@@ -232,7 +308,9 @@ function harnessCommand(spec: LaunchSpec, host: string): string[] {
 			const id = spec.resume ? ["--resume", spec.resume.id] : spec.sessionId ? ["--session-id", spec.sessionId] : [];
 			const operator = spec.cwd === operatorDir() ? ["--settings", claudeOperatorSettings()] : [];
 			const name = spec.title ? ["--name", spec.title] : [];
-			return ["claude", ...id, "--plugin-dir", writeClaudeLine(), ...operator, ...name, ...model, ...prompt];
+			// /loop's self-pacing wakeup outlives CLAUDE_CODE_DISABLE_CRON. Its flag takes a list, so another option follows.
+			const scheduler = ["--disallowed-tools", "ScheduleWakeup"];
+			return ["claude", ...id, ...scheduler, "--plugin-dir", writeClaudeLine(), ...operator, ...name, ...model, ...prompt];
 		}
 		case "codex":
 			return [
@@ -279,6 +357,8 @@ export function launch(spec: LaunchSpec): string {
 		// The terminal attached to the Deck may be on another machine, which pi can't see through tmux; OSC 52 reaches it.
 		"-e",
 		"PI_CLIPBOARD_OSC52=1",
+		// Claude Code's own scheduler dies with its process; swb's schedules are the ones that last.
+		...(spec.harness === "claude" ? ["-e", "CLAUDE_CODE_DISABLE_CRON=1"] : []),
 		...(spec.parentId ? ["-e", `SWB_PARENT=${spec.parentId}`] : []),
 		`exec env -u TMUX -u TMUX_PANE SHELL=${shell} ${shell} -lic ${quote(command)}`,
 		";",

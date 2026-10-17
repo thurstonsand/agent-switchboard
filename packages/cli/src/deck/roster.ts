@@ -17,12 +17,14 @@ import {
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { harness as asHarness, HARNESSES, type Harness, operatorDir, projectRoot, type View } from "@swb/shared";
+import type { SnoozePreset } from "@swb/shared/tools";
 import { mark } from "@swb/shared/trace";
 import type { Subprocess } from "bun";
 import { loadConfig } from "../config.ts";
 import { displayName, projectName } from "../derive.ts";
 import { completions, expandHome, type Target, type TargetTree, targetName } from "../dirs.ts";
 import { UsageError } from "../errors.ts";
+import { presetUntil } from "../schedules.ts";
 import { newer, nvimEditor, SWB } from "../sessions.ts";
 import type { DeckLayout } from "../store.ts";
 import { CLIENT_CWD, cleanEnv, quote, SESSIONS, tmux, tmuxAsync, tmuxBin, tmuxTry, UI } from "../tmux.ts";
@@ -74,6 +76,7 @@ import {
 	sgrBg,
 	shortPath,
 	spinnerFrame,
+	wakeAt,
 } from "./style.ts";
 
 const VISIT_MS = 1000;
@@ -263,8 +266,14 @@ function glyph(state: State, now: number): string {
 	}
 }
 
-/** The one place a session's state is named; the row's glyph is where it's scanned. */
+/** The one place a session's state is named; the row's glyph is where it's scanned, and its section says snoozed. */
 function status(e: Entry): string {
+	const base = phaseStatus(e);
+	if (!e.snoozed) return base;
+	return `${base}${gray(` · snoozed until ${e.snoozedUntil === null ? "a message" : wakeAt(e.snoozedUntil, Date.now())}`)}`;
+}
+
+function phaseStatus(e: Entry): string {
 	if (stage.ended?.id === e.id && stage.ended.failed && e.open && !e.live && !launchFor(e.id)) return red("failed to start");
 	const state = stateOf(e);
 	switch (state) {
@@ -658,7 +667,8 @@ function scheduleHighlightWake(): void {
 	if (stage.highlightTimer) clearTimeout(stage.highlightTimer);
 	stage.highlightTimer = null;
 	const e = stage.staged === null ? undefined : entries.get(stage.staged);
-	if (!config.wakeOnHighlight || !e?.open || e.live || launchFor(e.id) || stage.ended?.id === e.id) return;
+	// A snoozed session is out of the way: looking at it doesn't start it.
+	if (!config.wakeOnHighlight || !e?.open || e.snoozed || e.live || launchFor(e.id) || stage.ended?.id === e.id) return;
 	const id = e.id;
 	stage.highlightTimer = setTimeout(() => {
 		stage.highlightTimer = null;
@@ -749,7 +759,8 @@ let continueTo: Entry | null = null;
 function startCursor(): void {
 	started = true;
 	if (args.select || args.new) return;
-	const open = [...entries.values()].filter((e) => e.open && !e.provisional);
+	// A snoozed session is out of the way until it wakes: neither -c nor the last visit lands on one.
+	const open = [...entries.values()].filter((e) => e.open && !e.provisional && !e.snoozed);
 	if (args.continue) {
 		const root = projectRoot(here);
 		const recent = open
@@ -943,6 +954,7 @@ function reveal(id: string): void {
 		return;
 	}
 	if (!e.open) roster.expanded.add("archived");
+	else if (e.snoozed) roster.expanded.add("snoozed");
 	else if (e.operator) roster.expanded.add("operators");
 	else {
 		const parent = e.inactive && !launchFor(e.id) ? "inactive" : "open";
@@ -955,8 +967,16 @@ function reveal(id: string): void {
 	roster.syncStage(true);
 }
 
-type SectionKey = "operators" | "inactive" | "archived";
-const SECTION_KEYS: SectionKey[] = ["operators", "inactive", "archived"];
+type SectionKey = "operators" | "inactive" | "snoozed" | "archived";
+const SECTION_KEYS: SectionKey[] = ["operators", "inactive", "snoozed", "archived"];
+
+/** `s`'s menu: Amp's presets. */
+const SNOOZE_CHOICES: { label: string; snooze: SnoozePreset }[] = [
+	{ label: "1 hour", snooze: "one_hour" },
+	{ label: "1 day", snooze: "one_day" },
+	{ label: "Monday", snooze: "monday" },
+	{ label: "Until a message", snooze: "next_message" },
+];
 
 /** A Project header has no group; a Group or worktree bucket beneath it does, and starts sessions in its newest member's cwd. */
 type HeaderRow = {
@@ -1028,6 +1048,8 @@ class Roster implements Component {
 	name = new Input({ prompt: "> " });
 	/** `m`'s picker: the sessions it moves, the Group header it started on, and the highlighted choice. */
 	naming: { ids: string[]; header: HeaderRow | null; project: string; title: string; choice: number } | null = null;
+	/** `s`'s menu for a session: how long to snooze it. */
+	snoozing: { id: string; title: string; choice: number } | null = null;
 	/** The directory picker, `n` and `N`, which takes over the whole roster while it's open. */
 	choosing: Choosing | null = null;
 	search = new Input({ prompt: "/ " });
@@ -1123,18 +1145,28 @@ class Roster implements Component {
 			rows.push({ kind: "section", key, label, count, expanded });
 			return expanded;
 		};
-		const operators = open.filter((e) => e.operator).sort((a, b) => b.activityAt - a.activityAt);
+		const operators = open.filter((e) => e.operator && !e.snoozed).sort((a, b) => b.activityAt - a.activityAt);
 		if (section("operators", "Operators", operators.length)) {
 			for (const e of operators) rows.push({ kind: "session", key: e.id, entry: e, depth: 0, header: "operators" });
 		}
 		const inactive = (e: Entry) => e.inactive && !launchFor(e.id);
 		pushGroups(
-			open.filter((e) => !e.operator && !inactive(e)),
+			open.filter((e) => !e.operator && !e.snoozed && !inactive(e)),
 			0,
 			"open",
 		);
 		const idle = open.filter(inactive);
 		if (idle.length > 0 && section("inactive", "Inactive", idle.length)) pushGroups(idle, 1, "inactive");
+		// Soonest to wake first; one waiting on a message has no time, so it comes last.
+		const resting = open
+			.filter((e) => e.snoozed)
+			.sort(
+				(a, b) =>
+					(a.snoozedUntil ?? Number.POSITIVE_INFINITY) - (b.snoozedUntil ?? Number.POSITIVE_INFINITY) || b.activityAt - a.activityAt,
+			);
+		if (resting.length > 0 && section("snoozed", "Snoozed", resting.length)) {
+			for (const e of resting) rows.push({ kind: "session", key: e.id, entry: e, depth: 0, header: "snoozed" });
+		}
 		const archived = all.filter((e) => !e.open).sort((a, b) => archivedKey(b) - archivedKey(a));
 		if (section("archived", "Archived", archived.length)) {
 			for (const e of archived) rows.push({ kind: "session", key: e.id, entry: e, depth: 0, header: "archived" });
@@ -1194,6 +1226,16 @@ class Roster implements Component {
 			tui.requestRender();
 			return;
 		}
+		if (this.snoozing) {
+			const k = decodeKittyPrintable(data) ?? data;
+			if (matchesKey(data, "up") || k === "k") this.snoozing.choice = Math.max(0, this.snoozing.choice - 1);
+			else if (matchesKey(data, "down") || k === "j") this.snoozing.choice = Math.min(SNOOZE_CHOICES.length - 1, this.snoozing.choice + 1);
+			else if (matchesKey(data, "enter")) this.finishSnooze((SNOOZE_CHOICES[this.snoozing.choice] as { snooze: SnoozePreset }).snooze);
+			else if (matchesKey(data, "escape") || k === "q" || k === "s") this.snoozing = null;
+			stage.keyAt = 0;
+			tui.requestRender();
+			return;
+		}
 		if (this.naming) {
 			const choices = this.choices();
 			if (matchesKey(data, "up") || matchesKey(data, "down")) {
@@ -1239,6 +1281,7 @@ class Roster implements Component {
 		else if (k === "w") this.wake();
 		else if (k === "x") this.stop();
 		else if (k === "a") this.toggleArchived();
+		else if (k === "s") this.toggleSnooze();
 		else if (k === "y" || k === "Y") this.copy(k === "y");
 		else if (k === "n") this.newAt();
 		else if (k === "N") this.openPicker("add", null, null);
@@ -1346,7 +1389,7 @@ class Roster implements Component {
 	 * roster has the keyboard. Only a session's row on screen has one.
 	 */
 	peekSpot(rows: Row[], index: number): PeekSpot | null {
-		if (rosterHidden || (narrow && focus !== "roster") || this.choosing || this.naming || this.dragging) return null;
+		if (rosterHidden || (narrow && focus !== "roster") || this.choosing || this.naming || this.snoozing || this.dragging) return null;
 		const spot = (i: number, source: "pointer" | "cursor"): PeekSpot | null => {
 			const row = rows[i];
 			if (row?.kind !== "session" || i < this.scrollTop || i >= this.scrollTop + this.listHeight) return null;
@@ -1466,6 +1509,31 @@ class Roster implements Component {
 		post({ type: e.open ? "archive" : "unarchive", id: e.id });
 	}
 
+	/** s: unsnoozes a snoozed session, or asks how long to snooze an open one. */
+	toggleSnooze(row = this.selected()): void {
+		if (row?.kind !== "session" || this.pin) return;
+		const e = row.entry;
+		if (!e.open) toast("archived; unarchive it first", "info");
+		else if (e.provisional) toast("nothing to snooze before the first prompt", "error");
+		else if (e.snoozed) {
+			if (row.key === this.selected()?.key) this.pin = { index: this.resolveCursor(this.rows()), answered: false };
+			post({ type: "snooze", id: e.id, snooze: "off" });
+		} else {
+			this.filtering = false;
+			this.naming = null;
+			this.snoozing = { id: e.id, title: displayName(e), choice: 0 };
+		}
+	}
+
+	finishSnooze(snooze: SnoozePreset): void {
+		const snoozing = this.snoozing;
+		this.snoozing = null;
+		if (!snoozing) return;
+		// As with archive, the cursor keeps its place rather than following the row into Snoozed.
+		if (this.selected()?.key === snoozing.id) this.pin = { index: this.resolveCursor(this.rows()), answered: false };
+		post({ type: "snooze", id: snoozing.id, snooze });
+	}
+
 	/** Runs on every snapshot; the one that answers `a` puts the cursor back on its row's index. */
 	settlePin(): void {
 		if (!this.pin?.answered) return;
@@ -1557,6 +1625,7 @@ class Roster implements Component {
 
 	/** The picker's rows, which the list gives up its bottom to; each choice is a button. */
 	picker(width: number, height: number): [string, (() => void) | null][] {
+		if (this.snoozing) return this.snoozeMenu(width);
 		const naming = this.naming;
 		if (!naming) return [];
 		const choices = this.choices();
@@ -1572,6 +1641,24 @@ class Roster implements Component {
 			const line = truncateToWidth(`   ${label}`, width, "…", true);
 			out.push([i === naming.choice ? cursorLine(line, true) : line, () => this.finishNaming(choice.name)]);
 		}
+		return out;
+	}
+
+	snoozeMenu(width: number): [string, (() => void) | null][] {
+		const snoozing = this.snoozing;
+		if (!snoozing) return [];
+		const now = Date.now();
+		const title = ` Snooze ${snoozing.title} `;
+		const out: [string, (() => void) | null][] = [
+			[`${gray(`─${truncateToWidth(title, width - 5, "…")}${"─".repeat(Math.max(0, width - 4 - visibleWidth(title)))}`)} ✕ `, null],
+		];
+		SNOOZE_CHOICES.forEach((choice, i) => {
+			const until = presetUntil(choice.snooze, now);
+			const at = gray(until === null ? "↘" : wakeAt(until, now));
+			const label = `   ${choice.label}`;
+			const line = `${label}${" ".repeat(Math.max(1, width - visibleWidth(label) - visibleWidth(at) - 1))}${at} `;
+			out.push([i === snoozing.choice ? cursorLine(line, true) : line, () => this.finishSnooze(choice.snooze)]);
+		});
 		return out;
 	}
 
@@ -1965,6 +2052,7 @@ class Roster implements Component {
 				to: width,
 				act: () => {
 					this.naming = null;
+					this.snoozing = null;
 				},
 			});
 		if (index < this.scrollTop) this.scrollTop = index;
@@ -2035,6 +2123,18 @@ class Roster implements Component {
 	hints(y: number): string {
 		if (this.filtering) return ` ${this.filter.render(Math.max(10, rosterWidth() - 2))[0] ?? ""}`;
 		if (this.naming) return ` ${this.name.render(Math.max(10, rosterWidth() - 2))[0] ?? ""}`;
+		if (this.snoozing)
+			return this.clickable(y, [
+				[" ", null],
+				[key("⏎", "snooze"), () => this.finishSnooze((SNOOZE_CHOICES[this.snoozing?.choice ?? 0] as { snooze: SnoozePreset }).snooze)],
+				[" ", null],
+				[
+					key("esc", "cancel"),
+					() => {
+						this.snoozing = null;
+					},
+				],
+			]);
 		const drag = this.dragging;
 		if (drag?.moved) {
 			if (!drag.drop) return ` ${red("✗ not here")}`;
@@ -2065,6 +2165,13 @@ class Roster implements Component {
 			hints = [enter(row.expanded ? "collapse" : "expand"), ["n", "new operator", () => this.newAt()], help];
 		else if (row.kind === "section") hints = [enter(row.expanded ? "collapse" : "expand"), help];
 		else if (!row.entry.open) hints = [enter("open"), ["a", "unarchive", () => this.toggleArchived()], help];
+		else if (row.entry.snoozed)
+			hints = [
+				enter(row.entry.live ? "focus" : "wake"),
+				["s", "unsnooze", () => this.toggleSnooze()],
+				["a", "archive", () => this.toggleArchived()],
+				help,
+			];
 		else hints = [enter(row.entry.live ? "focus" : "wake"), ["a", "archive", () => this.toggleArchived()], newAtCursor, help];
 		return this.clickable(
 			y,
@@ -2184,7 +2291,14 @@ function rowLine(row: Row, width: number, now: number): string {
 	}
 	const mark = stage.staged === e.id ? (focus === "stage" ? cyan("▌") : "▌") : " ";
 	const lead = `${mark}${" ".repeat(2 + row.depth * 2)}`;
-	const when = e.open ? age(e.activityAt, now) : age(archivedKey(e), now);
+	// A snoozed row says when it wakes instead: ↘ for its next message.
+	const when = !e.open
+		? age(archivedKey(e), now)
+		: e.snoozed
+			? e.snoozedUntil === null
+				? "↘"
+				: wakeAt(e.snoozedUntil, now)
+			: age(e.activityAt, now);
 	// A worktree bucket already names the worktree.
 	const worktree = e.cwd !== e.project && groupOf(e)?.kind !== "worktree" ? magenta("⎇") : " ";
 	const right = ` ${worktree} ${gray(when.padStart(3))} `;
@@ -2441,6 +2555,20 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	}
 	const group = groupOf(e);
 	if (group?.kind === "custom") head.push(`${gray("Group")} ${group.name}`);
+	if (e.schedules.length > 0) {
+		head.push(rule, gray("Schedules"));
+		// The soonest few, and always the last that ran, so it shows one ran however many are pending.
+		const shown = [...e.schedules.filter((v) => v.nextAt !== null).slice(0, 3), ...e.schedules.filter((v) => v.nextAt === null)];
+		for (const v of shown) {
+			const line =
+				v.nextAt === null
+					? `${green("✓")} ${v.label}${gray(` · ran ${ago(v.lastFiredAt as number, now)}`)}`
+					: v.cron
+						? `${cyan("↻")} ${v.label}${gray(` · next ${wakeAt(v.nextAt, now)}${v.lastFiredAt === null ? "" : ` · last ${ago(v.lastFiredAt, now)}`}`)}`
+						: `${gray("◷")} ${v.label}${gray(` · ${wakeAt(v.nextAt, now)}`)}`;
+			head.push(truncateToWidth(` ${line}`, inner, "…"));
+		}
+	}
 	const turn: string[] = [];
 	if (info?.error) turn.push(rule, ...wrapTextWithAnsi(red(`✗ ${info.error}`), inner).slice(0, 3));
 	else if (info?.last) {
@@ -2603,7 +2731,11 @@ async function prefixKey(k: string, id: string | undefined): Promise<void> {
 	else if (k === "w") roster.wake(row);
 	else if (k === "x") roster.stop(row);
 	else if (k === "a") roster.toggleArchived(row);
-	else if (k === "y" || k === "Y") roster.copy(k === "y", row);
+	else if (k === "s" || k === "S") {
+		// The menu takes the keyboard; unsnoozing needs none.
+		if (!(row?.kind === "session" && row.entry.snoozed)) await focusRoster();
+		roster.toggleSnooze(row);
+	} else if (k === "y" || k === "Y") roster.copy(k === "y", row);
 	else throw new Error(`unknown deck key ${k}`);
 	roster.syncStage(true);
 }
@@ -2630,7 +2762,7 @@ function peekButtons(row: Row): [label: string, key: string][] {
 	if (!e.open) items.push(["Unarchive", "a"]);
 	else {
 		items.push(e.live ? ["Stop", "x"] : ["Wake", "w"]);
-		if (!e.provisional) items.push(["Archive", "a"]);
+		if (!e.provisional) items.push(e.snoozed ? ["Unsnooze", "s"] : ["Snooze…", "s"], ["Archive", "a"]);
 		if (!e.operator) items.push(["Group…", "m"]);
 		items.push([e.operator ? "New Operator" : "New session here", "n"]);
 	}
@@ -2871,7 +3003,7 @@ function viewState(): DeckState {
 		terminalFocused,
 		cursor: cursorRow?.kind === "session" ? cursorRow.entry.id : null,
 		cursorRow: index,
-		mode: roster.choosing ? "picker" : roster.filtering ? "filter" : roster.naming ? "name" : "roster",
+		mode: roster.choosing ? "picker" : roster.filtering ? "filter" : roster.naming ? "name" : roster.snoozing ? "snooze" : "roster",
 		picker: pickerState(),
 		drop: drop ? { project: projectName(drop.header.project), group: drop.header.group && groupLabel(drop.header.group) } : null,
 		filter: roster.query(),

@@ -48,14 +48,14 @@ Some scenarios install pi-sessions and pi-wt from `node_modules`, at the version
 - Deck layout: the `deck_layouts` table, one row per Project root: the cursor, folds, and roster width the next Deck there starts from
 - Drafts: `${XDG_STATE_HOME:-~/.local/state}/agent-switchboard/drafts/<session_id>`, an unsent prompt saved when an upgrade stops its pi
 - Deck sockets: `${XDG_STATE_HOME:-~/.local/state}/agent-switchboard/decks/<deck>.sock`
-- tmux servers: `tmux -L swb` (sessions) and `tmux -L swb-ui` (Decks), each suffixed `-<SWB_INSTANCE>` when that is set. Tests always set it
+- tmux servers: `tmux -L swb` (sessions) and `tmux -L swb-ui` (Decks), each suffixed `-<SWB_INSTANCE>` when that is set. Tests always set it. The sessions server's `swb-ctl` pane runs the clock, `swb __clock`, which any swb respawns if it's dead or another build
 
 ## Code style
 
 - TypeScript on Bun; use `.ts` extensions for repo-local imports
 - `swb` owns all DDL and migrations through `PRAGMA user_version`; a line only asserts the exact version
 - Every line records through `@swb/shared/record` and reads messages through `@swb/shared/mailbox`; the tool contracts live once, in `@swb/shared/tools`
-- Store facts, derive states: Live, Interrupted, Unseen, Inactive, and Archived are computed at read time, never persisted
+- Store facts, derive states: Live, Interrupted, Unseen, Inactive, Snoozed, and Archived are computed at read time, never persisted
 
 ## Testing
 

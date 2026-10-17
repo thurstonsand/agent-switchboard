@@ -1,7 +1,9 @@
 import type { Harness, View } from "@swb/shared";
+import type { Snooze } from "@swb/shared/tools";
 import type { Config } from "../config.ts";
 import type { SessionState } from "../derive.ts";
 import type { TargetTree } from "../dirs.ts";
+import type { ScheduleView } from "../schedules.ts";
 import type { DeckLayout } from "../store.ts";
 
 /** One roster entry: a Session, or a live pi that has had no prompt yet (provisional, titled by its id). */
@@ -11,6 +13,8 @@ export type Entry = SessionState & {
 	/** The tmux session hosting it, when live. */
 	host: string | null;
 	provisional: boolean;
+	/** What its Peek lists: schedules aimed at it, or launches it set, pending ones and the last that finished. */
+	schedules: ScheduleView[];
 };
 
 export type Snapshot = {
@@ -91,7 +95,7 @@ export type DeckState = {
 	cursor: string | null;
 	/** The cursor's index in `rows`, headers included. */
 	cursorRow: number;
-	mode: "filter" | "name" | "picker" | "roster";
+	mode: "filter" | "name" | "picker" | "snooze" | "roster";
 	picker: PickerState | null;
 	/** Mid-drag, the header a release would drop into: its Project, and its Group or worktree bucket, if any. */
 	drop: { project: string; group: string | null } | null;
@@ -127,6 +131,7 @@ export type ToWorker =
 	| { type: "visit"; id: string }
 	| { type: "archive"; id: string }
 	| { type: "unarchive"; id: string }
+	| { type: "snooze"; id: string; snooze: Snooze }
 	| { type: "stop"; id: string }
 	| { type: "transcript"; id: string; path: string; harness: Harness }
 	| { type: "peek"; id: string; cwd: string; transcript: string | null; harness: Harness }

@@ -18,9 +18,11 @@ Lists every Session, open and archived, with its derived state.
   open         not archived
   live         its pi process is running in this boot
   activity     "working", "blocked", or "idle" (always "idle" when not live)
-  unseen       open, and its agent finished a turn after my last Visit
+  unseen       open, not snoozed, and its agent finished a turn, or its snooze ran out, after my last Visit
   interrupted  not live, and its process ended mid-turn
-  inactive     open, not an Operator, no activity within inactive_after, neither blocked nor unseen
+  inactive     open, not an Operator, not snoozed, no activity within inactive_after, neither blocked nor unseen
+  snoozed      open and snoozed, neither blocked nor interrupted
+  snoozedUntil epoch ms a snoozed session's snooze ends, or null when it waits for a message
   createdAt    epoch ms of its first prompt
   activityAt   epoch ms of the last prompt or settle
   visitedAt    epoch ms of my last Visit, or null
@@ -47,7 +49,7 @@ export function ls(args: string[]): void {
 		return;
 	}
 	for (const s of states) {
-		const where = s.open ? (s.inactive ? "inactive" : "open") : "archived";
+		const where = s.open ? (s.snoozed ? "snoozed" : s.inactive ? "inactive" : "open") : "archived";
 		console.log([glyph(s), s.id, where, projectName(s.project), displayName(s)].join("\t"));
 	}
 }

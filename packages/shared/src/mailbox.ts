@@ -13,6 +13,9 @@ export type Message = {
 	body: string;
 	requestResponse: boolean;
 	createdAt: number;
+	/** What a schedule delivers: which one, and when it was due. */
+	scheduleId: string | null;
+	scheduledFor: number | null;
 };
 
 const HARNESS_NAMES: Record<Harness, string> = { pi: "pi", claude: "Claude Code", codex: "Codex" };
@@ -25,7 +28,7 @@ export function harnessName(harness: Harness): string {
 export function pendingFor(db: Db, targetId: string): Message[] {
 	return db
 		.all(
-			`SELECT id, kind, source_id, target_id, body, request_response, created_at FROM messages
+			`SELECT id, kind, source_id, target_id, body, request_response, created_at, schedule_id, scheduled_for FROM messages
 			 WHERE target_id = ? AND delivered_at IS NULL AND cancelled_at IS NULL ORDER BY created_at, rowid`,
 			targetId,
 		)
@@ -37,6 +40,8 @@ export function pendingFor(db: Db, targetId: string): Message[] {
 			body: row.body as string,
 			requestResponse: row.request_response === 1,
 			createdAt: row.created_at as number,
+			scheduleId: row.schedule_id as string | null,
+			scheduledFor: row.scheduled_for as number | null,
 		}));
 }
 
@@ -54,10 +59,26 @@ export function sender(db: Db, sourceId: string): { title: string; harness: Harn
 	return { title: (row?.title as string | null) ?? sourceId, harness: (row?.harness as Harness | undefined) ?? null };
 }
 
-/** The message as the model reads it: who it's from, how to answer, and the body. */
-export function frame(db: Db, m: Message): string {
+/** A moment as the person and the model both read it, in local time: "Sat Oct 17, 14:30". */
+export function clockTime(ms: number): string {
+	const d = new Date(ms);
+	const day = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }).replace(",", "");
+	return `${day}, ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/** A delivery more than this past its time says when it came. */
+const LATE_MS = 60_000;
+
+/** The message as the model reads it: who it's from, when it was scheduled for, how to answer, and the body. */
+export function frame(db: Db, m: Message, now = Date.now()): string {
 	const from = sender(db, m.sourceId);
-	const harness = from.harness ? `, ${harnessName(from.harness)}` : "";
+	const who = m.sourceId === m.targetId ? ", this session" : from.harness ? `, ${harnessName(from.harness)}` : "";
+	let when = "";
+	if (m.scheduledFor !== null) {
+		when = `, scheduled for ${clockTime(m.scheduledFor)}`;
+		if (now - m.scheduledFor > LATE_MS) when += `, delivered ${clockTime(now)}`;
+		if (m.scheduleId) when += ` (schedule: ${m.scheduleId})`;
+	}
 	const reply = m.requestResponse ? `\n\nResponse requested: reply with session_send_message to session ${m.sourceId}.` : "";
-	return `Message from session "${from.title}" (session: ${m.sourceId}${harness}):\n\n${m.body}${reply}`;
+	return `Message from session "${from.title}" (session: ${m.sourceId}${who})${when}:\n\n${m.body}${reply}`;
 }

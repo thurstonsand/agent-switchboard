@@ -41,6 +41,18 @@ export function age(at: number, now: number): string {
 	return `${Math.floor(d / DAY)}d`;
 }
 
+/** When a snooze ends, as short as a roster row takes it: "14:30" today, "Sun 9a" within the week, "Oct 25" after. */
+export function wakeAt(at: number, now: number): string {
+	const d = new Date(at);
+	const [h, m] = [d.getHours(), d.getMinutes()];
+	if (d.toDateString() === new Date(now).toDateString()) return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+	if (at - now < 6 * DAY) {
+		const day = d.toLocaleDateString("en-US", { weekday: "short" });
+		return `${day} ${h % 12 || 12}${m ? `:${String(m).padStart(2, "0")}` : ""}${h < 12 ? "a" : "p"}`;
+	}
+	return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 export function shortPath(path: string): string {
 	const home = homedir();
 	return path === home || path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;

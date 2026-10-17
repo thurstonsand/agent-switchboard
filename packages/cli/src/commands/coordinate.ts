@@ -2,6 +2,8 @@ import { parseArgs } from "node:util";
 import { harness } from "@swb/shared";
 import { launchSession, reachable as listReachable, send as sendMessage } from "../coordinate.ts";
 import { UsageError } from "../errors.ts";
+import { unschedule as cancelSchedule, listSchedules, schedule as scheduleMessage } from "../schedules.ts";
+import { ensureSessionsServer } from "../sessions.ts";
 import { openStore } from "../store.ts";
 
 // The lines' commands: each prints { text, details } as JSON, the text being what the calling model reads.
@@ -63,6 +65,63 @@ export async function launch(args: string[]): Promise<void> {
 			title: values.title ?? null,
 			requestResponse: values["request-response"],
 			model: values.model ?? null,
+			scheduled: null,
 		}),
 	);
+}
+
+export async function schedule(args: string[]): Promise<void> {
+	const { values } = parseArgs({
+		args,
+		options: {
+			from: { type: "string" },
+			to: { type: "string" },
+			at: { type: "string" },
+			cron: { type: "string" },
+			label: { type: "string" },
+			"launch-harness": { type: "string" },
+			"launch-cwd": { type: "string" },
+			"launch-title": { type: "string" },
+			"request-response": { type: "boolean", default: false },
+			snooze: { type: "boolean", default: false },
+			"request-id": { type: "string" },
+		},
+	});
+	if (!values.from || values.label === undefined) throw new UsageError("schedule: --from and --label are required");
+	const launching = values["launch-harness"] !== undefined;
+	if (launching && !values["launch-title"]) throw new UsageError("schedule: --launch-harness needs --launch-title");
+	const result = scheduleMessage(openStore(), {
+		from: values.from,
+		to: values.to ?? null,
+		launch: launching
+			? {
+					harness: harness(values["launch-harness"] as string),
+					cwd: values["launch-cwd"] ?? null,
+					title: values["launch-title"] as string,
+				}
+			: null,
+		body: await Bun.stdin.text(),
+		at: values.at ?? null,
+		cron: values.cron ?? null,
+		label: values.label,
+		requestResponse: values["request-response"],
+		snooze: values.snooze,
+		requestId: values["request-id"] ?? null,
+	});
+	// Its clock is what fires it, which a reboot or swb quit may have left stopped.
+	ensureSessionsServer();
+	print(result);
+}
+
+export function schedules(args: string[]): void {
+	const { values } = parseArgs({ args, options: { from: { type: "string" } } });
+	if (!values.from) throw new UsageError("schedules: --from is required");
+	print(listSchedules(openStore(), values.from));
+}
+
+export function unschedule(args: string[]): void {
+	const { values, positionals } = parseArgs({ args, options: { from: { type: "string" } }, allowPositionals: true });
+	const id = positionals[0];
+	if (!id || !values.from) throw new UsageError("unschedule: a schedule id and --from are required");
+	print(cancelSchedule(openStore(), values.from, id));
 }

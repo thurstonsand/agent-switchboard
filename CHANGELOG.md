@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+Schema v6: update swb and the pi line together.
+
+### Added
+
+- Schedules: an agent messages itself or another session later, once or on a cron, or launches a new session each time, with `session_schedule`, `session_schedules`, and `session_unschedule`, in pi, Claude Code, and Codex. A clock in swb's tmux server fires them with no Deck open, and after the machine sleeps, the missed ones fire once, saying when they were due. A session's Peek lists its schedules, and the last one that ran.
+- Snooze: `s` in the roster, `M-a S` from anywhere, `swb snooze`, or `swb_update_session`'s `snooze` put a session in the new Snoozed section for an hour, a day, a week, a set time, or until its next message.
+- `swb quit` stops every session, Deck, and the clock.
+
+### Changed
+
+- Claude Code's own scheduler (`CronCreate`, `/loop`) is off in sessions swb runs.
+- A dormant session with a message waiting is started by the clock, retrying with backoff, instead of only by its sender.
+
 ## 0.6.4 — 2026-10-16
 
 ### Fixed

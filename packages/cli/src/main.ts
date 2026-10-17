@@ -2,7 +2,8 @@ import { booted, span } from "@swb/shared/trace";
 import { codexHost } from "./codex/host.ts";
 import { adopt } from "./commands/adopt.ts";
 import { archive } from "./commands/archive.ts";
-import { launch, reachable, send } from "./commands/coordinate.ts";
+import { clock } from "./commands/clock.ts";
+import { launch, reachable, schedule, schedules, send, unschedule } from "./commands/coordinate.ts";
 import { deckCommand, deckNotify, help } from "./commands/deck.ts";
 import { detached } from "./commands/detached.ts";
 import { dirs } from "./commands/dirs.ts";
@@ -13,6 +14,8 @@ import { LS_HELP, ls } from "./commands/ls.ts";
 import { migrate } from "./commands/migrate.ts";
 import { newSession } from "./commands/new.ts";
 import { open } from "./commands/open.ts";
+import { quit } from "./commands/quit.ts";
+import { snooze } from "./commands/snooze.ts";
 import { unarchive } from "./commands/unarchive.ts";
 import { visit } from "./commands/visit.ts";
 import { wake } from "./commands/wake.ts";
@@ -31,12 +34,21 @@ const USAGE = `swb: Agent Switchboard
   swb dirs [--json]            list the directories the Deck's picker offers
   swb archive ID               archive a session
   swb unarchive ID             reopen an archived session
+  swb snooze ID one_hour|one_day|monday|next_message|off|TIME
+                               hide a session in Snoozed until then, or its next message; TIME is ISO 8601 with offset
+  swb quit [--force]           stop every session, Deck, and the clock; sessions stay open, dormant
   swb wake ID                  start a dormant session in the background
   swb launch --harness pi|claude|codex [--cwd DIR] [--from ID] [--title T] [--model M] [--request-response]
                                start a new session in the background; its goal on stdin
   swb send --from ID --to ID [--request-response] [--request-id KEY] [--cancel]
                                message a session, waking it if dormant; the body on stdin
   swb reachable --from ID      every open session but the caller, as a line's tool reads it
+  swb schedule --from ID [--to ID | --launch-harness H --launch-title T [--launch-cwd DIR]] (--at WHEN | --cron EXPR)
+               --label TEXT [--request-response] [--snooze] [--request-id KEY]
+                               message a session later, or launch one; the body on stdin. WHEN is ISO 8601: a time with
+                               offset or a duration (PT2H); EXPR is 5-field cron in local time
+  swb schedules --from ID      the schedules a session set or receives
+  swb unschedule ID --from ID  cancel a pending schedule
   swb mcp                      the MCP server a Codex session's app-server runs for swb's tools
   swb drive start [--size COLSxROWS] [--theme light|dark] [-- swb-args]
   swb drive keys [--delay MS] [-l TEXT]… [KEY…] | capture [--ansi] | theme light|dark | focus in|out
@@ -79,6 +91,16 @@ async function main(args: string[]): Promise<void> {
 			return archive(rest);
 		case "unarchive":
 			return unarchive(rest);
+		case "snooze":
+			return snooze(rest);
+		case "quit":
+			return quit(rest);
+		case "schedule":
+			return schedule(rest);
+		case "schedules":
+			return schedules(rest);
+		case "unschedule":
+			return unschedule(rest);
 		case "launch":
 			return launch(rest);
 		case "send":
@@ -113,6 +135,8 @@ async function main(args: string[]): Promise<void> {
 		case "mcp":
 			// The MCP SDK costs every other command 40 ms of startup; only `swb mcp` loads it.
 			return (await import("./codex/mcp.ts")).mcp();
+		case "__clock":
+			return clock();
 		case "__codex":
 			return codexHost(rest);
 		case "__record":

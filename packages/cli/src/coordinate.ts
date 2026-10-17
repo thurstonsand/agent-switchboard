@@ -2,27 +2,16 @@ import { existsSync, realpathSync } from "node:fs";
 import type { Db, Harness } from "@swb/shared";
 import { frame, harnessName, type MessageKind } from "@swb/shared/mailbox";
 import { isArchived, markArchived, recordTx } from "@swb/shared/record";
-import type { ToolResult } from "@swb/shared/tools";
+import type { Snooze, ToolResult } from "@swb/shared/tools";
 import { CodexClient } from "./codex/client.ts";
 import { codexSocket } from "./codex/host.ts";
-import { loadConfig } from "./config.ts";
-import { derive, displayName, type SessionState, sessionRows, world } from "./derive.ts";
+import { displayName, type SessionState, sessionState, states } from "./derive.ts";
 import { SwbError } from "./errors.ts";
+import { snooze } from "./schedules.ts";
 import { archive, ensureSessionsServer, launch, unarchive, wake } from "./sessions.ts";
 
 // The coordination every line's tools run. Each returns the text the model reads, so all three harnesses say the same
 // thing, and the facts a line may render. The sender is always the line's own session, never a tool argument.
-
-function states(db: Db): SessionState[] {
-	const w = world(loadConfig().inactiveAfterMs);
-	return sessionRows(db).map((row) => derive(row, w));
-}
-
-function session(db: Db, id: string): SessionState {
-	const found = states(db).find((s) => s.id === id);
-	if (!found) throw new SwbError(`no session ${id}; session_reachable lists them`);
-	return found;
-}
 
 function describe(s: SessionState): string {
 	const state = s.live ? s.activity : s.interrupted ? "interrupted" : "dormant";
@@ -55,7 +44,7 @@ export type Send = { from: string; to: string; body: string; requestResponse: bo
 export async function send(db: Db, m: Send): Promise<ToolResult> {
 	if (m.to === m.from) throw new SwbError("a session can't message itself");
 	if (m.kind === "message" && !m.body.trim()) throw new SwbError("the message is empty");
-	const target = session(db, m.to);
+	const target = sessionState(db, m.to);
 	if (!target.open) throw new SwbError(`"${displayName(target)}" is archived; unarchive it first`);
 	if (m.kind === "cancel" && !(target.live && target.activity !== "idle")) {
 		return { text: `"${displayName(target)}" has no running turn to cancel.`, details: { delivered: false, target: m.to } };
@@ -117,12 +106,14 @@ export type Launch = {
 	title: string | null;
 	requestResponse: boolean;
 	model: string | null;
+	/** The schedule that launches it, and when that was due, which its goal's frame says. */
+	scheduled: { id: string; at: number } | null;
 };
 
 /** Starts a new managed session whose first turn is the goal, and waits until its harness has registered it. */
 export async function launchSession(db: Db, l: Launch): Promise<ToolResult> {
 	if (!l.goal.trim()) throw new SwbError("the goal is empty");
-	const cwd = l.cwd ?? (l.from ? session(db, l.from).cwd : null);
+	const cwd = l.cwd ?? (l.from ? sessionState(db, l.from).cwd : null);
 	if (!cwd) throw new SwbError("a directory is required");
 	if (!existsSync(cwd)) throw new SwbError(`no directory ${cwd}`);
 	const dir = realpathSync(cwd);
@@ -137,6 +128,8 @@ export async function launchSession(db: Db, l: Launch): Promise<ToolResult> {
 				body: l.goal,
 				requestResponse: l.requestResponse,
 				createdAt: Date.now(),
+				scheduleId: l.scheduled?.id ?? null,
+				scheduledFor: l.scheduled?.at ?? null,
 			})
 		: l.goal;
 	ensureSessionsServer();
@@ -190,12 +183,22 @@ async function titled(db: Db, id: string, title: string): Promise<void> {
 	throw new SwbError(`launched ${id}, but its first turn didn't start within 15 s, so it isn't titled "${title}"`);
 }
 
+export type Update = { archived: boolean } | { snooze: Snooze };
+
+/** swb_update_session's arguments, which change one thing at a time. */
+export function updateOf(args: { archived?: boolean; snooze?: Snooze }): Update {
+	if ((args.archived === undefined) === (args.snooze === undefined)) throw new SwbError("give archived or snooze: one of them");
+	return args.archived === undefined ? { snooze: args.snooze as Snooze } : { archived: args.archived };
+}
+
 /**
- * Archives or unarchives. A session archiving itself may do so mid-turn: its line quits when the turn ends.
- * Anyone else's archive refuses a running turn.
+ * Archives, unarchives, snoozes, or unsnoozes. A session archiving itself may do so mid-turn: its line quits when the
+ * turn ends. Anyone else's archive refuses a running turn.
  */
-export function update(db: Db, from: string | null, id: string, archived: boolean): ToolResult {
-	const target = session(db, id);
+export function update(db: Db, from: string | null, id: string, change: Update): ToolResult {
+	if ("snooze" in change) return snooze(db, from, id, change.snooze);
+	const { archived } = change;
+	const target = sessionState(db, id);
 	const name = `"${displayName(target)}"`;
 	if (!archived) {
 		unarchive(db, id);

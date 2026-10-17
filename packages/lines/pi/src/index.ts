@@ -375,11 +375,75 @@ export default function (pi: ExtensionAPI) {
 	);
 
 	tool(
+		"session_schedule",
+		"Schedule",
+		(args) =>
+			`${args.launch ? `new ${(args.launch as { title: string }).title}` : args.session ? titleOf(args.session) : "this session"} · ${args.label}${args.snooze ? " · snooze" : ""}`,
+		(
+			args: {
+				message: string;
+				at?: string;
+				cron?: string;
+				label: string;
+				session?: string;
+				launch?: { harness: string; cwd?: string; title: string };
+				requestResponse?: boolean;
+				snooze?: boolean;
+			},
+			ctx,
+			toolCallId,
+		) =>
+			swb(
+				proc.launch.bin,
+				[
+					"schedule",
+					"--from",
+					self(ctx),
+					"--label",
+					args.label,
+					"--request-id",
+					toolCallId,
+					...(args.at !== undefined ? ["--at", args.at] : []),
+					...(args.cron !== undefined ? ["--cron", args.cron] : []),
+					...(args.session !== undefined ? ["--to", args.session] : []),
+					...(args.launch
+						? ["--launch-harness", args.launch.harness, "--launch-title", args.launch.title, "--launch-cwd", args.launch.cwd ?? ctx.cwd]
+						: []),
+					...(args.requestResponse ? ["--request-response"] : []),
+					...(args.snooze ? ["--snooze"] : []),
+				],
+				args.message,
+			),
+	);
+
+	tool(
+		"session_schedules",
+		"Schedules",
+		() => "",
+		(_args, ctx) => swb(proc.launch.bin, ["schedules", "--from", self(ctx)]),
+	);
+
+	tool(
+		"session_unschedule",
+		"Unschedule",
+		(args) => String(args.id),
+		(args: { id: string }, ctx) => swb(proc.launch.bin, ["unschedule", args.id, "--from", self(ctx)]),
+	);
+
+	type Snooze = string | { until: string };
+	const snoozeText = (snooze: Snooze) => (typeof snooze === "string" ? snooze : snooze.until);
+
+	tool(
 		"swb_update_session",
 		"Update session",
-		(args) => `${args.archived ? "archive" : "unarchive"} ${args.session ? titleOf(args.session) : "this session"}`,
-		async (args: { session?: string; archived: boolean }, ctx) => {
+		(args) => {
+			const what = args.snooze !== undefined ? `snooze ${snoozeText(args.snooze as Snooze)}` : args.archived ? "archive" : "unarchive";
+			return `${what} ${args.session ? titleOf(args.session) : "this session"}`;
+		},
+		async (args: { session?: string; archived?: boolean; snooze?: Snooze }, ctx) => {
 			const id = self(ctx);
+			if ((args.archived === undefined) === (args.snooze === undefined)) throw new Error("give archived or snooze: one of them");
+			if (args.snooze !== undefined) return swb(proc.launch.bin, ["snooze", args.session ?? id, snoozeText(args.snooze), "--from", id]);
 			if (!args.session || args.session === id) {
 				if (!args.archived) throw new Error("this session is already open");
 				if (!markArchived(ctx)) throw new Error(proc.failure ? `swb: not recording: ${proc.failure}` : "swb: no session recorded yet");
