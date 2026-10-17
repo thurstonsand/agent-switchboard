@@ -239,14 +239,20 @@ async function begin($) {
 	void submitPending($);
 }
 
-/** swb is the only thing that loads this plugin, so its tools are always offered; a call outside swb says so. */
+/**
+ * swb is the only thing that loads this plugin, so its tools are always offered; a call outside swb says so. All at
+ * once: each registration reconnects the plugin's tool server and waits until its tool lists, which the first turn
+ * waits for, and five in a row took 750 ms.
+ */
 async function registerTools($) {
-	for (const tool of TOOLS) {
-		try {
-			await $.tool.register(tool);
-		} catch (error) {
-			$.ui.log(`swb: tool ${tool.name} not registered: ${error.message}`);
-		}
+	await Promise.all(TOOLS.map((tool) => registerTool($, tool)));
+}
+
+async function registerTool($, tool) {
+	try {
+		await $.tool.register(tool);
+	} catch (error) {
+		$.ui.log(`swb: tool ${tool.name} not registered: ${error.message}`);
 	}
 }
 
