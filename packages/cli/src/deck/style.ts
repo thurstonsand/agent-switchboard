@@ -46,10 +46,21 @@ export function shortPath(path: string): string {
 	return path === home || path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
 }
 
-/** An SGR background parameter mixed from two colors, `t` of the way from a to b. */
-export function mix(a: RgbColor, b: RgbColor, t: number): string {
+export function lerp(a: RgbColor, b: RgbColor, t: number): RgbColor {
 	const ch = (x: number, y: number) => Math.round(x + (y - x) * t);
-	return `48;2;${ch(a.r, b.r)};${ch(a.g, b.g)};${ch(a.b, b.b)}`;
+	return { r: ch(a.r, b.r), g: ch(a.g, b.g), b: ch(a.b, b.b) };
+}
+
+/** An SGR foreground (38) or background (48) parameter mixed from two colors, `t` of the way from a to b. */
+export function mix(layer: 38 | 48, a: RgbColor, b: RgbColor, t: number): string {
+	const c = lerp(a, b, t);
+	return `${layer};2;${c.r};${c.g};${c.b}`;
+}
+
+/** The working glyph breathes from faint to strong and back, every 2.8 s. */
+export function breathe(faint: RgbColor, strong: RgbColor, now: number, s: string): string {
+	const t = (1 - Math.cos((2 * Math.PI * now) / 2800)) / 2;
+	return `\x1b[${mix(38, faint, strong, t)}m${s}\x1b[39m`;
 }
 
 export function hex(color: RgbColor): string {

@@ -370,6 +370,31 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"working-breathe": {
+		setup: async (s) => {
+			files(s);
+			await launch(s, "pi", "Planner");
+			await launch(s, "pi", "Rewrite the parser");
+		},
+		run: async (s) => {
+			await waitDrive(s, "the Deck ready", (x) => x.ready);
+			const parser = s.ls().find((e) => e.title === "Rewrite the parser")?.id as string;
+			typeInto(s, parser, "hold breath");
+			await entered(s, "breath");
+			const working = (x: DeckState) => x.rows.some((r) => r.kind === "session" && r.state === "working");
+			await waitDeck(s, "working on dark", (x) => working(x) && x.colors.background === "#1d2021");
+			await Bun.sleep(4500);
+			s.swb("drive", "theme", "light");
+			await waitDeck(s, "working on light", (x) => working(x) && x.colors.background === "#f9f5d7");
+			await Bun.sleep(4500);
+			s.swb("drive", "theme", "dark");
+			await waitDeck(s, "working on dark again", (x) => working(x) && x.colors.background === "#1d2021");
+			await Bun.sleep(3000);
+			release(s, "breath");
+			await waitLs(s, "both idle", (ls) => ls.length === 2 && ls.every((e) => e.activity === "idle"));
+		},
+	},
+
 	"unarchive-new-turn": {
 		setup: async (s) => {
 			const [id] = (await seed(s, { title: "Ship the hotfix", turns: ["hotfix shipped"] })) as [string];

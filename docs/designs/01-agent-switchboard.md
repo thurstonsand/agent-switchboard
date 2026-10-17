@@ -149,7 +149,7 @@ Clicking a pane focuses it. The bindings target panes by index rather than `{lef
 - Then **Archived**: an inline section, collapsed by default like Inactive, flat, ordered by `max(activity_at, archived_at)` descending.
 - The cursor follows the session id across reorders.
 
-**Glyphs**: ◆ blocked (flashing at about 1 Hz in `#c084fc`, the glimpse companion's attention purple; animated by the TUI, not SGR blink, and re-rendering only the affected rows) · ◐ working · ● unseen · ○ idle (including dormant) · ⚠ interrupted · ⟳ loading (wake in progress). Final glyphs are per the mocks.
+**Glyphs**: ◆ blocked (flashing at about 1 Hz in `#c084fc`, the glimpse companion's attention purple; animated by the TUI, not SGR blink, and re-rendering only the affected rows) · ◐ working (breathing in the theme's cyan, about every 2.8 s) · ● unseen · ○ idle (including dormant) · ⚠ interrupted · ⟳ loading (wake in progress). Final glyphs are per the mocks.
 
 **The bar** under the roster is one line: the clickable view tabs `pi · editor · split` with the current one highlighted, and a `shell` toggle beside them. The session's state, path, and branch are the Peek's. A narrow Deck, which has no Peek, adds two lines above the tabs: one status word (`failed to start`, `starting`, `blocked`, `working`, `unseen`, `idle`, `not running`, `interrupted`, `archived`), then path and branch. Below it, the legend lists only what the row under the cursor does: its primary act (`⏎ focus` on a live session, `⏎ wake` on a dormant one, `⏎ open` archived, `⏎ expand` on headers), `a archive` or `a unarchive`, `n new`, and `? keys`. With the Stage focused it becomes `<prefix> h list · <prefix> z hide list · <prefix> ? keys`. Every other key lives behind `?`.
 

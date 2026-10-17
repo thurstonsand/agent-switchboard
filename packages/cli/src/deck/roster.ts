@@ -59,6 +59,7 @@ import {
 	age,
 	attention,
 	bold,
+	breathe,
 	cyan,
 	dim,
 	flashOn,
@@ -66,6 +67,7 @@ import {
 	green,
 	hex,
 	key,
+	lerp,
 	magenta,
 	mix,
 	red,
@@ -247,7 +249,7 @@ function glyph(state: State, now: number): string {
 		case "blocked":
 			return flashOn(now) ? bold(attention("◆")) : dim(attention("◆"));
 		case "working":
-			return cyan("◐");
+			return breath ? breathe(breath.faint, breath.strong, now, "◐") : cyan("◐");
 		case "unseen":
 			return green("●");
 		case "idle":
@@ -996,6 +998,10 @@ type Drop = { header: HeaderRow; name: string | null } | null;
 // does. Until the terminal reports its colors, reverse video stands in. The row under the pointer gets a fainter mix
 // than the cursor's, focused or not; the cursor also has the ▌ bar while its session is on the Stage.
 let cursorBg: { focused: string; unfocused: string; hover: string } | null = null;
+// The working glyph breathes either side of the theme's cyan: faint toward the background, strong toward the
+// foreground. Fading all the way to the background would sink it below the cursor row's highlight on a dark theme.
+// Until the palette arrives it holds still.
+let breath: { faint: RgbColor; strong: RgbColor } | null = null;
 let colors: { background: string | null; scheme: string | null } = { background: null, scheme: null };
 
 function cursorLine(line: string, focused: boolean): string {
@@ -2944,11 +2950,14 @@ async function queryColors(scheme: string | null): Promise<void> {
 	cursorBg =
 		background && foreground
 			? {
-					focused: mix(background, foreground, 0.2),
-					unfocused: mix(background, foreground, 0.12),
-					hover: mix(background, foreground, 0.06),
+					focused: mix(48, background, foreground, 0.2),
+					unfocused: mix(48, background, foreground, 0.12),
+					hover: mix(48, background, foreground, 0.06),
 				}
 			: null;
+	const themeCyan = palette?.[6];
+	breath =
+		background && foreground && themeCyan ? { faint: lerp(background, themeCyan, 0.6), strong: lerp(themeCyan, foreground, 0.3) } : null;
 	colors = { background: background ? hex(background as RgbColor) : null, scheme: scheme ?? colors.scheme };
 	if (colors.background) post({ type: "background", color: colors.background });
 	tui.requestRender();
@@ -3009,6 +3018,10 @@ setInterval(() => {
 	const now = Date.now();
 	keepLayout(now);
 	syncTitle();
-	if (toasts.some((t) => t.until <= now) || launches.length > 0 || [...entries.values()].some((e) => e.activity === "blocked"))
+	if (
+		toasts.some((t) => t.until <= now) ||
+		launches.length > 0 ||
+		[...entries.values()].some((e) => e.activity === "blocked" || e.activity === "working")
+	)
 		tui.requestRender();
 }, 100);
