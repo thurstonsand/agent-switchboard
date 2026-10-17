@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, openSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { type Db, stateDir } from "@swb/shared";
-import { frame, markDelivered, pendingFor } from "@swb/shared/mailbox";
+import { frame, listen, markDelivered, pendingFor } from "@swb/shared/mailbox";
 import { endHosting, markArchived, recordTx, setPhase, setTitle, settle, startHosting, startTurn } from "@swb/shared/record";
 import { mark, now, since } from "@swb/shared/trace";
 import { archivedInCodex, readTranscript } from "../deck/transcript.ts";
@@ -108,9 +108,13 @@ export async function codexHost(args: string[]): Promise<void> {
 	const line = new CodexLine(db, client, host, parent, stopTui);
 	client.onNotification((note) => line.notify(note));
 	const timer = setInterval(() => void line.poll(), POLL_MS);
+	const doorbell = listen(db, (id) => {
+		if (id === line.bound?.id) void line.poll();
+	});
 
 	const code = await tui.exited;
 	clearInterval(timer);
+	doorbell.close();
 	line.end();
 	client.close();
 	server.kill("SIGTERM");

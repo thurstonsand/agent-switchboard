@@ -1,6 +1,6 @@
 import { existsSync, realpathSync } from "node:fs";
 import { type Db, type Harness, operatorDir, type Snooze } from "@swb/shared";
-import { frame, harnessName, type MessageKind } from "@swb/shared/mailbox";
+import { frame, harnessName, type MessageKind, ring } from "@swb/shared/mailbox";
 import { isArchived, markArchived, recordTx } from "@swb/shared/record";
 import type { ToolResult } from "@swb/shared/tools";
 import { CodexClient } from "./codex/client.ts";
@@ -73,6 +73,7 @@ export async function send(db: Db, m: Send): Promise<ToolResult> {
 		);
 		return id;
 	});
+	ring(db, m.to);
 	const woke = !target.live;
 	if (woke) wake(db, m.to);
 	const delivered = await deliveredWithin(db, id, woke ? 60_000 : 15_000);

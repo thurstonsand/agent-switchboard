@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { pidAlive } from "@swb/shared";
-import { frame, markDelivered, markOffered, pendingFor, sender } from "@swb/shared/mailbox";
+import { frame, listen, markDelivered, markOffered, pendingFor, sender } from "@swb/shared/mailbox";
 import { endHosting, recordTx, setPhase, settle, startHosting, startTurn } from "@swb/shared/record";
 import { claudeTitle } from "../deck/transcript.ts";
 import { UsageError } from "../errors.ts";
@@ -113,6 +113,10 @@ export async function inbox(args: string[]): Promise<void> {
 	let offered = new Set<string>();
 	let serving: string | undefined;
 	let version = -1;
+	let rang = () => {};
+	listen(db, (id) => {
+		if (id === serving) rang();
+	});
 	while (process.ppid === parent && pidAlive(parent)) {
 		const now = db.dataVersion();
 		if (now !== version) {
@@ -131,7 +135,10 @@ export async function inbox(args: string[]): Promise<void> {
 				process.stdout.write(`${JSON.stringify(line)}\n`);
 			}
 		}
-		await Bun.sleep(250);
+		await new Promise<void>((resolve) => {
+			rang = resolve;
+			setTimeout(resolve, 250);
+		});
 	}
 }
 

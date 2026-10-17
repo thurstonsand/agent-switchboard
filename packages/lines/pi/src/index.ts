@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
+import type { FSWatcher } from "node:fs";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Db, operatorDir } from "@swb/shared";
-import { frame, markDelivered, pendingFor, sender } from "@swb/shared/mailbox";
+import { frame, listen, markDelivered, pendingFor, sender } from "@swb/shared/mailbox";
 import {
 	markArchived as archiveMark,
 	endHosting,
@@ -29,6 +30,7 @@ type Process = {
 	/** The session that launched this process, until the first session it hosts has recorded it. */
 	parent?: string;
 	inbox?: NodeJS.Timeout;
+	doorbell?: FSWatcher;
 };
 type Ui = ExtensionContext["ui"];
 
@@ -219,6 +221,12 @@ export default function (pi: ExtensionAPI) {
 		if (proc.inbox) clearInterval(proc.inbox);
 		proc.inbox = setInterval(deliver, 250);
 		proc.inbox.unref();
+		proc.doorbell?.close();
+		write(current, (db) => {
+			proc.doorbell = listen(db, (id) => {
+				if (id === current) deliver();
+			});
+		});
 	});
 
 	// Not the user message_start: a launched session's first turn starts with its goal as a message.
@@ -457,6 +465,8 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_shutdown", (event, ctx) => {
 		if (proc.inbox) clearInterval(proc.inbox);
 		proc.inbox = undefined;
+		proc.doorbell?.close();
+		proc.doorbell = undefined;
 		ctxNow = undefined;
 		if (event.reason !== "quit") return;
 		const draft = ctx.ui.getEditorText();

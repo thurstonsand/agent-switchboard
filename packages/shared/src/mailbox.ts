@@ -1,7 +1,33 @@
+import { type FSWatcher, mkdirSync, rmSync, watch, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { Db } from "./db.ts";
 import type { Harness } from "./index.ts";
 
-// Messages between sessions wait in swb.db until the target's line takes them. Every live line polls for its own.
+// Messages between sessions wait in swb.db until the target's line takes them. A sender rings the target's doorbell
+// once its message commits, and every live line listens for its own, polling as well for a sender that didn't ring.
+// The db's own files can't stand in for a doorbell: the WAL's last write lands before its commit is visible.
+
+function doorbells(db: Db): string {
+	const dir = join(dirname(db.path), "doorbells");
+	mkdirSync(dir, { recursive: true, mode: 0o700 });
+	return dir;
+}
+
+/** Tells the target's line it has mail, by a file named for it that comes and goes. Only after the commit. */
+export function ring(db: Db, targetId: string): void {
+	const bell = join(doorbells(db), targetId);
+	writeFileSync(bell, "");
+	rmSync(bell, { force: true });
+}
+
+/** Hears every ring, with the session it's for, until closed; it doesn't hold the process open. */
+export function listen(db: Db, heard: (targetId: string) => void): FSWatcher {
+	const watcher = watch(doorbells(db), (_event, name) => {
+		if (name) heard(name.toString());
+	});
+	watcher.unref();
+	return watcher;
+}
 
 export type MessageKind = "message" | "cancel";
 
