@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, watch } from "node:fs";
+import { basename, dirname } from "node:path";
 import { parseArgs } from "node:util";
 import { matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { span } from "@swb/shared/trace";
@@ -14,6 +15,8 @@ const sock = args.sock;
 let card: Card = { head: [], lines: [], turns: null, agent: "" };
 let raw = "";
 let typedAt = 0;
+/** How long a keystroke's notice stays. */
+const TYPED_MS = 1500;
 let frame = "";
 
 function load(): boolean {
@@ -48,7 +51,7 @@ function draw(): void {
 	if (head.length > 0 && card.lines.length > 0) head.push("");
 	for (const line of card.lines) head.push(...(line === "" ? [""] : wrapTextWithAnsi(dim(line), width)));
 	const foot: string[] = [];
-	if (typedAt > now - 1500) foot.push("", yellow("input ignored until pi is up"));
+	if (typedAt > now - TYPED_MS) foot.push("", yellow("input ignored until pi is up"));
 
 	// The conversation fills the room left between the head and the foot, newest at the bottom.
 	const room = Math.max(0, rows - 2 - head.length - foot.length - 1);
@@ -91,6 +94,7 @@ process.stdin.on("data", (data: Buffer) => {
 	void send("wake");
 	typedAt = Date.now();
 	draw();
+	setTimeout(draw, TYPED_MS + 20);
 });
 process.on("SIGWINCH", () => {
 	frame = "";
@@ -98,9 +102,9 @@ process.on("SIGWINCH", () => {
 });
 process.on("SIGHUP", () => process.exit(0));
 
+// The roster replaces the card by renaming over it, which a watch on its directory hears.
+watch(dirname(cardPath), (_event, name) => {
+	if (name === basename(cardPath) && span("placeholder.load", load)) span("placeholder.draw", draw);
+});
 load();
 draw();
-setInterval(() => {
-	const changed = span("placeholder.load", load);
-	if (changed || typedAt > Date.now() - 2000) span("placeholder.draw", draw);
-}, 80);
