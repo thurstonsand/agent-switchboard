@@ -774,11 +774,13 @@ function startCursor(): void {
 		continueTo = recent;
 		return;
 	}
-	if (restoredKey !== null && entries.get(restoredKey)?.open) {
-		reveal(restoredKey);
+	// Nor does where the last Deck left off, if it has been snoozed since.
+	const restored = restoredKey === null ? undefined : entries.get(restoredKey);
+	if (restored?.open && !restored.snoozed) {
+		reveal(restored.id);
 		return;
 	}
-	if (restoredKey !== null && roster.rows().some((row) => row.key === restoredKey)) {
+	if (restoredKey !== null && !restored?.snoozed && roster.rows().some((row) => row.key === restoredKey)) {
 		roster.selectedKey = restoredKey;
 		return;
 	}

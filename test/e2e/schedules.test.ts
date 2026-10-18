@@ -305,7 +305,7 @@ test("Claude Code and Codex schedule and snooze through swb's tools, and Claude 
 	expect(snoozeOf(claude.id).snoozed).toBe(false);
 });
 
-test("the Deck's Snoozed section: s snoozes from the roster, the row says when it wakes, Enter doesn't unsnooze it, M-a S does", async () => {
+test("the Deck's Snoozed section: s snoozes from the roster, the row says when it wakes, Enter doesn't unsnooze it, M-a S does, and the next Deck doesn't start on it", async () => {
 	s = scenario("schedules", "deck");
 	config(s, 'inactive_after = "1h"\n');
 	s.swb("drive", "start", "--", "new");
@@ -373,6 +373,20 @@ test("the Deck's Snoozed section: s snoozes from the roster, the row says when i
 		(x) => x.peek?.id === id && x.peek.lines.some((l) => l.includes("✓ SWB soon")),
 	);
 	expect(ran.peek?.lines.find((l) => l.includes("✓ SWB soon"))).toMatch(/✓ SWB soon · ran just now/);
+
+	// Snoozed by its agent under the cursor, it isn't where the next Deck starts, though another session is.
+	const other = await launched("pi", "reply other");
+	s.swb("snooze", id, "one_hour");
+	await waitState(
+		s,
+		"in Snoozed, the cursor still on it",
+		(x) => x.cursor === id && x.rows.some((r) => r.kind === "section" && r.label === "Snoozed"),
+	);
+	await Bun.sleep(1500);
+	s.swb("drive", "stop");
+	s.swb("drive", "start");
+	const reopened = await waitState(s, "the next Deck", (x) => x.ready && x.rows.some((r) => r.kind === "section" && r.label === "Snoozed"));
+	expect(reopened.cursor).toBe(other.id);
 });
 
 test("swb quit refuses a running turn, then stops everything, leaving sessions open; any swb restarts a dead clock", async () => {
