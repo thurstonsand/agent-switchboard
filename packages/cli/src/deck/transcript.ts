@@ -94,12 +94,18 @@ type ClaudeEntry = {
 	message?: { role: string; content: unknown };
 };
 
-/** Claude Code: user and assistant entries link by parentUuid; the active branch is the chain back from the last. */
+/**
+ * Claude Code: user and assistant entries link by parentUuid; the active branch is the chain back from the last leaf.
+ * Not simply the last line: a conversation Claude Code writes as it exits can come out of order, a branch of its
+ * attachments last.
+ */
 function readClaude(path: string): Turn[] {
 	const entries = (lines(path) as ClaudeEntry[]).filter((e) => e.uuid && !e.isSidechain);
 	const byId = new Map(entries.map((e) => [e.uuid as string, e]));
+	const parents = new Set(entries.map((e) => e.parentUuid));
 	const turns: Turn[] = [];
-	for (let entry = entries.at(-1); entry; entry = entry.parentUuid ? byId.get(entry.parentUuid) : undefined) {
+	const leaf = entries.findLast((e) => !parents.has(e.uuid));
+	for (let entry = leaf; entry; entry = entry.parentUuid ? byId.get(entry.parentUuid) : undefined) {
 		if ((entry.type !== "user" && entry.type !== "assistant") || !entry.message || entry.isMeta) continue;
 		const body = text(entry.message.content).trim();
 		// Claude Code wraps its own commands and reminders in tags; only what was typed or answered shows.
