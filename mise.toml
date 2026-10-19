@@ -6,7 +6,7 @@ node = "24"
 "aqua:charmbracelet/vhs" = "0.12.1"
 "conda:ttyd" = "1.7.7"
 "conda:ffmpeg" = "9.0.2"
-"github:thurstonsand/wt" = "1.15.2"
+"github:thurstonsand/wt" = "1.16.0"
 "aqua:neovim/neovim" = "0.12.6"
 
 [tasks.bootstrap]
