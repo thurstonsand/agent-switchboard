@@ -467,6 +467,23 @@ maps(false)
 vim.api.nvim_create_autocmd("User", { pattern = "VeryLazy", once = true, callback = function() maps(false) end })
 -- netrw maps <C-h> and <C-l> in its own buffers, over the global ones.
 vim.api.nvim_create_autocmd("FileType", { pattern = "netrw", callback = function(ev) maps(ev.buf) end })
+-- Out of focus, the Editor's line highlight goes with its cursor, and back in, each window gets back exactly its own.
+vim.api.nvim_create_autocmd("FocusLost", { callback = function()
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.wo[win].cursorline then
+      vim.w[win].swb_cursorline = true
+      vim.wo[win].cursorline = false
+    end
+  end
+end })
+vim.api.nvim_create_autocmd("FocusGained", { callback = function()
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.w[win].swb_cursorline then
+      vim.w[win].swb_cursorline = nil
+      vim.wo[win].cursorline = true
+    end
+  end
+end })
 `;
 	mkdirSync(stateDir(), { recursive: true, mode: 0o700 });
 	writeFileSync(path, lua);

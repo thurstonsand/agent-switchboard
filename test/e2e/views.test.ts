@@ -664,8 +664,26 @@ end })
 	// One window over inside nvim, still at home.
 	expect(state(s).focus).toBe("editor");
 	s.save("nvim-split.txt", s.screen());
+	// netrw's line highlight shows while nvim has the keyboard, goes while it hasn't, and comes back to netrw alone: the
+	// empty buffer never had one. Unfocused windows' statuslines share its grey, so look only at the lines themselves.
+	const editor = (editors(s)[0] as { name: string }).name;
+	const rows = () => s.tmux(s.servers.sessions, "capture-pane", "-p", "-e", "-t", `=${editor}:`).split("\n");
+	const netrwRow = () => {
+		const right = rows()
+			.find((row) => row.includes("../"))
+			?.split("│")[1];
+		if (right === undefined) throw new Error("netrw's ../ line isn't beside the empty buffer");
+		return right;
+	};
+	const lit = netrwRow().match(/48;2;[0-9;]+m/)?.[0] as string;
+	expect(lit).toBeDefined();
 	s.keys("C-h");
 	await waitState(s, "off nvim's left edge to the roster", (x) => x.focus === "roster");
+	await until(() => !netrwRow().includes(lit), budgets.settle, "netrw's line unlit while nvim is out of focus");
 	s.keys("C-l");
 	await waitState(s, "back into nvim", (x) => x.focus === "editor");
+	await until(() => netrwRow().includes(lit), budgets.settle, "netrw's line lit again");
+	const top = rows()[0] as string;
+	expect(top).toContain("│");
+	expect(top.split("│")[0]).not.toContain(lit);
 });
