@@ -318,7 +318,16 @@ export async function openDeck(intent: DeckIntent): Promise<void> {
 	const cols = process.stdout.columns;
 	const rows = process.stdout.rows;
 	const env = deckEnv();
-	const stage = tmux(
+	const roster = [SWB, "__roster", "--deck", deck, "--here", process.cwd()];
+	if (intent.select) roster.push("--select", intent.select);
+	if (intent.newCwd) roster.push("--new", intent.newCwd);
+	if (intent.harness) roster.push("--harness", intent.harness);
+	if (intent.continue) roster.push("--continue");
+	// One tmux command, not one per step. A new pane gives up a row to its border label, and tmux holds back any resize
+	// within 250 ms of the last: a split sent separately reached the Stage that much later and redrew it, but resizes
+	// queued together land as one. The roster reads the Stage's id from @swb_stage, since the command can't name it.
+	const narrow = cols < NARROW_BELOW ? [";", "set", "-t", deck, "@swb_narrow", "1", ";", "resize-pane", "-Z", "-t", `=${deck}:`] : [];
+	tmux(
 		UI,
 		"new-session",
 		"-d",
@@ -328,34 +337,27 @@ export async function openDeck(intent: DeckIntent): Promise<void> {
 		String(cols),
 		"-y",
 		String(rows),
-		"-P",
-		"-F",
-		"#{pane_id}",
 		...env,
 		stageScript(deck, paths.target),
-	);
-	const roster = [SWB, "__roster", "--deck", deck, "--stage", stage, "--here", process.cwd()];
-	if (intent.select) roster.push("--select", intent.select);
-	if (intent.newCwd) roster.push("--new", intent.newCwd);
-	if (intent.harness) roster.push("--harness", intent.harness);
-	if (intent.continue) roster.push("--continue");
-	const rosterPane = tmux(
-		UI,
+		";",
+		"set",
+		"-wF",
+		"-t",
+		`=${deck}:`,
+		"@swb_stage",
+		"#{pane_id}",
+		";",
 		"split-window",
 		"-h",
 		"-b",
 		"-l",
 		String(rosterCols(config.rosterWidth, cols)),
 		"-t",
-		stage,
-		"-P",
-		"-F",
-		"#{pane_id}",
+		`=${deck}:`,
 		...env,
 		`exec ${roster.map(quote).join(" ")}`,
+		...narrow,
 	);
-	tmux(UI, "select-pane", "-t", rosterPane);
-	if (cols < NARROW_BELOW) tmux(UI, "set", "-t", deck, "@swb_narrow", "1", ";", "resize-pane", "-Z", "-t", rosterPane);
 	since("deck.panes", panes);
 
 	const attach = Bun.spawn([tmuxBin(), "-L", UI, "attach", "-t", `=${deck}`], {

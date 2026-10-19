@@ -90,7 +90,6 @@ const { values: args } = parseArgs({
 	args: process.argv.slice(3),
 	options: {
 		deck: { type: "string" },
-		stage: { type: "string" },
 		select: { type: "string" },
 		new: { type: "string" },
 		harness: { type: "string" },
@@ -98,13 +97,17 @@ const { values: args } = parseArgs({
 		continue: { type: "boolean" },
 	},
 });
-if (!args.deck || !args.stage || !args.here) throw new UsageError("__roster: --deck, --stage, and --here are required");
+if (!args.deck || !args.here) throw new UsageError("__roster: --deck and --here are required");
 const deck = args.deck;
 /** Where swb was run: `-c` and `swb new` start there, and this Project keeps the Deck's layout. */
 const here = args.here;
-const stagePane = args.stage;
 if (!process.env.TMUX_PANE) throw new UsageError("__roster: runs only inside a Deck pane");
 const rosterPane = process.env.TMUX_PANE;
+/** The Stage's pane and its tty, from the window option the Deck set as it made the Stage. */
+const [stagePane, stageTty] = tmux(UI, "display", "-p", "-t", rosterPane, "#{P:#{?#{==:#{pane_id},#{@swb_stage}},#{pane_id} #{pane_tty},}}")
+	.trim()
+	.split(" ") as [string, string];
+if (!stagePane || !stageTty) throw new UsageError("__roster: its window names no Stage");
 const paths = deckPaths(deck);
 const placeholder = placeholderName(deck);
 const config = loadConfig();
@@ -3451,7 +3454,7 @@ tui.onTerminalColorSchemeChange((scheme) => void queryColors(scheme));
 tui.setTerminalColorSchemeNotifications(true);
 void queryColors(null);
 
-main.tty = tmux(UI, "display", "-p", "-t", stagePane, "#{pane_tty}");
+main.tty = stageTty;
 tmux(
 	UI,
 	"set",
