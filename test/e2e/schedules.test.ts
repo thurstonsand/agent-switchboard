@@ -334,6 +334,8 @@ test("the Deck's Snoozed section: s snoozes from the roster, the row says when i
 	await reply(s, "one");
 	const id = st.staged.id as string;
 	await until(() => entry(s, id)?.activity === "idle", budgets.settle, "idle");
+	// The Deck reads the db on its own tick, and refuses to snooze a session it hasn't seen a prompt in yet.
+	await waitState(s, "its row in the Deck", (x) => sessionRows(x).some((r) => r.id === id && !r.provisional));
 
 	s.keys("M-a", "h");
 	await waitState(s, "roster focus", (x) => x.focus === "roster");
