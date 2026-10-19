@@ -15,6 +15,11 @@
 			"minimumReleaseAge": null
 		},
 		{
+			"description": "A Pi update raises the package.json floors, not only bun.lock, so the declared range always names the Pi swb is tested against.",
+			"matchPackageNames": ["@earendil-works/**"],
+			"rangeStrategy": "bump"
+		},
+		{
 			"description": "Pinned to the version pi ships. Pi's extension loader aliases typebox to its own bundled copy, so our declaration only types what pi executes and must match it. It moves when pi moves, not on Renovate's schedule.",
 			"matchPackageNames": ["typebox"],
 			"enabled": false
