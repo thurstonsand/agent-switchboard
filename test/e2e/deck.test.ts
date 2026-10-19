@@ -74,7 +74,7 @@ test("Enter on a dormant row puts the keyboard on its pi as it comes up; Enter t
 	expect(entry(s, a).live && entry(s, b).live).toBe(true);
 });
 
-test("M-a j from pi onto a dormant session leaves it asleep, and a key on its card wakes it into pi", async () => {
+test("M-a J from pi onto a dormant session leaves it asleep, and a key on its card wakes it into pi", async () => {
 	s = scenario("phase2", "stage-key-wake");
 	const [a, b] = (await seed(s, { turns: ["alpha"] }, { turns: ["beta"] })) as [string, string];
 	s.swb("drive", "start");
@@ -83,7 +83,7 @@ test("M-a j from pi onto a dormant session leaves it asleep, and a key on its ca
 	const live = await waitState(s, "a live with the keyboard", (x) => x.staged.id === a && x.staged.kind === "live", budgets.piReady);
 	expect(live.focus).toBe("stage");
 
-	s.keys("M-a", rowIndex(live, b) > rowIndex(live, a) ? "j" : "k");
+	s.keys("M-a", rowIndex(live, b) > rowIndex(live, a) ? "J" : "K");
 	const asleep = await waitState(s, "b's card on the Stage", (x) => x.staged.id === b);
 	await Bun.sleep(1000);
 	expect(state(s)).toMatchObject({ focus: "stage", staged: { id: b, kind: "dormant" } });

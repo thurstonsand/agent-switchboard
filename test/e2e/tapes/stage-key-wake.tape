@@ -1,7 +1,7 @@
-# M-a j from pi onto a sleeping session leaves it asleep with the keyboard on its card; any key there wakes it.
+# M-a J from pi onto a sleeping session leaves it asleep with the keyboard on its card; any key there wakes it.
 Source common.tape
 
-Type "# from pi, M-a j onto a sleeping session; a key on its card wakes it" Sleep 1s Enter
+Type "# from pi, M-a J onto a sleeping session; a key on its card wakes it" Sleep 1s Enter
 Type "swb" Sleep 400ms Enter
 Wait+Screen /▾ \S+ \(2\)/
 Sleep 1.5s
@@ -9,7 +9,7 @@ Enter
 Wait+Screen /faux-1/
 Sleep 1.5s
 Alt+a
-Type "j"
+Type "J"
 Wait+Screen /notes drafted/
 Sleep 1.5s
 Screenshot ../artifacts/phase6/videos/stage-key-wake-asleep.png

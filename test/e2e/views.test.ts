@@ -431,9 +431,9 @@ function groups(st: DeckState): Record<string, string[]> {
 	return out;
 }
 
-/** The screen line a row of the open roster renders on: the list starts two lines down. */
+/** The screen line a row of the open roster renders on: the list starts under the roster's label. */
 function lineOf(st: DeckState, probe: (row: DeckState["rows"][number]) => boolean): number {
-	return 2 + st.rows.findIndex(probe);
+	return 1 + st.rows.findIndex(probe);
 }
 
 test("m names a session's Group, n joins it; dragging moves it between Groups beside worktree buckets, and a Group lives only as long as its sessions", async () => {
@@ -473,7 +473,7 @@ test("m names a session's Group, n joins it; dragging moves it between Groups be
 	s.swb("drive", "release", "8", `${alpha}`);
 	st = await waitState(s, "bravo dropped into review", (x) => groups(x).review?.length === 2 && x.drop === null);
 	expect(groups(st)).toEqual({ review: sorted(a, b), "⎇ wt": [w] });
-	await until(() => entry(s, b).group === "review", budgets.settle, "b\'s Group review in the db");
+	await until(() => entry(s, b).group === "review", budgets.settle, "b's Group review in the db");
 	s.save("dropped.ansi", s.swb("drive", "capture", "--ansi"));
 
 	const wt = lineOf(st, (r) => r.kind === "header" && r.group === "⎇ wt");
@@ -502,7 +502,7 @@ test("m names a session's Group, n joins it; dragging moves it between Groups be
 	s.save("picker.ansi", s.swb("drive", "capture", "--ansi"));
 	s.keys("Enter");
 	st = await waitState(s, "bravo picked into review", (x) => groups(x).review?.length === 2 && x.mode === "roster");
-	await until(() => entry(s, b).group === "review", budgets.settle, "b\'s Group review in the db");
+	await until(() => entry(s, b).group === "review", budgets.settle, "b's Group review in the db");
 	await cursorTo(s, b);
 	s.keys("m");
 	await waitState(s, "picking again", (x) => x.mode === "name");
@@ -528,7 +528,7 @@ test("m names a session's Group, n joins it; dragging moves it between Groups be
 	st = await waitState(s, "review renamed triage", (x) => groups(x).triage?.join() === a);
 	const at = st.rows[st.cursorRow];
 	expect(at?.kind === "header" && at.group).toBe("triage");
-	await until(() => entry(s, a).group === "triage", budgets.settle, "a\'s Group triage in the db");
+	await until(() => entry(s, a).group === "triage", budgets.settle, "a's Group triage in the db");
 	s.save("renamed.ansi", s.swb("drive", "capture", "--ansi"));
 
 	await pickNew(s);
@@ -565,6 +565,21 @@ test("M-a s puts the directory's shell under pi, right of the split editor; ctrl
 	s.save("shell.txt", s.screen());
 	s.save("shell.ansi", s.swb("drive", "capture", "--ansi"));
 
+	// Every pane names itself on its top edge; with the prefix down, the others show the key that reaches them.
+	const [top] = s.screen().split("\n");
+	expect(top).toMatch(/swb.*editor.*pi/);
+	s.keys("M-a");
+	await until(() => /Tab +swb.*h +editor.*k +pi/.test(s.screen().split("\n")[0] ?? ""), budgets.settle, "the keys from the shell");
+	s.save("shell-prefix.txt", s.screen());
+	s.keys("k");
+	await waitState(s, "M-a k up to pi", (x) => x.focus === "stage");
+	await until(
+		() => /swb.*editor.*pi/.test(s.screen().split("\n")[0] ?? "") && !/h +editor/.test(s.screen()),
+		budgets.settle,
+		"the keys gone once the prefix is spent, the names kept",
+	);
+	await prefixKeys(s, "M-a", "j", "M-a j down to the shell", (x) => x.focus === "shell");
+
 	for (const [key, want] of [
 		["C-k", "stage"],
 		["C-j", "shell"],
@@ -584,6 +599,16 @@ test("M-a s puts the directory's shell under pi, right of the split editor; ctrl
 	await prefixKeys(s, "M-a", "h", "M-a h", (x) => x.focus === "editor");
 	await prefixKeys(s, "M-a", "h", "M-a h", (x) => x.focus === "roster");
 	await prefixKeys(s, "M-a", "l", "M-a l back to the editor", (x) => x.focus === "editor");
+	// Hidden and shown again, the roster still knows the pane it was left from, and says so; pi and the shell are two
+	// moves away from it, so they show no key.
+	await prefixKeys(s, "M-a", "z", "the roster hidden, the editor still focused", (x) => x.layout.rosterHidden && x.focus === "editor");
+	await prefixKeys(s, "M-a", "h", "M-a h shows the roster and focuses it", (x) => !x.layout.rosterHidden && x.focus === "roster");
+	s.keys("M-a");
+	await until(() => /l +editor/.test(s.screen().split("\n")[0] ?? ""), budgets.settle, "l on the editor, the pane it was left from");
+	expect(s.screen()).not.toMatch(/(h|j|k|l|Tab) +(pi|shell)\b/);
+	s.save("rejoined-prefix.txt", s.screen());
+	s.keys("l");
+	await waitState(s, "M-a l back to the editor after the roster rejoins", (x) => x.focus === "editor");
 
 	s.keys("C-l", "C-j");
 	await waitState(s, "shell", (x) => x.focus === "shell");

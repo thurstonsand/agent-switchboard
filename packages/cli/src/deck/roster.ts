@@ -580,6 +580,33 @@ function syncBelow(): void {
 	});
 }
 
+/** The labels the Stage's panes wear on their top edges, as last set. */
+let labels = "";
+
+/** Names each of the Stage's panes after what it shows, once any pane split or killed ahead of it is in place. */
+function syncLabels(): void {
+	const a = stage.applied;
+	let harness: string = newLaunch() ? "new" : "empty";
+	if (a.id !== null) {
+		const e = entries.get(a.id);
+		if (!e) throw new Error(`the Stage applied ${a.id}, which has no entry`);
+		harness = e.harness;
+	}
+	stageOps = stageOps.then(async () => {
+		const want: [string, string][] = [[stagePane, a.view === "pi" ? harness : "editor"]];
+		if (side) want.push([side.pane, harness]);
+		if (below) want.push([below.pane, "shell"]);
+		const key = JSON.stringify(want);
+		if (key === labels) return;
+		// One command per pane: a shell's pane closes with its shell, ahead of the apply that forgets it.
+		const results = await Promise.allSettled(want.map(([pane, label]) => tmuxAsync(UI, "set", "-p", "-t", pane, "@swb_label", label)));
+		const failed = results.flatMap((r) => (r.status === "rejected" && !String(r.reason).includes("can't find pane") ? [r.reason] : []));
+		// Only labels that took are remembered, so the next apply tries the rest again.
+		labels = failed.length === 0 ? key : "";
+		for (const error of failed) toast(`label: ${(error as Error).message}`, "error");
+	});
+}
+
 /** Ctrl-hjkl reach an nvim Editor in the pane showing it; nvim hands moves off its own edge back through `swb __nav`. */
 function tagEditor(on: boolean): void {
 	stageOps = stageOps.then(() =>
@@ -618,6 +645,7 @@ function apply(): void {
 	if (d.side !== prev.side || d.side !== (side?.target ?? null)) syncSide();
 	if (d.below !== (below?.target ?? null) || d.side !== prev.side) syncBelow();
 	if (nvimEditor(config.editor) && (d.view !== "pi") !== (prev.view !== "pi")) tagEditor(d.view !== "pi");
+	syncLabels();
 	if (d.target === prev.target) return;
 	writeAtomic(paths.target, d.target);
 	switchStage(main, d.target, false);
@@ -1066,7 +1094,7 @@ class Roster implements Component {
 	pointer: { x: number; y: number } | null = null;
 	/** A narrow Deck's Peek, as the last render drew it. */
 	inline: InlinePeek | null = null;
-	listTop = 2;
+	listTop = 0;
 	listHeight = 0;
 	/** What a click does, by row and column range, as of the last render. */
 	targets: ClickTarget[] = [];
@@ -2009,11 +2037,13 @@ class Roster implements Component {
 		this.targets = [];
 		// A wide Deck's Peek says what the session is; the narrow one's roster has no Stage beside it to show one.
 		const detailLines = narrow ? 3 : 1;
-		const bodyHeight = Math.max(1, height - 5 - detailLines);
-		const detail = this.detail(width, now, 3 + bodyHeight);
-		const lines = [this.header(width), gray("─".repeat(width))];
+		const tag = this.filterTag(width);
+		this.listTop = tag === null ? 0 : 1;
+		const bodyHeight = Math.max(1, height - this.listTop - 3 - detailLines);
+		const detail = this.detail(width, now, this.listTop + bodyHeight + 1);
+		const lines = tag === null ? [] : [tag];
 		lines.push(...this.list(rows, index, width, bodyHeight, now));
-		lines.push(gray("─".repeat(width)), ...detail, this.messageLine(now), this.hints(3 + bodyHeight + detailLines + 1));
+		lines.push(gray("─".repeat(width)), ...detail, this.messageLine(now), this.hints(this.listTop + bodyHeight + 1 + detailLines + 1));
 		// A wide Deck's Peek is a popup over the Stage; a narrow Deck has no Stage beside the roster, so the roster draws it.
 		const spot = wantPeek(this.peekSpot(rows, index));
 		syncPeek(narrow ? null : spot);
@@ -2028,16 +2058,14 @@ class Roster implements Component {
 		return out;
 	}
 
-	/** The filter's tag, while one applies, is a button that clears it. */
-	header(width: number): string {
-		const tag: [string, (() => void) | null][] =
-			this.query() !== "" && !this.filtering
-				? [
-						[" ", null],
-						[`${magenta(`/${this.filter.getValue()}`)} ✕`, () => this.filter.setValue("")],
-					]
-				: [];
-		return truncateToWidth(this.clickable(0, [[` ${bold("swb")}`, null], ...tag]), width, "…");
+	/** The filter's tag, atop the list while one applies, is a button that clears it. */
+	filterTag(width: number): string | null {
+		if (this.query() === "" || this.filtering) return null;
+		const parts: [string, (() => void) | null][] = [
+			[" ", null],
+			[`${magenta(`/${this.filter.getValue()}`)} ✕`, () => this.filter.setValue("")],
+		];
+		return truncateToWidth(this.clickable(0, parts), width, "…");
 	}
 
 	list(rows: Row[], index: number, width: number, full: number, now: number): string[] {
@@ -2438,18 +2466,22 @@ function openPeek(spot: PeekSpot): void {
 				.map((line) => {
 					const [id, left, top, width, height, tty] = line.split("\t") as [string, string, string, string, string, string];
 					return { id, left: Number(left), top: Number(top), width: Number(width), height: Number(height), tty };
-				})
-				.filter((pane) => pane.id !== rosterPane);
+				});
+			// The spot is a roster row; the panes' tops are the window's, below each pane's label. A roster hidden since has no Peek.
+			const rosterTop = panes.find((pane) => pane.id === rosterPane)?.top;
+			if (rosterTop === undefined) return;
+			const y = spot.y + rosterTop;
+			const stagePanes = panes.filter((pane) => pane.id !== rosterPane);
 			// The Stage's panes against the roster's edge: pi's, and the shell's under it.
-			const edge = Math.min(...panes.map((pane) => pane.left));
-			const host = panes.find((pane) => pane.left === edge && spot.y >= pane.top && spot.y < pane.top + pane.height);
+			const edge = Math.min(...stagePanes.map((pane) => pane.left));
+			const host = stagePanes.find((pane) => pane.left === edge && y >= pane.top && y < pane.top + pane.height);
 			const row = roster.rows().find((r) => r.key === spot.id);
 			if (!host || host.width < PEEK_MIN_COLS || row?.kind !== "session" || spotKey(peek.spot) !== spotKey(spot)) return;
 			const width = Math.min(PEEK_COLS, host.width);
 			const view = peekView(row, width, host.height, "left");
 			const height = view.lines.length;
 			// Its title, under the top edge, level with the row.
-			const top = Math.max(0, Math.min(spot.y - host.top - 1, host.height - height));
+			const top = Math.max(0, Math.min(y - host.top - 1, host.height - height));
 			const json = JSON.stringify(view);
 			writeAtomic(paths.peek, json);
 			const close = `${quote(tmuxBin())} -L ${quote(SESSIONS)} display-popup -C -c ${quote(host.tty)} >/dev/null 2>&1`;
@@ -2690,7 +2722,10 @@ function syncRoster(toRoster: boolean): Promise<void> {
 						const height = await tmuxAsync(UI, "display", "-p", "-t", below.pane, "#{pane_height}");
 						join.push(";", "join-pane", "-v", "-d", "-l", height, "-s", below.pane, "-t", below.parent);
 					}
-					await tmuxAsync(UI, ...join, ";", "select-window", "-t", rosterPane, ";", "select-pane", "-t", toRoster ? rosterPane : active);
+					// The roster's window began empty when it broke away, so it has no last pane: the Stage pane goes first, for
+					// l and Tab to return to.
+					const back = toRoster ? [";", "select-pane", "-t", rosterPane] : [];
+					await tmuxAsync(UI, ...join, ";", "select-window", "-t", rosterPane, ";", "select-pane", "-t", active, ...back);
 				}
 			} catch (error) {
 				toast(`roster: ${(error as Error).message}`, "error");
@@ -2722,7 +2757,7 @@ async function prefixKey(k: string, id: string | undefined): Promise<void> {
 	} else if (k === "m") {
 		await focusRoster();
 		roster.startNaming(row);
-	} else if (k === "j" || k === "k") roster.moveSession(k === "j" ? 1 : -1);
+	} else if (k === "J" || k === "K") roster.moveSession(k === "J" ? 1 : -1);
 	else if (k === "n") {
 		await focusRoster();
 		roster.newAt(row);
@@ -3101,7 +3136,27 @@ tui.setTerminalColorSchemeNotifications(true);
 void queryColors(null);
 
 main.tty = tmux(UI, "display", "-p", "-t", stagePane, "#{pane_tty}");
-tmux(UI, "set", "-t", deck, "@swb_roster", rosterPane, ";", "set", "-t", deck, "@swb_peek_close", "true");
+tmux(
+	UI,
+	"set",
+	"-t",
+	deck,
+	"@swb_roster",
+	rosterPane,
+	";",
+	"set",
+	"-t",
+	deck,
+	"@swb_peek_close",
+	"true",
+	";",
+	"set",
+	"-p",
+	"-t",
+	rosterPane,
+	"@swb_label",
+	"swb",
+);
 focusedPane = rosterPane;
 rmSync(paths.sock, { force: true });
 Bun.serve({

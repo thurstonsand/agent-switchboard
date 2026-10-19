@@ -107,6 +107,33 @@ const POINTER_AWAY = `#{&&:#{@swb_watch},#{&&:#{!=:#{mouse_pane},#{@swb_roster}}
 const KEY_AWAY = "#{&&:#{@swb_watch},#{!=:#{pane_id},#{@swb_roster}}}";
 const LEAVE = `set -u @swb_watch ; run-shell '#{@swb_peek_close}' ; ${deckCmd("pointer-out")}`;
 
+const IN_ROSTER = "#{==:#{pane_id},#{@swb_roster}}";
+
+/**
+ * The pane each of prefix h, j, k, l reaches from the focused one, kept in window options for the border labels. tmux's
+ * {left-of} and the rest wrap around, so an edge sets none; from the roster, l goes back to the pane it was left from.
+ */
+const KEY_TARGETS = [
+	`if -F '#{pane_at_left}' { set -wu @swb_key_h } { set -wF -t '{left-of}' @swb_key_h '#{pane_id}' }`,
+	`if -F '#{pane_at_bottom}' { set -wu @swb_key_j } { set -wF -t '{down-of}' @swb_key_j '#{pane_id}' }`,
+	`if -F '#{pane_at_top}' { set -wu @swb_key_k } { set -wF -t '{up-of}' @swb_key_k '#{pane_id}' }`,
+	`if -F '${IN_ROSTER}' { set -wF @swb_key_l '#{P:#{?pane_last,#{pane_id},}}' } { if -F '#{pane_at_right}' { set -wu @swb_key_l } { set -wF -t '{right-of}' @swb_key_l '#{pane_id}' } }`,
+].join(" ; ");
+
+const keyOf = (k: string, otherwise: string) => `#{?#{==:#{pane_id},#{@swb_key_${k}}},${k},${otherwise}}`;
+/** The key that reaches this pane from the focused one; prefix Tab reaches the roster from anywhere. */
+const PANE_KEY = keyOf("h", keyOf("j", keyOf("k", keyOf("l", `#{?${IN_ROSTER},Tab,}`))));
+/**
+ * Each pane names itself on its top edge, and the focused one's name is lit: a divider shared by two panes can't say
+ * which of them has the keyboard. While the prefix is down, the others show the key that reaches them.
+ */
+const PANE_LABEL = [
+	"#{?#{@swb_label},#{?pane_active,",
+	"#[fg=black bg=cyan bold] #{@swb_label} #[default],",
+	`#{?#{&&:#{client_prefix},${PANE_KEY}},#[fg=black bg=yellow bold] ${PANE_KEY} #[default],}`,
+	"#[fg=brightblack] #{@swb_label} #[default]},}",
+].join("");
+
 /** A mouse binding whose event stays with the Peek while the pointer is over it, and closes the Peek first otherwise. */
 function peekAware(key: string, otherwise: string): string {
 	return `bind -n ${key} if -F '${OVER_PEEK}' { send-keys -M } { if -F '${POINTER_AWAY}' { ${LEAVE} } ; ${otherwise} }`;
@@ -147,7 +174,10 @@ function uiConf(config: Config): string {
 		"set -g detach-on-destroy on",
 		"set -g pane-border-lines single",
 		"set -g pane-border-style fg=brightblack",
-		"set -g pane-active-border-style fg=cyan",
+		"set -g pane-active-border-style fg=brightblack",
+		"set -g pane-border-indicators off",
+		"set -g pane-border-status top",
+		`set -g pane-border-format "${PANE_LABEL}"`,
 		// tmux 3.8 paints popups dark grey by default, whatever the terminal's theme; help wears the terminal's own.
 		"set -g popup-style default",
 		"set -g popup-border-style default",
@@ -160,10 +190,13 @@ function uiConf(config: Config): string {
 		// splits, so its moves carry the zoom along. @swb_hidden is the wide Deck's roster state; the roster makes it so.
 		`bind Tab if -F '#{@swb_narrow}' { select-pane -Z -t :.+ } { if -F '#{@swb_hidden}' { set -u @swb_hidden ; ${roster("focus")} } { if -F '#{pane_index}' { select-pane -t :.0 } { ${backToStage} } } }`,
 		`bind h ${nav("h")}`,
+		// j and k move between panes on the Stage; the roster has none above or below, so there they move between sessions.
+		`bind j if -F '${IN_ROSTER}' { ${notify("__deck #{session_name} key J")} } { ${nav("j")} }`,
+		`bind k if -F '${IN_ROSTER}' { ${notify("__deck #{session_name} key K")} } { ${nav("k")} }`,
 		`bind l if -F '#{||:#{@swb_narrow},#{||:#{pane_index},#{@swb_hidden}}}' { ${nav("l")} } { ${backToStage} }`,
 		...(["h", "j", "k", "l"] as const).map((k) => `bind -n C-${k} if -F '#{@swb_editor}' { send-keys C-${k} } { ${nav(k)} }`),
 		`bind z if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { if -F '#{@swb_hidden}' { set -u @swb_hidden } { set @swb_hidden 1 } ; ${roster("sync")} }`,
-		...[..."nNawxyY/jkmdS"].map((k) => `bind ${k} ${notify(`__deck #{session_name} key ${k}`)}`),
+		...[..."nNawxyY/JKmdS"].map((k) => `bind ${k} ${notify(`__deck #{session_name} key ${k}`)}`),
 		`bind e ${notify("__deck #{session_name} view-swap")}`,
 		`bind v ${notify("__deck #{session_name} view-split")}`,
 		`bind s ${notify("__deck #{session_name} shell")}`,
@@ -175,6 +208,8 @@ function uiConf(config: Config): string {
 		hook("client-focus-in", "__deck #{session_name} terminal-focus in"),
 		hook("client-focus-out", "__deck #{session_name} terminal-focus out"),
 		hook("window-pane-changed", "__deck #{session_name} focus #{pane_id}"),
+		`set-hook -g window-pane-changed[1] { ${KEY_TARGETS} }`,
+		`set-hook -g window-layout-changed[0] { ${KEY_TARGETS} }`,
 		hook("session-window-changed", "__deck #{session_name} focus #{pane_id}"),
 		hook("window-resized", "__deck #{session_name} layout"),
 	].join("\n");

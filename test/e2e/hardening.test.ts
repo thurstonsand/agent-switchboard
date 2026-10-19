@@ -295,7 +295,7 @@ test("200 cursor moves render at a median under 16 ms from key to frame", async 
 
 test("roster navigation: h l space and a header click fold projects; g G jump; M-a Tab z ? and q", async () => {
 	s = scenario("phase5", "navigation");
-	await seed(s, { turns: ["here"] });
+	const [here] = (await seed(s, { turns: ["here"] })) as [string];
 	const other = join(s.root, "other");
 	mkdirSync(other);
 	s.swb("drive", "start", "--", "new", "--cwd", other);
@@ -355,14 +355,23 @@ test("roster navigation: h l space and a header click fold projects; g G jump; M
 	await waitState(s, "the roster hidden from the list, pi focused", (x) => x.layout.rosterHidden && x.focus === "stage");
 	s.keys("M-a", "z");
 	await waitState(s, "the roster back, pi still focused", (x) => !x.layout.rosterHidden && x.focus === "stage");
-	s.keys("M-a", "j");
+	s.keys("M-a", "J");
 	await waitState(
 		s,
-		"M-a j stages the session below, keys stay on pi",
-		(x) => x.cursor !== b && x.staged.id === x.cursor && x.focus === "stage",
+		"M-a J stages here, below b, keys stay on pi",
+		(x) => x.cursor === here && x.staged.id === here && x.focus === "stage",
 	);
+	s.keys("M-a", "K");
+	await waitState(s, "M-a K stages b again", (x) => x.cursor === b && x.staged.id === b && x.focus === "stage");
+	// The roster has no pane above or below it, so there M-a j and k move between sessions as J and K do.
+	s.keys("M-a", "h");
+	await waitState(s, "the roster", (x) => x.focus === "roster");
+	s.keys("M-a", "j");
+	await waitState(s, "M-a j in the roster stages here, below b", (x) => x.cursor === here && x.staged.id === here && x.focus === "roster");
 	s.keys("M-a", "k");
-	await waitState(s, "M-a k stages b again", (x) => x.cursor === b && x.staged.id === b && x.focus === "stage");
+	await waitState(s, "M-a k in the roster stages b again", (x) => x.cursor === b && x.staged.id === b && x.focus === "roster");
+	s.keys("M-a", "l");
+	await waitState(s, "pi again", (x) => x.focus === "stage");
 	const lines = s.screen().split("\n");
 	const hint = lines.findIndex((line) => line.includes("hide list"));
 	expect(hint).toBeGreaterThan(-1);

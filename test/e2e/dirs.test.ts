@@ -142,7 +142,7 @@ test("in the picker the highlight, and its ✕, follow the pointer", async () =>
 	s.keys("n");
 	await waitState(s, "the picker", (x) => x.picker?.rows.length === 3 && x.picker.choice === 0);
 	// Through the drive terminal and the Deck's tmux, which passes plain motion on only to a pane that asks for it.
-	s.swb("drive", "move", "6", "4");
+	s.swb("drive", "move", "6", "5");
 	const st = await waitState(s, "notes under the pointer", (x) => x.picker?.choice === 1);
 	expect(st.picker?.rows[1]?.name).toBe("notes");
 	expect(s.screen()).toMatch(/notes\s+✕/);

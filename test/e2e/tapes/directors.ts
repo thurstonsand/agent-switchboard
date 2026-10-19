@@ -294,7 +294,7 @@ export const directors: Record<string, Director> = {
 			const ls = await waitLs(s, "both seeded", (x) => x.length === 2);
 			const notes = ls.find((e) => e.title === "Draft release notes")?.id;
 			await waitDeck(s, "the first one live with the keyboard", (x) => x.staged.kind === "live" && x.focus === "stage");
-			const asleep = await waitDeck(s, "M-a j onto the sleeping one", (x) => x.staged.id === notes);
+			const asleep = await waitDeck(s, "M-a J onto the sleeping one", (x) => x.staged.id === notes);
 			expect(asleep.staged.kind).toBe("dormant");
 			expect(asleep.focus).toBe("stage");
 			await waitDeck(s, "a key woke it", (x) => x.staged.id === notes && x.staged.kind === "live" && x.focus === "stage");
@@ -342,6 +342,28 @@ export const directors: Record<string, Director> = {
 			await waitDeck(s, "split", (x) => x.layout.split && x.staged.view === "split");
 			await waitDeck(s, "the shell", (x) => x.layout.shell && x.focus === "shell");
 			await waitDeck(s, "ctrl-d closed it", (x) => !x.layout.shell && x.layout.split);
+		},
+	},
+
+	"pane-labels": {
+		setup: async (s) => {
+			files(s);
+			config(s, `editor = "${NVIM} --clean ."\n`);
+			await seed(
+				s,
+				{ title: "Draft release notes", turns: ["notes drafted"] },
+				{ title: "Refactor the parser", turns: ["parser refactored"] },
+			);
+		},
+		run: async (s) => {
+			const live = await waitDeck(s, "pi live with the keyboard", (x) => x.staged.kind === "live" && x.focus === "stage");
+			const [first, next] = live.rows.flatMap((r) => (r.kind === "session" ? [r.id] : [])) as [string, string];
+			expect(live.staged.id).toBe(first);
+			await waitDeck(s, "split, the shell under pi", (x) => x.layout.split && x.layout.shell && x.focus === "shell");
+			await waitDeck(s, "M-a k up to pi", (x) => x.focus === "stage");
+			await waitDeck(s, "M-a h to the editor", (x) => x.focus === "editor");
+			await waitDeck(s, "M-a h to the sidebar", (x) => x.focus === "roster");
+			await waitDeck(s, "M-a j in the sidebar stages the next session", (x) => x.staged.id === next && x.focus === "roster");
 		},
 	},
 
@@ -685,7 +707,8 @@ export const directors: Record<string, Director> = {
 					await Bun.sleep(120);
 				}
 			};
-			const line = (probe: (row: DeckState["rows"][number]) => boolean) => 2 + st.rows.findIndex(probe);
+			// The roster pane's own rows: its list is the first of them.
+			const line = (probe: (row: DeckState["rows"][number]) => boolean) => st.rows.findIndex(probe);
 			const drag = (from: number, to: number) =>
 				mouse([0, 8, from], ...[1, 2, 3, 4].map((i): [number, number, number] => [32, 8, Math.round(from + ((to - from) * i) / 4)]));
 
