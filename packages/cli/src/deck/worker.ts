@@ -3,7 +3,7 @@ import { statSync } from "node:fs";
 import { bootId, type Db, type Harness, operatorDir, projectRoot, type View } from "@swb/shared";
 import { span } from "@swb/shared/trace";
 import type { Config } from "../config.ts";
-import { derive, type RuntimeRecord, runtimeLive, runtimeRecords, type SessionRow, sessionRows, type World } from "../derive.ts";
+import { deriveSessions, type RuntimeRecord, runtimeLive, runtimeRecords, type SessionRow, sessionRows, type World } from "../derive.ts";
 import { addDir, removeDir, targets } from "../dirs.ts";
 import { type ScheduleView, schedulesBySession, snooze } from "../schedules.ts";
 import { archive, ensureEditor, ensureSessionsServer, ensureShell, launch, stop, unarchive, wake } from "../sessions.ts";
@@ -89,6 +89,7 @@ function snapshot(): Polled {
 		"#{pane_dead}",
 		"#{pane_dead_time}",
 		"#{@swb_version}",
+		"#{@swb_parent}",
 	);
 	const died: Record<string, string[]> = {};
 	for (const [name, kind, , , , dead, deadAt] of listed) {
@@ -110,8 +111,8 @@ function snapshot(): Polled {
 	const attached = new Map(alive.map(([name, , count]) => [name as string, count === "1"]));
 	const w: World = { now: Date.now(), bootId: boot, hosts: new Set(attached.keys()), inactiveAfterMs: config.inactiveAfterMs };
 	const known = new Set(rows.map((row) => row.session_id));
-	const entries: Entry[] = rows.map((row) => {
-		const state = derive(row, w);
+	const entries: Entry[] = deriveSessions(rows, w).map((state, i) => {
+		const row = rows[i] as SessionRow;
 		return {
 			...state,
 			view: row.view ?? "pi",
@@ -121,17 +122,21 @@ function snapshot(): Polled {
 			schedules: schedules.get(row.session_id) ?? [],
 		};
 	});
+	const parents = new Map(listed.map(([name, , , , , , , , parent]) => [name as string, (parent as string) || null]));
 	for (const runtime of runtimes) {
 		if (known.has(runtime.session_id) || !runtimeLive(runtime, w.bootId, w.hosts)) continue;
+		const parentId = parents.get(runtime.tmux_session) ?? null;
+		// What its first turn will copy: the parent's Group, when both are in one Project.
+		const parent = rows.find((row) => row.session_id === parentId && row.project_root === runtime.project_root);
 		entries.push({
 			id: runtime.session_id,
 			harness: runtime.harness,
-			parentId: null,
+			parentId,
 			title: null,
 			project: runtime.project_root,
 			cwd: runtime.cwd,
 			branch: null,
-			group: pendingGroups.get(runtime.session_id) ?? null,
+			group: pendingGroups.get(runtime.session_id) ?? parent?.group_name ?? null,
 			operator: runtime.cwd === operatorDir(),
 			open: true,
 			live: true,
@@ -306,9 +311,16 @@ function handle(message: ToWorker): void {
 			if (rows.some((row) => row.session_id === message.id)) markVisited(db, message.id);
 			break;
 		case "archive":
+			try {
+				archive(db, message.ids);
+				post({ type: "toggled", error: null });
+			} catch (error) {
+				post({ type: "toggled", error: (error as Error).message });
+			}
+			break;
 		case "unarchive":
 			try {
-				(message.type === "archive" ? archive : unarchive)(db, message.id);
+				unarchive(db, message.id);
 				post({ type: "toggled", error: null });
 			} catch (error) {
 				post({ type: "toggled", error: (error as Error).message });

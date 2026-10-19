@@ -1,7 +1,20 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { config, cursorTo, entry, piSessions, reply, rowIndex, seed, sessionRows, state, title, waitState } from "./harness/deck.ts";
+import {
+	config,
+	cursorTo,
+	entry,
+	launched,
+	piSessions,
+	reply,
+	rowIndex,
+	seed,
+	sessionRows,
+	state,
+	title,
+	waitState,
+} from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -213,6 +226,100 @@ test("Inactive after inactive_after, never while blocked or unseen", async () =>
 	await until(() => title(s) === "swb", budgets.settle, "the title counting nothing");
 	const st = await waitState(s, "Inactive section", (x) => x.rows.some((r) => r.kind === "section" && r.label === "Inactive"));
 	s.save("inactive.txt", `${s.screen()}\n${JSON.stringify(st.rows, null, 2)}`);
+});
+
+test("a on a session that started others still open asks first: esc keeps them, a archives it alone, A all of them; M-a a asks from the Stage", async () => {
+	s = scenario("phase8", "archive-family");
+	const other = join(s.root, "other");
+	mkdirSync(other);
+	const root = await launched(s, "reply root", { cwd: s.project, title: "root" });
+	const child = await launched(s, "reply child", { from: root, title: "child" });
+	const grandchild = await launched(s, "reply grandchild", { from: child, title: "grandchild" });
+	const away = await launched(s, "reply away", { from: root, cwd: other, title: "away" });
+	const family = [root, child, grandchild, away];
+	const open = () => family.map((id) => entry(s, id).open);
+	s.swb("drive", "start");
+	await waitState(s, "the family on the roster", (x) => x.ready && rowIndex(x, grandchild) !== -1);
+
+	await cursorTo(s, root);
+	s.keys("a");
+	let st = await waitState(s, "the archive prompt", (x) => x.mode === "archive");
+	// Everything it started, in any Project, and none of it seen yet.
+	expect(st.archive).toEqual({ id: root, counts: "●3", all: 4 });
+	await until(() => s.screen().includes("Archive  a this  A all 4  esc abort"), budgets.settle, "the prompt's choices");
+	s.save("prompt.txt", s.screen());
+	s.save("prompt.ansi", s.swb("drive", "capture", "--ansi"));
+	s.keys("Escape");
+	await waitState(s, "the prompt gone", (x) => x.mode === "roster" && x.archive === null);
+	expect(open()).toEqual([true, true, true, true]);
+
+	s.keys("a");
+	await waitState(s, "asked again", (x) => x.mode === "archive");
+	s.keys("a");
+	await until(() => !entry(s, root).open, budgets.settle, "root archived alone");
+	expect(open()).toEqual([false, true, true, true]);
+	// Its child stands on its own while it's archived, and goes back under it when it returns.
+	st = await waitState(s, "the child a root of its own", (x) => sessionRows(x).find((r) => r.id === child)?.origin === "session");
+	expect(sessionRows(st).find((r) => r.id === child)).toMatchObject({ level: 0, origin: "session" });
+	s.swb("unarchive", root);
+	st = await waitState(s, "the child back under root", (x) => sessionRows(x).find((r) => r.id === child)?.level === 1);
+	expect(sessionRows(st).find((r) => r.id === grandchild)).toMatchObject({ level: 2, origin: null });
+
+	await cursorTo(s, root);
+	s.keys("Enter");
+	await waitState(s, "root's pi focused", (x) => x.focus === "stage" && x.staged.id === root && x.staged.kind === "live", budgets.piReady);
+	s.keys("M-a", "a");
+	await waitState(s, "the prompt, with the keyboard", (x) => x.mode === "archive" && x.focus === "roster");
+	const lines = s.screen().split("\n");
+	const y = lines.findIndex((line) => line.includes("A all 4"));
+	s.swb("drive", "click", String((lines[y] as string).indexOf("A all 4") + 1), String(y));
+	await until(() => open().every((o) => !o), budgets.settle, "the whole family archived by a click");
+	await waitState(s, "the prompt gone", (x) => x.mode === "roster");
+	s.save("archived-all.txt", s.screen());
+});
+
+test("a family goes Inactive only as a whole: while one member is active, so are the rest", async () => {
+	s = scenario("phase8", "inactive-family");
+	config(s, 'inactive_after = "5s"\n');
+	const root = await launched(s, "reply root", { cwd: s.project, title: "root" });
+	const child = await launched(s, "reply child", { from: root, title: "child" });
+	const alone = await launched(s, "reply alone", { cwd: s.project, title: "alone" });
+	const visit = async (id: string) => {
+		await cursorTo(s, id);
+		s.keys("Enter");
+		await until(() => !entry(s, id).unseen, budgets.settle, `${id} visited`);
+		s.keys("M-a", "h");
+		await waitState(s, "the roster focused", (x) => x.focus === "roster");
+	};
+	s.swb("drive", "start");
+	// The child is visited last, so the next Deck opens on it, leaving Inactive folded away.
+	for (const id of [alone, root, child]) await visit(id);
+	s.swb("drive", "stop");
+	await until(() => [root, child, alone].every((id) => entry(s, id).inactive), 15_000, "all three quiet and seen");
+
+	// A new turn in the child makes it active again, and its parent with it; the unrelated session stays Inactive.
+	const sent = Bun.spawn([`${s.bin}/swb`, "send", "--from", root, "--to", child], { env: s.env, stdin: new Blob(["reply again"]) });
+	expect(await sent.exited).toBe(0);
+	await until(() => !entry(s, child).inactive, budgets.settle, "the child active");
+	expect(entry(s, root).inactive).toBe(false);
+	expect(entry(s, alone).inactive).toBe(true);
+	s.swb("drive", "start");
+	const st = await waitState(
+		s,
+		"the family open, alone Inactive",
+		(x) => x.ready && x.rows.some((r) => r.kind === "section" && r.label === "Inactive"),
+	);
+	expect(sessionRows(st).map((r) => [r.title, r.level])).toEqual([
+		["root", 0],
+		["child", 1],
+	]);
+	s.save("inactive-family.txt", `${s.screen()}\n${JSON.stringify(st.rows, null, 2)}`);
+	await visit(child);
+	await until(
+		() => entry(s, root).inactive && entry(s, child).inactive,
+		20_000,
+		"the family Inactive together once all of it is seen and quiet",
+	);
 });
 
 test("y copies swb open <id> and Y copies @session:<id> through the clipboard command", async () => {

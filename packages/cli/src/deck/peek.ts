@@ -51,7 +51,10 @@ process.stdin.on("data", (data: Buffer) => {
 				hot = at;
 				draw();
 			}
-		} else if (code === "0" && kind === "M" && at !== -1) post("key", [(view.buttons[at] as PeekButton).key, view.id]);
+		} else if (code === "0" && kind === "M" && at !== -1) {
+			const button = view.buttons[at] as PeekButton;
+			post("key", [button.key, button.id]);
+		}
 	}
 });
 process.stdin.on("end", () => process.exit(0));

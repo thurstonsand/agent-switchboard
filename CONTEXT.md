@@ -11,7 +11,7 @@ One agent conversation, identified by its harness session id, tracked from its f
 A session that has been completed; it leaves the roster but stays listable and reversible.
 
 **Inactive**:
-An open session with no activity within `inactive_after` (72 hours).
+An open session whose whole **Family**, leaving out its **Snoozed** members, has had no activity within `inactive_after` (72 hours).
 
 **Snoozed**:
 An open session put out of the way until a time or its next message. A timed snooze holds through any conversation; a next-message one ends with the next message or prompt. A blocked or interrupted session shows anyway, and one whose time runs out comes back Unseen.
@@ -85,7 +85,10 @@ A git repository together with all of its worktrees; sessions outside any reposi
 A session whose working directory is swb's Operator folder. It coordinates the other sessions instead of working in a **Project**, belongs to none, and never goes **Inactive**.
 
 **Group**:
-A name I give a session, scoping it within its **Project**. A Group exists only while some session carries its name: the last one archived takes it away, and unarchiving one brings it back. A session with no Group falls back to its worktree's bucket under `group_by = "worktree"`, or sits directly under its **Project**.
+A name I give a session, scoping it within its **Project**. A Group exists only while some session carries its name: the last one archived takes it away, and unarchiving one brings it back. A session another starts begins in its parent's Group, when both are in one **Project**; from then on, each one's Group is its own, and a session with none sits directly under its **Project**.
+
+**Family**:
+A session together with every session it started, and those they started, short of an **Operator**. The **Roster** nests a session under its parent while both sit in one Group or Project.
 
 ## Relationships
 
@@ -93,4 +96,4 @@ A name I give a session, scoping it within its **Project**. A Group exists only 
 - A **Session** is open or **Archived**; independently, it is **Live** or **Dormant**
 - **Activity**, **Unseen**, and **Snoozed** apply only to open sessions; a Snoozed session is neither Unseen nor Inactive while it holds
 - pi-sessions **subagents**, and Claude Code's and Codex's own subagents, are never **Sessions** here; their parent owns them
-- A **Session** started by another records it as its parent
+- A **Session** started by another records it as its parent; one an **Operator** started is never itself an **Operator**

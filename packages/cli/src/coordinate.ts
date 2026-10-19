@@ -1,5 +1,5 @@
 import { existsSync, realpathSync } from "node:fs";
-import type { Db, Harness } from "@swb/shared";
+import { type Db, type Harness, operatorDir } from "@swb/shared";
 import { frame, harnessName, type MessageKind } from "@swb/shared/mailbox";
 import { isArchived, markArchived, recordTx } from "@swb/shared/record";
 import type { Snooze, ToolResult } from "@swb/shared/tools";
@@ -117,6 +117,9 @@ export async function launchSession(db: Db, l: Launch): Promise<ToolResult> {
 	if (!cwd) throw new SwbError("a directory is required");
 	if (!existsSync(cwd)) throw new SwbError(`no directory ${cwd}`);
 	const dir = realpathSync(cwd);
+	// An Operator that names no directory would start another Operator in its own folder; starting one is the user's call.
+	if (l.from && dir === operatorDir() && sessionState(db, l.from).operator)
+		throw new SwbError("an Operator can't start another Operator; name a project's directory as cwd");
 	// pi and Claude Code take an id up front; Codex mints its own, which its host reports once it binds.
 	const sessionId = l.harness === "codex" ? undefined : crypto.randomUUID();
 	const prompt = l.from
@@ -209,6 +212,6 @@ export function update(db: Db, from: string | null, id: string, change: Update):
 		return { text: "Archived. This session quits when this turn ends.", details: { id, archived } };
 	}
 	if (isArchived(db, id)) return { text: `${name} is already archived.`, details: { id, archived } };
-	archive(db, id);
+	archive(db, [id]);
 	return { text: `Archived ${name}.`, details: { id, archived } };
 }

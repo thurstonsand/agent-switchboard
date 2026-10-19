@@ -14,8 +14,6 @@ export type Config = {
 	clipboard: string;
 	prefix: string;
 	rosterWidth: RosterWidth;
-	/** What a Project's sessions sit under before any Group: the Project itself, or one bucket per worktree. */
-	groupBy: "project" | "worktree";
 	/** Where the directory picker looks for places to start sessions, beyond the ones sessions have used. */
 	dirs: DirsConfig;
 	/** What `n` starts by default; the picker's Tab cycles it. */
@@ -62,7 +60,6 @@ export function loadConfig(): Config {
 		clipboard: defaultClipboard(),
 		prefix: "M-a",
 		rosterWidth: { cols: 42 },
-		groupBy: "project",
 		dirs: { scan: [], depth: 2, exclude: [], include: [], sort: "name" },
 		harness: "pi",
 	};
@@ -71,11 +68,6 @@ export function loadConfig(): Config {
 			case "wake_on_highlight":
 				if (typeof value !== "boolean") throw new SwbError(`config: wake_on_highlight must be true or false, got ${JSON.stringify(value)}`);
 				config.wakeOnHighlight = value;
-				break;
-			case "group_by":
-				if (value !== "project" && value !== "worktree")
-					throw new SwbError(`config: group_by must be "project" or "worktree", got ${JSON.stringify(value)}`);
-				config.groupBy = value;
 				break;
 			case "editor":
 				config.editor = string(key, value);

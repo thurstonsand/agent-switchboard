@@ -42,8 +42,8 @@ export type PeekInfo = { last: Turn | null; diff: Diff | null; error: string | n
 /** The Peek as `swb __peek` draws it, written whole to a file it watches. */
 export type PeekView = { id: string; lines: string[]; buttons: PeekButton[] };
 
-/** A Peek's button: where it is on its line, the roster key it runs, and its line with it lit. */
-export type PeekButton = { y: number; from: number; to: number; key: string; hot: string };
+/** A Peek's button: where it is on its line, the roster key it runs and the session it runs on, and its line with it lit. */
+export type PeekButton = { y: number; from: number; to: number; key: string; id: string; hot: string };
 
 /** What the Stage shows when it shows no live session; the placeholder renders it. */
 export type Card = {
@@ -60,7 +60,11 @@ export type State = "loading" | "blocked" | "working" | "unseen" | "idle" | "dor
 
 export type StatSummary = { n: number; lastMs: number; avgMs: number; medianMs: number; maxMs: number };
 
-/** `group` is the label of the Group or worktree bucket it sits in, null when directly under its Project or a section. */
+/**
+ * `group` is the Group it sits in, null when directly under its Project or a section. `level` is how deep it nests in
+ * its family, 0 for a root; `origin` is the mark a row not nested under its parent shows for who started it; a folded
+ * row hides `hidden` sessions.
+ */
 export type SessionStateRow = {
 	kind: "session";
 	id: string;
@@ -69,9 +73,13 @@ export type SessionStateRow = {
 	state: State;
 	provisional: boolean;
 	group: string | null;
+	level: number;
+	origin: "session" | "operator" | null;
+	folded: boolean;
+	hidden: number;
 };
 
-/** A Project header has a null group; a Group or worktree bucket beneath it names its own. */
+/** A Project header has a null group; a Group beneath it names its own. */
 export type HeaderStateRow = { kind: "header"; project: string; group: string | null; expanded: boolean };
 
 export type StateRow = SessionStateRow | HeaderStateRow | { kind: "section"; label: string; count: number; expanded: boolean };
@@ -95,9 +103,11 @@ export type DeckState = {
 	cursor: string | null;
 	/** The cursor's index in `rows`, headers included. */
 	cursorRow: number;
-	mode: "filter" | "name" | "picker" | "snooze" | "roster";
+	mode: "filter" | "name" | "picker" | "snooze" | "archive" | "roster";
 	picker: PickerState | null;
-	/** Mid-drag, the header a release would drop into: its Project, and its Group or worktree bucket, if any. */
+	/** The archive prompt: whose, its counts line, and how many `all` would archive. */
+	archive: { id: string; counts: string; all: number } | null;
+	/** Mid-drag, the header a release would drop into: its Project, and its Group, if any. */
 	drop: { project: string; group: string | null } | null;
 	filter: string;
 	/** The session row under the pointer, or null once the pointer has left the roster. */
@@ -129,7 +139,7 @@ export type ToWorker =
 	| { type: "wake"; id: string }
 	| { type: "new"; cwd: string; group: string | null; harness: Harness }
 	| { type: "visit"; id: string }
-	| { type: "archive"; id: string }
+	| { type: "archive"; ids: string[] }
 	| { type: "unarchive"; id: string }
 	| { type: "snooze"; id: string; snooze: Snooze }
 	| { type: "stop"; id: string }

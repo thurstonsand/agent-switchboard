@@ -2,7 +2,7 @@ import { expect } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState } from "../../../packages/cli/src/deck/protocol.ts";
-import { config, seed } from "../harness/deck.ts";
+import { config, launched, seed } from "../harness/deck.ts";
 import { git, gitRepo, gitWorktree, type LsEntry, type PiPackage, release, type Scenario, until, which } from "../harness/index.ts";
 
 export type Director = {
@@ -676,7 +676,6 @@ export const directors: Record<string, Director> = {
 
 	groups: {
 		setup: async (s) => {
-			config(s, 'group_by = "worktree"');
 			const worktree = join(s.root, "project-wt");
 			git(s, s.project, "init", "-q", "-b", "main");
 			git(s, s.project, "commit", "-q", "--allow-empty", "-m", "init");
@@ -724,14 +723,59 @@ export const directors: Record<string, Director> = {
 			st = await waitDeck(s, "two in review", (x) => x.rows.filter((r) => r.kind === "session" && r.group === "review").length === 2);
 			await Bun.sleep(2500);
 			const from = line((r) => r.kind === "session" && r.id === id("bravo"));
-			const wt = line((r) => r.kind === "header" && r.group === "⎇ wt");
-			await drag(from, wt);
+			const operators = line((r) => r.kind === "section" && r.label === "Operators");
+			await drag(from, operators);
 			await Bun.sleep(2500);
-			if (deck(s).drop !== null) throw new Error("a worktree bucket of another branch offered itself as a drop");
-			await mouse([0, 8, wt, true]);
+			if (deck(s).drop !== null) throw new Error("the Operators section offered itself as a drop");
+			await mouse([0, 8, operators, true]);
 			await waitDeck(s, "the refusal", (x) => x.toasts.some((t) => t.text.includes("nothing moved")));
 			expect(s.ls().find((e) => e.title === "bravo")?.group).toBe("review");
 			await waitLs(s, "n joined review", (ls) => ls.filter((e) => e.group === "review").length === 3);
+		},
+	},
+
+	lineage: {
+		setup: async (s) => {
+			const other = join(s.root, "pi-sessions");
+			const operator = join(s.env.XDG_CONFIG_HOME as string, "agent-switchboard/operator");
+			mkdirSync(other);
+			mkdirSync(operator, { recursive: true });
+			const root = await launched(s, "reply on it", { cwd: s.project, title: "Roster lineage design" });
+			const survey = await launched(s, "reply surveyed", { from: root, title: "Survey parent_id usage" });
+			await launched(s, "reply measured", { from: survey, title: "Measure lineage depth" });
+			await launched(s, "reply ported", { from: survey, cwd: other, title: "Port lineage entry" });
+			await launched(s, "reply tested", { from: root, title: "E2E for nested rows" });
+			const op = await launched(s, "reply triaged", { cwd: operator, title: "Triage open issues" });
+			await launched(s, "reply bumped", { from: op, cwd: s.project, title: "Bump pi-tui to 0.9" });
+		},
+		run: async (s) => {
+			const family = [
+				"Roster lineage design",
+				"Survey parent_id usage",
+				"Measure lineage depth",
+				"Port lineage entry",
+				"E2E for nested rows",
+				"Draft lineage docs",
+			];
+			// Once the tape has shown the root alone in lab, the root starts a child, which begins there too.
+			const st = await waitDeck(s, "the root in lab", (x) =>
+				x.rows.some((r) => r.kind === "session" && r.title === "Roster lineage design" && r.group === "lab"),
+			);
+			const root = st.rows.find((r) => r.kind === "session" && r.title === "Roster lineage design");
+			if (root?.kind !== "session") throw new Error("no root row");
+			await Bun.sleep(4000);
+			await launched(s, "reply drafted", { from: root.id, title: "Draft lineage docs" });
+			await waitDeck(s, "the archive prompt", (x) => x.mode === "archive" && x.archive?.all === family.length);
+			await waitLs(s, "the family archived", (ls) => {
+				const members = ls.filter((e) => family.includes(e.title ?? ""));
+				return members.length === family.length && members.every((e) => !e.open);
+			});
+			expect(
+				s
+					.ls()
+					.filter((e) => e.open)
+					.map((e) => e.title),
+			).toEqual(expect.arrayContaining(["Triage open issues", "Bump pi-tui to 0.9"]));
 		},
 	},
 

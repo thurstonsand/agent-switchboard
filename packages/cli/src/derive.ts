@@ -128,7 +128,27 @@ export function runtimeRecords(db: Db): RuntimeRecord[] {
 	}));
 }
 
-export function derive(row: SessionRow, w: World): SessionState {
+/**
+ * Every session's states. A family, a session together with everything it started short of an Operator, is Inactive
+ * only as a whole: while any open member is still active, none of them are.
+ */
+export function deriveSessions(rows: SessionRow[], w: World): SessionState[] {
+	const states = rows.map((row) => derive(row, w));
+	const byId = new Map(states.map((s) => [s.id, s]));
+	const rootOf = (s: SessionState): string => {
+		let at = s;
+		for (;;) {
+			const up = at.parentId === null ? undefined : byId.get(at.parentId);
+			if (!up || up.operator) return at.id;
+			at = up;
+		}
+	};
+	const active = new Set(states.filter((s) => s.open && !s.operator && !s.inactive && !s.snoozed).map(rootOf));
+	for (const s of states) if (s.inactive && active.has(rootOf(s))) s.inactive = false;
+	return states;
+}
+
+function derive(row: SessionRow, w: World): SessionState {
 	const live = row.runtime !== null && runtimeLive(row.runtime, w.bootId, w.hosts);
 	const open = row.archived_at === null || row.archived_at < row.last_prompt_at;
 	const activity: Phase = live ? row.phase : "idle";
@@ -173,7 +193,7 @@ export function derive(row: SessionRow, w: World): SessionState {
 /** Every recorded Session as of now. */
 export function states(db: Db): SessionState[] {
 	const w = world(loadConfig().inactiveAfterMs);
-	return sessionRows(db).map((row) => derive(row, w));
+	return deriveSessions(sessionRows(db), w);
 }
 
 /** One Session as of now, for a tool that names it. */

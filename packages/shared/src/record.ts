@@ -79,6 +79,7 @@ export type Turn = { harness: Harness; sessionId: string; cwd: string; transcrip
 export function startTurn(db: Db, t: Turn): void {
 	recordTx(db, () => {
 		const now = Date.now();
+		const first = !db.get("SELECT 1 FROM sessions WHERE session_id = ?", t.sessionId);
 		db.run(
 			`INSERT INTO sessions (session_id, harness, parent_id, cwd, project_root, transcript, title, branch, phase, created_at, last_prompt_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'working', ?, ?)
@@ -95,6 +96,16 @@ export function startTurn(db: Db, t: Turn): void {
 			now,
 			now,
 		);
+		// A child starts in its parent's Group, copied once; from then on each one's Group is its own.
+		if (first && t.parentId)
+			db.run(
+				`INSERT INTO marks (session_id, group_name)
+				 SELECT ?, m.group_name FROM sessions p JOIN marks m USING (session_id)
+				 WHERE p.session_id = ? AND p.project_root = ? AND m.group_name IS NOT NULL`,
+				t.sessionId,
+				t.parentId,
+				projectRoot(t.cwd),
+			);
 	});
 }
 

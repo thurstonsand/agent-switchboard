@@ -20,6 +20,7 @@ import { agentStep } from "./fakes/agent.ts";
 // A message from another session (it starts "Message from session") whose body is `reply <n>` is answered like it.
 //   archive <text>    call swb_update_session to archive itself, then answer "tool done <text>"
 // A pi that starts while start.hold exists signals start.entered and blocks until start.release.
+// A turn that starts while turn.hold exists signals turn.entered and waits for turn.release before agent_start.
 // pi-sessions' handoff extraction is answered with a fixed briefing.
 // `archive flaky` fails its post-tool reply once with a retryable provider error.
 // `/e2e-kick <prompt>` starts a turn with a custom message, the way a pi-sessions handoff child kicks off.
@@ -182,6 +183,12 @@ export default function (pi: ExtensionAPI) {
 			}
 			return { content: [{ type: "text", text: `attention ${params.name} released` }], details: undefined };
 		},
+	});
+
+	pi.on("before_agent_start", async () => {
+		if (!existsSync(join(signals, "turn.hold"))) return;
+		signal("turn.entered");
+		await released("turn", undefined);
 	});
 
 	pi.on("session_start", (_event, ctx) => {

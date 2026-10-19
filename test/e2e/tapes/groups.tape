@@ -1,11 +1,11 @@
-# Groups: worktree buckets by default, m names a Group, and dragging a session moves it between them.
+# Groups: m names a Group, and dragging a session moves it between them.
 Source common.tape
 
-Type "# group_by = worktree; m names a Group; drag moves a session into one" Sleep 1s Enter
+Type "# m names a Group; drag moves a session into one" Sleep 1s Enter
 Type "swb" Sleep 400ms Enter
-Wait+Screen /⎇ wt/
+Wait+Screen /bravo/
 Sleep 2s
-Screenshot ../artifacts/phase6/videos/groups-buckets.png
+Screenshot ../artifacts/phase6/videos/groups-project.png
 Type "/alpha" Sleep 400ms Enter
 Sleep 800ms
 Type "m"

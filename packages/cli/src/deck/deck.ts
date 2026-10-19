@@ -10,7 +10,7 @@ import { openStore } from "../store.ts";
 import { CLIENT_CWD, cleanEnv, listSessions, quote, SESSIONS, tmux, tmuxBin, tmuxTry, UI } from "../tmux.ts";
 import type { Card, DeckPaths, DeckState } from "./protocol.ts";
 
-export const HELP_POPUP = ["-w", "72", "-h", "36", "-T", " swb keys ", `${SWB} __help`];
+export const HELP_POPUP = ["-w", "72", "-h", "37", "-T", " swb keys ", `${SWB} __help`];
 
 /** At least 20 columns, and never more than half the Deck. */
 export function rosterCols(width: RosterWidth, deckWidth: number): number {
@@ -196,7 +196,7 @@ function uiConf(config: Config): string {
 		`bind l if -F '#{||:#{@swb_narrow},#{||:#{pane_index},#{@swb_hidden}}}' { ${nav("l")} } { ${backToStage} }`,
 		...(["h", "j", "k", "l"] as const).map((k) => `bind -n C-${k} if -F '#{@swb_editor}' { send-keys C-${k} } { ${nav(k)} }`),
 		`bind z if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { if -F '#{@swb_hidden}' { set -u @swb_hidden } { set @swb_hidden 1 } ; ${roster("sync")} }`,
-		...[..."nNawxyY/JKmdS"].map((k) => `bind ${k} ${notify(`__deck #{session_name} key ${k}`)}`),
+		...[..."nNawxyY/JKmdSp"].map((k) => `bind ${k} ${notify(`__deck #{session_name} key ${k}`)}`),
 		`bind e ${notify("__deck #{session_name} view-swap")}`,
 		`bind v ${notify("__deck #{session_name} view-split")}`,
 		`bind s ${notify("__deck #{session_name} shell")}`,

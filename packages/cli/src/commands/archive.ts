@@ -10,5 +10,5 @@ export function archive(args: string[]): void {
 	const id = positionals[0];
 	if (!id) throw new UsageError("archive: a session id is required");
 	if (values.from) console.log(JSON.stringify(update(openStore(), values.from, id, { archived: true })));
-	else archiveSession(openStore(), id);
+	else archiveSession(openStore(), [id]);
 }

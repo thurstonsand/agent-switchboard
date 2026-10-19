@@ -167,3 +167,33 @@ export function terminal(s: Scenario, name: string, command: string, size = "140
 		},
 	};
 }
+
+/** `swb launch` as session_launch runs it for a pi, from `from` when given, with the goal on stdin. */
+export async function launchTry(
+	s: Scenario,
+	goal: string,
+	options: { cwd?: string; from?: string; title?: string } = {},
+): Promise<{ code: number; out: string; err: string }> {
+	const args = ["--harness", "pi"];
+	if (options.cwd) args.push("--cwd", options.cwd);
+	if (options.from) args.push("--from", options.from);
+	if (options.title) args.push("--title", options.title);
+	const proc = Bun.spawn([`${s.bin}/swb`, "launch", ...args], {
+		env: s.env,
+		cwd: s.project,
+		stdin: new Blob([goal]),
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [out, err, code] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
+	return { code, out, err };
+}
+
+/** A pi session launched as `launchTry` does, once its first turn has settled; returns its id. */
+export async function launched(s: Scenario, goal: string, options: { cwd?: string; from?: string; title?: string } = {}): Promise<string> {
+	const { code, out, err } = await launchTry(s, goal, options);
+	if (code !== 0) throw new Error(`swb launch exited ${code}: ${err}`);
+	const id = (JSON.parse(out) as { details: { id: string } }).details.id;
+	await until(() => entry(s, id)?.activity === "idle" && entry(s, id).unseen, budgets.piReady, `${options.title ?? goal} settled`);
+	return id;
+}

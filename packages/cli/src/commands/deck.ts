@@ -29,7 +29,10 @@ export async function deckCommand(args: string[]): Promise<void> {
 		`${state.deck}  ${state.ready ? "ready" : "starting"}  focus ${state.focus}  staged ${state.staged.kind} ${state.staged.id ?? "-"}`,
 	);
 	for (const row of state.rows) {
-		if (row.kind === "session") console.log(`${row.id === state.cursor ? ">" : " "} ${row.glyph} ${row.title}  ${row.state}`);
+		if (row.kind === "session")
+			console.log(
+				`${row.id === state.cursor ? ">" : " "} ${"  ".repeat(row.level)}${row.origin === "operator" ? "⌁" : row.origin === "session" ? "↳" : " "}${row.folded ? "▸" : " "}${row.glyph} ${row.title}  ${row.state}${row.folded ? `  +${row.hidden}` : ""}`,
+			);
 		else if (row.kind === "header") console.log(`  ${row.expanded ? "▾" : "▸"} ${row.project}`);
 		else console.log(`  ${row.expanded ? "▾" : "▸"} ${row.label} (${row.count})`);
 	}
@@ -47,14 +50,15 @@ function keys(prefix: string): [string, string][] {
 		["j k ↑ ↓", "move"],
 		["g G", "first, last"],
 		["⏎", "focus the session (wakes it)"],
-		["l →", "focus the session; expand a header"],
-		["h ←", "collapse a header"],
-		["space", "toggle a header"],
+		["l →", "focus the session; expand a header or a fold"],
+		["h ←", "fold what a session started; collapse a header"],
+		["space", "toggle a header or a fold"],
 		["w", "wake without focusing"],
 		["x", "stop a running session; it stays open"],
 		["n", "new session: pick a directory, from the highlighted one"],
 		["N", "new session in a directory to add"],
-		["a", "archive; unarchive an archived one"],
+		["a", "archive, asking about what it started; unarchive"],
+		["p", "the session that started this one"],
 		["s", "snooze into Snoozed for a while, or until a message; unsnooze"],
 		["y Y", "copy swb open <id>; @session:<id>"],
 		["m", "pick the session's Group; rename a Group"],
@@ -72,7 +76,7 @@ function keys(prefix: string): [string, string][] {
 		[`${prefix} s`, "a shell below pi; ctrl-d closes it"],
 		[`${prefix} z`, "hide or show the sidebar; click ◂ to show it"],
 		[`${prefix} S`, "snooze or unsnooze, as s in the sidebar"],
-		[`${prefix} <key>`, "n N w x a y Y / m, as in the sidebar"],
+		[`${prefix} <key>`, "n N w x a p y Y / m, as in the sidebar"],
 		[`${prefix} d`, "in the directory picker, remove the highlighted one"],
 		[`${prefix} q`, "close the Deck from anywhere"],
 		[`${prefix} ?`, "these keys"],

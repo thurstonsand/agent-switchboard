@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 import { loadConfig } from "../config.ts";
-import { derive, displayName, projectName, type SessionState, sessionRows, world } from "../derive.ts";
+import { deriveSessions, displayName, projectName, type SessionState, sessionRows, world } from "../derive.ts";
 import { openStore } from "../store.ts";
 
 export const LS_HELP = `swb ls [--json]
@@ -9,6 +9,8 @@ Lists every Session, open and archived, with its derived state.
 
 --json prints an array of objects with these fields:
   id           pi session id
+  harness      "pi", "claude", or "codex"
+  parentId     id of the session that started it, or null
   title        pi session name, or null
   project      project root: the parent of the git common dir, else the cwd
   cwd          current working directory
@@ -20,7 +22,7 @@ Lists every Session, open and archived, with its derived state.
   activity     "working", "blocked", or "idle" (always "idle" when not live)
   unseen       open, not snoozed, and its agent finished a turn, or its snooze ran out, after my last Visit
   interrupted  not live, and its process ended mid-turn
-  inactive     open, not an Operator, not snoozed, no activity within inactive_after, neither blocked nor unseen
+  inactive     open, not an Operator, not snoozed, and its whole Family has had no activity within inactive_after, none of it blocked or unseen
   snoozed      open and snoozed, neither blocked nor interrupted
   snoozedUntil epoch ms a snoozed session's snooze ends, or null when it waits for a message
   createdAt    epoch ms of its first prompt
@@ -41,9 +43,7 @@ export function ls(args: string[]): void {
 	const config = loadConfig();
 	const db = openStore();
 	const w = world(config.inactiveAfterMs);
-	const states = sessionRows(db)
-		.map((row) => derive(row, w))
-		.sort((a, b) => b.activityAt - a.activityAt);
+	const states = deriveSessions(sessionRows(db), w).sort((a, b) => b.activityAt - a.activityAt);
 	if (values.json) {
 		console.log(JSON.stringify(states, null, 2));
 		return;

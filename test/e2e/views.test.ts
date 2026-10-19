@@ -421,7 +421,7 @@ test("a bad config key fails loudly, naming the key", async () => {
 	s.save("errors.txt", out.join("\n"));
 });
 
-/** Each Group or worktree bucket, or `(project)` for sessions directly under it, with its open sessions. */
+/** Each Group, or `(project)` for sessions directly under it, with its open sessions. */
 function groups(st: DeckState): Record<string, string[]> {
 	const out: Record<string, string[]> = {};
 	for (const row of sessionRows(st)) {
@@ -436,9 +436,8 @@ function lineOf(st: DeckState, probe: (row: DeckState["rows"][number]) => boolea
 	return 1 + st.rows.findIndex(probe);
 }
 
-test("m names a session's Group, n joins it; dragging moves it between Groups beside worktree buckets, and a Group lives only as long as its sessions", async () => {
+test("m names a session's Group, n joins it; dragging moves it between Groups, and a Group lives only as long as its sessions", async () => {
 	s = scenario("phase4", "groups");
-	config(s, 'group_by = "worktree"');
 	const worktree = join(s.root, "project-wt");
 	git(s, s.project, "init", "-q", "-b", "main");
 	git(s, s.project, "commit", "-q", "--allow-empty", "-m", "init");
@@ -448,9 +447,10 @@ test("m names a session's Group, n joins it; dragging moves it between Groups be
 	s.swb("drive", "stop");
 	s.swb("drive", "start");
 	const sorted = (...ids: string[]) => ids.sort();
-	await waitState(s, "worktree buckets", (x) => x.ready && Bun.deepEquals(groups(x), { "⎇ main": sorted(a, b), "⎇ wt": [w] }));
-	s.save("buckets.txt", s.screen());
-	s.save("buckets.ansi", s.swb("drive", "capture", "--ansi"));
+	// A worktree's session sits with the rest of its Project.
+	await waitState(s, "one Project", (x) => x.ready && Bun.deepEquals(groups(x), { "(project)": sorted(a, b, w) }));
+	s.save("project.txt", s.screen());
+	s.save("project.ansi", s.swb("drive", "capture", "--ansi"));
 
 	await cursorTo(s, a);
 	s.keys("m");
@@ -467,7 +467,7 @@ test("m names a session's Group, n joins it; dragging moves it between Groups be
 	expect(s.tmux(s.servers.drive, "display", "-p", "#{cursor_flag}")).toBe("1");
 	s.keys("Enter");
 	let st = await waitState(s, "alpha in review", (x) => groups(x).review?.join() === a && x.mode === "roster");
-	expect(groups(st)).toEqual({ review: [a], "⎇ main": [b], "⎇ wt": [w] });
+	expect(groups(st)).toEqual({ review: [a], "(project)": sorted(b, w) });
 	await until(() => entry(s, a).group === "review", budgets.settle, "a's Group review in the db");
 	s.save("named.ansi", s.swb("drive", "capture", "--ansi"));
 
@@ -482,24 +482,24 @@ test("m names a session's Group, n joins it; dragging moves it between Groups be
 	s.save("dragging.ansi", s.swb("drive", "capture", "--ansi"));
 	s.swb("drive", "release", "8", `${alpha}`);
 	st = await waitState(s, "bravo dropped into review", (x) => groups(x).review?.length === 2 && x.drop === null);
-	expect(groups(st)).toEqual({ review: sorted(a, b), "⎇ wt": [w] });
+	expect(groups(st)).toEqual({ review: sorted(a, b), "(project)": [w] });
 	await until(() => entry(s, b).group === "review", budgets.settle, "b's Group review in the db");
 	s.save("dropped.ansi", s.swb("drive", "capture", "--ansi"));
 
-	const wt = lineOf(st, (r) => r.kind === "header" && r.group === "⎇ wt");
+	const operators = lineOf(st, (r) => r.kind === "section" && r.label === "Operators");
 	const from = lineOf(st, (r) => r.kind === "session" && r.id === b);
-	s.swb("drive", "drag", "8", `${from}`, "8", `${wt}`, "--hold");
+	s.swb("drive", "drag", "8", `${from}`, "8", `${operators}`, "--hold");
 	await until(() => s.screen().includes("✗ not here"), budgets.settle, "the refusal hint");
 	expect(state(s).drop).toBeNull();
 	s.save("refused.ansi", s.swb("drive", "capture", "--ansi"));
-	s.swb("drive", "release", "8", `${wt}`);
+	s.swb("drive", "release", "8", `${operators}`);
 	st = await waitState(s, "the refusal toast", (x) => x.toasts.some((t) => t.text.includes("nothing moved")));
-	expect(groups(st)).toEqual({ review: sorted(a, b), "⎇ wt": [w] });
+	expect(groups(st)).toEqual({ review: sorted(a, b), "(project)": [w] });
 
 	const project = lineOf(st, (r) => r.kind === "header" && r.group === null);
 	s.swb("drive", "drag", "8", `${from}`, "8", `${project}`);
-	st = await waitState(s, "bravo back in its bucket", (x) => groups(x)["⎇ main"]?.join() === b);
-	expect(groups(st)).toEqual({ review: [a], "⎇ main": [b], "⎇ wt": [w] });
+	st = await waitState(s, "bravo back under its Project", (x) => groups(x)["(project)"]?.includes(b) === true);
+	expect(groups(st)).toEqual({ review: [a], "(project)": sorted(b, w) });
 	await until(() => entry(s, b).group === null, budgets.settle, "b out of its Group in the db");
 
 	// The picker narrows to the Project's Groups as I type, offering a new one until a name matches exactly.
@@ -521,7 +521,11 @@ test("m names a session's Group, n joins it; dragging moves it between Groups be
 		.split("\n")
 		.findIndex((line) => line.includes("(no Group)"));
 	s.swb("drive", "click", "6", `${none}`);
-	st = await waitState(s, "bravo clicked back to its bucket", (x) => groups(x)["⎇ main"]?.join() === b && x.mode === "roster");
+	st = await waitState(
+		s,
+		"bravo clicked back under its Project",
+		(x) => groups(x)["(project)"]?.includes(b) === true && x.mode === "roster",
+	);
 	await until(() => entry(s, b).group === null, budgets.settle, "b out of its Group in the db");
 
 	s.swb("archive", a);

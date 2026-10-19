@@ -61,6 +61,7 @@ import type {
 import {
 	age,
 	attention,
+	blue,
 	bold,
 	breathe,
 	cyan,
@@ -213,26 +214,51 @@ function viewOf(e: Entry): View {
 /** Groups set here and not yet back in a snapshot; null is ungrouped. */
 const localGroups = new Map<string, string | null>();
 
-/** Where a session sits beneath its Project: its own Group, else its worktree's bucket when group_by asks for one. */
-type Group = { kind: "custom"; name: string } | { kind: "worktree"; branch: string };
-
-function groupOf(e: Entry): Group | null {
+/** The Group a session carries, as set here or in the db; Operators take none. */
+function groupOf(e: Entry): string | null {
 	if (e.operator) return null;
 	const local = localGroups.get(e.id);
-	const name = local !== undefined ? local : e.group;
-	if (name !== null) return { kind: "custom", name };
-	if (config.groupBy === "worktree" && e.branch !== null) return { kind: "worktree", branch: e.branch };
-	return null;
-}
-
-function groupLabel(group: Group): string {
-	return group.kind === "custom" ? group.name : `⎇ ${group.branch}`;
+	return local !== undefined ? local : e.group;
 }
 
 function setGroup(ids: string[], name: string | null): void {
 	for (const id of ids) localGroups.set(id, name);
 	post({ type: "group", ids, name });
 }
+
+/** Where a session is listed: Archived, Operators, Inactive, or open beneath its Project. */
+function sectionOf(e: Entry): "archived" | "snoozed" | "operators" | "inactive" | "open" {
+	if (!e.open) return "archived";
+	if (e.snoozed) return "snoozed";
+	if (e.operator) return "operators";
+	return e.inactive && !launchFor(e.id) ? "inactive" : "open";
+}
+
+function parentOf(e: Entry): Entry | undefined {
+	return e.parentId === null ? undefined : entries.get(e.parentId);
+}
+
+/** Who started a session, as its row marks it wherever its parent's row isn't right above it. */
+function origin(e: Entry): "session" | "operator" | null {
+	if (e.parentId === null) return null;
+	return parentOf(e)?.operator ? "operator" : "session";
+}
+
+/** Every open session a session started, and those they started, wherever they are, short of an Operator. */
+function openDescendants(e: Entry): Entry[] {
+	const out: Entry[] = [];
+	const visit = (id: string) => {
+		for (const child of entries.values()) {
+			if (child.parentId !== id || child.operator) continue;
+			if (child.open) out.push(child);
+			visit(child.id);
+		}
+	};
+	visit(e.id);
+	return out;
+}
+
+const foldKey = (id: string) => `fold:${id}`;
 
 function stateOf(e: Entry): State {
 	if (launchFor(e.id) && !e.live) return "loading";
@@ -977,23 +1003,23 @@ async function clip(text: string): Promise<void> {
 	if (code !== 0) throw new Error(stderr.trim() || `${config.clipboard} exited ${code}`);
 }
 
-/** `swb open`: select a session wherever it is, opening the section and project that hide it. */
+/** `swb open`: select a session wherever it is, opening the section, project, and families that hide it. */
 function reveal(id: string): void {
 	const e = entries.get(id);
 	if (!e) {
 		toast(`no open or archived session ${id}`, "error");
 		return;
 	}
-	if (!e.open) roster.expanded.add("archived");
-	else if (e.snoozed) roster.expanded.add("snoozed");
-	else if (e.operator) roster.expanded.add("operators");
+	if (!roster.matches(e)) roster.filter.setValue("");
+	const section = sectionOf(e);
+	if (section === "archived" || section === "operators" || section === "snoozed") roster.expanded.add(section);
 	else {
-		const parent = e.inactive && !launchFor(e.id) ? "inactive" : "open";
-		if (parent === "inactive") roster.expanded.add("inactive");
+		if (section === "inactive") roster.expanded.add("inactive");
 		const group = groupOf(e);
-		roster.collapsed.delete(`${parent}:${e.project}`);
-		if (group) roster.collapsed.delete(`${parent}:${e.project}:${groupKey(group)}`);
+		roster.collapsed.delete(`${section}:${e.project}`);
+		if (group) roster.collapsed.delete(`${section}:${e.project}:${groupKey(group)}`);
 	}
+	for (let up = parentOf(e); up; up = parentOf(up)) roster.collapsed.delete(foldKey(up.id));
 	roster.selectedKey = id;
 	roster.syncStage(true);
 }
@@ -1009,23 +1035,54 @@ const SNOOZE_CHOICES: { label: string; snooze: SnoozePreset }[] = [
 	{ label: "Until a message", snooze: "next_message" },
 ];
 
-/** A Project header has no group; a Group or worktree bucket beneath it does, and starts sessions in its newest member's cwd. */
+/** A Project header has no group; a Group beneath it does, and starts sessions in its newest member's cwd. */
 type HeaderRow = {
 	kind: "header";
 	key: string;
 	projectKey: string;
 	project: string;
-	group: Group | null;
+	group: string | null;
 	cwd: string;
 	count: number;
 	depth: number;
 	collapsed: boolean;
 };
 
-type SessionRow = { kind: "session"; key: string; entry: Entry; depth: number; header: string };
+/**
+ * Where a nested row hangs in its family's tree: for each ancestor between it and the family's root, whether that
+ * ancestor has a sibling below it, so its guide carries on; and whether this row is the last of its siblings.
+ */
+type Nest = { continues: boolean[]; last: boolean };
+type Placed = { entry: Entry; nest: Nest };
+
+/**
+ * A family's root has no `nest`. `family` is everything beneath the row in its bucket, in tree order, placed relative to
+ * it; a folded row hides it.
+ */
+type SessionRow = {
+	kind: "session";
+	key: string;
+	entry: Entry;
+	depth: number;
+	header: string;
+	nest: Nest | null;
+	family: Placed[];
+	folded: boolean;
+};
 type Row = HeaderRow | SessionRow | { kind: "section"; key: SectionKey; label: string; count: number; expanded: boolean };
 
 const isHeader = (row: Row) => row.kind !== "session";
+const levelOf = (nest: Nest | null) => (nest === null ? 0 : nest.continues.length + 1);
+const flat = (e: Entry, depth: number, header: string): SessionRow => ({
+	kind: "session",
+	key: e.id,
+	entry: e,
+	depth,
+	header,
+	nest: null,
+	family: [],
+	folded: false,
+});
 const isCollapsed = (row: Row) => (row.kind === "header" ? row.collapsed : row.kind === "section" ? !row.expanded : false);
 
 function groupByProject(list: Entry[]): [string, Entry[]][] {
@@ -1038,8 +1095,8 @@ function groupByProject(list: Entry[]): [string, Entry[]][] {
 	return [...groups.entries()].sort(([a], [b]) => projectName(a).localeCompare(projectName(b)) || a.localeCompare(b));
 }
 
-function groupKey(group: Group): string {
-	return group.kind === "custom" ? `g:${group.name}` : `b:${group.branch}`;
+function groupKey(group: string): string {
+	return `g:${group}`;
 }
 
 /** Where a dragged session would land: a header to light up and the Group it would take, or nowhere. */
@@ -1066,11 +1123,15 @@ function hoverLine(line: string): string {
 
 type ClickTarget = { y: number; from: number; to: number; act: () => void };
 
+const ARCHIVE_PROMPT_LINES = 4;
+
 class Roster implements Component, Focusable {
 	selectedKey = "";
 	lastIndex = 0;
 	/** After `a`, the cursor keeps its index instead of chasing the session into its new section. */
 	pin: { index: number; answered: boolean } | null = null;
+	/** The session whose archive prompt is open beneath its row: it started others still open. */
+	archiving: string | null = null;
 	scrollTop = 0;
 	collapsed = new Set<string>();
 	expanded = new Set<SectionKey>(["operators"]);
@@ -1130,8 +1191,7 @@ class Roster implements Component, Focusable {
 
 	matches(e: Entry): boolean {
 		const q = this.query();
-		const group = groupOf(e);
-		const label = group ? groupLabel(group) : "";
+		const label = groupOf(e) ?? "";
 		return q === "" || `${displayName(e)} ${projectName(e.project)} ${e.branch ?? ""} ${label}`.toLowerCase().includes(q);
 	}
 
@@ -1139,28 +1199,71 @@ class Roster implements Component, Focusable {
 		const rows: Row[] = [];
 		const all = [...entries.values()].filter((e) => this.matches(e));
 		const open = all.filter((e) => e.open);
+		// A session nests under its parent when they share a bucket. Siblings, and families, go by the newest activity
+		// anywhere beneath them, so a busy grandchild brings its whole line up.
+		const pushFamilies = (members: Entry[], depth: number, header: string) => {
+			const here = new Set(members.map((e) => e.id));
+			const kids = new Map<string, Entry[]>();
+			const roots: Entry[] = [];
+			for (const e of members) {
+				if (e.parentId === null || !here.has(e.parentId)) {
+					roots.push(e);
+					continue;
+				}
+				const siblings = kids.get(e.parentId);
+				if (siblings) siblings.push(e);
+				else kids.set(e.parentId, [e]);
+			}
+			const latest = new Map<string, number>();
+			const latestOf = (e: Entry): number => {
+				let at = latest.get(e.id);
+				if (at === undefined) {
+					at = Math.max(e.activityAt, ...(kids.get(e.id) ?? []).map(latestOf));
+					latest.set(e.id, at);
+				}
+				return at;
+			};
+			const newest = (a: Entry, b: Entry) => latestOf(b) - latestOf(a);
+			const tree = (e: Entry, nest: Nest | null): { entry: Entry; nest: Nest | null }[] => {
+				const children = (kids.get(e.id) ?? []).sort(newest);
+				const continues = nest ? [...nest.continues, !nest.last] : [];
+				return [{ entry: e, nest }, ...children.flatMap((c, i) => tree(c, { continues, last: i === children.length - 1 }))];
+			};
+			for (const root of roots.sort(newest)) {
+				const placed = tree(root, null);
+				for (let i = 0; i < placed.length; ) {
+					const { entry, nest } = placed[i] as { entry: Entry; nest: Nest | null };
+					const level = levelOf(nest);
+					let end = i + 1;
+					while (end < placed.length && levelOf((placed[end] as { nest: Nest | null }).nest) > level) end++;
+					const family = placed.slice(i + 1, end).map((p) => {
+						const at = p.nest as Nest;
+						return { entry: p.entry, nest: { continues: at.continues.slice(level), last: at.last } };
+					});
+					// A filter shows every match, folded or not.
+					const folded = family.length > 0 && this.collapsed.has(foldKey(entry.id)) && this.query() === "";
+					rows.push({ kind: "session", key: entry.id, entry, depth, header, nest, family, folded });
+					i = folded ? end : i + 1;
+				}
+			}
+		};
 		const pushGroups = (list: Entry[], depth: number, parent: string) => {
 			for (const [project, members] of groupByProject(list)) {
 				const key = `${parent}:${project}`;
 				const collapsed = this.collapsed.has(key);
 				rows.push({ kind: "header", key, projectKey: key, project, group: null, cwd: project, count: members.length, depth, collapsed });
 				if (collapsed) continue;
-				// Groups and worktree buckets are siblings beneath the Project, ahead of its ungrouped sessions.
-				const buckets = new Map<string, { group: Group; members: Entry[] }>();
+				// Groups sit beneath the Project, ahead of its sessions in none.
+				const buckets = new Map<string, Entry[]>();
 				const loose: Entry[] = [];
 				for (const e of members) {
 					const group = groupOf(e);
-					if (!group) {
-						loose.push(e);
-						continue;
-					}
-					const bucket = buckets.get(groupKey(group)) ?? { group, members: [] };
-					bucket.members.push(e);
-					buckets.set(groupKey(group), bucket);
+					if (group === null) loose.push(e);
+					else buckets.set(group, [...(buckets.get(group) ?? []), e]);
 				}
-				const sorted = [...buckets.entries()].sort(([, a], [, b]) => groupLabel(a.group).localeCompare(groupLabel(b.group)));
-				for (const [sub, { group, members: inside }] of sorted) {
-					const subKey = `${key}:${sub}`;
+				const sorted = [...buckets.entries()].sort(([a], [b]) => a.localeCompare(b));
+				for (const [group, inside] of sorted) {
+					const subKey = `${key}:${groupKey(group)}`;
 					const subCollapsed = this.collapsed.has(subKey);
 					const cwd = (inside[0] as Entry).cwd;
 					rows.push({
@@ -1174,10 +1277,9 @@ class Roster implements Component, Focusable {
 						depth: depth + 1,
 						collapsed: subCollapsed,
 					});
-					if (subCollapsed) continue;
-					for (const e of inside) rows.push({ kind: "session", key: e.id, entry: e, depth: depth + 1, header: subKey });
+					if (!subCollapsed) pushFamilies(inside, depth + 1, subKey);
 				}
-				for (const e of loose) rows.push({ kind: "session", key: e.id, entry: e, depth, header: key });
+				pushFamilies(loose, depth, key);
 			}
 		};
 		// A filter opens every section it has matches in, so a match is never hidden behind a caret.
@@ -1188,15 +1290,14 @@ class Roster implements Component, Focusable {
 		};
 		const operators = open.filter((e) => e.operator && !e.snoozed).sort((a, b) => b.activityAt - a.activityAt);
 		if (section("operators", "Operators", operators.length)) {
-			for (const e of operators) rows.push({ kind: "session", key: e.id, entry: e, depth: 0, header: "operators" });
+			for (const e of operators) rows.push(flat(e, 0, "operators"));
 		}
-		const inactive = (e: Entry) => e.inactive && !launchFor(e.id);
 		pushGroups(
-			open.filter((e) => !e.operator && !e.snoozed && !inactive(e)),
+			open.filter((e) => sectionOf(e) === "open"),
 			0,
 			"open",
 		);
-		const idle = open.filter(inactive);
+		const idle = open.filter((e) => sectionOf(e) === "inactive");
 		if (idle.length > 0 && section("inactive", "Inactive", idle.length)) pushGroups(idle, 1, "inactive");
 		// Soonest to wake first; one waiting on a message has no time, so it comes last.
 		const resting = open
@@ -1206,11 +1307,11 @@ class Roster implements Component, Focusable {
 					(a.snoozedUntil ?? Number.POSITIVE_INFINITY) - (b.snoozedUntil ?? Number.POSITIVE_INFINITY) || b.activityAt - a.activityAt,
 			);
 		if (resting.length > 0 && section("snoozed", "Snoozed", resting.length)) {
-			for (const e of resting) rows.push({ kind: "session", key: e.id, entry: e, depth: 0, header: "snoozed" });
+			for (const e of resting) rows.push(flat(e, 0, "snoozed"));
 		}
 		const archived = all.filter((e) => !e.open).sort((a, b) => archivedKey(b) - archivedKey(a));
 		if (section("archived", "Archived", archived.length)) {
-			for (const e of archived) rows.push({ kind: "session", key: e.id, entry: e, depth: 0, header: "archived" });
+			for (const e of archived) rows.push(flat(e, 0, "archived"));
 		}
 		return rows;
 	}
@@ -1277,6 +1378,14 @@ class Roster implements Component, Focusable {
 			tui.requestRender();
 			return;
 		}
+		if (this.archiving !== null) {
+			const k = decodeKittyPrintable(data) ?? data;
+			if (k === "a" || k === "A") this.finishArchiving(k === "A");
+			else if (matchesKey(data, "escape")) this.finishArchiving(null);
+			stage.keyAt = 0;
+			tui.requestRender();
+			return;
+		}
 		if (this.naming) {
 			const choices = this.choices();
 			if (matchesKey(data, "up") || matchesKey(data, "down")) {
@@ -1323,6 +1432,7 @@ class Roster implements Component, Focusable {
 		else if (k === "x") this.stop();
 		else if (k === "a") this.toggleArchived();
 		else if (k === "s") this.toggleSnooze();
+		else if (k === "p") this.toParent();
 		else if (k === "y" || k === "Y") this.copy(k === "y");
 		else if (k === "n") this.newAt();
 		else if (k === "N") this.openPicker("add", null, null);
@@ -1346,6 +1456,18 @@ class Roster implements Component, Focusable {
 			const before = this.targetAt(this.pointer);
 			this.pointer = { x: event.x, y: event.y };
 			relit = this.targetAt(this.pointer) !== before;
+		}
+		// The archive prompt answers to its own buttons and nothing else.
+		if (this.archiving !== null) {
+			if (event.type === "move") return { handled: true, render: relit };
+			if (event.button === "left" && event.type === "press") this.pressed = this.targetAt(event) ?? null;
+			else if (event.button === "left" && event.type === "click") {
+				const target = this.pressed;
+				this.pressed = null;
+				target?.act();
+				this.syncStage(true);
+			}
+			return { handled: true, render: true };
 		}
 		if (this.choosing) {
 			const listRow = this.pickerTop + event.y - 3;
@@ -1430,7 +1552,16 @@ class Roster implements Component, Focusable {
 	 * roster has the keyboard. Only a session's row on screen has one.
 	 */
 	peekSpot(rows: Row[], index: number): PeekSpot | null {
-		if (rosterHidden || (narrow && focus !== "roster") || this.choosing || this.naming || this.snoozing || this.dragging) return null;
+		if (
+			rosterHidden ||
+			(narrow && focus !== "roster") ||
+			this.choosing ||
+			this.naming ||
+			this.snoozing ||
+			this.dragging ||
+			this.archiving !== null
+		)
+			return null;
 		const spot = (i: number, source: "pointer" | "cursor"): PeekSpot | null => {
 			const row = rows[i];
 			if (row?.kind !== "session" || i < this.scrollTop || i >= this.scrollTop + this.listHeight) return null;
@@ -1461,7 +1592,7 @@ class Roster implements Component, Focusable {
 			lines[top + i] = `${truncateToWidth(lines[top + i] ?? "", left, "", true)}\x1b[0m${hot && hot.y === i ? hot.hot : line}`;
 		});
 		this.targets.unshift(
-			...view.buttons.map((b) => ({ y: top + b.y, from: left + b.from, to: left + b.to, act: () => void prefixKey(b.key, view.id) })),
+			...view.buttons.map((b) => ({ y: top + b.y, from: left + b.from, to: left + b.to, act: () => void prefixKey(b.key, b.id) })),
 			...view.lines.map((_, i) => ({ y: top + i, from: left, to: width, act: () => {} })),
 		);
 		return { ...spot, view, top, left };
@@ -1501,6 +1632,7 @@ class Roster implements Component, Focusable {
 		if (!row) return;
 		if (row.kind !== "session") this.toggle(row);
 		else if (enter) this.focusEntry(row.entry);
+		else this.setFolded(row, !row.folded);
 	}
 
 	/** ⏎: wake it if needed and focus it at once; a session still starting holds the keyboard on its loading card. */
@@ -1513,13 +1645,15 @@ class Roster implements Component, Focusable {
 	right(): void {
 		const row = this.selected();
 		if (!row) return;
-		if (row.kind === "session") this.focusEntry(row.entry);
+		if (row.kind === "session" && row.folded) this.setFolded(row, false);
+		else if (row.kind === "session") this.focusEntry(row.entry);
 		else this.setExpanded(row, true);
 	}
 
 	left(): void {
 		const row = this.selected();
-		if (row && row.kind !== "session") this.setExpanded(row, false);
+		if (row?.kind === "session") this.setFolded(row, true);
+		else if (row) this.setExpanded(row, false);
 	}
 
 	/** The actions below act on the cursor's row unless given one: a Peek's buttons act on its row, wherever the cursor is. */
@@ -1538,6 +1672,7 @@ class Roster implements Component, Focusable {
 		else post({ type: "stop", id: e.id });
 	}
 
+	/** a: archives or unarchives the session; one that started others still open asks first whether they go too. */
 	toggleArchived(row = this.selected()): void {
 		if (row?.kind !== "session" || this.pin) return;
 		const e = row.entry;
@@ -1545,9 +1680,39 @@ class Roster implements Component, Focusable {
 			toast("nothing to archive before the first prompt", "error");
 			return;
 		}
+		if (e.open && openDescendants(e).length > 0) {
+			this.selectedKey = e.id;
+			this.hover = null;
+			this.archiving = e.id;
+			return;
+		}
 		// Only the cursor's own row moving takes the cursor along.
 		if (row.key === this.selected()?.key) this.pin = { index: this.resolveCursor(this.rows()), answered: false };
-		post({ type: e.open ? "archive" : "unarchive", id: e.id });
+		post(e.open ? { type: "archive", ids: [e.id] } : { type: "unarchive", id: e.id });
+	}
+
+	/** The archive prompt's answer: the session alone, all it started besides, or (null) neither. */
+	finishArchiving(all: boolean | null): void {
+		const e = this.archiving === null ? undefined : entries.get(this.archiving);
+		this.archiving = null;
+		if (!e || all === null) return;
+		this.pin = { index: this.resolveCursor(this.rows()), answered: false };
+		post({ type: "archive", ids: [e.id, ...(all ? openDescendants(e).map((d) => d.id) : [])] });
+	}
+
+	/** h folds the family under a session; l and space open it again. */
+	setFolded(row: SessionRow, folded: boolean): void {
+		if (row.family.length === 0) return;
+		if (folded) this.collapsed.add(foldKey(row.key));
+		else this.collapsed.delete(foldKey(row.key));
+	}
+
+	/** p: to the session that started this one, wherever it is. */
+	toParent(row = this.selected()): void {
+		if (row?.kind !== "session") return;
+		const parent = parentOf(row.entry);
+		if (parent) reveal(parent.id);
+		else toast(row.entry.parentId === null ? "you started this one" : "its parent is gone", "info");
 	}
 
 	/** s: unsnoozes a snoozed session, or asks how long to snooze an open one. */
@@ -1612,7 +1777,7 @@ class Roster implements Component, Focusable {
 			return;
 		}
 		const group = row.kind === "session" ? groupOf(row.entry) : row.group;
-		this.openPicker("pick", row.kind === "session" ? row.entry.cwd : row.cwd, group?.kind === "custom" ? group.name : null);
+		this.openPicker("pick", row.kind === "session" ? row.entry.cwd : row.cwd, group);
 	}
 
 	/**
@@ -1629,16 +1794,11 @@ class Roster implements Component, Focusable {
 			this.naming = { ids: [row.entry.id], header: null, project, title: displayName(row.entry), choice: 0 };
 			this.naming.choice = Math.max(
 				0,
-				this.choices().findIndex((c) => c.name === (group?.kind === "custom" ? group.name : null)),
+				this.choices().findIndex((c) => c.name === group),
 			);
-		} else if (row?.kind === "header" && row.group?.kind === "custom") {
-			const name = row.group.name;
-			const ids = [...entries.values()]
-				.filter((e) => {
-					const group = groupOf(e);
-					return e.project === row.project && group?.kind === "custom" && group.name === name;
-				})
-				.map((e) => e.id);
+		} else if (row?.kind === "header" && row.group !== null) {
+			const name = row.group;
+			const ids = [...entries.values()].filter((e) => e.project === row.project && groupOf(e) === name).map((e) => e.id);
 			this.naming = { ids, header: row, project: row.project, title: name, choice: 0 };
 			this.naming.choice = Math.max(
 				0,
@@ -1655,7 +1815,7 @@ class Roster implements Component, Focusable {
 		const groups = new Set<string>();
 		for (const e of entries.values()) {
 			const group = groupOf(e);
-			if (e.open && e.project === naming.project && group?.kind === "custom") groups.add(group.name);
+			if (e.open && e.project === naming.project && group !== null) groups.add(group);
 		}
 		const out: { label: string; name: string | null }[] = typed === "" ? [{ label: "(no Group)", name: null }] : [];
 		for (const name of [...groups].sort((a, b) => a.localeCompare(b)))
@@ -1719,22 +1879,18 @@ class Roster implements Component, Focusable {
 		if (!row || row.kind === "section") return null;
 		const header = row.kind === "header" ? row : rows.find((r): r is HeaderRow => r.kind === "header" && r.key === row.header);
 		if (!header || header.project !== e.project) return null;
-		if (header.group?.kind === "custom") return { header, name: header.group.name };
-		if (header.group?.kind === "worktree" && header.group.branch !== e.branch) return null;
-		return { header, name: null };
+		return { header, name: header.group };
 	}
 
-	/** Lands a drag: into the Group under the pointer, out of any on its Project or worktree bucket, or nowhere. */
+	/** Lands a drag: into the Group under the pointer, out of any on its Project, or nowhere. */
 	finishDrag(y: number): void {
 		const drag = this.dragging;
 		this.dragging = null;
 		const e = drag && entries.get(drag.id);
 		if (!e || !drag.moved) return;
 		const drop = this.dropAt(y, e);
-		const group = groupOf(e);
-		const current = group?.kind === "custom" ? group.name : null;
 		if (!drop) toast("not a place for it; nothing moved", "info");
-		else if (drop.name !== current) setGroup([e.id], drop.name);
+		else if (drop.name !== groupOf(e)) setGroup([e.id], drop.name);
 	}
 
 	toggle(row: Row): void {
@@ -2096,24 +2252,56 @@ class Roster implements Component, Focusable {
 					this.snoozing = null;
 				},
 			});
+		// The archive prompt opens beneath its row, pushing the rows after it down; its row is the cursor's.
+		const asking = this.archiving === null ? -1 : rows.findIndex((r) => r.key === this.archiving);
+		if (asking === -1) this.archiving = null;
+		const prompt = asking === -1 ? 0 : ARCHIVE_PROMPT_LINES;
 		if (index < this.scrollTop) this.scrollTop = index;
-		if (index >= this.scrollTop + height) this.scrollTop = index - height + 1;
-		this.scrollTop = Math.max(0, Math.min(this.scrollTop, Math.max(0, rows.length - height)));
+		if (index + prompt >= this.scrollTop + height) this.scrollTop = index + prompt - height + 1;
+		this.scrollTop = Math.max(0, Math.min(this.scrollTop, Math.max(0, rows.length + prompt - height)));
 		this.listHeight = height;
 		const out: string[] = [];
-		for (let i = 0; i < height; i++) {
-			const row = rows[this.scrollTop + i];
+		for (let i = this.scrollTop; out.length < height; i++) {
+			const row = rows[i];
 			if (!row) {
 				out.push("");
 				continue;
 			}
+			const y = this.listTop + out.length;
 			const line = truncateToWidth(rowLine(row, width, now), width, "…", true);
 			if (this.dragging?.drop?.header.key === row.key) out.push(cursorLine(line, true));
-			else if (this.scrollTop + i === index) out.push(cursorLine(line, focus === "roster"));
+			else if (i === index) out.push(cursorLine(line, focus === "roster"));
 			else out.push(row.key === this.hover ? hoverLine(line) : line);
+			if (row.kind === "session" && row.family.length > 0) {
+				const at = foldColumn(row);
+				this.targets.push({ y, from: at - 1, to: at + 1, act: () => this.setFolded(row, !row.folded) });
+			}
+			if (i === asking) out.push(...this.archivePrompt((row as SessionRow).entry, width, this.listTop + out.length));
 		}
+		out.length = height;
 		if (rows.length === 0) out[0] = dim(snapshot ? (this.query() ? "   no matches" : "   no sessions yet · n new") : "   loading…");
 		return [...out, ...picker.map(([line]) => line)];
+	}
+
+	/** The archive prompt, under the row of a session that started others still open: what they're doing, then the choice. */
+	archivePrompt(e: Entry, width: number, top: number): string[] {
+		const inner = Math.max(1, width - 4);
+		const family = openDescendants(e);
+		const box = (text: string) => ` │${truncateToWidth(text, inner, "…", true)}│`;
+		const choice = this.clickable(top + 2, [
+			[" │ Archive  ", null],
+			[key("a", "this"), () => this.finishArchiving(false)],
+			["  ", null],
+			[key("A", `all ${family.length + 1}`), () => this.finishArchiving(true)],
+			["  ", null],
+			[key("esc", "abort"), () => this.finishArchiving(null)],
+		]);
+		return [
+			` ┌${"─".repeat(inner)}┐`,
+			box(` ${familyTally(family)}`),
+			`${truncateToWidth(choice, inner + 2, "…", true)}│`,
+			` └${"─".repeat(inner)}┘`,
+		];
 	}
 
 	/** Joins the parts into row y's line, recording where each clickable one lands. */
@@ -2162,6 +2350,8 @@ class Roster implements Component, Focusable {
 
 	/** Each key in the legend is also a button. */
 	hints(y: number): string {
+		// The archive prompt carries its own keys.
+		if (this.archiving !== null) return "";
 		if (this.filtering) return ` ${this.filter.render(Math.max(10, rosterWidth() - 2))[0] ?? ""}`;
 		if (this.naming) return ` ${this.name.render(Math.max(10, rosterWidth() - 2))[0] ?? ""}`;
 		if (this.snoozing)
@@ -2179,8 +2369,7 @@ class Roster implements Component, Focusable {
 		const drag = this.dragging;
 		if (drag?.moved) {
 			if (!drag.drop) return ` ${red("✗ not here")}`;
-			const target = drag.drop.header.group;
-			return drag.drop.name === null ? ` ⇢ out of its Group` : ` ⇢ into ${bold(target ? groupLabel(target) : "")}`;
+			return drag.drop.name === null ? ` ⇢ out of its Group` : ` ⇢ into ${bold(drag.drop.name)}`;
 		}
 		const help: Hint = ["?", "keys", () => void showHelp()];
 		const newAtCursor: Hint = ["n", "new", () => this.newAt()];
@@ -2199,7 +2388,7 @@ class Roster implements Component, Focusable {
 				[`${config.prefix} ?`, "keys", help[2]],
 			];
 		else if (!row) hints = [newAtCursor, help];
-		else if (row.kind === "header" && row.group?.kind === "custom")
+		else if (row.kind === "header" && row.group !== null)
 			hints = [enter(row.collapsed ? "expand" : "collapse"), ["m", "rename", () => this.startNaming()], newAtCursor, help];
 		else if (row.kind === "header") hints = [enter(row.collapsed ? "expand" : "collapse"), newAtCursor, help];
 		else if (row.kind === "section" && row.key === "operators")
@@ -2319,19 +2508,18 @@ function overlayConfirm(
 function rowLine(row: Row, width: number, now: number): string {
 	if (row.kind === "header") {
 		const count = gray(` (${row.count})`);
-		const name =
-			row.group === null ? bold(projectName(row.project)) : row.group.kind === "custom" ? row.group.name : magenta(groupLabel(row.group));
+		const name = row.group === null ? bold(projectName(row.project)) : row.group;
 		return `${" ".repeat(1 + row.depth * 2)}${row.collapsed ? "▸" : "▾"} ${name}${count}`;
 	}
 	if (row.kind === "section") return ` ${row.expanded ? "▾" : "▸"} ${row.label} ${gray(`(${row.count})`)}`;
 	const e = row.entry;
 	// Mid-drag, the session being carried is a hollow outline of itself.
 	if (roster.dragging?.moved && roster.dragging.id === e.id) {
-		const lead = `${gray("┆")}${" ".repeat(2 + row.depth * 2)}`;
+		const lead = `${gray("┆")}${rowLead(row)}`;
 		return `${lead}${gray("◌")} ${gray(truncateToWidth(displayName(e), width - visibleWidth(lead) - 2, "…"))}`;
 	}
 	const mark = stage.staged === e.id ? (focus === "stage" ? cyan("▌") : "▌") : " ";
-	const lead = `${mark}${" ".repeat(2 + row.depth * 2)}`;
+	const lead = `${mark}${rowLead(row)}`;
 	// A snoozed row says when it wakes instead: ↘ for its next message.
 	const when = !e.open
 		? age(archivedKey(e), now)
@@ -2340,12 +2528,64 @@ function rowLine(row: Row, width: number, now: number): string {
 				? "↘"
 				: wakeAt(e.snoozedUntil, now)
 			: age(e.activityAt, now);
-	// A worktree bucket already names the worktree.
-	const worktree = e.cwd !== e.project && groupOf(e)?.kind !== "worktree" ? magenta("⎇") : " ";
+	const worktree = e.cwd !== e.project ? magenta("⎇") : " ";
 	const right = ` ${worktree} ${gray(when.padStart(3))} `;
-	const titleWidth = width - visibleWidth(lead) - 2 - visibleWidth(right);
+	const hidden = row.folded ? ` ${foldedTally(row.family.map((p) => p.entry))}` : "";
+	const titleWidth = width - visibleWidth(lead) - 2 - visibleWidth(hidden) - visibleWidth(right);
 	const title = truncateToWidth(e.provisional ? gray(displayName(e)) : displayName(e), titleWidth, "…", true);
-	return `${lead}${glyph(stateOf(e), now)} ${title}${right}`;
+	return `${lead}${glyph(stateOf(e), now)} ${title}${hidden}${right}`;
+}
+
+/**
+ * A session row's left edge, after the cursor's bar: a nested row hangs from its parent's glyph on its family's guides;
+ * a family's root says who started it, if a session did, and has the family's fold.
+ */
+function rowLead(row: SessionRow): string {
+	const indent = " ".repeat(row.depth * 2);
+	const fold = row.family.length === 0 ? null : gray(row.folded ? "▸" : "▾");
+	if (row.nest) {
+		const guides = row.nest.continues.map((on) => (on ? "│  " : "   ")).join("");
+		return `${indent}  ${gray(`${guides}${row.nest.last ? "└" : "├"}`)}${fold ?? gray("─")} `;
+	}
+	const from = origin(row.entry);
+	return `${indent}${originMark(from)}${fold ?? " "}`;
+}
+
+function originMark(from: "session" | "operator" | null): string {
+	return from === "operator" ? blue("⌁") : from === "session" ? "↳" : " ";
+}
+
+/** Where a row's fold is: the column a click on it folds or opens its family from. */
+function foldColumn(row: SessionRow): number {
+	return row.nest ? 4 + row.depth * 2 + 3 * row.nest.continues.length : 2 + row.depth * 2;
+}
+
+/** What a family is doing, by state; ○ is every one finished, idle or not running. */
+function familyTally(family: Entry[]): string {
+	const states = family.map(stateOf);
+	const tally: [State[], string][] = [
+		[["working", "loading"], cyan("◐")],
+		[["blocked"], attention("◆")],
+		[["interrupted"], red("⚠")],
+		[["unseen"], green("●")],
+		[["idle", "dormant"], "○"],
+	];
+	return tally
+		.flatMap(([which, mark]) => {
+			const n = states.filter((state) => which.includes(state)).length;
+			return n > 0 ? [`${mark}${n}`] : [];
+		})
+		.join(" ");
+}
+
+/** How many sessions a fold hides, and of them, as the terminal's title counts them, those that need me. */
+function foldedTally(hidden: Entry[]): string {
+	const states = hidden.map(stateOf);
+	const count = (state: State, mark: string) => {
+		const n = states.filter((s) => s === state).length;
+		return n > 0 ? ` ${mark}${n}` : "";
+	};
+	return `${gray(`+${hidden.length}`)}${count("blocked", attention("◆"))}${count("unseen", green("●"))}`;
 }
 
 // ── Peek ────────────────────────────────────────────────────────────────
@@ -2365,6 +2605,8 @@ const PEEK_SWITCH_MS = 150;
 const PEEK_INFO_WAIT_MS = 200;
 /** How long a session's last turn and diff stand before a Peek asks again. */
 const PEEK_INFO_MS = 2000;
+/** The most of a folded family a Peek lists. */
+const PEEK_FOLD_ROWS = 8;
 
 type PeekSpot = { id: string; source: "pointer" | "cursor"; y: number };
 type InlinePeek = PeekSpot & { view: PeekView; top: number; left: number };
@@ -2599,7 +2841,30 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 		head.push(`${magenta(`⎇ ${e.branch}`)}${changes}`);
 	}
 	const group = groupOf(e);
-	if (group?.kind === "custom") head.push(`${gray("Group")} ${group.name}`);
+	if (group !== null) head.push(`${gray("Group")} ${group}`);
+	// Lines that are buttons: who started it, and on a fold, each session it hides.
+	const links: { at: number; key: string; id: string }[] = [];
+	const parent = parentOf(e);
+	if (parent) {
+		const label = `${gray("started by")} ${originMark(origin(e))} `;
+		links.push({ at: head.length, key: "p", id: e.id });
+		head.push(`${label}${truncateToWidth(displayName(parent), inner - visibleWidth(label) - 2, "…", true)} ${dim("p")}`);
+		if (parent.project !== e.project && !parent.operator)
+			head.push(gray(`${" ".repeat(visibleWidth(label))}in ${projectName(parent.project)}`));
+	}
+	if (row.folded) {
+		head.push(rule, `${gray("folded")} ${foldedTally(row.family.map((p) => p.entry))}`);
+		for (const { entry, nest } of row.family.slice(0, PEEK_FOLD_ROWS)) {
+			const guides = `${nest.continues.map((on) => (on ? "│  " : "   ")).join("")}${nest.last ? "└─ " : "├─ "}`;
+			links.push({ at: head.length, key: "open", id: entry.id });
+			head.push(`${gray(guides)}${glyph(stateOf(entry), now)} ${displayName(entry)}`);
+		}
+		const rest = row.family[PEEK_FOLD_ROWS];
+		if (rest) {
+			links.push({ at: head.length, key: "open", id: rest.entry.id });
+			head.push(gray(`… ${row.family.length - PEEK_FOLD_ROWS} more`));
+		}
+	}
 	if (e.schedules.length > 0) {
 		head.push(rule, gray("Schedules"));
 		// The soonest few, and always the last that ran, so it shows one ran however many are pending.
@@ -2662,14 +2927,26 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	return {
 		id: e.id,
 		lines,
-		buttons: buttons
-			.filter((b) => 1 + buttonsAt + b.y < lines.length - 1)
-			.map((b) => {
-				const y = 1 + buttonsAt + b.y;
-				// The line again with this one button lit, for the pointer resting on it.
-				const lit = (buttonLines[b.y] as string).replace(b.text, cursorLine(b.text, true));
-				return { y, from: margin + b.from, to: margin + b.to, key: b.key, hot: frame(lit) };
-			}),
+		buttons: [
+			...links
+				.filter((link) => 1 + link.at < lines.length - 1)
+				.map((link) => ({
+					y: 1 + link.at,
+					from: margin,
+					to: margin + inner,
+					key: link.key,
+					id: link.id,
+					hot: frame(cursorLine(truncateToWidth(body[link.at] as string, inner, "…", true), true)),
+				})),
+			...buttons
+				.filter((b) => 1 + buttonsAt + b.y < lines.length - 1)
+				.map((b) => {
+					const y = 1 + buttonsAt + b.y;
+					// The line again with this one button lit, for the pointer resting on it.
+					const lit = (buttonLines[b.y] as string).replace(b.text, cursorLine(b.text, true));
+					return { y, from: margin + b.from, to: margin + b.to, key: b.key, id: e.id, hot: frame(lit) };
+				}),
+		],
 	};
 }
 
@@ -2760,6 +3037,11 @@ function syncRoster(toRoster: boolean): Promise<void> {
  * session, from a Peek's buttons, the key acts on that session's row instead of the cursor's.
  */
 async function prefixKey(k: string, id: string | undefined): Promise<void> {
+	// A Peek lists the family a fold hides; one of them, chosen there, has no row of its own yet.
+	if (k === "open" && id !== undefined) {
+		reveal(id);
+		return;
+	}
 	const row = id === undefined ? roster.selected() : roster.rows().find((r) => r.key === id);
 	if (id !== undefined && !row) throw new Error(`no session ${id} in the roster`);
 	if (k === "/") {
@@ -2778,7 +3060,11 @@ async function prefixKey(k: string, id: string | undefined): Promise<void> {
 	} else if (k === "d") roster.askRemove();
 	else if (k === "w") roster.wake(row);
 	else if (k === "x") roster.stop(row);
-	else if (k === "a") roster.toggleArchived(row);
+	else if (k === "a") {
+		// Asking whether the family goes too needs the keyboard where the question is.
+		if (row?.kind === "session" && row.entry.open && openDescendants(row.entry).length > 0) await focusRoster();
+		roster.toggleArchived(row);
+	} else if (k === "p") roster.toParent(row);
 	else if (k === "s" || k === "S") {
 		// The menu takes the keyboard; unsnoozing needs none.
 		if (!(row?.kind === "session" && row.entry.snoozed)) await focusRoster();
@@ -2802,7 +3088,7 @@ function peekButtons(row: Row): [label: string, key: string][] {
 	if (row.kind === "section") return row.key === "operators" ? [["New Operator", "n"]] : [];
 	if (row.kind === "header") {
 		const items: [string, string][] = [["New session here", "n"]];
-		if (row.group?.kind === "custom") items.push(["Rename Group…", "m"]);
+		if (row.group !== null) items.push(["Rename Group…", "m"]);
 		return items;
 	}
 	const e = row.entry;
@@ -3039,7 +3325,7 @@ function pickerState(): PickerState | null {
 
 function viewState(): DeckState {
 	const rows = roster.rows();
-	const labels = new Map(rows.flatMap((row) => (row.kind === "header" && row.group ? [[row.key, groupLabel(row.group)]] : [])));
+	const labels = new Map(rows.flatMap((row) => (row.kind === "header" && row.group !== null ? [[row.key, row.group]] : [])));
 	const index = roster.resolveCursor(rows);
 	const cursorRow = rows[index];
 	const drop = roster.dragging?.moved ? roster.dragging.drop : null;
@@ -3051,9 +3337,25 @@ function viewState(): DeckState {
 		terminalFocused,
 		cursor: cursorRow?.kind === "session" ? cursorRow.entry.id : null,
 		cursorRow: index,
-		mode: roster.choosing ? "picker" : roster.filtering ? "filter" : roster.naming ? "name" : roster.snoozing ? "snooze" : "roster",
+		mode: roster.choosing
+			? "picker"
+			: roster.archiving !== null
+				? "archive"
+				: roster.filtering
+					? "filter"
+					: roster.naming
+						? "name"
+						: roster.snoozing
+							? "snooze"
+							: "roster",
 		picker: pickerState(),
-		drop: drop ? { project: projectName(drop.header.project), group: drop.header.group && groupLabel(drop.header.group) } : null,
+		archive: (() => {
+			const e = roster.archiving === null ? undefined : entries.get(roster.archiving);
+			if (!e) return null;
+			const family = openDescendants(e);
+			return { id: e.id, counts: Bun.stripANSI(familyTally(family)), all: family.length + 1 };
+		})(),
+		drop: drop ? { project: projectName(drop.header.project), group: drop.header.group } : null,
 		filter: roster.query(),
 		hover: roster.hover,
 		peek: (() => {
@@ -3087,12 +3389,16 @@ function viewState(): DeckState {
 						state: stateOf(row.entry),
 						provisional: row.entry.provisional,
 						group: labels.get(row.header) ?? null,
+						level: levelOf(row.nest),
+						origin: row.nest ? null : origin(row.entry),
+						folded: row.folded,
+						hidden: row.folded ? row.family.length : 0,
 					}
 				: row.kind === "header"
 					? {
 							kind: "header",
 							project: projectName(row.project),
-							group: row.group && groupLabel(row.group),
+							group: row.group,
 							expanded: !row.collapsed,
 						}
 					: { kind: "section", label: row.label, count: row.count, expanded: row.expanded },

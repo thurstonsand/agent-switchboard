@@ -383,6 +383,8 @@ export function launch(spec: LaunchSpec): string {
 		"remain-on-exit-format",
 		"",
 		...(resume ? [";", "set", "-t", name, "@swb_launch_id", resume.id] : []),
+		// For the Deck, which nests the new session under its parent before its first turn records one.
+		...(spec.parentId ? [";", "set", "-t", name, "@swb_parent", spec.parentId] : []),
 	);
 	since(`launch.${spec.harness}`, at);
 	return name;
@@ -528,19 +530,34 @@ function liveRuntime(db: Db, id: string, hosts: Set<string>): RuntimeRow | null 
 	return runtime && runtimeLive(runtime, bootId(), hosts) ? runtime : null;
 }
 
-/** Archives a session, refusing mid-turn; an idle live pi is killed, and editors nobody needs any more go with it. */
-export function archive(db: Db, id: string): void {
+/**
+ * Archives sessions, refusing any mid-turn; idle live pis are killed together, and editors nobody needs any more go
+ * with them. Of several, the rest are archived before the refusals are raised.
+ */
+export function archive(db: Db, ids: string[]): void {
 	const hosts = new Set(listSessions(SESSIONS).map(([name]) => name as string));
-	const runtime = db.tx(() => {
-		const session = db.get("SELECT phase FROM sessions WHERE session_id = ?", id);
-		if (!session) throw new SwbError(`no session ${id}`);
-		const runtime = liveRuntime(db, id, hosts);
-		if (runtime && session.phase !== "idle") throw new SwbError("turn running: wait for it to complete");
-		markArchived(db, id);
-		return runtime;
-	});
-	if (runtime) stopPis([runtime]);
+	const stopping: RuntimeRow[] = [];
+	const refused: string[] = [];
+	for (const id of ids) {
+		try {
+			const runtime = db.tx(() => {
+				const session = db.get("SELECT phase FROM sessions WHERE session_id = ?", id);
+				if (!session) throw new SwbError(`no session ${id}`);
+				const runtime = liveRuntime(db, id, hosts);
+				if (runtime && session.phase !== "idle") throw new SwbError("turn running: wait for it to complete");
+				markArchived(db, id);
+				return runtime;
+			});
+			if (runtime) stopping.push(runtime);
+		} catch (error) {
+			if (!(error instanceof SwbError)) throw error;
+			refused.push(error.message);
+		}
+	}
+	if (stopping.length > 0) stopPis(stopping);
 	gc(db);
+	if (refused.length === 1 && ids.length === 1) throw new SwbError(refused[0] as string);
+	if (refused.length > 0) throw new SwbError(`${refused.length} of ${ids.length} not archived: ${refused[0]}`);
 }
 
 /** Stops a live idle pi, keeping its session open to wake later; refuses mid-turn, as archive does. */
