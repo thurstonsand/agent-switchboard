@@ -161,8 +161,9 @@ test("a timed snooze holds through a conversation and shows while blocked or int
 	s.swb("snooze", pi.id, "monday");
 	const monday = new Date(snoozeOf(pi.id).snoozedUntil as number);
 	expect([monday.getDay(), monday.getHours(), monday.getMinutes()]).toEqual([1, 9, 0]);
-	expect(monday.getTime() - Date.now()).toBeGreaterThan(0);
-	expect(monday.getTime() - Date.now()).toBeLessThanOrEqual(7 * 86_400_000);
+	const today = new Date();
+	const days = Math.round((new Date(monday).setHours(0, 0, 0, 0) - new Date(today).setHours(0, 0, 0, 0)) / 86_400_000);
+	expect(days).toBe(today.getDay() === 1 ? 7 : (8 - today.getDay()) % 7);
 	s.swb("archive", pi.id);
 	s.swb("unarchive", pi.id);
 	expect(
@@ -250,7 +251,7 @@ test("a schedule launches a new session, refuses what can't work, unschedules, a
 
 	const refusals: [string[], string][] = [
 		[["--at", "PT1H", "--cron", "* * * * *"], "give at, to run once, or cron, to recur: one of them"],
-		[["--at", "fri 3pm"], 'at: "fri 3pm" is neither an ISO 8601 time with offset nor a duration like "PT2H"'],
+		[["--at", "fri 3pm"], 'at: "fri 3pm" is neither an ISO 8601 time nor a duration like "PT2H"'],
 		[["--at", "2020-01-01T09:00:00Z"], "at: 2020-01-01T09:00:00Z has passed"],
 		[["--cron", "0 9 * *"], 'cron: "0 9 * *" needs 5 fields, "M H DoM Mon DoW"'],
 		[["--at", "PT1H", "--request-response"], "a message to this session can't request a response from it"],
@@ -276,6 +277,21 @@ test("a schedule launches a new session, refuses what can't work, unschedules, a
 	);
 	const listed = JSON.parse(s.swb("schedules", "--from", pi.id)) as { details: { schedules: { label: string }[] } };
 	expect(listed.details.schedules.map((x) => x.label)).toEqual(["soon"]);
+
+	// A time without an offset is the machine's local time, as cron's are; one with an offset is that instant.
+	const year = new Date().getFullYear() + 1;
+	const inNewYork = async (at: string) => {
+		const proc = Bun.spawn([`${s.bin}/swb`, "schedule", "--from", pi.id, "--at", at, "--label", "Dec 15, 9 AM"], {
+			env: { ...s.env, TZ: "America/New_York" },
+			cwd: s.project,
+			stdin: new Blob(["reply local"]),
+			stdout: "pipe",
+			stderr: "inherit",
+		});
+		return (JSON.parse(await proc.stdout.text()) as { details: { nextAt: number } }).details.nextAt;
+	};
+	expect(await inNewYork(`${year}-12-15T09:00`)).toBe(Date.parse(`${year}-12-15T09:00:00-05:00`));
+	expect(await inNewYork(`${year}-12-15T09:00Z`)).toBe(Date.parse(`${year}-12-15T09:00:00Z`));
 });
 
 test("Claude Code and Codex schedule and snooze through swb's tools, and Claude Code's own scheduler is off", async () => {

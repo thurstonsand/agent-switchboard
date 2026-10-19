@@ -35,7 +35,7 @@ const USAGE = `swb: Agent Switchboard
   swb archive ID               archive a session
   swb unarchive ID             reopen an archived session
   swb snooze ID one_hour|one_day|monday|next_message|off|TIME
-                               hide a session in Snoozed until then, or its next message; TIME is ISO 8601 with offset
+                               hide a session in Snoozed until then, or its next message; TIME is ISO 8601, local unless it has an offset
   swb quit [--force]           stop every session, Deck, and the clock; sessions stay open, dormant
   swb wake ID                  start a dormant session in the background
   swb launch --harness pi|claude|codex [--cwd DIR] [--from ID] [--title T] [--model M] [--request-response]
@@ -45,8 +45,8 @@ const USAGE = `swb: Agent Switchboard
   swb reachable --from ID      every open session but the caller, as a line's tool reads it
   swb schedule --from ID [--to ID | --launch-harness H --launch-title T [--launch-cwd DIR]] (--at WHEN | --cron EXPR)
                --label TEXT [--request-response] [--snooze] [--request-id KEY]
-                               message a session later, or launch one; the body on stdin. WHEN is ISO 8601: a time with
-                               offset or a duration (PT2H); EXPR is 5-field cron in local time
+                               message a session later, or launch one; the body on stdin. WHEN is ISO 8601: a time, local
+                               unless it has an offset, or a duration (PT2H); EXPR is 5-field cron in local time
   swb schedules --from ID      the schedules a session set or receives
   swb unschedule ID --from ID  cancel a pending schedule
   swb mcp                      the MCP server a Codex session's app-server runs for swb's tools

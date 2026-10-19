@@ -162,6 +162,8 @@ export function scenario(
 		SHELL: "/bin/sh",
 		TERM: "xterm-256color",
 		LANG: "C.UTF-8",
+		// swb and the test read local time alike: both from /etc/localtime, or both from this.
+		...(process.env.TZ ? { TZ: process.env.TZ } : {}),
 		XDG_CONFIG_HOME: join(home, ".config"),
 		XDG_STATE_HOME: join(home, ".local/state"),
 		XDG_CACHE_HOME: join(home, ".cache"),

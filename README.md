@@ -33,7 +33,7 @@ swb ls [--json]              list sessions with derived state
 swb dirs [--json]            list the directories n offers for a new session
 swb archive ID               archive a session
 swb unarchive ID             reopen an archived session
-swb snooze ID one_hour|one_day|monday|next_message|off|TIME   snooze a session; TIME is ISO 8601 with offset
+swb snooze ID one_hour|one_day|monday|next_message|off|TIME   snooze a session; TIME is ISO 8601, local unless it has an offset
 swb quit [--force]           stop every session, Deck, and swb's clock; sessions stay open
 swb wake ID                  start a dormant session in the background
 swb launch --harness H [--cwd DIR] [--from ID] [--title T]   start a new session in the background; its goal on stdin

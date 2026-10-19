@@ -79,7 +79,8 @@ export const TOOLS = {
 			message: Type.String({ description: "What to deliver, self-contained when it goes to another session." }),
 			at: Type.Optional(
 				Type.String({
-					description: 'When, once: an ISO 8601 time with offset ("2026-10-23T15:00:00-04:00") or a duration from now ("PT2H", "P1D").',
+					description:
+						'When, once: an ISO 8601 time, local unless it has an offset ("2026-10-23T15:00"), or a duration from now ("PT2H", "P1D").',
 				}),
 			),
 			cron: Type.Optional(
@@ -131,7 +132,7 @@ export const TOOLS = {
 			archived: Type.Optional(Type.Boolean()),
 			snooze: Type.Optional(
 				Type.Union([...[...SNOOZE_PRESETS, "off"].map((preset) => Type.Literal(preset)), Type.Object({ until: Type.String() })], {
-					description: 'Snooze preset, off to unsnooze, or {"until": "2026-11-05T09:00:00-05:00"} for a custom time.',
+					description: 'Snooze preset, off to unsnooze, or {"until": "2026-11-05T09:00"} for a custom local time.',
 				}),
 			),
 		}),

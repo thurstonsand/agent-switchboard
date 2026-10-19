@@ -33,10 +33,10 @@ export function presetUntil(preset: SnoozePreset, now: number): number | null {
 	}
 }
 
-const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?$/;
 const ISO_DURATION = /^P(?=\d|T\d)(?:(\d+)W)?(?:(\d+)D)?(?:T(?=\d)(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/;
 
-/** An ISO 8601 time with its offset, or a duration from now, as epoch ms in the future. */
+/** An ISO 8601 time, local unless it has an offset as cron is, or a duration from now, as epoch ms in the future. */
 export function when(text: string, now: number, what: string): number {
 	const duration = ISO_DURATION.exec(text);
 	let at: number;
@@ -45,7 +45,7 @@ export function when(text: string, now: number, what: string): number {
 		at = now + ((((w * 7 + d) * 24 + h) * 60 + m) * 60 + s) * 1000;
 		if (at <= now) throw new SwbError(`${what}: ${text} is no time from now`);
 	} else {
-		if (!ISO_TIME.test(text)) throw new SwbError(`${what}: "${text}" is neither an ISO 8601 time with offset nor a duration like "PT2H"`);
+		if (!ISO_TIME.test(text)) throw new SwbError(`${what}: "${text}" is neither an ISO 8601 time nor a duration like "PT2H"`);
 		at = Date.parse(text);
 		if (Number.isNaN(at)) throw new SwbError(`${what}: "${text}" is no real time`);
 		if (at <= now) throw new SwbError(`${what}: ${text} has passed`);
