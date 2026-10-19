@@ -1,8 +1,8 @@
 import { existsSync, realpathSync } from "node:fs";
-import { type Db, type Harness, operatorDir } from "@swb/shared";
+import { type Db, type Harness, operatorDir, type Snooze } from "@swb/shared";
 import { frame, harnessName, type MessageKind } from "@swb/shared/mailbox";
 import { isArchived, markArchived, recordTx } from "@swb/shared/record";
-import type { Snooze, ToolResult } from "@swb/shared/tools";
+import type { ToolResult } from "@swb/shared/tools";
 import { CodexClient } from "./codex/client.ts";
 import { codexSocket } from "./codex/host.ts";
 import { displayName, type SessionState, sessionState, states } from "./derive.ts";

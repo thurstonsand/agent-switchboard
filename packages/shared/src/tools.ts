@@ -1,6 +1,6 @@
 import { type Static, type TSchema, Type } from "typebox";
 import { Value } from "typebox/value";
-import { HARNESSES } from "./index.ts";
+import { HARNESSES, SNOOZE_PRESETS } from "./index.ts";
 
 // The coordination tools every line gives its agent, defined once. pi takes these schemas as they are; Claude Code
 // and Codex take them as JSON Schema. Each tool runs an swb command and returns its text to the model unchanged.
@@ -13,11 +13,6 @@ const harnessName = Type.Union(
 	HARNESSES.map((name) => Type.Literal(name)),
 	{ description: "Which harness runs it: pi, claude (Claude Code), or codex." },
 );
-
-export const SNOOZE_PRESETS = ["one_hour", "one_day", "monday", "next_message"] as const;
-export type SnoozePreset = (typeof SNOOZE_PRESETS)[number];
-/** What swb_update_session's snooze takes, and `swb snooze` too: a preset, off, or a time. */
-export type Snooze = SnoozePreset | "off" | { until: string };
 
 export const TOOLS = {
 	session_reachable: {

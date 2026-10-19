@@ -1,5 +1,4 @@
-import type { Harness, View } from "@swb/shared";
-import type { Snooze } from "@swb/shared/tools";
+import type { Harness, Snooze, View } from "@swb/shared";
 import type { Config } from "../config.ts";
 import type { SessionState } from "../derive.ts";
 import type { TargetTree } from "../dirs.ts";

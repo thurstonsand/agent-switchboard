@@ -12,6 +12,11 @@ export type View = "pi" | "editor" | "split";
 export const HARNESSES = ["pi", "claude", "codex"] as const;
 export type Harness = (typeof HARNESSES)[number];
 
+export const SNOOZE_PRESETS = ["one_hour", "one_day", "monday", "next_message"] as const;
+export type SnoozePreset = (typeof SNOOZE_PRESETS)[number];
+/** What swb_update_session's snooze takes, and `swb snooze` too: a preset, off, or a time. */
+export type Snooze = SnoozePreset | "off" | { until: string };
+
 export function harness(name: string): Harness {
 	if (!(HARNESSES as readonly string[]).includes(name)) throw new Error(`unknown harness ${name}: one of ${HARNESSES.join(", ")}`);
 	return name as Harness;

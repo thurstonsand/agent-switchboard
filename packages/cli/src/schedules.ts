@@ -1,8 +1,8 @@
 import { existsSync, realpathSync } from "node:fs";
-import type { Db, Harness } from "@swb/shared";
+import { type Db, type Harness, SNOOZE_PRESETS, type Snooze, type SnoozePreset } from "@swb/shared";
 import { clockTime, harnessName } from "@swb/shared/mailbox";
 import { recordTx } from "@swb/shared/record";
-import { SNOOZE_PRESETS, type Snooze, type SnoozePreset, type ToolResult } from "@swb/shared/tools";
+import type { ToolResult } from "@swb/shared/tools";
 import { Cron } from "croner";
 import { displayName, sessionState, states } from "./derive.ts";
 import { SwbError } from "./errors.ts";

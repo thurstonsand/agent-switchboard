@@ -17,8 +17,7 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { harness as asHarness, HARNESSES, type Harness, operatorDir, projectRoot, type View } from "@swb/shared";
-import type { SnoozePreset } from "@swb/shared/tools";
+import { harness as asHarness, HARNESSES, type Harness, operatorDir, projectRoot, type SnoozePreset, type View } from "@swb/shared";
 import { mark } from "@swb/shared/trace";
 import type { Subprocess } from "bun";
 import { loadConfig } from "../config.ts";
