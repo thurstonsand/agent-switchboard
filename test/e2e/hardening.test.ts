@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { DeckState, HeaderStateRow } from "../../packages/cli/src/deck/protocol.ts";
 import { VERSION } from "../../packages/cli/src/version.ts";
 import {
@@ -17,7 +17,7 @@ import {
 	terminal,
 	waitState,
 } from "./harness/deck.ts";
-import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
+import { alive, budgets, release, repo, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
 afterEach(async () => {
@@ -486,4 +486,27 @@ test("a newer swb takes over: idle pis stop, a working one keeps its turn, and e
 	await waitState(s, "the Deck up again", (x) => sessionRows(x).length === 2);
 	expect([pid(sessions), pid(ui)]).not.toContain(before[0]);
 	expect(pid(ui)).not.toBe(before[1]);
+});
+
+test("cleanup leaves nothing running: a Deck open on a live pi can't restart the sessions server, and a late gc can't recreate the db", async () => {
+	s = scenario("phase6", "cleanup");
+	s.swb("drive", "start", "--", "new");
+	await waitState(s, "the new pi live with the keyboard", (x) => x.staged.kind === "live" && x.focus === "stage", budgets.piReady);
+	await reply(s, "one");
+	const root = dirname(s.env.HOME as string);
+	const server = Number(s.tmux(s.servers.sessions, "display", "-p", "#{pid}"));
+
+	await s.cleanup();
+	// Past a Deck worker's tick, which restarts a sessions server it finds down.
+	await Bun.sleep(1000);
+	expect(alive(server)).toBe(false);
+	const flag = `-L ${s.servers.sessions}`;
+	const procs = Bun.spawnSync(["ps", "-eo", "args="]).stdout.toString().split("\n");
+	expect(procs.filter((args) => args.includes(`${flag} `) || args.endsWith(flag))).toEqual([]);
+	expect(existsSync(root)).toBe(false);
+
+	// The sessions server's session-closed hook, landing after its world is gone, fails instead of bringing it back.
+	const gc = Bun.spawnSync([join(repo, "dist/swb"), "gc"], { env: s.env, cwd: "/", stderr: "pipe" });
+	expect(gc.exitCode).not.toBe(0);
+	expect(existsSync(root)).toBe(false);
 });

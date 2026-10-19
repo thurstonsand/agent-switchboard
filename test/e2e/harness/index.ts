@@ -240,20 +240,22 @@ export function scenario(
 		trust,
 		save: (file, content) => writeFileSync(join(artifacts, file), content),
 		cleanup: async () => {
-			const pids: number[] = [];
-			for (const key of [...servers]) {
+			// The sessions server last, once everything on the others is dead: a Deck still running restarts it.
+			const sessions = `${env.TMUX_TMPDIR}\0${named.sessions}`;
+			const keys = [...servers].sort((a, b) => Number(a === sessions) - Number(b === sessions));
+			for (const key of keys) {
 				const [tmpdir, server] = key.split("\0") as [string, string];
 				if (tmpdir !== env.TMUX_TMPDIR) continue;
 				servers.delete(key);
 				const probe = Bun.spawnSync([tools.tmux, "-L", server, "display", "-p", "#{pid}"], { env });
 				if (probe.exitCode !== 0) continue;
-				pids.push(Number(probe.stdout.toString().trim()));
+				const pids = [Number(probe.stdout.toString().trim())];
 				const panes = Bun.spawnSync([tools.tmux, "-L", server, "list-panes", "-a", "-F", "#{pane_pid}"], { env });
 				pids.push(...panes.stdout.toString().trim().split("\n").filter(Boolean).map(Number));
 				Bun.spawnSync([tools.tmux, "-L", server, "kill-server"], { env });
+				await until(() => pids.every((pid) => !alive(pid)), 5000, `${server}: pids ${pids.join(",")} to die`);
 			}
 			for (const fake of fakes) fake.kill();
-			await until(() => pids.every((pid) => !alive(pid)), 5000, `pids ${pids.join(",")} to die`);
 			rmSync(root, { recursive: true, force: true });
 		},
 	};

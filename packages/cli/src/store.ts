@@ -145,8 +145,8 @@ export function saveLayout(db: Db, projectRoot: string, layout: DeckLayout): voi
 }
 
 /** Opens the db and brings it to this binary's schema; refuses a db from a newer swb. */
-export function openStore(): Db {
-	const db = new Db(dbPath(), { create: true });
+export function openStore({ create } = { create: true }): Db {
+	const db = new Db(dbPath(), { create });
 	const version = db.userVersion();
 	if (version > SCHEMA_VERSION) throw new SwbError(`db ${db.path} is schema v${version}, newer than this swb (v${SCHEMA_VERSION})`);
 	if (version < SCHEMA_VERSION) {
