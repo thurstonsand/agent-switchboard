@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 import {
 	type Component,
 	decodeKittyPrintable,
+	type Focusable,
 	Input,
 	isKeyRelease,
 	matchesKey,
@@ -1065,7 +1066,7 @@ function hoverLine(line: string): string {
 
 type ClickTarget = { y: number; from: number; to: number; act: () => void };
 
-class Roster implements Component {
+class Roster implements Component, Focusable {
 	selectedKey = "";
 	lastIndex = 0;
 	/** After `a`, the cursor keeps its index instead of chasing the session into its new section. */
@@ -1073,6 +1074,16 @@ class Roster implements Component {
 	scrollTop = 0;
 	collapsed = new Set<string>();
 	expanded = new Set<SectionKey>(["operators"]);
+	/**
+	 * pi-tui's focus is always the roster's; it passes it on to the inputs, so the one showing places the terminal's
+	 * cursor rather than drawing one of its own, and tmux shows that cursor only while the roster's pane is active.
+	 */
+	get focused(): boolean {
+		return this.filter.focused;
+	}
+	set focused(on: boolean) {
+		for (const input of [this.filter, this.name, this.search, this.path]) input.focused = on;
+	}
 	filter = new Input({ prompt: "/ " });
 	filtering = false;
 	name = new Input({ prompt: "> " });
@@ -3100,7 +3111,7 @@ function viewState(): DeckState {
 // ── main ────────────────────────────────────────────────────────────────
 
 let frameKeyAt = 0;
-const tui = new TuiAltScreen(new ProcessTerminal(), false, undefined, { mouse: true });
+const tui = new TuiAltScreen(new ProcessTerminal(), true, undefined, { mouse: true });
 const roster = new Roster();
 tui.setLayoutRoot(roster);
 tui.setFocus(roster);

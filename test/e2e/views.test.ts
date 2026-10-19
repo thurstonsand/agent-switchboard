@@ -455,10 +455,20 @@ test("m names a session's Group, n joins it; dragging moves it between Groups be
 	await cursorTo(s, a);
 	s.keys("m");
 	await waitState(s, "naming", (x) => x.mode === "name");
-	s.keys("-l", "review", "Enter");
+	// The name's cursor is the terminal's, which tmux shows only while the roster's pane is the active one.
+	s.keys("-l", "review");
+	const nameLine = () =>
+		s
+			.tmux(s.servers.ui, "capture-pane", "-p", "-e", "-t", `=${state(s).deck}:.0`)
+			.split("\n")
+			.find((line) => line.includes("> review"));
+	await until(() => nameLine() !== undefined, budgets.settle, "the name typed");
+	expect(nameLine()).not.toContain("\x1b[7m");
+	expect(s.tmux(s.servers.drive, "display", "-p", "#{cursor_flag}")).toBe("1");
+	s.keys("Enter");
 	let st = await waitState(s, "alpha in review", (x) => groups(x).review?.join() === a && x.mode === "roster");
 	expect(groups(st)).toEqual({ review: [a], "⎇ main": [b], "⎇ wt": [w] });
-	await until(() => entry(s, a).group === "review", budgets.settle, "a\'s Group review in the db");
+	await until(() => entry(s, a).group === "review", budgets.settle, "a's Group review in the db");
 	s.save("named.ansi", s.swb("drive", "capture", "--ansi"));
 
 	const bravo = lineOf(st, (r) => r.kind === "session" && r.id === b);
