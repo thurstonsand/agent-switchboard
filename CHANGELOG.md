@@ -24,6 +24,10 @@ Schema v6: update swb and the pi line together.
 
 - `group_by = "worktree"`. A config that still sets `group_by` fails to load; delete the key.
 
+### Fixed
+
+- On tmux 3.8, a pi on the Stage stayed tuned to your terminal's old theme after it switched between light and dark: a light screen with your messages in dark boxes. It follows the switch again, in copy mode too, and every session sees your terminal's foreground and palette along with its background. With several Decks open, the one you use last sets the colours.
+
 ## 0.6.4 — 2026-10-16
 
 ### Fixed

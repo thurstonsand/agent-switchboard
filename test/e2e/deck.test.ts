@@ -494,6 +494,44 @@ const DARK_BG = "\x1b]11;rgb:1d1d/2020/2121\x1b\\";
 const LIGHT_RED = "\x1b]4;9;rgb:9d9d/0000/0606\x1b\\";
 const DARK_RED = "\x1b]4;9;rgb:fbfb/4949/3434\x1b\\";
 
+/** The background pi paints its last user message on, read from its pane rather than asked of the terminal. */
+function userMessageBg(host: string): string {
+	const ansi = s.tmux(s.servers.sessions, "capture-pane", "-p", "-e", "-t", `=${host}:`);
+	return [...ansi.slice(0, ansi.lastIndexOf("reply ")).matchAll(/48;2;(\d+;\d+;\d+)/g)].at(-1)?.[1] ?? "none";
+}
+
+test("a pi on the Stage repaints when the terminal flips, in copy mode too, while the shell beside it gets no report", async () => {
+	s = scenario("phase2", "theme-repaint");
+	s.swb("drive", "start", "--", "new");
+	const st = await waitState(
+		s,
+		"the new pi live with the keyboard",
+		(x) => x.staged.kind === "live" && x.focus === "stage",
+		budgets.piReady,
+	);
+	const host = st.staged.host as string;
+	await reply(s, "one");
+	await until(() => userMessageBg(host) === "219;229;229", budgets.settle, "pi's light user message");
+	s.keys("M-a", "s");
+	await waitState(s, "the shell, with the keyboard", (x) => x.layout.shell && x.focus === "shell");
+
+	// tmux 3.8 tells pi before the sessions server mirrors the terminal, so pi's own query would see the old colors.
+	s.swb("drive", "theme", "dark");
+	await until(() => userMessageBg(host) === "35;54;54", budgets.settle, "pi's dark user message");
+	s.save("dark.ansi", s.swb("drive", "capture", "--ansi"));
+
+	// tmux 3.7c tells pi only once copy mode ends; swb, on 3.8, while it's still up.
+	s.tmux(s.servers.sessions, "copy-mode", "-t", `=${host}:`);
+	s.swb("drive", "theme", "light");
+	await waitState(s, "the roster's light background", (x) => x.colors.background === "#f9f5d7");
+	await Bun.sleep(500);
+	expect(s.tmux(s.servers.sessions, "display", "-p", "-t", `=${host}:`, "#{pane_in_mode}")).toBe("1");
+	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host}:`, "-X", "cancel");
+	await until(() => userMessageBg(host) === "219;229;229", budgets.settle, "pi's light user message, after copy mode");
+	s.save("light.ansi", s.swb("drive", "capture", "--ansi"));
+	expect(s.screen()).not.toContain("997");
+});
+
 test("with the db writer lock held and a 50 MB transcript being parsed, the cursor still moves within 100 ms", async () => {
 	s = scenario("phase2", "slow-worker");
 	const [a, b] = (await seed(s, { turns: ["small"] }, { turns: ["huge"] })) as [string, string];

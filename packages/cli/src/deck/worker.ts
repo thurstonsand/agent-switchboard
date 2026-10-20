@@ -8,9 +8,9 @@ import { addDir, removeDir, targets } from "../dirs.ts";
 import { type ScheduleView, schedulesBySession, snooze } from "../schedules.ts";
 import { archive, ensureEditor, ensureSessionsServer, ensureShell, launch, stop, unarchive, wake } from "../sessions.ts";
 import { loadLayout, markVisited, openStore, saveLayout, setGroup, setView } from "../store.ts";
-import { listSessions, SESSIONS, tmuxTry } from "../tmux.ts";
+import { listSessions, SESSIONS, tmux, tmuxTry } from "../tmux.ts";
 import { ensurePlaceholder, placeholderName } from "./deck.ts";
-import type { Diff, Entry, FromWorker, Snapshot, ToWorker, Turn } from "./protocol.ts";
+import type { Diff, Entry, FromWorker, Snapshot, TerminalProfile, ToWorker, Turn } from "./protocol.ts";
 import { locateTranscript, readTranscript } from "./transcript.ts";
 
 // The roster's worker owns the db and everything slow: a held writer lock or a 50 MB transcript stalls this
@@ -31,7 +31,8 @@ let dataVersion = -1;
 let rows: SessionRow[] = [];
 let runtimes: RuntimeRecord[] = [];
 let schedules = new Map<string, ScheduleView[]>();
-let background: string | null = null;
+let profile: TerminalProfile | null = null;
+/** The sessions server this Deck last mirrored its terminal into, by pid: a new one is mirrored again. */
 let mirroredServer = "";
 const transcripts = new Map<string, { mtimeMs: number; turns: Turn[] }>();
 /** Hosts this Deck launched whose pi hasn't registered yet. */
@@ -193,14 +194,36 @@ function reap(snap: Snapshot, attached: Map<string, boolean>): void {
 	}
 }
 
-/** Unviewed panes have no terminal to ask, so the terminal's background is mirrored into the sessions server. */
-function mirror(serverPid: string): void {
-	if (background === null) return;
-	const key = `${serverPid}:${background}`;
-	if (key === mirroredServer) return;
-	const style = `bg=${background}`;
-	const result = tmuxTry(SESSIONS, "set", "-g", "window-style", style, ";", "set", "-g", "window-active-style", style);
-	if (result.ok) mirroredServer = key;
+/**
+ * Unviewed panes have no terminal to ask, so tmux answers their color queries from window-style and pane-colours: this
+ * Deck's terminal is mirrored there, for every pane. The last Deck to report or regain focus owns it.
+ *
+ * Then every program subscribed to light/dark reports (mode 2031) gets one, so its next query sees the new colors.
+ * tmux 3.8 sends its own as soon as the Stage's client reports, before this mirror is current, and none again once it
+ * is. paste-buffer -S writes straight to the program, even under copy mode, where send-keys would drive copy mode.
+ * pane_private_modes reads the program's modes, not copy mode's; on 3.7c it's empty, and that tmux reports to panes
+ * from the window-style change itself.
+ */
+function mirror(colors: TerminalProfile): void {
+	const { foreground, background, palette, scheme } = colors;
+	const key = [foreground, background, scheme, ...(palette ?? [])].join(" ");
+	const current = tmuxTry(SESSIONS, "show", "-gqv", "@swb_colors");
+	if (current.ok && current.out === key) return;
+	const style = `bg=${background},fg=${foreground}`;
+	const styles = ["window-style", "window-active-style"].flatMap((option) => [";", "set", "-g", option, style]);
+	const colours = palette
+		? palette.flatMap((color, i) => [";", "set", "-g", `pane-colours[${i}]`, color])
+		: [";", "set", "-gu", "pane-colours"];
+	tmux(SESSIONS, ...[...styles, ...colours, ";", "set", "-g", "@swb_colors", key].slice(1));
+	const subscribed = tmux(SESSIONS, "list-panes", "-a", "-F", "#{?pane_dead,,#{pane_id} #{pane_private_modes}}")
+		.split("\n")
+		.filter((line) => line.split(" ")[1]?.split(",").includes("2031"))
+		.map((line) => line.split(" ")[0] as string);
+	if (subscribed.length === 0) return;
+	tmux(SESSIONS, "set-buffer", "-b", "swb-theme", `\x1b[?997;${scheme === "dark" ? 1 : 2}n`);
+	// One command per pane: a pane that exits in between fails only its own.
+	for (const pane of subscribed) tmuxTry(SESSIONS, "paste-buffer", "-S", "-b", "swb-theme", "-t", pane);
+	tmux(SESSIONS, "delete-buffer", "-b", "swb-theme");
 }
 
 function tick(): Set<string> {
@@ -213,7 +236,14 @@ function tick(): Set<string> {
 	// A Deck without its placeholder shows a blank Stage, so a killed sessions server comes straight back.
 	if (!snap.serverUp) ensureSessionsServer();
 	if (!names.has(placeholderName(deck))) ensurePlaceholder(deck);
-	mirror(serverPid);
+	if (profile && serverPid !== mirroredServer) {
+		mirroredServer = serverPid;
+		try {
+			mirror(profile);
+		} catch (error) {
+			post({ type: "error", text: (error as Error).message });
+		}
+	}
 	reap(snap, attached);
 	const json = JSON.stringify(snap);
 	if (json === lastJson) return names;
@@ -348,8 +378,9 @@ function handle(message: ToWorker): void {
 		case "peek":
 			void peek(message.id, message.cwd, message.transcript, message.harness);
 			return;
-		case "background":
-			background = message.color;
+		case "colors":
+			profile = message.colors;
+			mirroredServer = "";
 			break;
 		case "view":
 			try {

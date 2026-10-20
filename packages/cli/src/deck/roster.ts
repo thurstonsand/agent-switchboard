@@ -54,6 +54,7 @@ import type {
 	Snapshot,
 	State,
 	StatSummary,
+	TerminalProfile,
 	ToWorker,
 	Turn,
 } from "./protocol.ts";
@@ -3191,6 +3192,8 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 			if (focused === terminalFocused) break;
 			terminalFocused = focused;
 			syncVisit();
+			// Of several Decks, the one in use owns the colors every hosted program sees.
+			if (focused && profile) post({ type: "colors", colors: profile });
 			break;
 		}
 		case "layout":
@@ -3437,11 +3440,10 @@ process.stdout.write("\x1b[?1003h");
 
 // Like pi: query the colors, and again on every light/dark report (997). The roster starts before the Deck's
 // client attaches, so the first query gets nothing; tmux sends a 997 on attach, and that query gets everything.
-// pi asks for the palette once, at startup, usually with no client attached; tmux answers OSC 4 for a detached pane
-// only from pane-colours, so mirror this terminal's palette onto the sessions server.
-async function queryColors(scheme: string | null): Promise<void> {
+// The worker mirrors them into the sessions server, for the panes it hosts; see its mirror().
+let profile: TerminalProfile | null = null;
+async function queryColors(scheme: "light" | "dark" | null): Promise<void> {
 	const { foreground, background, palette } = await tui.queryTerminalColors({ timeoutMs: 200 });
-	if (palette) await tmuxAsync(SESSIONS, ...palette.flatMap((color, i) => [";", "set", "-g", `pane-colours[${i}]`, hex(color)]).slice(1));
 	cursorBg =
 		background && foreground
 			? {
@@ -3454,7 +3456,17 @@ async function queryColors(scheme: string | null): Promise<void> {
 	breath =
 		background && foreground && themeCyan ? { faint: lerp(background, themeCyan, 0.6), strong: lerp(themeCyan, foreground, 0.3) } : null;
 	colors = { background: background ? hex(background as RgbColor) : null, scheme: scheme ?? colors.scheme };
-	if (colors.background) post({ type: "background", color: colors.background });
+	if (background && foreground) {
+		// Before the terminal's first report, its scheme is guessed from the background, as tmux does.
+		const guess = background.r + background.g + background.b > 382 ? "light" : "dark";
+		profile = {
+			foreground: hex(foreground),
+			background: hex(background),
+			palette: palette?.map(hex) ?? null,
+			scheme: scheme ?? profile?.scheme ?? guess,
+		};
+		post({ type: "colors", colors: profile });
+	}
 	tui.requestRender();
 }
 tui.onTerminalColorSchemeChange((scheme) => void queryColors(scheme));

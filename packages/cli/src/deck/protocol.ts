@@ -132,6 +132,9 @@ export type DeckState = {
 /** `side` is the target file of the Stage's second pane, which exists only while split is showing; `peek` is the Peek's. */
 export type DeckPaths = { sock: string; card: string; target: string; side: string; below: string; peek: string };
 
+/** A Deck's terminal as its programs see it, in hex; `palette` is null when the terminal didn't report all 16. */
+export type TerminalProfile = { foreground: string; background: string; palette: string[] | null; scheme: "light" | "dark" };
+
 export type ToWorker =
 	| { type: "init"; deck: string; paths: DeckPaths; config: Config; here: string }
 	| { type: "layout"; layout: DeckLayout }
@@ -144,7 +147,7 @@ export type ToWorker =
 	| { type: "stop"; id: string }
 	| { type: "transcript"; id: string; path: string; harness: Harness }
 	| { type: "peek"; id: string; cwd: string; transcript: string | null; harness: Harness }
-	| { type: "background"; color: string }
+	| { type: "colors"; colors: TerminalProfile }
 	| { type: "view"; id: string; view: View }
 	| { type: "group"; ids: string[]; name: string | null }
 	| { type: "editor"; dir: string }
