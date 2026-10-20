@@ -109,8 +109,10 @@ export async function cursorTo(s: Scenario, id: string): Promise<void> {
 	for (let st = state(s); st.cursor !== id; ) {
 		if (Date.now() > deadline) throw new Error(`timed out waiting for cursor on ${id}`);
 		const before = st.cursorRow;
+		const on = st.cursor;
 		s.keys(rowIndex(st, id) > before ? "j" : "k");
-		st = await waitState(s, `cursor off row ${before}`, (x) => x.cursorRow !== before || x.cursor === id);
+		// A row re-sorting as the key lands can put the cursor's next session at the index it left.
+		st = await waitState(s, `cursor off row ${before}`, (x) => x.cursorRow !== before || x.cursor !== on || x.cursor === id);
 	}
 }
 
