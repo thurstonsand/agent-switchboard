@@ -2,6 +2,7 @@ import { type FSWatcher, mkdirSync, rmSync, watch, writeFileSync } from "node:fs
 import { dirname, join } from "node:path";
 import type { Db } from "./db.ts";
 import type { Harness } from "./index.ts";
+import { titleOf } from "./record.ts";
 
 // Messages between sessions wait in swb.db until the target's line takes them. A sender rings the target's doorbell
 // once its message commits, and every live line listens for its own, polling as well for a sender that didn't ring.
@@ -81,8 +82,8 @@ export function markDelivered(db: Db, id: string): void {
 
 /** Who a message is from, as the recipient's model reads it. */
 export function sender(db: Db, sourceId: string): { title: string; harness: Harness | null } {
-	const row = db.get("SELECT title, harness FROM sessions WHERE session_id = ?", sourceId);
-	return { title: (row?.title as string | null) ?? sourceId, harness: (row?.harness as Harness | undefined) ?? null };
+	const row = db.get("SELECT harness FROM sessions WHERE session_id = ?", sourceId);
+	return { title: titleOf(db, sourceId) ?? sourceId, harness: (row?.harness as Harness | undefined) ?? null };
 }
 
 /** A moment as the person and the model both read it, in local time: "Sat Oct 17, 14:30". */

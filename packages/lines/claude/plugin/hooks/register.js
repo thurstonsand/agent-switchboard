@@ -21,6 +21,8 @@ const line = {
 	blocked: false,
 	draft: "",
 	pending: [],
+	/** A title set through swb, { target, title }, that Claude Code takes as its own with the next prompt. */
+	title: null,
 	/** The last record in flight; each waits for the one before, so swb sees them in order. */
 	recording: Promise.resolve(""),
 };
@@ -129,7 +131,8 @@ async function drain($) {
 			buffer = buffer.slice(nl + 1);
 			if (!raw.trim()) continue;
 			const m = JSON.parse(raw);
-			if (m.kind === "cancel") {
+			if (m.kind === "title") line.title = m;
+			else if (m.kind === "cancel") {
 				if (line.busy && line.turnId) await $.turn.abort({ turnId: line.turnId });
 				await ack($, [m.id]);
 			} else {
@@ -201,11 +204,14 @@ async function useTool($, name, e) {
 			return swb($, ["schedules", ...from]);
 		case "session_unschedule":
 			return swb($, ["unschedule", e.id, ...from]);
-		case "swb_update_session":
-			if ((e.archived === undefined) === (e.snooze === undefined)) throw new Error("give archived or snooze: one of them");
-			if (e.snooze !== undefined)
-				return swb($, ["snooze", e.session ?? self, typeof e.snooze === "string" ? e.snooze : e.snooze.until, ...from]);
-			return swb($, [e.archived ? "archive" : "unarchive", e.session ?? self, ...from]);
+		case "swb_show_session":
+			return swb($, ["show", e.session, ...from, ...(e.view ? ["--view", e.view] : [])]);
+		case "swb_update_session": {
+			// The event carries the call's own fields beside its arguments; swb checks only the arguments.
+			const { properties } = TOOLS.find((t) => t.name === name).inputSchema;
+			const args = Object.fromEntries(Object.keys(properties).flatMap((key) => (e[key] === undefined ? [] : [[key, e[key]]])));
+			return swb($, ["update", ...from], JSON.stringify(args));
+		}
 		default:
 			throw new Error(`swb: no tool ${name}`);
 	}
@@ -320,6 +326,15 @@ export function register(on) {
 			void record($, ["turn", "--session", line.session, "--cwd", line.cwd, "--transcript", line.transcript, ...parent]);
 		}
 		return next(e);
+	});
+
+	// Claude Code names a session from a prompt hook's sessionTitle, and writes it as its own custom title.
+	on("classic.UserPromptSubmit", async (_, e, next) => {
+		const result = await next(e);
+		const pending = line.title;
+		if (!line.managed || pending?.target !== line.session) return result;
+		line.title = null;
+		return { ...result, sessionTitle: pending.title };
 	});
 
 	on("classic.PermissionRequest", async ($, e, next) => {

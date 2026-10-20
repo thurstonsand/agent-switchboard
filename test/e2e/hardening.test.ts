@@ -97,20 +97,20 @@ test("session_launch starts a managed pi Session that records its parent, and me
 
 	await until(() => entry(s, child.id).activity === "idle", budgets.settle, "the woken child idle");
 
-	// A clean quit with no Deck tracking the child leaves its dead pane behind; waking must not mistake it for a host.
+	// A clean quit closes the pane of a child no Deck started, as it does one a Deck did.
 	const woken = s.query<{ tmux_session: string }>("select tmux_session from runtimes where session_id = ?", child.id)[0]
 		?.tmux_session as string;
 	s.tmux(s.servers.sessions, "send-keys", "-t", `=${woken}:`, "-l", "archive a1");
 	s.tmux(s.servers.sessions, "send-keys", "-t", `=${woken}:`, "Enter");
 	await until(() => !entry(s, child.id).open && !entry(s, child.id).live, budgets.settle, "the child archived and quit");
 	await until(
-		() => s.tmux(s.servers.sessions, "display", "-p", "-t", `=${woken}:`, "#{pane_dead}").trim() === "1",
+		() => !s.tmux(s.servers.sessions, "list-sessions", "-F", "#{session_name}").split("\n").includes(woken),
 		budgets.settle,
-		"the child's pane left dead",
+		"the child's pane closed",
 	);
 	s.swb("unarchive", child.id);
 	s.keys("-l", `message ${child.id} w2`, "Enter");
-	await until(() => s.signal("replied.w2") !== "", budgets.piReady, "the child woken past its dead pane");
+	await until(() => s.signal("replied.w2") !== "", budgets.piReady, "the unarchived child woken");
 	expect(entry(s, child.id)).toMatchObject({ open: true, live: true });
 	await until(() => entry(s, child.id).activity === "idle", budgets.settle, "the rewoken child idle");
 	s.swb("archive", child.id);

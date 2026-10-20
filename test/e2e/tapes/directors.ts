@@ -2,7 +2,7 @@ import { expect } from "bun:test";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState } from "../../../packages/cli/src/deck/protocol.ts";
-import { config, launched, seed } from "../harness/deck.ts";
+import { config, launched, launchTry, seed } from "../harness/deck.ts";
 import { git, gitRepo, gitWorktree, type LsEntry, type PiPackage, release, type Scenario, until, which } from "../harness/index.ts";
 
 export type Director = {
@@ -224,6 +224,59 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"show-session": {
+		setup: async (s) => {
+			const infra = join(s.root, "infra");
+			const operator = join(s.env.XDG_CONFIG_HOME as string, "agent-switchboard/operator");
+			mkdirSync(infra);
+			mkdirSync(operator, { recursive: true });
+			await launched(s, "reply drafted", { cwd: s.project, title: "Draft the v3 changelog" });
+			await launched(s, "reply bisected", { cwd: s.project, title: "Bisect the flaky login test" });
+			await launched(s, "reply measured", { cwd: s.project, title: "Profile roster render" });
+			const certs = await launched(s, "reply certs rotated", { cwd: infra, title: "Rotate the staging certs" });
+			await launched(s, "reply pinned", { cwd: infra, title: "Pin the base image" });
+			await launched(s, "reply on it", { cwd: operator, title: "Morning triage" });
+			const host = s.query<{ tmux_session: string }>("select tmux_session from runtimes where session_id = ?", certs)[0]?.tmux_session;
+			s.tmux(s.servers.sessions, "kill-session", "-t", `=${host}`);
+			await waitLs(s, "the certs session dormant", (ls) => ls.find((e) => e.id === certs)?.live === false);
+		},
+		run: async (s) => {
+			const target = s.ls().find((e) => e.title === "Rotate the staging certs")?.id as string;
+			const shown = await waitDeck(s, "the certs session live", (x) => x.cursor === target && x.staged.kind === "live");
+			expect(shown).toMatchObject({ focus: "stage", staged: { id: target } });
+			await Bun.sleep(3000);
+		},
+	},
+
+	"operator-tidy": {
+		setup: async (s) => {
+			const infra = join(s.root, "infra");
+			const operator = join(s.env.XDG_CONFIG_HOME as string, "agent-switchboard/operator");
+			mkdirSync(infra);
+			mkdirSync(operator, { recursive: true });
+			await launched(s, "reply measured", { cwd: s.project, title: "Profile roster render" });
+			await launched(s, "reply pinned", { cwd: s.project, title: "Pin the base image" });
+			const certs = await launched(s, "reply certs rotated", { cwd: infra, title: "Rotate the staging certs" });
+			await launchTry(s, "reply child renew", { from: certs, title: "Renew the wildcard cert" });
+			await entered(s, "child.renew");
+			await launched(s, "reply on it", { cwd: operator, title: "Morning triage" });
+		},
+		run: async (s) => {
+			await waitLs(s, "Pin the base image in hygiene", (ls) => ls.some((e) => e.title === "Pin the base image" && e.group === "hygiene"));
+			await waitLs(s, "the render session retitled", (ls) => ls.some((e) => e.title === "Roster render at 60 fps"));
+			const family = (ls: LsEntry[]) => ls.filter((e) => e.title === "Rotate the staging certs" || e.title === "Renew the wildcard cert");
+			const operator = s.ls().find((e) => e.title === "Morning triage")?.id as string;
+			const host = s.query<{ tmux_session: string }>("select tmux_session from runtimes where session_id = ?", operator)[0]?.tmux_session;
+			await until(
+				() => s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-t", `=${host}:`).includes("Nothing changed"),
+				TAPE,
+				"the refusal in the Operator",
+			);
+			expect(family(s.ls()).every((e) => e.open)).toBe(true);
+			await waitLs(s, "the certs family archived", (ls) => family(ls).every((e) => !e.open && !e.live));
+		},
+	},
+
 	"launch-wake-archive": {
 		harnesses: ["claude", "codex"],
 		setup: async (s) => {
@@ -365,7 +418,7 @@ export const directors: Record<string, Director> = {
 		},
 		run: async (s) => {
 			await waitDeck(s, "the editor view", (x) => x.staged.view === "editor" && x.focus === "editor");
-			await waitDeck(s, "back to pi", (x) => x.staged.view === "pi");
+			await waitDeck(s, "back to pi", (x) => x.staged.view === "agent");
 			await waitDeck(s, "split", (x) => x.layout.split && x.staged.view === "split");
 			await waitDeck(s, "the shell", (x) => x.layout.shell && x.focus === "shell");
 			await waitDeck(s, "ctrl-d closed it", (x) => !x.layout.shell && x.layout.split);

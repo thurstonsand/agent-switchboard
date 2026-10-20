@@ -10,6 +10,8 @@ import {
 	markArchived as archiveMark,
 	endHosting,
 	hostOfTranscript,
+	pendingTitle,
+	titleOf as recordedTitle,
 	recordTx,
 	setPhase,
 	setTitle,
@@ -181,6 +183,9 @@ export default function (pi: ExtensionAPI) {
 				}
 				markDelivered(db, m.id);
 			}
+			// A title set through swb becomes pi's own name, which session_info_changed records back.
+			const title = pendingTitle(db, current);
+			if (title !== null && title !== ctx.sessionManager.getSessionName()) pi.setSessionName(title);
 		} catch (error) {
 			fail(error);
 		}
@@ -330,8 +335,7 @@ export default function (pi: ExtensionAPI) {
 
 	const self = (ctx: ExtensionContext) => ctx.sessionManager.getSessionId();
 	/** A session id as the roster names it, for a tool call's line. */
-	const titleOf = (id: unknown) =>
-		typeof id === "string" ? ((connect().get("SELECT title FROM sessions WHERE session_id = ?", id)?.title as string | null) ?? id) : "";
+	const titleOf = (id: unknown) => (typeof id === "string" ? (recordedTitle(connect(), id) ?? id) : "");
 
 	tool(
 		"session_reachable",
@@ -466,6 +470,14 @@ export default function (pi: ExtensionAPI) {
 		(args: { id: string }, ctx) => swb(proc.launch.bin, ["unschedule", args.id, "--from", self(ctx)]),
 	);
 
+	tool(
+		"swb_show_session",
+		"Show",
+		(args) => `${titleOf(args.session)}${args.view ? ` · ${args.view}` : ""}`,
+		(args: { session: string; view?: string }, ctx) =>
+			swb(proc.launch.bin, ["show", args.session, "--from", self(ctx), ...(args.view ? ["--view", args.view] : [])]),
+	);
+
 	type Snooze = string | { until: string };
 	const snoozeText = (snooze: Snooze) => (typeof snooze === "string" ? snooze : snooze.until);
 
@@ -473,21 +485,19 @@ export default function (pi: ExtensionAPI) {
 		"swb_update_session",
 		"Update session",
 		(args) => {
-			const what = args.snooze !== undefined ? `snooze ${snoozeText(args.snooze as Snooze)}` : args.archived ? "archive" : "unarchive";
-			return `${what} ${args.session ? titleOf(args.session) : "this session"}`;
+			const parts = [
+				args.archived === true ? `archive${args.family ? " family" : ""}${args.force ? " · force" : ""}` : "",
+				args.archived === false ? "unarchive" : "",
+				args.snooze !== undefined ? `snooze ${snoozeText(args.snooze as Snooze)}` : "",
+				args.group === null ? "ungroup" : args.group !== undefined ? `group ${args.group}` : "",
+				args.title !== undefined ? `retitle as "${args.title}"` : "",
+			].filter(Boolean);
+			// Rendered after the call, when a retitled target already carries its new title.
+			if (args.title !== undefined) return parts.join(" · ");
+			return `${parts.join(" · ")} ${args.session ? titleOf(args.session) : "this session"}`;
 		},
-		async (args: { session?: string; archived?: boolean; snooze?: Snooze }, ctx) => {
-			const id = self(ctx);
-			if ((args.archived === undefined) === (args.snooze === undefined)) throw new Error("give archived or snooze: one of them");
-			if (args.snooze !== undefined) return swb(proc.launch.bin, ["snooze", args.session ?? id, snoozeText(args.snooze), "--from", id]);
-			if (!args.session || args.session === id) {
-				if (!args.archived) throw new Error("this session is already open");
-				if (!markArchived(ctx)) throw new Error(proc.failure ? `swb: not recording: ${proc.failure}` : "swb: no session recorded yet");
-				ctx.shutdown();
-				return { text: "Archived. pi quits when this turn ends.", details: { id, archived: true } };
-			}
-			return swb(proc.launch.bin, [args.archived ? "archive" : "unarchive", args.session, "--from", id]);
-		},
+		// Archived during its own turn, pi quits once the turn settles.
+		(args: Record<string, unknown>, ctx) => swb(proc.launch.bin, ["update", "--from", self(ctx)], JSON.stringify(args)),
 	);
 
 	pi.on("session_shutdown", (event, ctx) => {

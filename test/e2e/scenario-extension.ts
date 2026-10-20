@@ -18,7 +18,7 @@ import { agentStep } from "./fakes/agent.ts";
 //   reach <n>         find the first dormant session through session_reachable and message it like `message`
 //   call <tool> <json>  call any tool with those arguments, then answer "tool done call"
 //   tools             signal the active tool names as `tools`, and answer "tools listed"
-//   tell <harness> <m>, launch <harness> <title>   use swb's tools as fakes/agent.ts scripts them
+//   tell <harness> <m>, launch <harness> <title>, show <title>, update <title> <json>   use swb's tools as fakes/agent.ts scripts them
 // A message from another session (it starts "Message from session") whose body is `reply <n>` is answered like it.
 //   archive <text>    call swb_update_session to archive itself, then answer "tool done <text>"
 // "Continue where you left off.", which waking a cut-off session sends, is answered "continued".

@@ -4,6 +4,7 @@ import { states } from "../derive.ts";
 import { type Fired, fire, newSessionName, nextDue } from "../schedules.ts";
 import { wake } from "../sessions.ts";
 import { openStore } from "../store.ts";
+import { SESSIONS, tmuxTry } from "../tmux.ts";
 
 // `swb __clock`: the sessions server's control pane, which lives as long as the server does. It fires schedules on
 // time, and starts any dormant session with mail waiting. It reads the wall clock every tick, so after the machine
@@ -25,6 +26,21 @@ export async function clock(): Promise<void> {
 	let version = -1;
 	let due: number | null = null;
 	let reconciled = 0;
+	const registered = new Set<string>();
+
+	/**
+	 * A session starts with remain-on-exit on, so a harness that dies before it registers leaves its last words for the
+	 * Deck to show. Once registered, its pane goes when the harness quits, however it was started.
+	 */
+	const settleHosts = () => {
+		const hosts = new Set(db.all("SELECT tmux_session FROM runtimes").map((row) => row.tmux_session as string));
+		for (const host of registered) if (!hosts.has(host)) registered.delete(host);
+		for (const host of hosts) {
+			if (registered.has(host)) continue;
+			registered.add(host);
+			tmuxTry(SESSIONS, "set", "-p", "-u", "-t", `=${host}:`, "remain-on-exit");
+		}
+	};
 
 	/** Every open session with an undelivered message and no process gets one, unless it's waiting out a failed start. */
 	const wakeWaiting = (now: number) => {
@@ -75,6 +91,7 @@ export async function clock(): Promise<void> {
 		if (current !== version) {
 			version = current;
 			due = nextDue(db);
+			settleHosts();
 		}
 		if (due !== null && due <= now) {
 			const fired = fire(db, now);

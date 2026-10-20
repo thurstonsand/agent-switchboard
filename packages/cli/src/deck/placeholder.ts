@@ -56,7 +56,7 @@ function draw(): void {
 	if (head.length > 0 && card.lines.length > 0) head.push("");
 	for (const line of card.lines) head.push(...(line === "" ? [""] : wrapTextWithAnsi(dim(line), width)));
 	const foot: string[] = [];
-	if (typedAt > now - TYPED_MS) foot.push("", yellow("input ignored until pi is up"));
+	if (typedAt > now - TYPED_MS) foot.push("", yellow(`input ignored until ${card.agent || "the session"} is up`));
 
 	// The conversation fills the room left between the head and the foot, newest at the bottom.
 	const room = Math.max(0, rows - 2 - head.length - foot.length - 1);

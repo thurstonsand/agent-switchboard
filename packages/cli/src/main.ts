@@ -3,7 +3,7 @@ import { codexHost } from "./codex/host.ts";
 import { adopt } from "./commands/adopt.ts";
 import { archive } from "./commands/archive.ts";
 import { clock } from "./commands/clock.ts";
-import { launch, reachable, schedule, schedules, send, unschedule } from "./commands/coordinate.ts";
+import { launch, reachable, schedule, schedules, send, show, unschedule, update } from "./commands/coordinate.ts";
 import { deckCommand, deckNotify, help } from "./commands/deck.ts";
 import { detached } from "./commands/detached.ts";
 import { dirs } from "./commands/dirs.ts";
@@ -28,7 +28,7 @@ import { VERSION } from "./version.ts";
 const USAGE = `swb: Agent Switchboard
 
   swb                          open a Deck where the last one in this Project left off
-  swb -c, --continue           open a Deck in pi on this Project's most recent session, or a new one
+  swb -c, --continue           open a Deck on this Project's most recent session, or a new one
   swb new [--cwd DIR] [--harness H]  open a Deck on a new session
   swb open ID                  open a Deck on a session
   swb adopt ID|TRANSCRIPT      track a pi, Claude Code, or Codex session run outside swb, then open it; quit it first
@@ -54,6 +54,9 @@ const USAGE = `swb: Agent Switchboard
                                unless it has an offset, or a duration (PT2H); EXPR is 5-field cron in local time
   swb schedules --from ID      the schedules a session set or receives
   swb unschedule ID --from ID  cancel a pending schedule
+  swb show ID --from ID [--view agent|editor|split]
+                               switch the Deck showing the caller to a session, and start it
+  swb update --from ID         swb_update_session as a line calls it; its arguments as JSON on stdin
   swb mcp                      the MCP server a Codex session's app-server runs for swb's tools
   swb drive start [--size COLSxROWS] [--theme light|dark] [-- swb-args]
   swb drive keys [--delay MS] [-l TEXT]… [KEY…] | capture [--ansi] | theme light|dark | focus in|out
@@ -128,6 +131,10 @@ async function main(args: string[]): Promise<void> {
 			return schedules(rest);
 		case "unschedule":
 			return unschedule(rest);
+		case "show":
+			return show(rest);
+		case "update":
+			return update(rest);
 		case "launch":
 			return launch(rest);
 		case "send":

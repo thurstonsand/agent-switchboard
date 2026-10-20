@@ -59,7 +59,7 @@ The process in swb's tmux server that fires Schedules and starts dormant session
 What a live session's agent is doing right now: **working**, **blocked** on me (e.g. permission prompt), or **idle**, its turn finished and waiting for my next prompt.
 
 **Visit**:
-The moment I last looked at a session, by focusing its pi for a second, on the **Stage** or in any other tmux client attached to it; a timestamp watermark.
+The moment I last looked at a session, by focusing its agent for a second, on the **Stage** or in any other tmux client attached to it; a timestamp watermark.
 
 **Unseen**:
 A session whose agent finished a turn after my last **Visit**.
@@ -82,7 +82,7 @@ The text editor for one directory, shared by every session whose working directo
 A session's particulars and keys, shown beside its Roster row over the **Stage** while the pointer rests on the row or the cursor has just moved onto it. It never covers the Roster.
 
 **View**:
-What the **Stage** shows for a session: **pi**, its **Editor**, or a **split** of both. Each session remembers its own.
+What the **Stage** shows for a session: its **agent**, its **Editor**, or a **split** of both. Each session remembers its own.
 
 **Project**:
 A git repository together with all of its worktrees; sessions outside any repository group by directory.

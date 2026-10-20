@@ -19,9 +19,13 @@ Schema v6: update swb and the pi line together.
 - The shortlist: presets of a harness with a model and effort, or a Claude Code agent, each with a note for agents. `n`'s picker opens on the ★ default and `Tab` steps through the rest, and agents choose from it in `session_launch`. Until you edit it, swb makes one from each harness's own list. `swb models` lists everything the harnesses offer.
 - `harnesses` turns a harness off for new sessions.
 - An edit to config.toml, by hand or from Settings, applies to every open Deck at once. A file swb can't read stops new swb commands at the line at fault; an open Deck keeps what it had, says so in red, and `O` opens the file there.
+- `swb_show_session`: ask an agent to take you to a session, and the Deck you're talking to it in moves there, opening whatever section, Project, or family hid it, and starts it if it's dormant, in its agent, its editor, or a split when it asks for one. Other Decks stay where they are.
+- `swb_update_session` groups and retitles a session, and archives a whole family with `family`, any of its changes in one call. A family member mid-turn, blocked, cut off, or errored refuses the whole call by name; `force` archives it anyway and cancels the turn. A title set through it becomes the harness's own name: pi and Codex take it at once, Claude Code with its next prompt.
+- `session_reachable` names each session's Group.
 
 ### Changed
 
+- The Stage's first view is the session's agent, whichever harness runs it: `swb deck state` reports it as `agent` instead of `pi`, and the Deck's help and notices name the session's harness or say "the agent".
 - Claude Code's own scheduler (`CronCreate`, `/loop`) is off in sessions swb runs.
 - A dormant session with a message waiting is started by the clock, retrying with backoff, instead of only by its sender.
 - A family goes Inactive only once all of it has.
@@ -29,6 +33,10 @@ Schema v6: update swb and the pi line together.
 - A roster row's time shows nothing while its turn runs, and counts from when the turn finished, not from the prompt that started it. Its Peek says `active now`.
 - Interrupted is now Cut off. `swb ls --json`'s `interrupted` boolean is `cutOff`: `"shutdown"`, `"killed"`, `"restart"`, or null. `session_reachable` lists such a session as `cut off`.
 - `session_launch`, and `session_schedule`'s `launch`, take a preset's harness, model, effort, or agent, and start the default with none of them; one that isn't a preset is refused. `swb launch --harness` is optional, and `swb schedule` marks a launch with `--launch-title`.
+
+### Fixed
+
+- Archiving or stopping a session that no Deck started (the clock, a schedule, or `session_launch` did) took 5 seconds, waiting on a pane that stayed open after its harness quit. Every session's pane now closes with its harness once the session has registered.
 
 ### Removed
 

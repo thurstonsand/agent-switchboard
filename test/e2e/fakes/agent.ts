@@ -1,6 +1,8 @@
 // What a scripted agent does with swb's tools, the same in every harness's fake model:
 //   tell <pi|claude|codex> <message>   find that harness's session with session_reachable, then message it
 //   launch <pi|claude|codex> <title>   start a session there with session_launch, whose goal is the title
+//   show <title>                       find the session with that title with session_reachable, then swb_show_session it
+//   update <title> <json>              find it the same way, then swb_update_session it with those arguments
 // Each call gets the prompt and the output of the tool it called last (null for a fresh turn), and answers the next
 // tool call, or the final text, or null when the prompt isn't one of these.
 
@@ -16,7 +18,25 @@ export function titleOf(prompt: string): string {
 
 export type Step = { tool: string; args: Record<string, unknown> } | { text: string } | null;
 
+/** The session titled `title` in session_reachable's output, structured or as text; undefined in any other tool's. */
+function reachableId(toolOutput: string, title: string): string | undefined {
+	const listed = /\{"sessions":.*\}/.exec(toolOutput)?.[0];
+	if (listed)
+		return (JSON.parse(listed) as { sessions: { id: string; title: string | null }[] }).sessions.find((session) => session.title === title)
+			?.id;
+	return /^- (\S+)/.exec(toolOutput.split("\n").find((line) => line.includes(` · "${title}" · `)) ?? "")?.[1];
+}
+
 export function agentStep(prompt: string, toolOutput: string | null): Step {
+	const named = /^(show|update) (.+?)(?: (\{.*\}))?$/.exec(prompt.trim());
+	if (named) {
+		const [, verb, title, json] = named;
+		if (toolOutput === null) return { tool: "session_reachable", args: {} };
+		const id = reachableId(toolOutput, title as string);
+		if (!id) return { text: toolOutput };
+		if (verb === "show") return { tool: "swb_show_session", args: { session: id } };
+		return { tool: "swb_update_session", args: { ...JSON.parse(json ?? "{}"), session: id } };
+	}
 	const [verb, harness, ...rest] = prompt.trim().split(" ");
 	const name = NAMES[harness ?? ""];
 	if (!name || (verb !== "tell" && verb !== "launch")) return null;

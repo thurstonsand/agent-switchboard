@@ -214,7 +214,7 @@ export const deckNav = suite({
 					{ what: "nvim on the Stage" },
 				);
 				await t.press("M-a", "e");
-				await t.waitState("pi view again", (x) => x.staged.view === "pi");
+				await t.waitState("agent view again", (x) => x.staged.view === "agent");
 				return { t0, metrics: { settled: last - t0, drawn: doneAt - t0 } };
 			},
 		},

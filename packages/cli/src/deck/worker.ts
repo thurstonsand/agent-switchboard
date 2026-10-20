@@ -184,7 +184,7 @@ function snapshot(): Polled {
 		const row = rows[i] as SessionRow;
 		return {
 			...state,
-			view: row.view ?? "pi",
+			view: row.view ?? "agent",
 			transcript: row.transcript,
 			host: state.live ? (row.runtime?.tmux_session ?? null) : null,
 			provisional: false,
@@ -220,7 +220,7 @@ function snapshot(): Polled {
 			activityAt: runtime.started_at,
 			visitedAt: null,
 			archivedAt: null,
-			view: "pi",
+			view: "agent",
 			transcript: null,
 			host: runtime.tmux_session,
 			provisional: true,
@@ -328,7 +328,6 @@ function tick(): Set<string> {
 	for (const runtime of runtimes) {
 		if (!launched.has(runtime.tmux_session) || !runtimeLive(runtime, boot, new Set(snap.hosts))) continue;
 		launched.delete(runtime.tmux_session);
-		tmuxTry(SESSIONS, "set", "-p", "-u", "-t", `=${runtime.tmux_session}:`, "remain-on-exit");
 	}
 	// A Deck without its placeholder shows a blank Stage, so a killed sessions server comes straight back.
 	if (!snap.serverUp) ensureSessionsServer();

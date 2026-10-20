@@ -1,6 +1,6 @@
 import { type Static, type TSchema, Type } from "typebox";
 import { Value } from "typebox/value";
-import { HARNESSES, SNOOZE_PRESETS } from "./index.ts";
+import { HARNESSES, SNOOZE_PRESETS, VIEWS } from "./index.ts";
 
 // The coordination tools every line gives its agent, defined once. pi takes these schemas as they are; Claude Code
 // and Codex take them as JSON Schema. Each tool runs an swb command and returns its text to the model unchanged.
@@ -126,20 +126,51 @@ export const TOOLS = {
 		readOnly: false,
 	},
 	swb_update_session: {
-		description: "Archive, unarchive, snooze, or unsnooze a session. Omit session to update the current session.",
+		description: "Update one session on the switchboard. Omit session to update the current session.",
 		guidelines: [
 			"Archive only when the user asks, or when you started that session and have driven it to completion.",
 			"Archiving the current session quits it when the turn ends: call it last, then end with a brief final message.",
-			"Archiving another session fails while it is mid-turn. Unarchiving doesn't restart it; session_send_message wakes it.",
-			"Snooze or unsnooze only when the user asks. A message ends a next_message snooze; a timed snooze lasts until its time.",
+			"Archiving refuses any session other than this one that is mid-turn, blocked, cut off, or errored, and names them. If they should go anyway, call again with force, which cancels their turns.",
+			"Unarchiving doesn't restart a session; session_send_message wakes it.",
+			"Snooze or unsnooze only when the user asks.",
+			"Group sessions when the user asks, or to keep sessions you started for one piece of work together. Reuse a Group session_reachable lists in that Project rather than inventing a near-duplicate.",
+			"Retitle a session when the user asks, or when its title no longer says what it is working on.",
 		],
 		parameters: Type.Object({
 			session: Type.Optional(Type.String({ description: "Session id; omit for the current session." })),
-			archived: Type.Optional(Type.Boolean()),
+			archived: Type.Optional(Type.Boolean({ description: "True to archive, false to unarchive." })),
+			family: Type.Optional(
+				Type.Boolean({ description: "With archived true: archive every open session it started too, and the ones they started." }),
+			),
+			force: Type.Optional(
+				Type.Boolean({
+					description: "With archived true: archive sessions mid-turn, blocked, cut off, or errored anyway, cancelling their turns.",
+				}),
+			),
+			group: Type.Optional(
+				Type.Union([Type.String(), Type.Null()], {
+					description: "The Group to move it into, within its Project; null takes it out of its Group.",
+				}),
+			),
+			title: Type.Optional(Type.String({ description: "A new, short title." })),
 			snooze: Type.Optional(
 				Type.Union([...[...SNOOZE_PRESETS, "off"].map((preset) => Type.Literal(preset)), Type.Object({ until: Type.String() })], {
-					description: 'Snooze preset, off to unsnooze, or {"until": "2026-11-05T09:00"} for a custom local time.',
+					description: 'Snooze preset, off to unsnooze, or {"until":"2026-11-05T09:00:00-08:00"} for a custom date.',
 				}),
+			),
+		}),
+		readOnly: false,
+	},
+	swb_show_session: {
+		description: "Show the user a specific session by switching focus to it.",
+		guidelines: ["Call it last in your turn, and end with one short line; the user won't be watching this session afterward."],
+		parameters: Type.Object({
+			session,
+			view: Type.Optional(
+				Type.Union(
+					VIEWS.map((view) => Type.Literal(view)),
+					{ description: "agent, its directory's editor, or a split of both; omit unless user asks for it explicitly." },
+				),
 			),
 		}),
 		readOnly: false,

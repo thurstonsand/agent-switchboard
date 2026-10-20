@@ -82,7 +82,7 @@ export type SessionRow = {
 export function sessionRows(db: Db): SessionRow[] {
 	return db
 		.all(
-			`SELECT s.session_id, s.harness, s.parent_id, s.title, s.project_root, s.cwd, s.branch, s.transcript, s.phase, s.created_at, s.last_prompt_at, s.last_settled_at, s.errored_at,
+			`SELECT s.session_id, s.harness, s.parent_id, coalesce(m.title, s.title) AS title, s.project_root, s.cwd, s.branch, s.transcript, s.phase, s.created_at, s.last_prompt_at, s.last_settled_at, s.errored_at,
 		        m.archived_at, m.visited_at, m.view, m.group_name, m.snoozed_at, m.snoozed_until, r.tmux_session, r.boot_id, r.pid,
 		        (SELECT max(created_at) FROM messages WHERE target_id = s.session_id AND kind = 'message') AS last_message_at
 		 FROM sessions s LEFT JOIN marks m USING (session_id) LEFT JOIN runtimes r USING (session_id)`,
@@ -215,6 +215,21 @@ export function sessionState(db: Db, id: string): SessionState {
 	const found = states(db).find((s) => s.id === id);
 	if (!found) throw new SwbError(`no session ${id}; session_reachable lists them`);
 	return found;
+}
+
+/** The open sessions a session started, and those they started, short of an Operator: its Family below it. */
+export function openDescendants<S extends SessionState>(sessions: Iterable<S>, id: string): S[] {
+	const all = [...sessions];
+	const out: S[] = [];
+	const visit = (parent: string) => {
+		for (const child of all) {
+			if (child.parentId !== parent || child.operator) continue;
+			if (child.open) out.push(child);
+			visit(child.id);
+		}
+	};
+	visit(id);
+	return out;
 }
 
 export function displayName(state: { id: string; title: string | null }): string {

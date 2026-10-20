@@ -108,10 +108,10 @@ test("M-a e swaps the Stage to nvim in the session's directory, and back", async
 	s.save("editor.txt", s.screen());
 
 	await prefixKeys(s, "M-a", "h", "the roster focused", (x) => x.focus === "roster");
-	const back = await prefixKeys(s, "M-a", "e", "pi view", (x) => x.staged.view === "pi" && x.focus === "stage");
-	expect(back.staged.savedView).toBe("pi");
+	const back = await prefixKeys(s, "M-a", "e", "pi view", (x) => x.staged.view === "agent" && x.focus === "stage");
+	expect(back.staged.savedView).toBe("agent");
 	await until(() => s.screen().includes("hello") && !s.screen().includes("NVIM v"), budgets.settle, "pi back on the Stage");
-	await until(() => savedView(s, id) === "pi", budgets.settle, "marks.view = pi");
+	await until(() => savedView(s, id) === "agent", budgets.settle, "marks.view = agent");
 	expect(editors(s).length).toBe(1);
 	s.save("pi-again.txt", s.screen());
 
@@ -126,7 +126,7 @@ test("M-a e swaps the Stage to nvim in the session's directory, and back", async
 	s.save("editor-tab.txt", s.screen());
 	await Bun.sleep(500);
 	s.swb("drive", "click", ...tab("pi"));
-	await waitState(s, "the pi tab clicked", (x) => x.staged.view === "pi");
+	await waitState(s, "the pi tab clicked", (x) => x.staged.view === "agent");
 });
 
 test("M-a v splits the editor at 65% beside pi; M-a h and l walk all three panes; the split follows the session", async () => {
@@ -187,7 +187,7 @@ test("M-a v splits the editor at 65% beside pi; M-a h and l walk all three panes
 	expect(activePane(s, shown)).toBe(0);
 	await cursorTo(s, other);
 	const away = await waitState(s, "the other session alone", (x) => x.staged.id === other && !x.layout.split);
-	expect(away.staged).toMatchObject({ view: "pi", savedView: "pi" });
+	expect(away.staged).toMatchObject({ view: "agent", savedView: "agent" });
 	expect(panes(s, away).length).toBe(2);
 	await cursorTo(s, id);
 	await waitState(s, "split again", (x) => x.staged.id === id && x.layout.split && x.staged.view === "split");
@@ -204,8 +204,8 @@ test("M-a v splits the editor at 65% beside pi; M-a h and l walk all three panes
 	s.keys("M-a", "v");
 	await waitState(s, "split from the editor, keyboard on the editor", (x) => x.layout.split && x.focus === "editor");
 	s.keys("M-a", "l", "M-a", "v");
-	const toPi = await waitState(s, "split left for pi", (x) => !x.layout.split && x.staged.view === "pi");
-	expect(toPi).toMatchObject({ focus: "stage", staged: { savedView: "pi" } });
+	const toPi = await waitState(s, "split left for pi", (x) => !x.layout.split && x.staged.view === "agent");
+	expect(toPi).toMatchObject({ focus: "stage", staged: { savedView: "agent" } });
 	await until(() => s.screen().includes("hello"), budgets.settle, "pi full width");
 	s.save("left-for-pi.txt", s.screen());
 });
@@ -219,7 +219,7 @@ test("split shows pi below 160 columns and returns on widening, survives reopeni
 
 	s.swb("drive", "resize", "150x50");
 	const narrowed = await waitState(s, "pi alone at 150", (x) => !x.layout.split && x.layout.width === 150);
-	expect(narrowed.staged).toMatchObject({ view: "pi", savedView: "split" });
+	expect(narrowed.staged).toMatchObject({ view: "agent", savedView: "split" });
 	expect(panes(s, narrowed).length).toBe(2);
 	s.save("150-cols.txt", s.screen());
 	s.swb("drive", "resize", "200x50");
@@ -233,7 +233,7 @@ test("split shows pi below 160 columns and returns on widening, survives reopeni
 	s.swb("drive", "start", "--size", "200x50");
 	await cursorTo(s, id);
 	const dormant = await waitState(s, "a dormant card in one pane", (x) => x.staged.kind === "dormant");
-	expect(dormant.staged).toMatchObject({ view: "pi", savedView: "split" });
+	expect(dormant.staged).toMatchObject({ view: "agent", savedView: "split" });
 	expect(dormant.layout.split).toBe(false);
 	expect(panes(s, dormant).length).toBe(2);
 	s.save("dormant-split.txt", s.screen());
@@ -247,7 +247,7 @@ test("split shows pi below 160 columns and returns on widening, survives reopeni
 	await waitState(s, "pi alone at 150", (x) => !x.layout.split && x.layout.width === 150);
 	s.keys("M-a", "v", "M-a", "v");
 	const told = await waitState(s, "a split refusal", (x) => x.toasts.some((t) => t.text === "split needs 160 columns; showing pi"));
-	expect(told.staged).toMatchObject({ view: "pi", savedView: "split" });
+	expect(told.staged).toMatchObject({ view: "agent", savedView: "split" });
 	expect(told.focus).toBe("stage");
 	await prefixKeys(s, "M-a", "h", "the roster focused", (x) => x.focus === "roster");
 
@@ -346,7 +346,7 @@ test("an editor that won't start says so, keeps pi on the Stage, and the key sti
 	for (const attempt of [1, 2]) {
 		s.keys("M-a", "e");
 		const st = await waitState(s, `refusal ${attempt}`, (x) => x.toasts.filter((t) => t.text.startsWith("editor")).length >= attempt);
-		expect(st.staged).toMatchObject({ id: live.staged.id, view: "pi" });
+		expect(st.staged).toMatchObject({ id: live.staged.id, view: "agent" });
 		expect(st.toasts.find((t) => t.text.startsWith("editor"))?.level).toBe("error");
 	}
 	expect(editors(s)).toEqual([]);
@@ -397,7 +397,7 @@ test("M-a M-a sends a literal M-a through to the Stage, and a rebound prefix tak
 	await waitState(s, "editor focus", (x) => x.focus === "editor");
 	s.keys("-l", "m2:", "C-b", "C-b", "M-a", "Enter");
 	await until(() => s.screen().includes("m2:^B^[a"), budgets.settle, "a literal C-b, and M-a passing straight through");
-	await prefixKeys(s, "C-b", "e", "pi view through C-b", (x) => x.staged.view === "pi");
+	await prefixKeys(s, "C-b", "e", "pi view through C-b", (x) => x.staged.view === "agent");
 	await prefixKeys(s, "C-b", "h", "roster through C-b", (x) => x.focus === "roster");
 	s.save("rebound.txt", s.screen());
 });

@@ -17,11 +17,12 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { harness as asHarness, configDir, type Harness, operatorDir, projectRoot, type SnoozePreset, type View } from "@swb/shared";
+import { harness as asHarness, configDir, type Harness, operatorDir, projectRoot, type SnoozePreset, VIEWS, type View } from "@swb/shared";
+import { harnessName } from "@swb/shared/mailbox";
 import { mark, span } from "@swb/shared/trace";
 import type { Subprocess } from "bun";
 import { ConfigError, configPath, type Loaded, readConfig } from "../config.ts";
-import { type CutOff, displayName, projectName } from "../derive.ts";
+import { type CutOff, displayName, openDescendants, projectName } from "../derive.ts";
 import { completions, expandHome, type Target, type TargetTree, targetName } from "../dirs.ts";
 import { SwbError, UsageError } from "../errors.ts";
 import { type Catalog, type Choice, defaultLaunch, fromDefault, type LaunchTarget, presetLabels, shortlist } from "../harnesses.ts";
@@ -89,7 +90,6 @@ const VISIT_MS = 1000;
 const HIGHLIGHT_MS = 500;
 const TOAST_MS = 3500;
 const LAYOUT_SETTLE_MS = 500;
-const VIEWS: View[] = ["pi", "editor", "split"];
 
 const { values: args } = parseArgs({
 	args: process.argv.slice(3),
@@ -259,20 +259,6 @@ function origin(e: Entry): "session" | "operator" | null {
 	return parentOf(e)?.operator ? "operator" : "session";
 }
 
-/** Every open session a session started, and those they started, wherever they are, short of an Operator. */
-function openDescendants(e: Entry): Entry[] {
-	const out: Entry[] = [];
-	const visit = (id: string) => {
-		for (const child of entries.values()) {
-			if (child.parentId !== id || child.operator) continue;
-			if (child.open) out.push(child);
-			visit(child.id);
-		}
-	};
-	visit(e.id);
-	return out;
-}
-
 const foldKey = (id: string) => `fold:${id}`;
 
 function stateOf(e: Entry): State {
@@ -370,12 +356,12 @@ type Applied = {
 };
 
 function onCard(kind: Applied["kind"], id: string | null, card: Card): Applied {
-	return { kind, id, host: null, card, view: "pi", target: placeholder, side: null, below: null };
+	return { kind, id, host: null, card, view: "agent", target: placeholder, side: null, below: null };
 }
 
 /** A pi still starting, on view so whatever it asks before it registers (a missing cwd, project trust) can be answered. */
 function starting(id: string | null, host: string): Applied {
-	return { kind: "loading", id, host: null, card: null, view: "pi", target: host, side: null, below: null };
+	return { kind: "loading", id, host: null, card: null, view: "agent", target: host, side: null, below: null };
 }
 
 function piShown(a: Applied): boolean {
@@ -489,9 +475,13 @@ function piStage(): Applied {
 	if (!e) return onCard("empty", null, EMPTY);
 	if (stage.ended?.id === e.id && e.open) {
 		const failed = stage.ended.failed;
-		return onCard(failed ? "failed" : "exited", e.id, card(e, failed ? ["pi quit before it was ready:", ...stage.ended.lines] : []));
+		return onCard(
+			failed ? "failed" : "exited",
+			e.id,
+			card(e, failed ? [`${harnessName(e.harness)} quit before it was ready:`, ...stage.ended.lines] : []),
+		);
 	}
-	if (e.live && e.host) return { kind: "live", id: e.id, host: e.host, card: null, view: "pi", target: e.host, side: null, below: null };
+	if (e.live && e.host) return { kind: "live", id: e.id, host: e.host, card: null, view: "agent", target: e.host, side: null, below: null };
 	const launch = launchFor(e.id);
 	if (launch?.host) return starting(e.id, launch.host);
 	if (launch) return onCard("loading", e.id, card(e, launch.keyboard && rosterOffScreen() ? [ESC_LINE] : []));
@@ -653,7 +643,7 @@ function syncLabels(): void {
 		harness = e.harness;
 	}
 	stageOps = stageOps.then(async () => {
-		const want: [string, string][] = [[stagePane, a.view === "pi" ? harness : "editor"]];
+		const want: [string, string][] = [[stagePane, a.view === "agent" ? harness : "editor"]];
 		if (side) want.push([side.pane, harness]);
 		if (below) want.push([below.pane, "shell"]);
 		const key = JSON.stringify(want);
@@ -692,11 +682,11 @@ function apply(): void {
 	stage.applied = d;
 	syncVisit();
 	const e = d.id === null ? undefined : entries.get(d.id);
-	if (d.host && e?.open && viewOf(e) !== "pi" && snapshot && !snapshot.editors[e.cwd]) {
+	if (d.host && e?.open && viewOf(e) !== "agent" && snapshot && !snapshot.editors[e.cwd]) {
 		if (!editorsAsked.has(e.cwd)) void requestEditor(e.cwd);
 		else if (!editorWaits.has(e.cwd) && !editorsLost.has(e.cwd)) {
 			editorsLost.add(e.cwd);
-			toast(`editor for ${e.cwd} exited; showing pi`, "error");
+			toast(`editor for ${e.cwd} exited; showing ${harnessName(e.harness)}`, "error");
 		}
 	}
 	tui.requestRender();
@@ -704,7 +694,7 @@ function apply(): void {
 	if (d.side !== prev.side || d.below !== prev.below) closePeek();
 	if (d.side !== prev.side || d.side !== (side?.target ?? null)) syncSide();
 	if (d.below !== (below?.target ?? null) || d.side !== prev.side) syncBelow();
-	if (nvimEditor(config.editor) && (d.view !== "pi") !== (prev.view !== "pi")) tagEditor(d.view !== "pi");
+	if (nvimEditor(config.editor) && (d.view !== "agent") !== (prev.view !== "agent")) tagEditor(d.view !== "agent");
 	syncLabels();
 	if (d.target === prev.target) return;
 	writeAtomic(paths.target, d.target);
@@ -812,7 +802,7 @@ function settleLaunches(): void {
 		launches.splice(launches.indexOf(launch), 1);
 		const lastWords = snapshot.died[launch.host] ?? [];
 		if (launch.id !== null && stage.staged === launch.id) stage.ended = { id: launch.id, failed: true, lines: lastWords };
-		else toast(lastWords.length > 0 ? `pi failed to start: ${lastWords.at(-1)}` : "pi failed to start", "error");
+		else toast(lastWords.length > 0 ? `the session failed to start: ${lastWords.at(-1)}` : "the session failed to start", "error");
 		if (launch.id === null && stage.staged === null) stage.staged = roster.cursorEntry()?.id ?? null;
 		if (focus === "stage") void focusRoster();
 	}
@@ -1044,7 +1034,7 @@ async function clip(text: string): Promise<void> {
 	if (code !== 0) throw new Error(stderr.trim() || `${config.clipboard} exited ${code}`);
 }
 
-/** `swb open`: select a session wherever it is, opening the section, project, and families that hide it. */
+/** `swb open` and `swb show`: select a session wherever it is, opening the section, project, and families that hide it. */
 function reveal(id: string): void {
 	const e = entries.get(id);
 	if (!e) {
@@ -1734,7 +1724,7 @@ class Roster implements Component, Focusable {
 			toast("nothing to archive before the first prompt", "error");
 			return;
 		}
-		if (e.open && openDescendants(e).length > 0) {
+		if (e.open && openDescendants(entries.values(), e.id).length > 0) {
 			this.selectedKey = e.id;
 			this.hover = null;
 			this.archiving = e.id;
@@ -1751,7 +1741,7 @@ class Roster implements Component, Focusable {
 		this.archiving = null;
 		if (!e || all === null) return;
 		this.pin = { index: this.resolveCursor(this.rows()), answered: false };
-		post({ type: "archive", ids: [e.id, ...(all ? openDescendants(e).map((d) => d.id) : [])] });
+		post({ type: "archive", ids: [e.id, ...(all ? openDescendants(entries.values(), e.id).map((d) => d.id) : [])] });
 	}
 
 	/** h folds the family under a session; l and space open it again. */
@@ -2356,7 +2346,7 @@ class Roster implements Component, Focusable {
 	/** The archive prompt, under the row of a session that started others still open: what they're doing, then the choice. */
 	archivePrompt(e: Entry, width: number, top: number): string[] {
 		const inner = Math.max(1, width - 4);
-		const family = openDescendants(e);
+		const family = openDescendants(entries.values(), e.id);
 		const box = (text: string) => ` │${truncateToWidth(text, inner, "…", true)}│`;
 		const choice = this.clickable(top + 2, [
 			[" │ Archive  ", null],
@@ -2397,7 +2387,7 @@ class Roster implements Component, Focusable {
 			const parts: [string, (() => void) | null][] = [[" ", null]];
 			for (const view of VIEWS) {
 				// The first view is the session's own TUI, whichever harness that is.
-				const label = ` ${view === "pi" ? e.harness : view} `;
+				const label = ` ${view === "agent" ? e.harness : view} `;
 				parts.push([view === stage.applied.view ? cursorLine(label, true) : gray(label), () => void showView(e, view)]);
 			}
 			// The shell is a toggle beside the views, not one of them.
@@ -3232,7 +3222,7 @@ async function prefixKey(k: string, id: string | undefined): Promise<void> {
 	else if (k === "x") roster.stop(row);
 	else if (k === "a") {
 		// Asking whether the family goes too needs the keyboard where the question is.
-		if (row?.kind === "session" && row.entry.open && openDescendants(row.entry).length > 0) await focusRoster();
+		if (row?.kind === "session" && row.entry.open && openDescendants(entries.values(), row.entry.id).length > 0) await focusRoster();
 		roster.toggleArchived(row);
 	} else if (k === "p") roster.toParent(row);
 	else if (k === "s" || k === "S") {
@@ -3401,6 +3391,20 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 			await focusRoster();
 			apply();
 			break;
+		// The session on view taking me to another. One it launched a moment ago reaches this Deck with a later snapshot.
+		case "show": {
+			const [id = "", from, view] = argv;
+			const deadline = Date.now() + 2000;
+			while (!entries.has(id) && Date.now() < deadline) await Bun.sleep(50);
+			const e = entries.get(id);
+			if (!e) throw new Error(`no session ${id} on this Deck`);
+			if (stage.staged !== from) throw new Error("the user has moved off this session; nothing switched");
+			reveal(id);
+			// Asking to be taken there means as much as clicking its row: a dormant one starts.
+			roster.focusEntry(e);
+			if (view !== undefined && view !== viewOf(e)) await showView(e, view as View);
+			break;
+		}
 		// A key typed on a session's card, which only the keyboard on the Stage can type, means to use it.
 		case "wake": {
 			const { kind, id } = stage.applied;
@@ -3451,27 +3455,27 @@ async function changeView(swap: boolean): Promise<void> {
 	if (swap && saved === "split") return;
 	const showing = stage.applied.view;
 	let next: View;
-	if (swap) next = showing === "editor" ? "pi" : "editor";
+	if (swap) next = showing === "editor" ? "agent" : "editor";
 	else if (saved !== "split") next = "split";
-	else next = showing === "split" && focus === "stage" && focusedPane === stagePane ? "editor" : "pi";
+	else next = showing === "split" && focus === "stage" && focusedPane === stagePane ? "editor" : "agent";
 	await showView(e, next);
 }
 
 /** The keyboard goes to the pane the view brought up; entering split, to the one matching what showed before. */
 async function showView(e: Entry, next: View): Promise<void> {
 	const showing = stage.applied.view;
-	if (next !== "pi") {
+	if (next !== "agent") {
 		editorsAsked.delete(e.cwd);
 		editorsLost.delete(e.cwd);
 		if ((await requestEditor(e.cwd)) === null || stage.applied.id !== e.id) return;
 	}
 	if (next !== "editor" && !e.live) wake(e.id, focus === "stage");
-	if (next === "split" && deckWidth < SPLIT_FROM) toast(`split needs ${SPLIT_FROM} columns; showing pi`, "info");
+	if (next === "split" && deckWidth < SPLIT_FROM) toast(`split needs ${SPLIT_FROM} columns; showing ${harnessName(e.harness)}`, "info");
 	localViews.set(e.id, next);
 	post({ type: "view", id: e.id, view: next });
 	apply();
 	await stageOps;
-	const pane = next === "split" && showing === "pi" && side ? side.pane : stagePane;
+	const pane = next === "split" && showing === "agent" && side ? side.pane : stagePane;
 	await tmuxAsync(UI, "select-pane", ...(narrow ? ["-Z"] : []), "-t", pane);
 }
 
@@ -3668,7 +3672,7 @@ function viewState(): DeckState {
 		archive: (() => {
 			const e = roster.archiving === null ? undefined : entries.get(roster.archiving);
 			if (!e) return null;
-			const family = openDescendants(e);
+			const family = openDescendants(entries.values(), e.id);
 			return { id: e.id, counts: Bun.stripANSI(familyTally(family)), all: family.length + 1 };
 		})(),
 		settings: roster.settings?.state() ?? null,
@@ -3685,7 +3689,7 @@ function viewState(): DeckState {
 				? "roster"
 				: focusedPane === below?.pane
 					? "shell"
-					: focusedPane === stagePane && applied.view !== "pi"
+					: focusedPane === stagePane && applied.view !== "agent"
 						? "editor"
 						: "stage",
 		staged: {
@@ -3693,7 +3697,7 @@ function viewState(): DeckState {
 			host: applied.host,
 			kind: applied.kind,
 			view: applied.view,
-			savedView: staged ? viewOf(staged) : "pi",
+			savedView: staged ? viewOf(staged) : "agent",
 		},
 		layout: { width: deckWidth, rosterOnly: narrow, split: side !== null, shell: below !== null, rosterHidden },
 		waking: launches.map((launch) => ({ id: launch.id, keyboardWaiting: launch.keyboard })),

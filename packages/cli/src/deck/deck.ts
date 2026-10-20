@@ -68,22 +68,31 @@ export function nav(k: "h" | "j" | "k" | "l"): string {
 }
 
 /**
- * `swb __nav`, from an Editor at its own edge: the Deck pane showing it most recently is a nested client of the sessions
- * server whose tty is that pane's, and the move runs there as if ctrl-hjkl had reached tmux.
+ * The Deck pane that showed a tmux session of the sessions server most recently: a nested client of the sessions server
+ * whose tty is that pane's. Null when no Deck shows it.
  */
-export function editorNav(k: string, editor: string): void {
-	if (k !== "h" && k !== "j" && k !== "k" && k !== "l") throw new SwbError(`__nav: no direction ${k}`);
-	const clients = tmux(SESSIONS, "list-clients", "-t", `=${editor}`, "-F", "#{client_activity}\t#{client_tty}")
+export function deckShowing(target: string): { deck: string; pane: string } | null {
+	const clients = tmux(SESSIONS, "list-clients", "-t", `=${target}`, "-F", "#{client_activity}\t#{client_tty}")
 		.split("\n")
 		.filter(Boolean)
 		.map((line) => line.split("\t") as [string, string])
 		.toSorted(([a], [b]) => Number(b) - Number(a));
+	// A client attached from outside swb, with no Deck open, leaves the UI server down.
+	const listed = tmuxTry(UI, "list-panes", "-a", "-F", "#{pane_tty}\t#{pane_id}\t#{session_name}");
+	if (!listed.ok) return null;
 	const panes = new Map(
-		tmux(UI, "list-panes", "-a", "-F", "#{pane_tty}\t#{pane_id}")
-			.split("\n")
-			.map((line) => line.split("\t") as [string, string]),
+		listed.out.split("\n").map((line) => {
+			const [tty, pane, deck] = line.split("\t") as [string, string, string];
+			return [tty, { deck, pane }];
+		}),
 	);
-	const pane = clients.map(([, tty]) => panes.get(tty)).find(Boolean);
+	return clients.map(([, tty]) => panes.get(tty)).find(Boolean) ?? null;
+}
+
+/** `swb __nav`, from an Editor at its own edge: the move runs in the Deck pane showing it, as if ctrl-hjkl had reached tmux. */
+export function editorNav(k: string, editor: string): void {
+	if (k !== "h" && k !== "j" && k !== "k" && k !== "l") throw new SwbError(`__nav: no direction ${k}`);
+	const pane = deckShowing(editor)?.pane;
 	if (!pane) return;
 	const result = Bun.spawnSync([tmuxBin(), "-L", UI, "source-file", "-t", pane, "-"], {
 		cwd: CLIENT_CWD,

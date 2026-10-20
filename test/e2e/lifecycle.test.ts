@@ -6,6 +6,7 @@ import {
 	cursorTo,
 	entry,
 	launched,
+	launchTry,
 	piSessions,
 	reply,
 	rowIndex,
@@ -385,4 +386,30 @@ test("swb adopt tracks a session pi ran outside swb, wakes it managed, and refus
 	expect(s.swbTry("adopt", stray).err.trim()).toBe(
 		`swb: adopt: pi won't find stray-y from ${s.project}; move it to ${dirname(transcript as string)}`,
 	);
+});
+
+test("swb_update_session archives a whole family; one member mid-turn refuses the whole call by name until force, which cancels that turn", async () => {
+	s = scenario("phase3", "archive-family");
+	const root = await launched(s, "reply root", { cwd: s.project, title: "Root" });
+	const one = await launched(s, "reply one", { from: root, title: "One" });
+	const grand = await launched(s, "reply grand", { from: one, title: "Grand" });
+	const held = launchTry(s, "reply child fam", { from: root, title: "Held" });
+	await until(() => s.signal("child.fam.entered") !== "", budgets.piReady, "Held's turn running");
+	const heldId = (JSON.parse((await held).out) as { details: { id: string } }).details.id;
+	const family = [root, one, grand, heldId];
+	const { id: caller } = await liveSession("caller");
+
+	s.keys("-l", `call swb_update_session {"session":"${root}","archived":true,"family":true,"title":"Never set"}`, "Enter");
+	await until(() => s.screen().includes("Nothing changed"), budgets.settle, "the refusal");
+	expect(s.screen()).toContain('"Held" is mid-turn');
+	for (const id of family) expect(entry(s, id).open).toBe(true);
+	expect(entry(s, root).title).toBe("Root");
+	s.save("refused.txt", s.screen());
+
+	s.keys("-l", `call swb_update_session {"session":"${root}","archived":true,"family":true,"force":true}`, "Enter");
+	await until(() => family.every((id) => !entry(s, id).open && !entry(s, id).live), budgets.settle, "the family archived and stopped");
+	expect(entry(s, heldId).cutOff).toBeNull();
+	expect(entry(s, caller)).toMatchObject({ open: true, live: true });
+	expect(s.screen()).toContain("Cancelled the turns of");
+	s.save("forced.txt", s.screen());
 });

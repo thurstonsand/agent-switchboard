@@ -8,7 +8,9 @@ export { Db, type Param, type Row } from "./db.ts";
 export const SCHEMA_VERSION = 6;
 
 export type Phase = "idle" | "working" | "blocked";
-export type View = "pi" | "editor" | "split";
+/** The Stage's views of a session: its own agent, whichever harness runs it, its Editor, or both. */
+export const VIEWS = ["agent", "editor", "split"] as const;
+export type View = (typeof VIEWS)[number];
 export const HARNESSES = ["pi", "claude", "codex"] as const;
 export type Harness = (typeof HARNESSES)[number];
 
@@ -16,6 +18,11 @@ export const SNOOZE_PRESETS = ["one_hour", "one_day", "monday", "next_message"] 
 export type SnoozePreset = (typeof SNOOZE_PRESETS)[number];
 /** What swb_update_session's snooze takes, and `swb snooze` too: a preset, off, or a time. */
 export type Snooze = SnoozePreset | "off" | { until: string };
+
+export function view(name: string): View {
+	if (!(VIEWS as readonly string[]).includes(name)) throw new Error(`unknown view ${name}: one of ${VIEWS.join(", ")}`);
+	return name as View;
+}
 
 export function harness(name: string): Harness {
 	if (!(HARNESSES as readonly string[]).includes(name)) throw new Error(`unknown harness ${name}: one of ${HARNESSES.join(", ")}`);

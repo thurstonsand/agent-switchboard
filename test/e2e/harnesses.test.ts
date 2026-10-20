@@ -604,3 +604,35 @@ test("a Codex session whose app-server dies mid-turn ends with it, cut off as ki
 	expect(commands().some((args) => args.includes(socket))).toBe(false);
 	release(s, "d1");
 });
+
+test("a title set through swb_update_session becomes Codex's own name at once, and Claude Code's with its next prompt", async () => {
+	s = scenario("harnesses", "titles", { packages: [], recorder: true, harnesses: ["claude", "codex"] });
+	const claude = await launched("claude", "reply claude up");
+	const codex = await launched("codex", "reply codex up");
+	const retitle = async (id: string, title: string) => {
+		const proc = Bun.spawn([`${s.bin}/swb`, "update", "--from", id], {
+			env: s.env,
+			stdin: new Blob([JSON.stringify({ title })]),
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		if ((await proc.exited) !== 0) throw new Error(`swb update: ${await proc.stderr.text()}`);
+	};
+	// What the harness itself calls the session, as its line records it.
+	const own = (id: string) => s.query<{ title: string | null }>("select title from sessions where session_id = ?", id)[0]?.title;
+
+	await retitle(codex.id, "Codex renamed");
+	await until(() => own(codex.id) === "Codex renamed", budgets.settle, "Codex's thread renamed");
+	expect(s.query("select title from marks where session_id = ?", codex.id)).toEqual([{ title: null }]);
+
+	await retitle(claude.id, "Claude renamed");
+	expect(s.ls().find((e) => e.id === claude.id)?.title).toBe("Claude renamed");
+	expect(own(claude.id)).not.toBe("Claude renamed");
+	type(claude.id, "reply again");
+	await until(() => own(claude.id) === "Claude renamed", ready, "Claude Code's own title");
+	const [{ transcript }] = s.query<{ transcript: string }>("select transcript from sessions where session_id = ?", claude.id) as [
+		{ transcript: string },
+	];
+	expect(readFileSync(transcript, "utf8")).toContain('"customTitle":"Claude renamed"');
+	expect(s.query("select title from marks where session_id = ?", claude.id)).toEqual([{ title: null }]);
+});

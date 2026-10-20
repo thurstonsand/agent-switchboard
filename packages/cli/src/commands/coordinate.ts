@@ -1,6 +1,12 @@
 import { parseArgs } from "node:util";
-import { harness } from "@swb/shared";
-import { launchSession, reachable as listReachable, send as sendMessage } from "../coordinate.ts";
+import { harness, view as viewNamed } from "@swb/shared";
+import {
+	launchSession,
+	reachable as listReachable,
+	send as sendMessage,
+	show as showSession,
+	update as updateSession,
+} from "../coordinate.ts";
 import { UsageError } from "../errors.ts";
 import { unschedule as cancelSchedule, listSchedules, schedule as scheduleMessage } from "../schedules.ts";
 import { ensureSessionsServer } from "../sessions.ts";
@@ -127,6 +133,26 @@ export function schedules(args: string[]): void {
 	const { values } = parseArgs({ args, options: { from: { type: "string" } } });
 	if (!values.from) throw new UsageError("schedules: --from is required");
 	print(listSchedules(openStore(), values.from));
+}
+
+export async function show(args: string[]): Promise<void> {
+	const { values, positionals } = parseArgs({
+		args,
+		options: { from: { type: "string" }, view: { type: "string" } },
+		allowPositionals: true,
+	});
+	const id = positionals[0];
+	if (!id || !values.from) throw new UsageError("show: a session id and --from are required");
+	print(await showSession(openStore(), values.from, id, values.view === undefined ? null : viewNamed(values.view)));
+}
+
+/** swb_update_session as every line calls it: its arguments as JSON on stdin, checked against the tool's schema. */
+export async function update(args: string[]): Promise<void> {
+	const { values } = parseArgs({ args, options: { from: { type: "string" } } });
+	if (!values.from) throw new UsageError("update: --from is required");
+	const { parsed } = await import("@swb/shared/tools");
+	const a = parsed("swb_update_session", JSON.parse(await Bun.stdin.text()));
+	print(await updateSession(openStore(), values.from, a.session ?? values.from, a));
 }
 
 export function unschedule(args: string[]): void {

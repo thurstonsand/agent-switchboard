@@ -119,6 +119,7 @@ export type Settle = { host: string; sessionId: string; cwd: string; title: stri
 /** The turn finished with nothing queued. Reports whether the session was archived during it, so its line can quit. */
 export function settle(db: Db, s: Settle): { archived: boolean } {
 	return recordTx(db, () => {
+		harnessTitled(db, s.sessionId, s.title);
 		db.run(
 			"UPDATE sessions SET phase = 'idle', last_settled_at = ?, cwd = ?, project_root = ?, branch = ?, title = coalesce(?, title) WHERE session_id = ?",
 			Date.now(),
@@ -139,7 +140,42 @@ export function turnErrored(db: Db, sessionId: string): void {
 }
 
 export function setTitle(db: Db, sessionId: string, title: string | null): void {
-	recordTx(db, () => db.run("UPDATE sessions SET title = ? WHERE session_id = ?", title, sessionId));
+	recordTx(db, () => {
+		harnessTitled(db, sessionId, title);
+		db.run("UPDATE sessions SET title = ? WHERE session_id = ?", title, sessionId);
+	});
+}
+
+/**
+ * A harness naming its session anew clears a title set through swb: either it took that title, or it was renamed in the
+ * harness since, which wins. The same name again, as every settle reports, clears nothing.
+ */
+function harnessTitled(db: Db, sessionId: string, title: string | null): void {
+	if (title === null) return;
+	db.run(
+		"UPDATE marks SET title = NULL WHERE session_id = ? AND ? IS NOT (SELECT title FROM sessions WHERE session_id = ?)",
+		sessionId,
+		title,
+		sessionId,
+	);
+}
+
+/** A title set through swb that the session's harness hasn't taken yet: its line hands it over, and the harness reports it back. */
+export function pendingTitle(db: Db, sessionId: string): string | null {
+	const row = db.get(
+		"SELECT m.title FROM marks m JOIN sessions s USING (session_id) WHERE m.session_id = ? AND m.title IS NOT NULL AND m.title IS NOT s.title",
+		sessionId,
+	);
+	return (row?.title as string | undefined) ?? null;
+}
+
+/** A session's title as the roster shows it: one set through swb, else its harness's. */
+export function titleOf(db: Db, sessionId: string): string | null {
+	const row = db.get(
+		"SELECT coalesce(m.title, s.title) AS title FROM sessions s LEFT JOIN marks m USING (session_id) WHERE s.session_id = ?",
+		sessionId,
+	);
+	return (row?.title as string | null | undefined) ?? null;
 }
 
 /** The process quit: its runtime row goes, and the phase stays, so a quit mid-turn reads as cut off. */

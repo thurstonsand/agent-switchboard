@@ -537,7 +537,7 @@ export function wake(db: Db, id: string, continueTurn: boolean): string {
 	ensureSessionsServer();
 	return db.tx(() => {
 		const listed = listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_launch_id}", "#{pane_dead}");
-		// A pi that quit cleanly with no Deck to reap it leaves a dead pane still tagged with its id.
+		// A pi that died before it registered leaves a dead pane still tagged with its id.
 		for (const [name, kind, launchId, dead] of listed) {
 			if (kind === "pi" && launchId === id && dead === "1") tmuxTry(SESSIONS, "kill-session", "-t", `=${name}`);
 		}

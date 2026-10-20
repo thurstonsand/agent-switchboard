@@ -15,6 +15,7 @@ import {
 	seed,
 	sessionRows,
 	state,
+	terminal,
 	waitState,
 } from "./harness/deck.ts";
 import { alive, budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
@@ -155,6 +156,69 @@ test("swb open selects an Inactive session, opening its section", async () => {
 	const st = await waitState(s, "a selected", (x) => x.cursor === a && x.staged.id === a);
 	expect(st.rows).toContainEqual({ kind: "section", label: "Inactive", count: 1, expanded: true });
 	s.save("open-inactive.txt", s.screen());
+});
+
+test("swb_show_session moves the Deck showing its caller onto the session it names, leaving other Decks where they were", async () => {
+	s = scenario("phase2", "show");
+	const [a, b] = (await seed(s, { turns: ["alpha"], title: "alpha" }, { turns: ["beta"], title: "beta" })) as [string, string];
+	const other = terminal(s, "other", `swb open ${b}`);
+	await other.ready();
+	await until(() => other.state().cursor === b, budgets.settle, "the other Deck on beta");
+	s.swb("drive", "start", "--", "new");
+	await waitState(s, "the caller live", (x) => x.staged.kind === "live" && x.focus === "stage", budgets.piReady);
+	await reply(s, "caller");
+	const caller = state(s).staged.id as string;
+
+	s.keys("-l", `call swb_show_session {"session":"${a}"}`, "Enter");
+	await waitState(s, "alpha shown", (x) => x.cursor === a && x.staged.id === a);
+	// Dormant until now, it starts with the keyboard on it, as a click on its row would.
+	const live = await waitState(s, "alpha live", (x) => x.staged.id === a && x.staged.kind === "live", budgets.piReady);
+	expect(live.focus).toBe("stage");
+	expect(entry(s, a).live).toBe(true);
+	expect(other.state()).toMatchObject({ cursor: b, staged: { id: b } });
+	s.save("shown.txt", s.screen());
+
+	// The caller runs on, but no Deck shows it now, so there's none for it to switch.
+	expect(entry(s, caller).live).toBe(true);
+	const unseen = s.swbTry("show", b, "--from", caller);
+	expect(unseen.code).not.toBe(0);
+	expect(unseen.err).toContain("no Deck is showing this session");
+	expect(other.state().cursor).toBe(b);
+});
+
+test("swb_update_session groups and retitles in one call, pi takes the title as its own name, a rename in pi wins, and swb_show_session opens the view asked for", async () => {
+	s = scenario("phase2", "update-show");
+	config(s, 'editor = "cat -v"');
+	const [a] = (await seed(s, { turns: ["alpha"], title: "alpha" })) as [string];
+	s.swb("drive", "start", "--", "new");
+	await waitState(s, "the caller live", (x) => x.staged.kind === "live" && x.focus === "stage", budgets.piReady);
+	await reply(s, "caller");
+	const caller = state(s).staged.id as string;
+	const row = (st: DeckState, id: string) => sessionRows(st).find((r) => r.id === id);
+	// What pi itself calls the session, as its line records it.
+	const own = (id: string) => s.query<{ title: string | null }>("SELECT title FROM sessions WHERE session_id = ?", id)[0]?.title;
+
+	s.keys("-l", `call swb_update_session {"session":"${a}","group":"auth","title":"Auth rewrite"}`, "Enter");
+	const updated = await waitState(s, "alpha in auth, retitled", (x) => row(x, a)?.group === "auth" && row(x, a)?.title === "Auth rewrite");
+	expect(updated.rows).toContainEqual({ kind: "header", project: "project", group: "auth", expanded: true });
+	// Dormant, alpha's pi hasn't taken the title yet.
+	expect(own(a)).toBe("alpha");
+	const reachable = JSON.parse(s.swb("reachable", "--from", caller)) as { text: string };
+	expect(reachable.text).toContain('"Auth rewrite" · dormant · ');
+	expect(reachable.text).toContain(' · Group "auth"');
+
+	s.keys("-l", `call swb_update_session {"title":"Coordinator"}`, "Enter");
+	await until(() => own(caller) === "Coordinator", budgets.settle, "pi's own name");
+	await waitState(s, "pi's name on the roster", (x) => row(x, caller)?.title === "Coordinator");
+	s.keys("-l", "/name Planner", "Enter");
+	await waitState(s, "pi's rename on the roster", (x) => row(x, caller)?.title === "Planner");
+
+	s.keys("-l", `call swb_show_session {"session":"${a}","view":"editor"}`, "Enter");
+	const shown = await waitState(s, "alpha in its editor", (x) => x.staged.id === a && x.staged.view === "editor");
+	expect(shown).toMatchObject({ cursor: a, focus: "editor", staged: { savedView: "editor" } });
+	await until(() => own(a) === "Auth rewrite", budgets.piReady, "alpha's pi taking its title as it starts");
+	expect(s.query("SELECT title FROM marks WHERE session_id = ?", a)).toEqual([{ title: null }]);
+	s.save("shown-editor.txt", s.screen());
 });
 
 /** Each session row as its family places it: indented by level, marked by who started it when not nested, and what a fold hides. */

@@ -1,4 +1,4 @@
-# M-a e swaps the Stage to the session's editor and back; M-a v splits it beside pi.
+# M-a e swaps the Stage to the session's editor and back; M-a v splits it beside the agent.
 Source common.tape
 
 Type "# the session's editor: swap with M-a e, split with M-a v; M-a s for a shell; ctrl-hjkl between them" Sleep 1s Enter

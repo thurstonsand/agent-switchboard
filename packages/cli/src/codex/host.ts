@@ -3,7 +3,18 @@ import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { type Db, stateDir } from "@swb/shared";
 import { frame, listen, markDelivered, pendingFor } from "@swb/shared/mailbox";
-import { endHosting, markArchived, recordTx, setPhase, setTitle, settle, startHosting, startTurn, turnErrored } from "@swb/shared/record";
+import {
+	endHosting,
+	markArchived,
+	pendingTitle,
+	recordTx,
+	setPhase,
+	setTitle,
+	settle,
+	startHosting,
+	startTurn,
+	turnErrored,
+} from "@swb/shared/record";
 import { mark, now, since } from "@swb/shared/trace";
 import { archivedInCodex, readTranscript } from "../deck/transcript.ts";
 import { SwbError, UsageError } from "../errors.ts";
@@ -375,6 +386,9 @@ class CodexLine {
 			}
 			recordTx(this.db, () => markDelivered(this.db, m.id));
 		}
+		// A title set through swb becomes the thread's own name, which thread/name/updated records back.
+		const title = pendingTitle(this.db, thread.id);
+		if (title !== null && title !== thread.name) await this.client.request("thread/name/set", { threadId: thread.id, name: title });
 	}
 
 	end(): void {

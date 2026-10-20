@@ -76,6 +76,8 @@ const MIGRATIONS: string[] = [
 	);
 	CREATE INDEX messages_pending ON messages (target_id) WHERE delivered_at IS NULL AND cancelled_at IS NULL;`,
 	// A schedule delivers to a session, or launches a new one, on each fire; next_at is null once it has finished.
+	// marks.title is a title set through swb, shown until the session's harness takes it and reports it back as its own.
+	// The first view is the session's agent, whichever harness runs it; its CHECK can't change in place, so marks is rebuilt.
 	`CREATE TABLE schedules (
 		id               TEXT PRIMARY KEY,
 		source_id        TEXT NOT NULL,
@@ -97,9 +99,21 @@ const MIGRATIONS: string[] = [
 	ALTER TABLE messages ADD COLUMN schedule_id TEXT;
 	ALTER TABLE messages ADD COLUMN scheduled_for INTEGER;
 	CREATE INDEX messages_target ON messages (target_id, created_at);
-	ALTER TABLE marks ADD COLUMN snoozed_at INTEGER;
-	ALTER TABLE marks ADD COLUMN snoozed_until INTEGER;
-	ALTER TABLE sessions ADD COLUMN errored_at INTEGER;`,
+	ALTER TABLE sessions ADD COLUMN errored_at INTEGER;
+	CREATE TABLE marks_v6 (
+		session_id    TEXT PRIMARY KEY REFERENCES sessions,
+		archived_at   INTEGER,
+		visited_at    INTEGER,
+		view          TEXT NOT NULL DEFAULT 'agent' CHECK (view IN ('agent','editor','split')),
+		group_name    TEXT,
+		snoozed_at    INTEGER,
+		snoozed_until INTEGER,
+		title         TEXT
+	);
+	INSERT INTO marks_v6 (session_id, archived_at, visited_at, view, group_name)
+		SELECT session_id, archived_at, visited_at, CASE view WHEN 'pi' THEN 'agent' ELSE view END, group_name FROM marks;
+	DROP TABLE marks;
+	ALTER TABLE marks_v6 RENAME TO marks;`,
 ];
 
 if (MIGRATIONS.length !== SCHEMA_VERSION) throw new Error(`${MIGRATIONS.length} migrations for schema v${SCHEMA_VERSION}`);
@@ -114,6 +128,11 @@ export function markVisited(db: Db, id: string): void {
 
 export function setView(db: Db, id: string, view: View): void {
 	db.run("INSERT INTO marks (session_id, view) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET view = excluded.view", id, view);
+}
+
+/** A title for the session's harness to take, or (null) none pending. */
+export function rename(db: Db, id: string, title: string | null): void {
+	db.run("INSERT INTO marks (session_id, title) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET title = excluded.title", id, title);
 }
 
 /** Moves sessions into a Group, or out of any when `name` is null. */

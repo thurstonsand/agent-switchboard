@@ -1,7 +1,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { type Db, type Harness, SNOOZE_PRESETS, type Snooze, type SnoozePreset } from "@swb/shared";
 import { clockTime, harnessName } from "@swb/shared/mailbox";
-import { recordTx } from "@swb/shared/record";
+import { recordTx, titleOf } from "@swb/shared/record";
 import type { ToolResult } from "@swb/shared/tools";
 import { Cron } from "croner";
 import { displayName, sessionState, states } from "./derive.ts";
@@ -128,8 +128,7 @@ function recipient(db: Db, row: ScheduleRow, from: string): string {
 
 function sessionName(db: Db, id: string, from: string): string {
 	if (id === from) return "this session";
-	const title = db.get("SELECT title FROM sessions WHERE session_id = ?", id)?.title as string | null | undefined;
-	return `"${title ?? id}"`;
+	return `"${titleOf(db, id) ?? id}"`;
 }
 
 function scheduled(db: Db, row: ScheduleRow, from: string, snoozed: boolean): ToolResult {

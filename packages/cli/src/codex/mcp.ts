@@ -3,7 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { describeTool, launchGuide } from "@swb/shared";
 import { parsed, TOOLS, type ToolName, type ToolResult, toolsAsJson } from "@swb/shared/tools";
-import { launchSession, reachable, send, update, updateOf } from "../coordinate.ts";
+import { launchSession, reachable, send, show, update } from "../coordinate.ts";
 import { SwbError } from "../errors.ts";
 import { listSchedules, schedule, unschedule } from "../schedules.ts";
 import { openStore } from "../store.ts";
@@ -79,9 +79,13 @@ async function call(name: ToolName, args: unknown, from: string, callId: string 
 			return listSchedules(db, from);
 		case "session_unschedule":
 			return unschedule(db, from, parsed(name, args).id);
+		case "swb_show_session": {
+			const a = parsed(name, args);
+			return show(db, from, a.session, a.view ?? null);
+		}
 		case "swb_update_session": {
 			const a = parsed(name, args);
-			return update(db, from, a.session ?? from, updateOf(a));
+			return update(db, from, a.session ?? from, a);
 		}
 	}
 }
