@@ -88,7 +88,8 @@ export function record(args: string[]): void {
 		case "settled": {
 			const { archived } = settle(db, { host, sessionId: need("session"), cwd: need("cwd"), title: title(transcript()) });
 			// Archived during its turn: stop it now the turn is over, in the background, since Claude Code waits on this.
-			if (archived) tmuxTry(SESSIONS, "run-shell", "-b", `kill -TERM ${panePid(host)}`);
+			// Quiet, since a failed run-shell draws its status over some other session's harness.
+			if (archived) tmuxTry(SESSIONS, "run-shell", "-b", `kill -TERM ${panePid(host)} 2>/dev/null || :`);
 			console.log(JSON.stringify({ archived }));
 			return;
 		}

@@ -21,6 +21,8 @@ import { agentStep } from "./fakes/agent.ts";
 //   archive <text>    call swb_update_session to archive itself, then answer "tool done <text>"
 // A pi that starts while start.hold exists signals start.entered and blocks until start.release.
 // A turn that starts while turn.hold exists signals turn.entered and waits for turn.release before agent_start.
+// A pi that shuts down while shutdown.hold exists signals shutdown.entered and waits for shutdown.release.
+// Every SIGTERM a pi receives appends its pid to sigterm.
 // pi-sessions' handoff extraction is answered with a fixed briefing.
 // `archive flaky` fails its post-tool reply once with a retryable provider error.
 // `/e2e-kick <prompt>` starts a turn with a custom message, the way a pi-sessions handoff child kicks off.
@@ -189,6 +191,14 @@ export default function (pi: ExtensionAPI) {
 		if (!existsSync(join(signals, "turn.hold"))) return;
 		signal("turn.entered");
 		await released("turn", undefined);
+	});
+
+	process.on("SIGTERM", () => appendFileSync(join(signals, "sigterm"), `${process.pid}\n`));
+
+	pi.on("session_shutdown", async () => {
+		if (!existsSync(join(signals, "shutdown.hold"))) return;
+		signal("shutdown.entered");
+		await released("shutdown", undefined);
 	});
 
 	pi.on("session_start", (_event, ctx) => {

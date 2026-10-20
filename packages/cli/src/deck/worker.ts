@@ -38,6 +38,9 @@ const transcripts = new Map<string, { mtimeMs: number; turns: Turn[] }>();
 /** Hosts this Deck launched whose pi hasn't registered yet. */
 const launched = new Set<string>();
 const ORPHAN_DEAD_S = 10;
+const REAP_GRACE_MS = 10_000;
+/** Reaped hosts this Deck has sent SIGKILL, until their tmux session is gone. */
+const killed = new Set<string>();
 
 /** Views chosen before a session's first prompt, written once it has a row to mark. */
 const pendingViews = new Map<string, View>();
@@ -77,7 +80,7 @@ function readDb(): void {
 	}
 }
 
-type Polled = { snapshot: Snapshot; attached: Map<string, boolean>; names: Set<string>; serverPid: string };
+type Polled = { snapshot: Snapshot; attached: Map<string, boolean>; reaped: Map<string, number>; names: Set<string>; serverPid: string };
 
 function snapshot(): Polled {
 	readDb();
@@ -91,6 +94,7 @@ function snapshot(): Polled {
 		"#{pane_dead_time}",
 		"#{@swb_version}",
 		"#{@swb_parent}",
+		"#{@swb_reaped}",
 	);
 	const died: Record<string, string[]> = {};
 	for (const [name, kind, , , , dead, deadAt] of listed) {
@@ -110,6 +114,7 @@ function snapshot(): Polled {
 	}
 	const alive = listed.filter(([, kind, , , , dead]) => kind === "pi" && dead !== "1");
 	const attached = new Map(alive.map(([name, , count]) => [name as string, count === "1"]));
+	const reaped = new Map(alive.filter((row) => row[9]).map((row) => [row[0] as string, Number(row[9])]));
 	const w: World = { now: Date.now(), bootId: boot, hosts: new Set(attached.keys()), inactiveAfterMs: config.inactiveAfterMs };
 	const known = new Set(rows.map((row) => row.session_id));
 	const entries: Entry[] = deriveSessions(rows, w).map((state, i) => {
@@ -169,28 +174,56 @@ function snapshot(): Polled {
 			swbVersion: listed[0]?.[7] ?? "",
 		},
 		attached,
+		reaped,
 		names: new Set(listed.map(([name]) => name as string)),
 		serverPid: listed[0]?.[3] ?? "",
 	};
+}
+
+/** A failed run-shell draws its status over some other session's harness, and a lost race to exit isn't news. */
+function quietKill(signal: "TERM" | "KILL", pid: number): string {
+	return `kill -${signal} ${pid} 2>/dev/null || :`;
 }
 
 /**
  * An idle live pi nobody is viewing stops after reap_after. A freshly started one counts from its start, so a
  * background wake isn't reaped on the spot. The attached check runs inside tmux, so a Deck that attached since
  * this poll keeps it.
+ *
+ * A process gets one SIGTERM, from whichever Deck gets there first: tmux marks its session @swb_reaped as it sends
+ * it. pi shuts down once and ignores every later SIGTERM, and the SIGHUP of a closed pane too, so a shutdown hook
+ * that hangs would keep it forever; one still there REAP_GRACE_MS after its SIGTERM gets SIGKILL.
  */
-function reap(snap: Snapshot, attached: Map<string, boolean>): void {
+function reap(snap: Snapshot, attached: Map<string, boolean>, reaped: Map<string, number>): void {
 	const now = Date.now();
+	for (const host of killed) if (!reaped.has(host)) killed.delete(host);
 	const byId = new Map(rows.map((row) => [row.session_id, row]));
 	for (const entry of snap.entries) {
-		if (!entry.host || entry.activity !== "idle" || attached.get(entry.host)) continue;
-		const row = byId.get(entry.id);
+		if (!entry.host) continue;
 		const runtime = runtimes.find((r) => r.tmux_session === entry.host);
-		const lastTouched = Math.max(row?.last_settled_at ?? 0, row?.visited_at ?? 0, runtime?.started_at ?? 0);
-		if (now - lastTouched < config.reapAfterMs) continue;
 		if (!runtime) continue;
+		// Past its SIGTERM it's shutting down, whatever a message that just arrived did to its phase.
+		const termed = reaped.get(entry.host);
+		if (termed !== undefined) {
+			if (now - termed < REAP_GRACE_MS || killed.has(entry.host)) continue;
+			killed.add(entry.host);
+			tmuxTry(SESSIONS, "run-shell", "-b", quietKill("KILL", runtime.pid));
+			continue;
+		}
+		if (entry.activity !== "idle" || attached.get(entry.host)) continue;
+		const row = byId.get(entry.id);
+		const lastTouched = Math.max(row?.last_settled_at ?? 0, row?.visited_at ?? 0, runtime.started_at);
+		if (now - lastTouched < config.reapAfterMs) continue;
 		// SIGTERM rather than closing the pane, so pi's and Claude's lines save any draft; Codex's is lost. See stopPis.
-		tmuxTry(SESSIONS, "if-shell", "-F", "-t", `=${entry.host}:`, "#{?session_attached,0,1}", `run-shell -b 'kill -TERM ${runtime.pid}'`);
+		tmuxTry(
+			SESSIONS,
+			"if-shell",
+			"-F",
+			"-t",
+			`=${entry.host}:`,
+			"#{?session_attached,0,1}",
+			`set -t =${entry.host}: @swb_reaped ${now} ; run-shell -b '${quietKill("TERM", runtime.pid)}'`,
+		);
 	}
 }
 
@@ -227,7 +260,7 @@ function mirror(colors: TerminalProfile): void {
 }
 
 function tick(): Set<string> {
-	const { snapshot: snap, attached, names, serverPid } = snapshot();
+	const { snapshot: snap, attached, reaped, names, serverPid } = snapshot();
 	for (const runtime of runtimes) {
 		if (!launched.has(runtime.tmux_session) || !runtimeLive(runtime, boot, new Set(snap.hosts))) continue;
 		launched.delete(runtime.tmux_session);
@@ -244,7 +277,7 @@ function tick(): Set<string> {
 			post({ type: "error", text: (error as Error).message });
 		}
 	}
-	reap(snap, attached);
+	reap(snap, attached, reaped);
 	const json = JSON.stringify(snap);
 	if (json === lastJson) return names;
 	lastJson = json;

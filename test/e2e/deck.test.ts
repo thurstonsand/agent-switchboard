@@ -358,7 +358,7 @@ test("a dormant card shows the whole conversation, newest at the bottom, cropped
 	s.save("dormant-card-peek.txt", s.screen());
 });
 
-test("an idle, unviewed pi is reaped after reap_after; the one on view is not", async () => {
+test("an idle, unviewed pi is reaped after reap_after with one SIGTERM, then SIGKILL when its shutdown hangs; the one on view is not", async () => {
 	s = scenario("phase2", "reap");
 	const [a, b] = (await seed(s, { turns: ["a"] }, { turns: ["b"] })) as [string, string];
 	config(s, 'reap_after = "2s"\n');
@@ -366,12 +366,20 @@ test("an idle, unviewed pi is reaped after reap_after; the one on view is not", 
 	await cursorTo(s, a);
 	s.keys("w");
 	await waitState(s, "a live", (x) => x.staged.id === a && x.staged.kind === "live", budgets.piReady);
+	const pid = Number(s.tmux(s.servers.sessions, "display", "-p", "-t", `=${piSessions(s)[0]}:`, "#{pane_pid}"));
+	writeFileSync(join(s.home, "e2e-signals", "shutdown.hold"), "");
 	await cursorTo(s, b);
 	s.keys("w");
 	await waitState(s, "b live", (x) => x.staged.id === b && x.staged.kind === "live", budgets.piReady);
-	await until(() => !entry(s, a).live, 8000, "a reaped");
+	await until(() => s.signal("shutdown.entered") !== "", 8000, "a's shutdown hung");
 	await Bun.sleep(3000);
+	expect(alive(pid)).toBe(true);
+	await until(() => !alive(pid), 12_000, "a's pi killed");
+	await until(() => !entry(s, a).live, budgets.settle, "a reaped");
+	expect(s.signal("sigterm")).toBe(`${pid}\n`);
 	expect(entry(s, b).live).toBe(true);
+	expect(s.tmux(s.servers.sessions, "display", "-p", "-t", `=${piSessions(s)[0]}:`, "#{pane_in_mode}")).toBe("0");
+	release(s, "shutdown");
 	s.save("reaped.txt", `${s.screen()}\n${JSON.stringify(s.ls(), null, 2)}`);
 });
 
