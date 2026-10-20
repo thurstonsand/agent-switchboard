@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { commands, host, launched, pane, ready, send, type } from "./harness/agents.ts";
-import { cursorTo, entry, seed, state, waitState } from "./harness/deck.ts";
+import { config, cursorTo, entry, seed, state, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 
 // Claude Code and Codex, as swb hosts them: the real TUIs in the sessions server, scripted by fake model servers.
@@ -158,4 +158,42 @@ test("a title set through swb_update_session becomes Codex's own name at once, a
 	];
 	expect(readFileSync(transcript, "utf8")).toContain('"customTitle":"Claude renamed"');
 	expect(s.query("select title from marks where session_id = ?", claude.id)).toEqual([{ title: null }]);
+});
+
+test("session_launch with no preset carries the caller's harness and model forward, not the default", async () => {
+	s = scenario("harnesses", "carry-forward", { packages: [], recorder: true, harnesses: ["claude"] });
+	config(
+		s,
+		[
+			["claude", "sonnet", "default = true"],
+			["claude", "opus", ""],
+		]
+			.map(
+				([harness, model, extra]) =>
+					`[[targets]]\nharness = "${harness}"\nmodel = "${model}"\neffort = "medium"\nuse = "${model}"\n${extra}\n`,
+			)
+			.concat('[[targets]]\nharness = "pi"\nprovider = "faux"\nmodel = "faux-1"\neffort = "off"\nuse = "scripted"\n')
+			.join("\n"),
+	);
+	const call = (title: string) => `call session_launch {"goal":"reply ${title}","title":"${title}","requestResponse":false}`;
+	/** The model a Claude Code session's turn runs on, as its transcript opens the turn with it. */
+	const claudeModel = (id: string) => {
+		const [row] = s.query<{ transcript: string }>("select transcript from sessions where session_id = ?", id);
+		return readFileSync(row?.transcript as string, "utf8")
+			.split("\n")
+			.filter(Boolean)
+			.map((line) => JSON.parse(line) as { attachment?: { type?: string; identity?: { modelId?: string } } })
+			.findLast((e) => e.attachment?.type === "model")?.attachment?.identity?.modelId;
+	};
+	const child = (parent: string, title: string) =>
+		until(() => s.ls().find((e) => e.parentId === parent && e.title === title && e.activity === "idle"), ready, `${title} launched`);
+
+	const pi = await launched(s, "pi", call("from pi"));
+	expect(await child(pi.id, "from pi")).toMatchObject({ harness: "pi" });
+
+	const opus = await launched(s, "claude", call("from opus"), undefined, ["--model", "opus"]);
+	expect(claudeModel(opus.id)).toContain("opus");
+	const carried = await child(opus.id, "from opus");
+	expect(carried.harness).toBe("claude");
+	expect(claudeModel(carried.id)).toContain("opus");
 });

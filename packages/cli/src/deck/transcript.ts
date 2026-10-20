@@ -238,3 +238,45 @@ function readCodex(path: string): Transcript {
 	}
 	return reading.done();
 }
+
+/** The model and effort a session runs on now, as its transcript last records them; null where it records none. */
+export type InUse = { model: string | null; effort: string | null };
+
+/**
+ * pi records each model and thinking level it switches to; Claude Code, the model of each turn and reply, and no effort;
+ * Codex, the model and effort of each turn, an effort of null being Codex's own default.
+ */
+export function inUse(path: string, harness: Harness): InUse {
+	const entries = lines(locateTranscript(path, harness)) as Record<string, unknown>[];
+	const last = (match: (e: Record<string, unknown>) => boolean) => entries.findLast(match);
+	switch (harness) {
+		case "pi": {
+			const model = last((e) => e.type === "model_change");
+			const level = last((e) => e.type === "thinking_level_change");
+			return {
+				model: model ? `${model.provider}/${model.modelId}` : null,
+				effort: (level?.thinkingLevel as string | undefined) ?? null,
+			};
+		}
+		case "claude": {
+			// Each turn opens with the model it runs on, before any reply; Claude Code's own notices are replies from a
+			// model named "<synthetic>".
+			const model = (e: Record<string, unknown>) =>
+				e.type === "attachment"
+					? (e.attachment as { type?: string; identity?: { modelId?: string } }).identity?.modelId
+					: e.type === "assistant"
+						? (e.message as { model?: string } | undefined)?.model
+						: undefined;
+			const found = last((e) => typeof model(e) === "string" && model(e) !== "<synthetic>");
+			return { model: found ? (model(found) as string) : null, effort: null };
+		}
+		case "codex": {
+			type Context = { model?: string; effort?: string | null; collaboration_mode?: { settings?: { reasoning_effort?: string | null } } };
+			const context = last((e) => e.type === "turn_context")?.payload as Context | undefined;
+			return {
+				model: context?.model ?? null,
+				effort: context?.effort ?? context?.collaboration_mode?.settings?.reasoning_effort ?? null,
+			};
+		}
+	}
+}

@@ -60,6 +60,8 @@ export async function launch(args: string[]): Promise<void> {
 			from: { type: "string" },
 			title: { type: "string" },
 			model: { type: "string" },
+			"from-model": { type: "string" },
+			"from-effort": { type: "string" },
 			"request-response": { type: "boolean", default: false },
 		},
 	});
@@ -75,6 +77,7 @@ export async function launch(args: string[]): Promise<void> {
 			requestResponse: values["request-response"],
 			model: values.model ?? null,
 			scheduled: null,
+			running: values["from-model"] ? { model: values["from-model"], effort: values["from-effort"] ?? null } : null,
 		}),
 	);
 }

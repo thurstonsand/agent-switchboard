@@ -57,7 +57,7 @@ export const TOOLS = {
 		guidelines: [
 			"Write the goal as a complete briefing: objective, relevant context, constraints, and what done means.",
 			"Launch a new session when the work is independent of this one, belongs to another directory, or the user asks for one.",
-			"Choose a preset by its note and pass its fields, or omit them all for the default. A combination that isn't a preset is refused.",
+			"Omit the preset fields to carry forward what this session runs now. Pass a preset's fields only to switch to it, by its note. A combination that isn't a preset is refused.",
 		],
 		parameters: Type.Object({
 			...preset,

@@ -110,6 +110,7 @@ export async function clock(): Promise<void> {
 					title: l.launch.title,
 					requestResponse: l.requestResponse,
 					scheduled: { id: l.scheduleId, at: l.scheduledFor },
+					running: null,
 				}).then(
 					(result) => log(result.text),
 					(error: Error) => launchFailed(l, error),

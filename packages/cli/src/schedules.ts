@@ -153,7 +153,7 @@ export async function schedule(db: Db, s: ScheduleSpec): Promise<ToolResult> {
 	const to = s.launch ? null : (s.to ?? s.from);
 	if (to === s.from && s.requestResponse) throw new SwbError("a message to this session can't request a response from it");
 	// Refused now rather than when it fires; it fires on the shortlist as it is then.
-	if (s.launch) await presetLaunch(s.launch);
+	if (s.launch) await presetLaunch(s.launch, null);
 	// Under the write lock, so a retried call finds its first, and an archive can't land between the check and the insert.
 	return recordTx(db, () => {
 		if (s.requestId) {

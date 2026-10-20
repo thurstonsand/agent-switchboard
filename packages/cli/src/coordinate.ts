@@ -6,9 +6,10 @@ import type { ToolArgs, ToolResult } from "@swb/shared/tools";
 import { CodexClient } from "./codex/client.ts";
 import { codexSocket } from "./codex/host.ts";
 import { deckShowing, postCommand } from "./deck/deck.ts";
+import { type InUse, inUse } from "./deck/transcript.ts";
 import { displayName, openDescendants, projectName, type SessionState, sessionState, states } from "./derive.ts";
 import { SwbError } from "./errors.ts";
-import { launchFlags, presetLaunch } from "./harnesses.ts";
+import { type Caller, launchFlags, presetLaunch } from "./harnesses.ts";
 import { snooze } from "./schedules.ts";
 import { archive, ensureSessionsServer, launch, unarchive, wake } from "./sessions.ts";
 import { rename, setGroup } from "./store.ts";
@@ -107,7 +108,7 @@ async function deliveredWithin(db: Db, id: string, timeoutMs: number): Promise<b
 
 export type Launch = {
 	from: string | null;
-	/** The preset to start on, by its fields; none for the default. */
+	/** The preset to start on, by its fields; none for the one nearest what `from` runs now, else the default. */
 	harness: Harness | null;
 	effort: string | null;
 	agent: string | null;
@@ -118,6 +119,8 @@ export type Launch = {
 	model: string | null;
 	/** The schedule that launches it, and when that was due, which its goal's frame says. */
 	scheduled: { id: string; at: number } | null;
+	/** What `from` runs now, from a line that knows it before its transcript does; null to read its transcript. */
+	running: InUse | null;
 };
 
 /** Starts a new managed session whose first turn is the goal, and waits until its harness has registered it. */
@@ -130,7 +133,9 @@ export async function launchSession(db: Db, l: Launch): Promise<ToolResult> {
 	// An Operator that names no directory would start another Operator in its own folder; starting one is the user's call.
 	if (l.from && dir === operatorDir() && sessionState(db, l.from).operator)
 		throw new SwbError("an Operator can't start another Operator; name a project's directory as cwd");
-	const target = await presetLaunch({ harness: l.harness, model: l.model, effort: l.effort, agent: l.agent });
+	const asked = l.harness !== null || l.model !== null || l.effort !== null || l.agent !== null;
+	const caller = !asked && l.from ? callerOf(db, l.from, l.running) : null;
+	const target = await presetLaunch({ harness: l.harness, model: l.model, effort: l.effort, agent: l.agent }, caller);
 	const harness = target.harness;
 	// pi and Claude Code take an id up front; Codex mints its own, which its host reports once it binds.
 	const sessionId = harness === "codex" ? undefined : crypto.randomUUID();
@@ -169,6 +174,13 @@ export async function launchSession(db: Db, l: Launch): Promise<ToolResult> {
 		.join(", ");
 	const text = `Launched a ${harnessName(harness)} session${what ? ` (${what})` : ""} (session: ${id}) in ${dir}.${l.requestResponse ? " It will report back as a message; end your turn rather than waiting." : ""}`;
 	return { text, details: { id, harness, host, cwd: dir } };
+}
+
+function callerOf(db: Db, id: string, running: InUse | null): Caller {
+	const row = db.get("SELECT harness, transcript FROM sessions WHERE session_id = ?", id);
+	if (!row) throw new SwbError(`no session ${id}`);
+	const harness = row.harness as Harness;
+	return { harness, ...(running ?? inUse(row.transcript as string, harness)) };
 }
 
 async function registered(db: Db, host: string, timeoutMs: number): Promise<string> {

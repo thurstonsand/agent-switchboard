@@ -5,9 +5,15 @@ import { budgets, type LsEntry, release, type Scenario, until } from "./index.ts
 export const ready = 60_000;
 
 /** Starts a session in a harness the way session_launch does, and returns its row once its first turn has settled. */
-export async function launched(s: Scenario, harness: "pi" | "claude" | "codex", goal: string, from?: string): Promise<LsEntry> {
+export async function launched(
+	s: Scenario,
+	harness: "pi" | "claude" | "codex",
+	goal: string,
+	from?: string,
+	flags: string[] = [],
+): Promise<LsEntry> {
 	const out = JSON.parse(
-		await Bun.spawn([`${s.bin}/swb`, "launch", "--harness", harness, "--cwd", s.project, ...(from ? ["--from", from] : [])], {
+		await Bun.spawn([`${s.bin}/swb`, "launch", "--harness", harness, ...flags, "--cwd", s.project, ...(from ? ["--from", from] : [])], {
 			env: s.env,
 			cwd: s.project,
 			stdin: new Blob([goal]),

@@ -85,12 +85,18 @@ async function startNew(message: NewSession): Promise<void> {
 		let target = message.target;
 		if (target === null) {
 			await found;
-			target = resolveLaunch(config, catalog as Catalog, shortlist(config, catalog) ?? [], {
-				harness: message.harness,
-				model: null,
-				effort: null,
-				agent: null,
-			});
+			target = resolveLaunch(
+				config,
+				catalog as Catalog,
+				shortlist(config, catalog) ?? [],
+				{
+					harness: message.harness,
+					model: null,
+					effort: null,
+					agent: null,
+				},
+				null,
+			);
 		}
 		ensureSessionsServer();
 		const host = launch({ ...launchFlags(target), cwd: message.cwd, resume: null });

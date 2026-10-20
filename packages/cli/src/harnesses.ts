@@ -563,7 +563,7 @@ export function presetLabels(presets: Preset[]): string[] {
 function presetLine(c: Choice): string {
 	const p = c.preset;
 	const fields = p.agent ? [p.harness, `agent ${p.agent}`] : [p.harness, p.provider ? `${p.provider}/${p.model}` : p.model, p.effort];
-	return `- ${fields.join(", ")}${p.default ? " (default)" : ""}${c.note ? `: ${c.note}` : ""}`;
+	return `- ${fields.join(", ")}${c.note ? `: ${c.note}` : ""}`;
 }
 
 /** The shortlist as agents read it in session_launch's description, written for every line to pick up. */
@@ -588,8 +588,31 @@ export async function currentCatalog(): Promise<Catalog> {
 /** A launch's choice of preset: each field given must match; an omitted agent means a preset without one, and an agent's has no model or effort. */
 export type Ask = { harness: Harness | null; model: string | null; effort: string | null; agent: string | null };
 
-/** What a launch starts: the first preset, from the default on, matching what it asks; asking nothing, the default. */
-export function resolveLaunch(config: Config, catalog: Catalog, choices: Choice[], ask: Ask): LaunchTarget {
+/** The session a launch comes from: its harness, and the model and effort it runs on now. */
+export type Caller = { harness: Harness; model: string | null; effort: string | null };
+
+/** Whether a preset is the model a session runs on: Claude Code records the full name behind an alias like opus. */
+function runsOn(p: Preset, model: string): boolean {
+	if (p.model === null) return false;
+	if (p.harness === "pi" && p.provider) return model === `${p.provider}/${p.model}`;
+	if (p.harness === "claude") return model === p.model || model.startsWith(`claude-${p.model.replace(/\[1m\]$/, "")}-`);
+	return model === p.model;
+}
+
+/** The preset nearest what a caller runs: its model and effort, else its model, else its harness's first model. */
+function carried(choices: Choice[], caller: Caller): LaunchTarget | null {
+	const ready = fromDefault(choices).filter((c) => c.reason === null && c.preset.harness === caller.harness);
+	const model = caller.model;
+	const same = model === null ? [] : ready.filter((c) => runsOn(c.preset, model));
+	const match = same.find((c) => c.preset.effort === caller.effort) ?? same[0] ?? ready.find((c) => c.preset.agent === null);
+	return match?.launch ?? null;
+}
+
+/**
+ * What a launch starts: the first preset, from the default on, matching what it asks. Asking nothing, the preset nearest
+ * what its caller runs now; with no caller, or none on its harness, the default.
+ */
+export function resolveLaunch(config: Config, catalog: Catalog, choices: Choice[], ask: Ask, caller: Caller | null): LaunchTarget {
 	if (ask.harness !== null || ask.model !== null || ask.effort !== null || ask.agent !== null) {
 		const matches = fromDefault(choices).filter(({ preset: p }) => {
 			const model = p.provider && p.model ? `${p.provider}/${p.model}` : p.model;
@@ -610,18 +633,20 @@ export function resolveLaunch(config: Config, catalog: Catalog, choices: Choice[
 		);
 		throw new SwbError(`no preset is ${asked}. The presets:\n${listed.join("\n")}${failed.join("")}`);
 	}
+	const carry = caller && carried(choices, caller);
+	if (carry) return carry;
 	const fallback = defaultLaunch(config, catalog, choices);
 	if (typeof fallback === "string") throw new SwbError(fallback);
 	return fallback;
 }
 
 /** What a launch asking for a preset starts, against the shortlist as it is now. */
-export async function presetLaunch(ask: Ask): Promise<LaunchTarget> {
+export async function presetLaunch(ask: Ask, caller: Caller | null): Promise<LaunchTarget> {
 	const config = loadConfig();
 	const catalog = await currentCatalog();
 	const choices = shortlist(config, catalog) ?? [];
 	writeGuide(choices);
-	return resolveLaunch(config, catalog, choices, ask);
+	return resolveLaunch(config, catalog, choices, ask, caller);
 }
 
 /** A launch target as LaunchSpec takes it: only the flags it sets. */

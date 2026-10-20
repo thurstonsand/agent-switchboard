@@ -23,6 +23,9 @@ const line = {
 	pending: [],
 	/** A title set through swb, { target, title }, that Claude Code takes as its own with the next prompt. */
 	title: null,
+	/** The model and effort of this session's latest model request, which its transcript only has once the turn ends. */
+	model: "",
+	effort: "",
 	/** The last record in flight; each waits for the one before, so swb sees them in order. */
 	recording: Promise.resolve(""),
 };
@@ -165,6 +168,8 @@ async function useTool($, name, e) {
 					"launch",
 					...from,
 					...["harness", "model", "effort", "agent"].flatMap((k) => (e[k] ? [`--${k}`, e[k]] : [])),
+					...(line.model ? ["--from-model", line.model] : []),
+					...(line.effort ? ["--from-effort", line.effort] : []),
 					"--cwd",
 					e.cwd ?? line.cwd,
 					"--title",
@@ -348,6 +353,10 @@ export function register(on) {
 
 	// A model request means the permission prompt was answered.
 	on("turn.step", async function* ($, e, next) {
+		if (!e.agentId) {
+			line.model = e.model ?? "";
+			line.effort = e.effort ?? "";
+		}
 		if (line.managed && !e.agentId && line.blocked) {
 			line.blocked = false;
 			void record($, ["phase", "working", "--session", line.session]);

@@ -37,7 +37,7 @@ swb snooze ID one_hour|one_day|monday|next_message|off|TIME   snooze a session; 
 swb quit [--force]           stop every session, Deck, and swb's clock; sessions stay open
 swb wake ID                  start a dormant session in the background
 swb models [--harness H] [QUERY]   list every model and agent the harnesses offer
-swb launch [--harness H] [--model M] [--effort E] [--agent A] [--cwd DIR] [--from ID] [--title T]   start a new session in the background on a preset, or the default; its goal on stdin
+swb launch [--harness H] [--model M] [--effort E] [--agent A] [--cwd DIR] [--from ID] [--title T]   start a new session in the background on a preset; naming none, the one nearest what --from runs, else the default; its goal on stdin
 swb send --from ID --to ID [--request-response] [--cancel]   message a session, waking it if dormant; the body on stdin
 ```
 

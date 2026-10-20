@@ -33,7 +33,7 @@ Schema v6: update swb and the pi line together.
 - An Operator can no longer start another Operator: `session_launch` from one must name a project's directory.
 - A roster row's time shows nothing while its turn runs, and counts from when the turn finished, not from the prompt that started it. Its Peek says `active now`.
 - Interrupted is now Cut off. `swb ls --json`'s `interrupted` boolean is `cutOff`: `"shutdown"`, `"killed"`, `"restart"`, or null. `session_reachable` lists such a session as `cut off`.
-- `session_launch`, and `session_schedule`'s `launch`, take a preset's harness, model, effort, or agent, and start the default with none of them; one that isn't a preset is refused. `swb launch --harness` is optional, and `swb schedule` marks a launch with `--launch-title`.
+- `session_launch`, and `session_schedule`'s `launch`, take a preset's harness, model, effort, or agent; one that isn't a preset is refused. With none of them, the new session carries forward what its caller runs now: the preset with the caller's harness, model, and effort, else its harness and model, else its harness, else the default. `swb launch --harness` is optional, and `swb schedule` marks a launch with `--launch-title`.
 
 ### Fixed
 
