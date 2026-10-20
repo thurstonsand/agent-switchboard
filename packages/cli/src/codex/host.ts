@@ -23,6 +23,60 @@ type Status = { type: string; activeFlags?: string[] };
 
 const POLL_MS = 250;
 
+/**
+ * The shell between this host and its app-server, which ends the server however the host ends. An app-server
+ * listening on a socket ignores its parent, and the hangup a dying host's group gets only has it finish its running
+ * turns first, with no limit. The host holds the other end of this shell's stdin, which closes even when the host is
+ * SIGKILLed. Then a first SIGTERM has Codex drain and a second stops it, skipping cleanup it doesn't always finish;
+ * its tools run in process groups of their own, found while it's still their parent, before the first signal and
+ * again after it, and killed once it's gone. The shell reaps the server whenever it likes, freeing its pid, so it's
+ * signalled only while it's still this shell's running app-server. A shell, not swb, because one runs beside every
+ * Codex session: about 1 MB against Bun's 29.
+ */
+const APP_SERVER_GUARD = `
+socket=$1
+shift
+trap '' HUP
+trap 'host_gone=1' USR1
+exec 3<&0 </dev/null
+"$@" 3<&- &
+server=$!
+(cat <&3 >/dev/null; kill -USR1 $$) &
+watcher=$!
+exec 3<&-
+wait "$server"
+status=$?
+running() {
+	ps -o ppid= -o stat= -o args= -p "$server" | awk -v guard=$$ '$1 == guard && $2 !~ /^Z/ && /app-server/ { up = 1 } END { exit !up }'
+}
+tool_groups() {
+	running && ps -A -o pid= -o ppid= -o pgid= | awk -v root="$server" -v own="$(ps -o pgid= -p $$)" '
+		{ parent[$1] = $2; group[$1] = $3 }
+		END {
+			for (p in parent) {
+				for (q = parent[p]; (q in parent) && q != root; q = parent[q]) {}
+				if (q == root && group[p] + 0 != own + 0) print group[p]
+			}
+		}'
+}
+if [ -n "$host_gone" ]; then
+	groups=$(tool_groups)
+	running && kill -TERM "$server"
+	sleep 0.2
+	groups=$(printf '%s\n' $groups $(tool_groups) | sort -u)
+	running && kill -TERM "$server"
+	i=0
+	while [ "$i" -lt 50 ] && running; do sleep 0.1; i=$((i + 1)); done
+	running && kill -KILL "$server"
+	for group in $groups; do kill -s KILL -- "-$group" 2>/dev/null; done
+	wait "$server"
+fi
+kill "$watcher" 2>/dev/null
+wait "$watcher"
+rm -f "$socket"
+exit "$status"
+`;
+
 /** The private app-server of the Codex session in a tmux session. */
 export function codexSocket(host: string): string {
 	return join(stateDir(), "codex", `${host}.sock`);
@@ -57,6 +111,11 @@ export async function codexHost(args: string[]): Promise<void> {
 	const starting = now();
 	const server = Bun.spawn(
 		[
+			"/bin/sh",
+			"-c",
+			APP_SERVER_GUARD,
+			"sh",
+			socket,
 			codex,
 			"app-server",
 			"--listen",
@@ -67,7 +126,7 @@ export async function codexHost(args: string[]): Promise<void> {
 			`plugins.${CODEX_PLUGIN}.enabled=true`,
 			...operator,
 		],
-		{ stdin: "ignore", stdout: "ignore", stderr: openSync(join(dir, `${host}.log`), "w") },
+		{ stdin: "pipe", stdout: "ignore", stderr: openSync(join(dir, `${host}.log`), "w") },
 	);
 	const deadline = Date.now() + 15_000;
 	while (!existsSync(socket)) {
@@ -113,16 +172,19 @@ export async function codexHost(args: string[]): Promise<void> {
 		if (id === line.bound?.id) void line.poll();
 	});
 
-	const code = await tui.exited;
+	// The TUI would only wait to reconnect to a dead app-server, so the session ends with it.
+	const code = await Promise.race([tui.exited, server.exited.then(() => null)]);
 	clearInterval(timer);
 	doorbell.close();
-	line.end();
+	if (code === null) {
+		// A dead app-server is a killed harness, recorded as one: its runtime row stays behind.
+		stopTui();
+		await tui.exited;
+	} else line.end();
 	client.close();
-	server.kill("SIGTERM");
-	await Promise.race([server.exited, Bun.sleep(3000)]);
-	if (server.exitCode === null) server.kill("SIGKILL");
-	rmSync(socket, { force: true });
-	process.exit(code);
+	server.stdin.end();
+	await server.exited;
+	process.exit(code ?? 1);
 }
 
 const UNREAD_GRACE_MS = 5000;

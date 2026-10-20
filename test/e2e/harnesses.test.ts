@@ -54,6 +54,11 @@ function host(id: string): string {
 	return s.query<{ tmux_session: string }>("select tmux_session from runtimes where session_id = ?", id)[0]?.tmux_session as string;
 }
 
+/** Every running process's command line. */
+function commands(): string[] {
+	return Bun.spawnSync(["ps", "-eo", "args="]).stdout.toString().split("\n");
+}
+
 function pane(id: string): string {
 	return s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-S", "-500", "-t", `=${host(id)}:`);
 }
@@ -502,8 +507,17 @@ for (const harness of ["pi", "claude", "codex"] as const)
 		// Claude Code writes its transcript a few seconds behind.
 		await Bun.sleep(5000);
 		const pid = (id: string) => (s.query<{ pid: number }>("select pid from runtimes where session_id = ?", id)[0] as { pid: number }).pid;
-		// The whole process group: Codex's app-server outlives its host's SIGKILL alone, finishing the turn on its own.
-		process.kill(-pid(cut.id), "SIGKILL");
+		const socket = `${host(cut.id)}.sock`;
+		process.kill(pid(cut.id), "SIGKILL");
+		if (harness === "codex")
+			await until(
+				() =>
+					!commands().some(
+						(args) => (args.includes(socket) && args.includes("app-server")) || args.includes(`${s.home}/e2e-signals/k1.release`),
+					),
+				budgets.settle,
+				"the app-server and its tool gone with their host",
+			);
 		// What swb quit --force sends.
 		process.kill(pid(quit.id), "SIGTERM");
 		s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(stopped.id)}:`, "Escape");
@@ -571,3 +585,21 @@ for (const harness of ["pi", "claude", "codex"] as const)
 		await until(() => prompted(failed.id) > errored && entry(s, failed.id).activity === "idle", ready, "a turn after the error");
 		expect(entry(s, failed.id).errored).toBe(false);
 	});
+
+test("a Codex session whose app-server dies mid-turn ends with it, cut off as killed", async () => {
+	s = scenario("harnesses", "codex-server-dies", { packages: [], recorder: true, harnesses: ["codex"] });
+	const codex = await launched("codex", "reply up");
+	type(codex.id, `run echo entered > ${s.home}/e2e-signals/d1.entered; until [ -e ${s.home}/e2e-signals/d1.release ]; do sleep 0.1; done`);
+	await until(() => s.signal("d1.entered") !== "", ready, "the tool call running");
+	const socket = `${host(codex.id)}.sock`;
+	const server = Bun.spawnSync(["ps", "-eo", "pid=,args="])
+		.stdout.toString()
+		.split("\n")
+		.map((line) => line.trim().split(/\s+/))
+		.find(([, command, verb, ...rest]) => command === `${s.bin}/codex` && verb === "app-server" && rest.join(" ").includes(socket));
+	process.kill(Number(server?.[0]), "SIGKILL");
+	await until(() => !entry(s, codex.id).live, budgets.settle, "the session ended, not reconnecting forever");
+	expect(entry(s, codex.id).cutOff).toBe("killed");
+	expect(commands().some((args) => args.includes(socket))).toBe(false);
+	release(s, "d1");
+});
