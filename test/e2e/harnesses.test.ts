@@ -157,7 +157,7 @@ test("an idle Codex session nobody is viewing is reaped after reap_after, as pi 
 	await waitState(s, "ready", (x) => x.ready);
 	await cursorTo(s, other);
 	await until(() => !entry(s, codex.id).live, 15_000, "Codex reaped");
-	expect(entry(s, codex.id)).toMatchObject({ open: true, interrupted: false });
+	expect(entry(s, codex.id)).toMatchObject({ open: true, cutOff: null });
 	// Launched outside this Deck, its pane stays on exit until the Deck's orphan sweep, ten seconds on, closes it.
 	await until(
 		() => !s.tmux(s.servers.sessions, "list-sessions", "-F", "#{session_name}").split("\n").includes(hostName),
@@ -302,7 +302,7 @@ test("swb adopt tracks Claude Code and Codex sessions run outside swb, and wakes
 		const id = ids[harness];
 		s.swb("drive", "start", "--", "adopt", id);
 		await waitState(s, `the adopted ${harness} session on the Stage`, (x) => x.cursor === id && x.staged.kind === "dormant");
-		expect(entry(s, id)).toMatchObject({ harness, open: true, live: false, interrupted: false, cwd: s.project });
+		expect(entry(s, id)).toMatchObject({ harness, open: true, live: false, cutOff: null, cwd: s.project });
 		s.keys("Enter");
 		await waitState(s, `${harness} live`, (x) => x.staged.id === id && x.staged.kind === "live", ready);
 		await until(() => pane(id).includes(`${harness} outside`), ready, `${harness}'s outside conversation on screen`);
@@ -382,11 +382,11 @@ test("agents use swb's tools across harnesses: list, message, launch, and cancel
 	expect(child).toMatchObject({ harness: "codex", cwd: s.project });
 	await until(() => pane(child.id).includes("got SWB-launched do the thing"), ready, "the launched session working on its goal");
 
-	// Cancel from pi interrupts Codex's held turn.
+	// Cancel from pi stops Codex's held turn.
 	type(codex.id, "hold x2");
 	await until(() => s.signal("x2.entered") !== "", ready, "Codex holding");
 	type(pi.id, `call session_cancel {"session":"${codex.id}"}`);
-	await until(() => entry(s, codex.id).activity === "idle", budgets.settle, "Codex's turn interrupted");
+	await until(() => entry(s, codex.id).activity === "idle", budgets.settle, "Codex's turn stopped");
 	release(s, "x2");
 	s.save("agents.txt", [pane(pi.id), pane(claude.id), pane(codex.id), pane(child.id)].join("\n=====\n"));
 });
@@ -441,13 +441,13 @@ test("Codex's own /archive archives in swb, and a Claude session archiving itsel
 
 	type(claude.id, `call swb_update_session {"archived":true}`);
 	await until(() => !entry(s, claude.id).open && !entry(s, claude.id).live, ready, "Claude archived and quit");
-	expect(entry(s, claude.id).interrupted).toBe(false);
+	expect(entry(s, claude.id).cutOff).toBeNull();
 
 	// pi archiving itself from its shell, not its tool, quits when the turn ends too.
 	const pi = await launched("pi", "reply pi up");
 	type(pi.id, `call bash {"command":"${s.bin}/swb archive ${pi.id} --from ${pi.id}"}`);
 	await until(() => !entry(s, pi.id).open && !entry(s, pi.id).live, ready, "pi archived and quit");
-	expect(entry(s, pi.id).interrupted).toBe(false);
+	expect(entry(s, pi.id).cutOff).toBeNull();
 });
 
 test("the Deck's n picks a harness with Tab, puts its real TUI on the Stage, and shows its dormant conversation", async () => {
@@ -485,3 +485,89 @@ test("the Deck's n picks a harness with Tab, puts its real TUI on the Stage, and
 	expect(state(s).rows.some((r) => r.kind === "session" && r.id === id)).toBe(true);
 	s.save("claude-card.txt", s.screen());
 });
+
+for (const harness of ["pi", "claude", "codex"] as const)
+	test(`a dormant ${harness} session's card ends where its last turn stopped: cut off, stopped, or errored; waking it continues only a cut-off turn`, async () => {
+		s = scenario("harnesses", `endings-${harness}`, { packages: [], recorder: true, harnesses: harness === "pi" ? [] : [harness] });
+		const [cut, quit, stopped, failed] = (await Promise.all(
+			["cut", "quit", "stopped", "failed"].map((name) => launched(harness, `reply ${name}`)),
+		)) as [LsEntry, LsEntry, LsEntry, LsEntry];
+		const held = (name: string) =>
+			`run echo entered > ${s.home}/e2e-signals/${name}.entered; until [ -e ${s.home}/e2e-signals/${name}.release ]; do sleep 0.1; done`;
+		type(cut.id, held("k1"));
+		type(quit.id, held("q1"));
+		type(stopped.id, held("e1"));
+		type(failed.id, "fail boom");
+		await until(() => ["k1", "q1", "e1"].every((name) => s.signal(`${name}.entered`) !== ""), ready, "the tool calls running");
+		// Claude Code writes its transcript a few seconds behind.
+		await Bun.sleep(5000);
+		const pid = (id: string) => (s.query<{ pid: number }>("select pid from runtimes where session_id = ?", id)[0] as { pid: number }).pid;
+		// The whole process group: Codex's app-server outlives its host's SIGKILL alone, finishing the turn on its own.
+		process.kill(-pid(cut.id), "SIGKILL");
+		// What swb quit --force sends.
+		process.kill(pid(quit.id), "SIGTERM");
+		s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(stopped.id)}:`, "Escape");
+		await until(
+			() =>
+				!entry(s, cut.id).live &&
+				!entry(s, quit.id).live &&
+				entry(s, stopped.id).activity === "idle" &&
+				entry(s, failed.id).activity === "idle",
+			ready,
+			"one killed, one shut down, one stopped, one failed",
+		);
+		expect([entry(s, cut.id).cutOff, entry(s, quit.id).cutOff]).toEqual(["killed", "shutdown"]);
+		// Errored, live or not, marks its row as a cut-off one does; stopped doesn't.
+		expect([cut, quit, stopped, failed].map(({ id }) => entry(s, id).errored)).toEqual([false, false, false, true]);
+		for (const { id } of [stopped, failed]) s.tmux(s.servers.sessions, "kill-session", "-t", `=${host(id)}`);
+		await until(() => !entry(s, stopped.id).live && !entry(s, failed.id).live, budgets.settle, "both dormant");
+		expect([entry(s, stopped.id).cutOff, entry(s, failed.id).cutOff]).toEqual([null, null]);
+
+		s.swb("drive", "start");
+		const glyphs = await waitState(s, "every row", (x) => x.rows.filter((r) => r.kind === "session").length === 4);
+		const glyphOf = (id: string) => glyphs.rows.flatMap((r) => (r.kind === "session" && r.id === id ? [r.glyph] : []))[0];
+		expect([cut, quit, stopped, failed].map(({ id }) => glyphOf(id))).toEqual(["⚠", "⚠", "●", "⚠"]);
+		const card = async (id: string, ...want: string[]) => {
+			await cursorTo(s, id);
+			await until(() => want.every((text) => s.screen().includes(text)), budgets.settle, want.join(", "));
+			return s.screen();
+		};
+		const cutCard = await card(cut.id, "─ cut off ─", "$ echo entered", "cut off · killed · waking continues it");
+		s.save("cut.txt", cutCard);
+		s.save("quit.txt", await card(quit.id, "─ cut off ─", "$ echo entered", "cut off · shut down"));
+		const stoppedCard = await card(stopped.id, "─ stopped ─", "$ echo entered");
+		s.save("stopped.txt", stoppedCard);
+		const failedCard = await card(failed.id, "─ errored ─", "invalid request: boom");
+		s.save("failed.txt", failedCard);
+		expect(stoppedCard).not.toContain("─ cut off ─");
+		expect(failedCard).not.toContain("$ echo entered");
+		for (const name of ["k1", "q1", "e1"]) release(s, name);
+
+		// Waking the cut-off session starts a turn that picks its last one back up; waking the stopped one doesn't.
+		const prompted = (id: string) =>
+			(s.query<{ at: number }>("select last_prompt_at as at from sessions where session_id = ?", id)[0] as { at: number }).at;
+		const before = { cut: prompted(cut.id), stopped: prompted(stopped.id) };
+		await cursorTo(s, cut.id);
+		s.keys("w");
+		await until(
+			() => entry(s, cut.id).live && entry(s, cut.id).activity === "idle" && prompted(cut.id) > before.cut,
+			ready,
+			"the cut-off turn continued and settled",
+		);
+		expect(entry(s, cut.id).cutOff).toBeNull();
+		await cursorTo(s, stopped.id);
+		s.keys("w");
+		await until(() => entry(s, stopped.id).live, ready, "the stopped session awake");
+		await Bun.sleep(3000);
+		expect(prompted(stopped.id)).toBe(before.stopped);
+		s.save("continued.txt", pane(cut.id));
+
+		// The next turn clears an error.
+		await cursorTo(s, failed.id);
+		s.keys("w");
+		await until(() => entry(s, failed.id).live, ready, "the errored session awake");
+		const errored = prompted(failed.id);
+		type(failed.id, "reply recovered");
+		await until(() => prompted(failed.id) > errored && entry(s, failed.id).activity === "idle", ready, "a turn after the error");
+		expect(entry(s, failed.id).errored).toBe(false);
+	});

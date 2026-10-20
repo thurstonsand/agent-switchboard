@@ -14,7 +14,7 @@ A session that has been completed; it leaves the roster but stays listable and r
 An open session whose whole **Family**, leaving out its **Snoozed** members, has had no activity within `inactive_after` (72 hours).
 
 **Snoozed**:
-An open session put out of the way until a time or its next message. A timed snooze holds through any conversation; a next-message one ends with the next message or prompt. A blocked or interrupted session shows anyway, and one whose time runs out comes back Unseen.
+An open session put out of the way until a time or its next message. A timed snooze holds through any conversation; a next-message one ends with the next message or prompt. A blocked, cut-off, or errored session shows anyway, and one whose time runs out comes back Unseen.
 
 ### Runtime
 
@@ -24,8 +24,14 @@ A session whose agent process is running in this boot.
 **Dormant**:
 An open session with no running process.
 
-**Interrupted**:
-A dormant session whose process ended mid-turn rather than while idle.
+**Cut off**:
+A dormant session whose process ended mid-turn rather than while idle: its harness shut down, it was killed, or the machine restarted. When I wake it, it picks that turn back up; a wake to deliver a Message doesn't.
+
+**Stopped**:
+A turn ended early on purpose, by Esc or another session's cancel. The session is idle, and stays so.
+
+**Errored**:
+A session whose last turn its provider ended with an error. It stays idle, marked like a cut-off one, until its next turn starts.
 
 **Managed**:
 A session hosted by a harness process that `swb` started in its tmux server. Once a process is managed, every session it hosts counts, including after `/new`, `/resume`, `/clear`, or `/fork`. Processes it spawns, such as subagents, do not; only managed sessions can be reattached.

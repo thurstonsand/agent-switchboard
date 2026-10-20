@@ -1,12 +1,14 @@
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fauxAssistantMessage, fauxProvider, fauxToolCall, Type } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall, Type } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { agentStep } from "./fakes/agent.ts";
 
 // Scripted turns for e2e scenarios. The user's prompt picks the script:
 //   reply <text>      answer with <text>
 //   tool <text>       run `echo <text>` through bash, then answer "tool done <text>"
+//   run <command>     say so, run <command> through bash, then answer "tool done <command>"
+//   fail <text>       end the turn on a provider error that isn't retried
 //   hold <name>       signal <name>.entered, wait for <name>.release, answer "released <name>"
 //   attention <name>  like hold, inside a glimpse attention span
 //   subagent <name>   launch a real pi-sessions subagent whose task is `reply child <name>`; the child holds like
@@ -19,6 +21,7 @@ import { agentStep } from "./fakes/agent.ts";
 //   tell <harness> <m>, launch <harness> <title>   use swb's tools as fakes/agent.ts scripts them
 // A message from another session (it starts "Message from session") whose body is `reply <n>` is answered like it.
 //   archive <text>    call swb_update_session to archive itself, then answer "tool done <text>"
+// "Continue where you left off.", which waking a cut-off session sends, is answered "continued".
 // A pi that starts while start.hold exists signals start.entered and blocks until start.release.
 // A turn that starts while turn.hold exists signals turn.entered and waits for turn.release before agent_start.
 // A pi that shuts down while shutdown.hold exists signals shutdown.entered and waits for shutdown.release.
@@ -90,6 +93,7 @@ export default function (pi: ExtensionAPI) {
 			return fauxAssistantMessage(`tool done ${prompt.split(" ").slice(1).join(" ")}`);
 		}
 		const prompt = text(last).trim();
+		if (prompt === "Continue where you left off.") return fauxAssistantMessage("continued");
 		if (prompt.includes("<handoff-goal>")) {
 			return fauxAssistantMessage(fauxToolCall("create_handoff_context", { summary: "e2e", relevantFiles: [] }), {
 				stopReason: "toolUse",
@@ -123,6 +127,10 @@ export default function (pi: ExtensionAPI) {
 				return fauxAssistantMessage(arg);
 			case "tool":
 				return fauxAssistantMessage(fauxToolCall("bash", { command: `echo ${arg}` }), { stopReason: "toolUse" });
+			case "run":
+				return fauxAssistantMessage([fauxText(`Running ${arg}.`), fauxToolCall("bash", { command: arg })], { stopReason: "toolUse" });
+			case "fail":
+				return fauxAssistantMessage("", { stopReason: "error", errorMessage: `400 invalid request: ${arg}` });
 			case "hold":
 				signal(`${arg}.entered`);
 				await released(arg, options?.signal);

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { bootId, type Db, dbPath, type Harness, operatorDir, projectRoot, stateDir } from "@swb/shared";
-import { markArchived } from "@swb/shared/record";
+import { isArchived, markArchived } from "@swb/shared/record";
 import { now, since } from "@swb/shared/trace";
 import { archivedInCodex } from "./deck/transcript.ts";
 import { type RuntimeRow, runtimeLive } from "./derive.ts";
@@ -278,8 +278,8 @@ export function randomHex(bytes: number): string {
 export type LaunchSpec = {
 	harness: Harness;
 	cwd: string;
-	/** The session to resume, when it has run before, and its recorded transcript. */
-	resume: { id: string; transcript: string } | null;
+	/** The session to resume, when it has run before, its recorded transcript, and whether to continue a cut-off turn. */
+	resume: { id: string; transcript: string; continueTurn: boolean } | null;
 	/** A new session's id, for the harnesses that take one up front (pi, Claude Code). */
 	sessionId?: string;
 	/** The first turn's prompt. */
@@ -294,7 +294,8 @@ export type LaunchSpec = {
 /** The harness's own command line for a launch, run by the user's login shell. */
 function harnessCommand(spec: LaunchSpec, host: string): string[] {
 	const model = spec.model ? ["--model", spec.model] : [];
-	const prompt = spec.prompt ? [spec.prompt] : [];
+	const first = spec.prompt ?? (spec.resume?.continueTurn ? CONTINUE : undefined);
+	const prompt = first ? [first] : [];
 	switch (spec.harness) {
 		case "pi": {
 			// --session-id only searches the starting directory's sessions, and a moved-away one would mint a fresh
@@ -319,9 +320,11 @@ function harnessCommand(spec: LaunchSpec, host: string): string[] {
 				"--host",
 				host,
 				...(spec.resume ? ["--resume", spec.resume.id] : []),
+				// Codex picks a cut-off turn back up from its own history, with no prompt from swb.
+				...(spec.resume?.continueTurn ? ["--continue"] : []),
 				...(spec.cwd === operatorDir() ? ["--operator"] : []),
 				...model,
-				...prompt.flatMap((p) => ["--prompt", p]),
+				...(spec.prompt ? ["--prompt", spec.prompt] : []),
 			];
 	}
 }
@@ -498,7 +501,18 @@ end })
  * launch still in flight (tagged with the id, no runtime row yet). Unlike a tmux wait-for lock, the kernel releases
  * it when a waker dies mid-launch.
  */
-export function wake(db: Db, id: string): string {
+/**
+ * What waking a cut-off session tells pi and Claude Code, which pick a turn back up only from a prompt; T3 Code's
+ * wording, which its adapters send the same way.
+ */
+const CONTINUE = "Continue where you left off.";
+
+/**
+ * Starts a dormant session, unless something already hosts it, and returns its tmux session. `continueTurn` is for a
+ * person's wake: an open session cut off mid-turn picks that turn back up. A wake to deliver a message leaves it
+ * idle, since the message is its next turn.
+ */
+export function wake(db: Db, id: string, continueTurn: boolean): string {
 	ensureSessionsServer();
 	return db.tx(() => {
 		const listed = listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_launch_id}", "#{pane_dead}");
@@ -512,11 +526,17 @@ export function wake(db: Db, id: string): string {
 		const recorded = new Set(db.all("SELECT tmux_session FROM runtimes").map((row) => row.tmux_session as string));
 		const inFlight = hosts.find(([name, kind, launchId]) => kind === "pi" && launchId === id && !recorded.has(name as string));
 		if (inFlight) return inFlight[0] as string;
-		const session = db.get("SELECT cwd, project_root, harness, transcript FROM sessions WHERE session_id = ?", id);
+		const session = db.get("SELECT cwd, project_root, harness, transcript, phase FROM sessions WHERE session_id = ?", id);
 		if (!session) throw new SwbError(`no session ${id}`);
 		// tmux starts a missing directory in $HOME, away from the session's Project.
 		const cwd = existsSync(session.cwd as string) ? (session.cwd as string) : (session.project_root as string);
-		return launch({ harness: session.harness as Harness, cwd, resume: { id, transcript: session.transcript as string } });
+		// Not live, so a phase other than idle means its process died mid-turn.
+		const cutOff = session.phase !== "idle" && !isArchived(db, id);
+		return launch({
+			harness: session.harness as Harness,
+			cwd,
+			resume: { id, transcript: session.transcript as string, continueTurn: continueTurn && cutOff },
+		});
 	});
 }
 

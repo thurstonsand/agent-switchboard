@@ -21,9 +21,15 @@ export type SessionState = {
 	live: boolean;
 	activity: Phase;
 	unseen: boolean;
-	interrupted: boolean;
+	/**
+	 * How a dormant session's process ended mid-turn, or null: its harness shut down cleanly (quit, swb quit --force,
+	 * its pane closed), it died without one (killed, crashed, its tmux server gone), or it went with the machine.
+	 */
+	cutOff: CutOff | null;
+	/** Its last turn ended on its provider's error, and none has started since. */
+	errored: boolean;
 	inactive: boolean;
-	/** Out of the way until a time or its next message; blocked or interrupted, it shows anyway. */
+	/** Out of the way until a time or its next message; blocked, cut off, or errored, it shows anyway. */
 	snoozed: boolean;
 	/** When a snoozed session's snooze ends; null while it waits for a message, or isn't snoozed. */
 	snoozedUntil: number | null;
@@ -39,6 +45,8 @@ export type World = { now: number; bootId: string; hosts: Set<string>; inactiveA
 export function world(inactiveAfterMs: number): World {
 	return { now: Date.now(), bootId: bootId(), hosts: new Set(listSessions(SESSIONS).map(([name]) => name as string)), inactiveAfterMs };
 }
+
+export type CutOff = "shutdown" | "killed" | "restart";
 
 export type RuntimeRow = { tmux_session: string; boot_id: string; pid: number };
 
@@ -59,6 +67,7 @@ export type SessionRow = {
 	created_at: number;
 	last_prompt_at: number;
 	last_settled_at: number | null;
+	errored_at: number | null;
 	archived_at: number | null;
 	visited_at: number | null;
 	view: View | null;
@@ -73,7 +82,7 @@ export type SessionRow = {
 export function sessionRows(db: Db): SessionRow[] {
 	return db
 		.all(
-			`SELECT s.session_id, s.harness, s.parent_id, s.title, s.project_root, s.cwd, s.branch, s.transcript, s.phase, s.created_at, s.last_prompt_at, s.last_settled_at,
+			`SELECT s.session_id, s.harness, s.parent_id, s.title, s.project_root, s.cwd, s.branch, s.transcript, s.phase, s.created_at, s.last_prompt_at, s.last_settled_at, s.errored_at,
 		        m.archived_at, m.visited_at, m.view, m.group_name, m.snoozed_at, m.snoozed_until, r.tmux_session, r.boot_id, r.pid,
 		        (SELECT max(created_at) FROM messages WHERE target_id = s.session_id AND kind = 'message') AS last_message_at
 		 FROM sessions s LEFT JOIN marks m USING (session_id) LEFT JOIN runtimes r USING (session_id)`,
@@ -91,6 +100,7 @@ export function sessionRows(db: Db): SessionRow[] {
 			created_at: r.created_at as number,
 			last_prompt_at: r.last_prompt_at as number,
 			last_settled_at: r.last_settled_at as number | null,
+			errored_at: r.errored_at as number | null,
 			archived_at: r.archived_at as number | null,
 			visited_at: r.visited_at as number | null,
 			view: r.view as View | null,
@@ -152,14 +162,17 @@ function derive(row: SessionRow, w: World): SessionState {
 	const live = row.runtime !== null && runtimeLive(row.runtime, w.bootId, w.hosts);
 	const open = row.archived_at === null || row.archived_at < row.last_prompt_at;
 	const activity: Phase = live ? row.phase : "idle";
-	const interrupted = !live && row.phase !== "idle";
+	// A clean shutdown takes its runtime row with it; a killed process leaves one behind, from this boot or an earlier one.
+	const cutOff: CutOff | null =
+		live || row.phase === "idle" ? null : row.runtime === null ? "shutdown" : row.runtime.boot_id === w.bootId ? "killed" : "restart";
 	// A timed snooze holds through any conversation; next_message's ends with the next message or prompt.
 	const holds =
 		row.snoozed_at !== null &&
 		(row.snoozed_until === null
 			? row.snoozed_at >= row.last_prompt_at && (row.last_message_at ?? 0) < row.snoozed_at
 			: row.snoozed_until > w.now);
-	const snoozed = open && holds && activity !== "blocked" && !interrupted;
+	const errored = activity === "idle" && !cutOff && row.errored_at !== null && row.errored_at >= row.last_prompt_at;
+	const snoozed = open && holds && activity !== "blocked" && !cutOff && !errored;
 	// A timed snooze running out is news: Unseen until I look, and fresh for inactive_after.
 	const woke = row.snoozed_until !== null && row.snoozed_until <= w.now ? row.snoozed_until : 0;
 	const activityAt = Math.max(row.last_prompt_at, row.last_settled_at ?? 0, woke);
@@ -179,7 +192,8 @@ function derive(row: SessionRow, w: World): SessionState {
 		live,
 		activity,
 		unseen,
-		interrupted,
+		cutOff,
+		errored,
 		inactive: open && !operator && !snoozed && activityAt < w.now - w.inactiveAfterMs && activity !== "blocked" && !unseen,
 		snoozed,
 		snoozedUntil: snoozed ? row.snoozed_until : null,

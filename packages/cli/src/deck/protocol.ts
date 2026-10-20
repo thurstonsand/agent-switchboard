@@ -32,6 +32,12 @@ export type Snapshot = {
 
 export type Turn = { who: "you" | "agent"; text: string };
 
+/** How a conversation's last turn ended, when it didn't end with a reply: you stopped it, or its provider failed. */
+export type Ending = { kind: "stopped" } | { kind: "error"; message: string };
+
+/** A conversation as a card shows it: its turns, the tool calls the last one made after its last text, and how it ended. */
+export type Transcript = { turns: Turn[]; tail: string[]; ending: Ending | null };
+
 /** A worktree's uncommitted changes against HEAD. */
 export type Diff = { files: number; add: number; del: number };
 
@@ -51,11 +57,15 @@ export type Card = {
 	lines: string[];
 	/** The conversation's newest turns, as many as could fill the screen, oldest first; null while it is still being read. */
 	turns: Turn[] | null;
+	/** The tool calls its last turn made after its last text, shown when the turn didn't end with a reply. */
+	tail: string[];
+	/** Where the conversation stopped short of a reply, drawn as a rule beneath it. */
+	ending: string | null;
 	/** What labels the agent's replies: its harness. */
 	agent: string;
 };
 
-export type State = "loading" | "blocked" | "working" | "unseen" | "idle" | "dormant" | "interrupted" | "archived";
+export type State = "loading" | "blocked" | "working" | "unseen" | "idle" | "dormant" | "cut-off" | "errored" | "archived";
 
 export type StatSummary = { n: number; lastMs: number; avgMs: number; medianMs: number; maxMs: number };
 
@@ -161,7 +171,7 @@ export type FromWorker =
 	| { type: "snapshot"; snapshot: Snapshot }
 	| { type: "woke"; id: string; host: string }
 	| { type: "created"; host: string }
-	| { type: "transcript"; id: string; turns: Turn[] | null; error: string | null }
+	| { type: "transcript"; id: string; transcript: Transcript | null; error: string | null }
 	| { type: "peek"; id: string; info: PeekInfo }
 	| { type: "launchFailed"; id: string | null; text: string }
 	| { type: "toggled"; error: string | null }

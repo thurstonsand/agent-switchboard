@@ -504,10 +504,55 @@ export const directors: Record<string, Director> = {
 			await Bun.sleep(2500);
 			s.tmux(s.servers.sessions, "kill-server");
 			const ls = await waitLs(s, "both dormant", (x) => x.every((e) => !e.live));
-			expect(ls.map((e) => [e.title, e.interrupted]).sort()).toEqual([
+			expect(ls.map((e) => [e.title, e.cutOff !== null]).sort()).toEqual([
 				["Simulated: idle when killed", false],
 				["Simulated: mid-turn when killed", true],
 			]);
+		},
+	},
+
+	"turn-endings": {
+		harnesses: ["claude", "codex"],
+		setup: async (s) => {
+			files(s);
+			const held = (name: string) =>
+				`${name}:\n\t@echo entered > $$HOME/e2e-signals/${name}.entered; until [ -e $$HOME/e2e-signals/${name}.release ]; do sleep 0.1; done\n`;
+			writeFileSync(join(s.project, "Makefile"), `${held("test")}${held("lint")}`);
+			const pi = await launch(s, "pi", "Fix the flaky login test");
+			const claude = await launch(s, "claude", "Tidy the parser");
+			const codex = await launch(s, "codex", "Bump the API client");
+			typeInto(s, pi, "run make test");
+			typeInto(s, claude, "run make lint");
+			typeInto(s, codex, "fail the model is overloaded");
+			await entered(s, "test");
+			await entered(s, "lint");
+			// Claude Code writes its transcript a few seconds behind.
+			await Bun.sleep(5000);
+			const [{ pid }] = s.query<{ pid: number }>("select pid from runtimes where session_id = ?", pi) as [{ pid: number }];
+			process.kill(pid, "SIGKILL");
+			s.tmux(s.servers.sessions, "send-keys", "-t", `=${hostOf(s, claude)}:`, "Escape");
+			await waitLs(s, "pi killed, Claude Code stopped, Codex errored", (ls) =>
+				ls.every((e) => (e.id === pi ? !e.live : e.activity === "idle")),
+			);
+			for (const id of [claude, codex]) s.tmux(s.servers.sessions, "kill-session", "-t", `=${hostOf(s, id)}`);
+			await waitLs(s, "all three dormant", (ls) => ls.every((e) => !e.live));
+			release(s, "test");
+			release(s, "lint");
+		},
+		run: async (s) => {
+			const ls = s.ls();
+			expect(Object.fromEntries(ls.map((e) => [e.harness, e.cutOff]))).toEqual({ pi: "killed", claude: null, codex: null });
+			expect(Object.fromEntries(ls.map((e) => [e.harness, e.errored]))).toEqual({ pi: false, claude: false, codex: true });
+			const pi = ls.find((e) => e.harness === "pi")?.id;
+			// Woken, the cut-off pi picks its turn back up and settles; nothing else wakes.
+			await waitLs(s, "pi continued", (now) => now.some((e) => e.id === pi && e.live && e.activity === "idle" && e.cutOff === null));
+			await Bun.sleep(2000);
+			expect(
+				s
+					.ls()
+					.filter((e) => e.live)
+					.map((e) => e.harness),
+			).toEqual(["pi"]);
 		},
 	},
 

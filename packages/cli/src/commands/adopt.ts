@@ -113,7 +113,7 @@ function claude(transcript: string, entries: Entry[]): Adoptable {
 	const id = basename(transcript, ".jsonl");
 	if (entries.some((e) => e.isSidechain)) throw new SwbError(`adopt: ${id} is a Claude Code subagent; its parent owns it`);
 	const cwd = entries.find((e) => e.cwd)?.cwd;
-	if (!cwd || readTranscript(transcript, "claude").length === 0) throw new SwbError(`adopt: ${id} has no turns yet`);
+	if (!cwd || readTranscript(transcript, "claude").turns.length === 0) throw new SwbError(`adopt: ${id} has no turns yet`);
 	if (existsSync(cwd) && dirname(transcript) !== claudeProjectDir(cwd)) {
 		throw new SwbError(`adopt: Claude Code won't find ${id} from ${cwd}; move it to ${claudeProjectDir(cwd)}`);
 	}
@@ -135,7 +135,7 @@ function codex(transcript: string, entries: Entry[]): Adoptable {
 	const { id, cwd } = meta;
 	if (meta.thread_source && meta.thread_source !== "user")
 		throw new SwbError(`adopt: ${id} is a Codex ${meta.thread_source} thread, not a session`);
-	if (readTranscript(transcript, "codex").length === 0) throw new SwbError(`adopt: ${id} has no turns yet`);
+	if (readTranscript(transcript, "codex").turns.length === 0) throw new SwbError(`adopt: ${id} has no turns yet`);
 	return {
 		harness: "codex",
 		id,

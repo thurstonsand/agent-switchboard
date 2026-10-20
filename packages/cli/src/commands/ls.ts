@@ -21,9 +21,10 @@ Lists every Session, open and archived, with its derived state.
   live         its pi process is running in this boot
   activity     "working", "blocked", or "idle" (always "idle" when not live)
   unseen       open, not snoozed, and its agent finished a turn, or its snooze ran out, after my last Visit
-  interrupted  not live, and its process ended mid-turn
+  cutOff       how its process ended mid-turn, when not live: "shutdown" (its harness quit), "killed" (it died without quitting), or "restart" (an earlier boot); else null
+  errored      its last turn ended on its provider's error, and none has started since
   inactive     open, not an Operator, not snoozed, and its whole Family has had no activity within inactive_after, none of it blocked or unseen
-  snoozed      open and snoozed, neither blocked nor interrupted
+  snoozed      open and snoozed, neither blocked, cut off, nor errored
   snoozedUntil epoch ms a snoozed session's snooze ends, or null when it waits for a message
   createdAt    epoch ms of its first prompt
   activityAt   epoch ms of the last prompt or settle
@@ -33,7 +34,7 @@ Lists every Session, open and archived, with its derived state.
 function glyph(s: SessionState): string {
 	if (s.activity === "blocked") return "◆";
 	if (s.activity === "working") return "◐";
-	if (s.interrupted) return "⚠";
+	if (s.cutOff || s.errored) return "⚠";
 	if (s.unseen) return "●";
 	return "○";
 }

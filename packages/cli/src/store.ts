@@ -98,7 +98,8 @@ const MIGRATIONS: string[] = [
 	ALTER TABLE messages ADD COLUMN scheduled_for INTEGER;
 	CREATE INDEX messages_target ON messages (target_id, created_at);
 	ALTER TABLE marks ADD COLUMN snoozed_at INTEGER;
-	ALTER TABLE marks ADD COLUMN snoozed_until INTEGER;`,
+	ALTER TABLE marks ADD COLUMN snoozed_until INTEGER;
+	ALTER TABLE sessions ADD COLUMN errored_at INTEGER;`,
 ];
 
 if (MIGRATIONS.length !== SCHEMA_VERSION) throw new Error(`${MIGRATIONS.length} migrations for schema v${SCHEMA_VERSION}`);

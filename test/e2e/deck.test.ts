@@ -48,7 +48,7 @@ test("w wakes a dormant session to live while the keyboard stays in the roster",
 	s.keys("x");
 	await waitState(s, "x stops it", (x) => x.staged.kind === "exited");
 	await until(() => !entry(s, id).live, budgets.settle, "its pi gone");
-	expect(entry(s, id)).toMatchObject({ open: true, interrupted: false });
+	expect(entry(s, id)).toMatchObject({ open: true, cutOff: null });
 });
 
 test("Enter on a dormant row puts the keyboard on its pi as it comes up; Enter then M-a h backs out while pi still starts", async () => {

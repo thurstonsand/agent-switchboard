@@ -346,6 +346,12 @@ export function register(on) {
 		return result;
 	});
 
+	// The turn ended on an API error; turn.complete still settles it.
+	on("classic.StopFailure", async ($, e, next) => {
+		if (line.managed && !e.agent_id) void record($, ["errored", "--session", line.session]);
+		return next(e);
+	});
+
 	on("tool.call", async ($, e, next) => {
 		const tool = TOOLS.find((t) => e.tool === `mcp__swb__${t.name}`);
 		if (tool) {

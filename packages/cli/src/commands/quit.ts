@@ -9,7 +9,7 @@ import { killServer, listSessions, SESSIONS, tmuxTry, UI } from "../tmux.ts";
 /**
  * Stops everything swb runs: every harness, saving drafts as an upgrade does, then the Decks, the Editors, and the
  * clock. Sessions stay open and dormant, and schedules wait in the db for the next swb. A running turn refuses it
- * without --force, which interrupts it.
+ * without --force, which cuts it off.
  */
 export function quit(args: string[]): void {
 	const { values } = parseArgs({ args, options: { force: { type: "boolean", default: false } } });

@@ -12,6 +12,9 @@ Schema v6: update swb and the pi line together.
 - The roster nests a session under the session that started it, on pi's tree guides, and sorts each family by its newest activity. `h` folds a family, and the folded row counts what it hides and what of that needs you. A session whose parent sits elsewhere is marked `↳`, or `⌁` when an Operator started it; its Peek says who, and `p` goes there.
 - `a` on a session that started others still open asks whether they go too: `a` again archives it alone, `A` all of them.
 - A session another starts begins in its parent's Group. Moving either one afterwards leaves the other where it is.
+- A dormant session's card ends where its last turn did when it never replied: the tool calls it was making, then `cut off`, `stopped`, or `errored` beneath the provider's error, in pi, Claude Code, and Codex. A cut-off session's status says how: shut down, killed, or machine restarted.
+- An errored session's row wears the cut-off session's `⚠` instead of looking finished, live or not, until its next turn starts; `swb ls --json` gains `errored`.
+- Waking a cut-off session from the Deck continues its turn: pi and Claude Code are told `Continue where you left off.`, and Codex starts a turn with no prompt, going on from its own history. A stopped or errored session wakes idle, and so does any session woken to deliver a message.
 
 ### Changed
 
@@ -20,6 +23,7 @@ Schema v6: update swb and the pi line together.
 - A family goes Inactive only once all of it has.
 - An Operator can no longer start another Operator: `session_launch` from one must name a project's directory.
 - A roster row's time shows nothing while its turn runs, and counts from when the turn finished, not from the prompt that started it. Its Peek says `active now`.
+- Interrupted is now Cut off. `swb ls --json`'s `interrupted` boolean is `cutOff`: `"shutdown"`, `"killed"`, `"restart"`, or null. `session_reachable` lists such a session as `cut off`.
 
 ### Removed
 
@@ -29,6 +33,7 @@ Schema v6: update swb and the pi line together.
 
 - On tmux 3.8, a pi on the Stage stayed tuned to your terminal's old theme after it switched between light and dark: a light screen with your messages in dark boxes. It follows the switch again, in copy mode too, and every session sees your terminal's foreground and palette along with its background. With several Decks open, the one you use last sets the colours.
 - A Deck stopping an idle session sends it one SIGTERM, then SIGKILL if it's still running 10 seconds later, instead of a SIGTERM every 250 ms until it exits. A late one no longer draws `'kill -TERM <pid>' returned 1` over another session.
+- A card no longer shows Claude Code's `[Request interrupted by user]` as something you typed, or its `API Error: …` as a reply.
 
 ## 0.6.4 — 2026-10-16
 

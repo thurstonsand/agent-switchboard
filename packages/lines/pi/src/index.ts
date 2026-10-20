@@ -16,6 +16,7 @@ import {
 	settle,
 	startHosting,
 	startTurn,
+	turnErrored,
 } from "@swb/shared/record";
 import { TOOLS, type ToolName, type ToolResult } from "@swb/shared/tools";
 import { mark, span } from "@swb/shared/trace";
@@ -253,9 +254,16 @@ export default function (pi: ExtensionAPI) {
 	pi.events.on("glimpseui:attention:request", attention(true));
 	pi.events.on("glimpseui:attention:resolve", attention(false));
 
-	pi.on("agent_settled", (_event, ctx) => {
+	// The last reply's stop, read when the run settles: a retry that succeeds replaces an error before then.
+	let stopReason: string | undefined;
+	pi.on("message_end", (event) => {
+		if (event.message.role === "assistant") stopReason = event.message.stopReason;
+	});
+
+	pi.on("agent_settled", (event, ctx) => {
 		proc.attention.clear();
 		writeFor(ctx, (db, id) => {
+			if (stopReason === "error" && !event.aborted) turnErrored(db, id);
 			const { archived } = settle(db, {
 				host: proc.launch.tmuxSession,
 				sessionId: id,

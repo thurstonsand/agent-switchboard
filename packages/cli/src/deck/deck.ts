@@ -310,7 +310,7 @@ export async function openDeck(intent: DeckIntent): Promise<void> {
 	const deck = `deck-${randomHex(3)}`;
 	const paths = deckPaths(deck);
 	mkdirSync(decksDir(), { recursive: true, mode: 0o700 });
-	writeCard(paths, { head: [], lines: ["Deck starting…"], turns: null, agent: "" });
+	writeCard(paths, { head: [], lines: ["Deck starting…"], turns: null, tail: [], ending: null, agent: "" });
 	writeAtomic(paths.target, placeholderName(deck));
 	span("deck.placeholder", () => ensurePlaceholder(deck));
 	const panes = now();

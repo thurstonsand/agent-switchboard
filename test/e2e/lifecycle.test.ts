@@ -100,9 +100,12 @@ test("a first turn started by a custom message, as a handoff child's is, is trac
 	s.save("kicked-off.txt", s.screen());
 	const { pid } = s.query("SELECT pid FROM runtimes WHERE session_id = ?", id)[0] as { pid: number };
 	process.kill(pid, "SIGKILL");
-	await until(() => entry(s, id)?.interrupted, budgets.settle, "interrupted");
-	expect(entry(s, id)).toMatchObject({ open: true, live: false, interrupted: true });
+	await until(() => entry(s, id)?.cutOff, budgets.settle, "cut off");
+	expect(entry(s, id)).toMatchObject({ open: true, live: false, cutOff: "killed" });
 	s.save("kicked-off-killed.txt", `${s.screen()}\n${JSON.stringify(s.ls(), null, 2)}`);
+	// The same process left behind by an earlier boot went with the machine.
+	s.query("UPDATE runtimes SET boot_id = 'an-earlier-boot' WHERE session_id = ?", id);
+	expect(entry(s, id).cutOff).toBe("restart");
 });
 
 test("swb_update_session archives from inside a turn, and pi quits only once the turn's final message lands", async () => {
@@ -110,7 +113,7 @@ test("swb_update_session archives from inside a turn, and pi quits only once the
 	const { id, host } = await liveSession("ready");
 	s.keys("-l", "archive now", "Enter");
 	await until(() => !piSessions(s).includes(host), budgets.settle, "pi quit");
-	expect(entry(s, id)).toMatchObject({ open: false, live: false, interrupted: false });
+	expect(entry(s, id)).toMatchObject({ open: false, live: false, cutOff: null });
 	const { transcript } = s.query("SELECT transcript FROM sessions WHERE session_id = ?", id)[0] as { transcript: string };
 	expect(readFileSync(transcript, "utf8")).toContain("tool done now");
 	expect(s.query("SELECT tmux_session FROM runtimes")).toHaveLength(0);
@@ -123,7 +126,7 @@ test("a provider retry inside the archiving turn does not reopen the session", a
 	s.keys("-l", "archive flaky", "Enter");
 	await until(() => !piSessions(s).includes(host), budgets.settle, "pi quit");
 	expect(existsSync(join(s.env.HOME as string, "e2e-signals", "flaky.failed"))).toBe(true);
-	expect(entry(s, id)).toMatchObject({ open: false, live: false, interrupted: false });
+	expect(entry(s, id)).toMatchObject({ open: false, live: false, cutOff: null });
 	const { transcript } = s.query("SELECT transcript FROM sessions WHERE session_id = ?", id)[0] as { transcript: string };
 	expect(readFileSync(transcript, "utf8")).toContain("tool done flaky");
 	s.save("archived-through-retry.txt", `${s.screen()}\n${JSON.stringify(s.ls(), null, 2)}`);
@@ -349,7 +352,7 @@ test("swb adopt tracks a session pi ran outside swb, wakes it managed, and refus
 
 	s.swb("drive", "start", "--", "adopt", id);
 	await waitState(s, "the adopted session on the Stage", (x) => x.cursor === id && x.staged.kind === "dormant");
-	expect(entry(s, id)).toMatchObject({ open: true, live: false, interrupted: false, unseen: false, cwd: s.project });
+	expect(entry(s, id)).toMatchObject({ open: true, live: false, cutOff: null, unseen: false, cwd: s.project });
 	s.save("adopted-dormant.txt", s.screen());
 	s.keys("Enter");
 	await waitState(

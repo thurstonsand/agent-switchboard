@@ -14,7 +14,7 @@ import { archive, ensureSessionsServer, launch, unarchive, wake } from "./sessio
 // thing, and the facts a line may render. The sender is always the line's own session, never a tool argument.
 
 function describe(s: SessionState): string {
-	const state = s.live ? s.activity : s.interrupted ? "interrupted" : "dormant";
+	const state = s.cutOff ? "cut off" : s.errored ? `errored${s.live ? "" : ", dormant"}` : s.live ? s.activity : "dormant";
 	return `- ${s.id} · ${harnessName(s.harness)} · "${displayName(s)}" · ${state} · ${s.cwd}`;
 }
 
@@ -75,7 +75,7 @@ export async function send(db: Db, m: Send): Promise<ToolResult> {
 	});
 	ring(db, m.to);
 	const woke = !target.live;
-	if (woke) wake(db, m.to);
+	if (woke) wake(db, m.to, false);
 	const delivered = await deliveredWithin(db, id, woke ? 60_000 : 15_000);
 	const name = `"${displayName(target)}"`;
 	const text =

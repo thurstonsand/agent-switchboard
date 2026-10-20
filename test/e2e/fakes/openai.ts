@@ -2,6 +2,8 @@
 //   reply <text>         answer "<text>"
 //   hold <name>          signal <name>.entered, wait for <name>.release through the shell, answer "released <name>"
 //   call <tool> <json>   call the tool whose name ends in <tool> with <json>, then answer "tool done"
+//   run <command>        run <command> through the shell, then answer "ran <command>"
+//   fail <text>          fail the request with a 400, which isn't retried
 // A message from another session (it starts "Message from session") is answered "got <its last line>".
 // Every request is appended to $FAKE_LOG as one JSON line: the user texts it saw, the tools it was offered, and its
 // whole input, instructions included.
@@ -71,6 +73,11 @@ const server = Bun.serve({
 		const answering = last?.type === "message";
 		let output: object;
 		const [verb, ...rest] = prompt.split(" ");
+		if (verb === "fail")
+			return Response.json(
+				{ error: { type: "invalid_request_error", code: null, param: null, message: `invalid request: ${rest.join(" ")}` } },
+				{ status: 400 },
+			);
 		const step = answering || last?.type === "function_call_output" ? agentStep(prompt, answering ? null : outputText(last)) : null;
 		if (step && "tool" in step) {
 			const found = tools.find((candidate) => candidate.name === step.tool) ?? { name: step.tool };
@@ -80,6 +87,9 @@ const server = Bun.serve({
 		} else if (answering && verb === "hold") {
 			const name = rest.join(" ");
 			const call = shell(names, `echo entered > ${signals}/${name}.entered; until [ -e ${signals}/${name}.release ]; do sleep 0.1; done`);
+			output = { type: "function_call", call_id: `call_${n}`, name: call.name, arguments: JSON.stringify(call.args) };
+		} else if (answering && verb === "run") {
+			const call = shell(names, rest.join(" "));
 			output = { type: "function_call", call_id: `call_${n}`, name: call.name, arguments: JSON.stringify(call.args) };
 		} else if (answering && verb === "call") {
 			const [tool, ...json] = rest;
@@ -97,7 +107,9 @@ const server = Bun.serve({
 							? rest.join(" ")
 							: verb === "call"
 								? "tool done"
-								: `ack ${prompt.slice(0, 60)}`;
+								: verb === "run"
+									? `ran ${rest.join(" ")}`
+									: `ack ${prompt.slice(0, 60)}`;
 			output = { type: "message", role: "assistant", id: `msg_${n}`, content: [{ type: "output_text", text }] };
 		}
 		const usage = { input_tokens: 1, input_tokens_details: null, output_tokens: 1, output_tokens_details: null, total_tokens: 2 };

@@ -44,7 +44,7 @@ async function firstTurn(): Promise<void> {
 	await prompt("hold first");
 	await waitFor("first.entered");
 	const working = entry(runtime.session_id);
-	expect(working).toMatchObject({ live: true, open: true, activity: "working", interrupted: false, project: s.project, cwd: s.project });
+	expect(working).toMatchObject({ live: true, open: true, activity: "working", cutOff: null, project: s.project, cwd: s.project });
 	expect(working.title).toBeNull();
 
 	release(s, "first");
@@ -114,7 +114,7 @@ test("/reload keeps recording, /new moves the runtime row to a new id and leaves
 	const moved = await until(() => runtimes().find((r) => r.session_id !== runtime.session_id), budgets.settle, "the runtime to move");
 	expect(moved.tmux_session).toBe(runtime.tmux_session);
 	expect(runtimes()).toHaveLength(1);
-	expect(entry(runtime.session_id)).toMatchObject({ live: false, activity: "idle", interrupted: false, open: true });
+	expect(entry(runtime.session_id)).toMatchObject({ live: false, activity: "idle", cutOff: null, open: true });
 	await prompt("reply second");
 	await until(() => entry(moved.session_id)?.activity === "idle", budgets.settle, "second session idle");
 	expect(s.ls()).toHaveLength(2);
@@ -149,11 +149,11 @@ test("swb refuses a db newer than itself, and a recorder started against a misma
 	s = scenario("phase1", "mismatch-at-start");
 	s.swb("migrate");
 	const conn = s.db();
-	conn.exec("PRAGMA user_version = 7");
+	conn.exec(`PRAGMA user_version = ${SCHEMA_VERSION + 1}`);
 	conn.close();
 	const refused = s.swbTry("ls");
 	expect(refused.code).toBe(1);
-	expect(refused.err).toContain(`is schema v7, newer than this swb (v${SCHEMA_VERSION})`);
+	expect(refused.err).toContain(`is schema v${SCHEMA_VERSION + 1}, newer than this swb (v${SCHEMA_VERSION})`);
 
 	// Launched exactly as swb launches it, but against the db swb refused.
 	const server = `stale-${s.instance}`;
@@ -185,7 +185,7 @@ test("swb refuses a db newer than itself, and a recorder started against a misma
 	const screen = await until(
 		() => {
 			const text = s.tmux(server, "capture-pane", "-p", "-t", "pi");
-			return text.includes("swb: not recording: db schema is v7") && text;
+			return text.includes(`swb: not recording: db schema is v${SCHEMA_VERSION + 1}`) && text;
 		},
 		budgets.piReady,
 		"the red footer",
@@ -194,7 +194,7 @@ test("swb refuses a db newer than itself, and a recorder started against a misma
 	expect(runtimes()).toEqual([]);
 });
 
-test("kill-server leaves an idle session dormant and a mid-turn one interrupted", async () => {
+test("kill-server leaves an idle session dormant and a mid-turn one cut off", async () => {
 	s = scenario("phase1", "kill-server");
 	const first = await startManaged();
 	await prompt("reply idle one");
@@ -207,8 +207,10 @@ test("kill-server leaves an idle session dormant and a mid-turn one interrupted"
 	await waitFor("forever.entered");
 	s.tmux(s.servers.sessions, "kill-server");
 	await until(() => !entry(second.session_id).live, budgets.settle, "dead");
-	expect(entry(first.session_id)).toMatchObject({ live: false, activity: "idle", interrupted: false });
-	expect(entry(second.session_id)).toMatchObject({ live: false, activity: "idle", interrupted: true });
+	expect(entry(first.session_id)).toMatchObject({ live: false, activity: "idle", cutOff: null });
+	expect(entry(second.session_id)).toMatchObject({ live: false, activity: "idle" });
+	// Losing its terminal, pi may or may not record its shutdown before it dies; either way the turn was cut off.
+	expect(entry(second.session_id).cutOff).not.toBeNull();
 });
 
 test("a never-prompted session is killed when its last viewer detaches; a prompted one survives", async () => {

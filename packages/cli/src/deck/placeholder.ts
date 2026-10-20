@@ -1,7 +1,7 @@
 import { readFileSync, watch } from "node:fs";
 import { basename, dirname } from "node:path";
 import { parseArgs } from "node:util";
-import { matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { span } from "@swb/shared/trace";
 import { UsageError } from "../errors.ts";
 import type { Card, Turn } from "./protocol.ts";
@@ -12,7 +12,7 @@ if (!args.card || !args.sock) throw new UsageError("__placeholder: --card and --
 const cardPath = args.card;
 const sock = args.sock;
 
-let card: Card = { head: [], lines: [], turns: null, agent: "" };
+let card: Card = { head: [], lines: [], turns: null, tail: [], ending: null, agent: "" };
 let raw = "";
 let typedAt = 0;
 /** How long a keystroke's notice stays. */
@@ -42,6 +42,11 @@ function turnLines(turn: Turn, width: number): string[] {
 	return wrapped.map((line, i) => `${i === 0 ? `${label}${" ".repeat(pad - who.length)}` : " ".repeat(pad)}${line}`);
 }
 
+function endingRule(label: string, width: number): string {
+	const side = Math.max(2, Math.floor((width - visibleWidth(label) - 2) / 2));
+	return `${gray("─".repeat(side))} ${label} ${gray("─".repeat(side))}`;
+}
+
 function draw(): void {
 	const cols = process.stdout.columns;
 	const rows = process.stdout.rows;
@@ -57,8 +62,14 @@ function draw(): void {
 	const room = Math.max(0, rows - 2 - head.length - foot.length - 1);
 	let conversation: string[] = [];
 	if (card.turns === null) conversation = ["", dim("reading transcript…")];
-	else if (card.turns.length > 0) {
-		const all = card.turns.flatMap((turn, i) => [...(i > 0 ? [""] : []), ...turnLines(turn, width)]);
+	else if (card.turns.length > 0 || card.ending) {
+		const pad = " ".repeat(Math.max(4, card.agent.length) + 1);
+		const all = [
+			...card.turns.flatMap((turn, i) => [...(i > 0 ? [""] : []), ...turnLines(turn, width)]),
+			// The calls it was making hang off its last text, so an unfinished turn reads as one.
+			...card.tail.map((step) => gray(`${pad}${step}`)),
+			...(card.ending ? ["", endingRule(card.ending, width)] : []),
+		];
 		conversation = ["", ...(all.length > room - 1 ? [gray("…"), ...all.slice(all.length - (room - 2))] : all)];
 	}
 	if (room <= 2) conversation = [];

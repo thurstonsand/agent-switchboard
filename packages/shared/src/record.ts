@@ -133,11 +133,16 @@ export function settle(db: Db, s: Settle): { archived: boolean } {
 	});
 }
 
+/** The turn ended on its provider's error. It stands until the next turn starts from idle. */
+export function turnErrored(db: Db, sessionId: string): void {
+	recordTx(db, () => db.run("UPDATE sessions SET errored_at = ? WHERE session_id = ?", Date.now(), sessionId));
+}
+
 export function setTitle(db: Db, sessionId: string, title: string | null): void {
 	recordTx(db, () => db.run("UPDATE sessions SET title = ? WHERE session_id = ?", title, sessionId));
 }
 
-/** The process quit: its runtime row goes, and the phase stays, so a quit mid-turn reads as interrupted. */
+/** The process quit: its runtime row goes, and the phase stays, so a quit mid-turn reads as cut off. */
 export function endHosting(db: Db, host: string): void {
 	recordTx(db, () => db.run("DELETE FROM runtimes WHERE tmux_session = ?", host));
 }

@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { type Db, stateDir } from "@swb/shared";
 import { frame, listen, markDelivered, pendingFor } from "@swb/shared/mailbox";
-import { endHosting, markArchived, recordTx, setPhase, setTitle, settle, startHosting, startTurn } from "@swb/shared/record";
+import { endHosting, markArchived, recordTx, setPhase, setTitle, settle, startHosting, startTurn, turnErrored } from "@swb/shared/record";
 import { mark, now, since } from "@swb/shared/trace";
 import { archivedInCodex, readTranscript } from "../deck/transcript.ts";
 import { SwbError, UsageError } from "../errors.ts";
@@ -36,6 +36,7 @@ export async function codexHost(args: string[]): Promise<void> {
 			resume: { type: "string" },
 			model: { type: "string" },
 			prompt: { type: "string" },
+			continue: { type: "boolean" },
 			operator: { type: "boolean" },
 		},
 	});
@@ -105,7 +106,7 @@ export async function codexHost(args: string[]): Promise<void> {
 	process.on("SIGHUP", stopTui);
 	process.on("SIGTERM", stopTui);
 
-	const line = new CodexLine(db, client, host, parent, stopTui);
+	const line = new CodexLine(db, client, host, parent, values.continue ? (values.resume ?? null) : null, stopTui);
 	client.onNotification((note) => line.notify(note));
 	const timer = setInterval(() => void line.poll(), POLL_MS);
 	const doorbell = listen(db, (id) => {
@@ -144,6 +145,8 @@ class CodexLine {
 		readonly host: string,
 		/** The launcher, recorded with the first turn. */
 		public parent: string | null,
+		/** A resumed thread whose cut-off turn picks back up once the TUI shows it. */
+		public continuing: string | null,
 		readonly stop: () => void,
 	) {}
 
@@ -190,6 +193,15 @@ class CodexLine {
 					this.stop();
 				}
 			});
+			// Only the TUI's connection hears turn/completed; this one asks how the turn ended.
+			void this.client
+				.request<{ data: { status: string }[] }>("thread/turns/list", { threadId: thread.id, limit: 1, sortDirection: "desc" })
+				.then(
+					({ data }) => {
+						if (data[0]?.status === "failed") this.guard(() => turnErrored(this.db, thread.id));
+					},
+					(error: Error) => console.error(`swb: not recording: ${error.message}`),
+				);
 		}
 	}
 
@@ -219,6 +231,11 @@ class CodexLine {
 		this.polling = true;
 		try {
 			await this.bind();
+			if (this.bound && this.bound.id === this.continuing) {
+				this.continuing = null;
+				// No input: Codex goes on from its own history, as T3 Code continues a Codex turn.
+				await this.client.request("turn/start", { threadId: this.bound.id, input: [] });
+			}
 			await this.deliver();
 		} catch (error) {
 			console.error(`swb: ${(error as Error).message}`);
@@ -303,5 +320,5 @@ class CodexLine {
 
 /** Codex writes a thread's rollout with its first turn. */
 function hasTurns(path: string): boolean {
-	return existsSync(path) && readTranscript(path, "codex").length > 0;
+	return existsSync(path) && readTranscript(path, "codex").turns.length > 0;
 }

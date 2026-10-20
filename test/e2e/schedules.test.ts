@@ -105,7 +105,7 @@ test("a session schedules itself a message and snoozes until then; the clock wak
 	expect(pane(pi.id)).toContain('· "in 8 seconds" · ran ');
 });
 
-test("a timed snooze holds through a conversation and shows while blocked or interrupted; next_message ends at the next message or prompt", async () => {
+test("a timed snooze holds through a conversation and shows while blocked or cut off; next_message ends at the next message or prompt", async () => {
 	s = scenario("schedules", "snooze-rules");
 	const [pi, other] = await Promise.all([launched("pi", "reply one"), launched("pi", "reply other")]);
 
@@ -154,7 +154,8 @@ test("a timed snooze holds through a conversation and shows while blocked or int
 	await until(() => s.signal("i1.entered") !== "", budgets.settle, "the held turn");
 	s.tmux(s.servers.sessions, "kill-session", "-t", `=${host(other.id)}`);
 	await until(() => !entry(s, other.id).live, budgets.settle, "dormant");
-	expect(snoozeOf(other.id)).toMatchObject({ interrupted: true, snoozed: false });
+	expect(snoozeOf(other.id).cutOff).not.toBeNull();
+	expect(snoozeOf(other.id).snoozed).toBe(false);
 
 	// Archiving cancels what was coming and the snooze with it; unarchiving brings neither back.
 	// Monday is 9 AM on the next one, never today's.
@@ -430,5 +431,5 @@ test("swb quit refuses a running turn, then stops everything, leaving sessions o
 	expect(s.swb("quit").trim()).toBe("Stopped 1 session, every Deck, and swb's clock. swb starts them again.");
 	expect(() => s.tmux(s.servers.sessions, "has-session")).toThrow();
 	expect(() => s.tmux(s.servers.ui, "has-session")).toThrow();
-	expect(entry(s, pi.id)).toMatchObject({ open: true, live: false, interrupted: false });
+	expect(entry(s, pi.id)).toMatchObject({ open: true, live: false, cutOff: null });
 });

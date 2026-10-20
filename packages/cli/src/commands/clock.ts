@@ -43,7 +43,7 @@ export async function clock(): Promise<void> {
 			const wait = retry ? Math.min(retry.wait * 2, WAKE_RETRY_MAX_MS) : WAKE_RETRY_MS;
 			retries.set(s.id, { at: now + wait, wait });
 			try {
-				log(`waking ${s.id} for its mail: ${wake(db, s.id)}`);
+				log(`waking ${s.id} for its mail: ${wake(db, s.id, false)}`);
 			} catch (error) {
 				log(`waking ${s.id} failed: ${(error as Error).message}`);
 			}

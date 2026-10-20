@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { pidAlive } from "@swb/shared";
 import { frame, listen, markDelivered, markOffered, pendingFor, sender } from "@swb/shared/mailbox";
-import { endHosting, recordTx, setPhase, settle, startHosting, startTurn } from "@swb/shared/record";
+import { endHosting, recordTx, setPhase, settle, startHosting, startTurn, turnErrored } from "@swb/shared/record";
 import { claudeTitle } from "../deck/transcript.ts";
 import { UsageError } from "../errors.ts";
 import { openStore } from "../store.ts";
@@ -93,6 +93,9 @@ export function record(args: string[]): void {
 			console.log(JSON.stringify({ archived }));
 			return;
 		}
+		case "errored":
+			turnErrored(db, need("session"));
+			return;
 		case "end":
 			endHosting(db, host);
 			return;

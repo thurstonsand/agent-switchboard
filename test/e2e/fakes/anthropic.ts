@@ -2,6 +2,8 @@
 //   reply <text>         answer "<text>"
 //   hold <name>          signal <name>.entered, wait for <name>.release through Bash, answer "released <name>"
 //   call <tool> <json>   call the tool whose name is <tool> or ends in __<tool> with <json>, then answer "tool done"
+//   run <command>        say so, run <command> through Bash, then answer "tool done"
+//   fail <text>          fail the request with a 400, which isn't retried
 // A message from another session (its text contains "Message from session") is answered "got <its last line>".
 // Requests without tools (titles) get a short reply, and prompt suggestions none. Every request is appended to $FAKE_LOG as one
 // JSON line: the latest prompt, whether it carried a tool result, the tools offered, every swb message marker seen, and
@@ -84,6 +86,12 @@ const server = Bun.serve({
 		);
 
 		const [verb, ...rest] = lastTyped.trim().split(" ");
+		// Claude Code joins a prompt that failed to the next one, so only the newest paragraph can fail again.
+		if (tools.length > 0 && verb === "fail" && !lastTyped.includes("\n\n"))
+			return Response.json(
+				{ type: "error", error: { type: "invalid_request_error", message: `invalid request: ${rest.join(" ")}` } },
+				{ status: 400 },
+			);
 		const answered = messages.findLastIndex((m) => m.role === "assistant") > messages.findLastIndex((m) => typed(m) !== undefined);
 		let content: object[];
 		const step = tools.length > 0 && (toolResult || !answered) ? agentStep(lastTyped, toolResult ? toolOutput : null) : null;
@@ -96,6 +104,12 @@ const server = Bun.serve({
 			const name = rest.join(" ");
 			const command = `echo entered > ${signals}/${name}.entered; until [ -e ${signals}/${name}.release ]; do sleep 0.1; done`;
 			content = [{ type: "tool_use", id: `toolu_${n}`, name: "Bash", input: { command, description: "Hold", timeout: 600000 } }];
+		} else if (tools.length > 0 && !toolResult && !answered && verb === "run") {
+			const command = rest.join(" ");
+			content = [
+				{ type: "text", text: `Running ${command}.` },
+				{ type: "tool_use", id: `toolu_${n}`, name: "Bash", input: { command, description: "Run", timeout: 600000 } },
+			];
 		} else if (tools.length > 0 && !toolResult && !answered && verb === "call") {
 			const [tool, ...json] = rest;
 			const name = tools.find((candidate) => candidate === tool || candidate.endsWith(`__${tool}`)) ?? (tool as string);

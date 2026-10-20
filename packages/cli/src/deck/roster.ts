@@ -21,7 +21,7 @@ import { harness as asHarness, HARNESSES, type Harness, operatorDir, projectRoot
 import { mark, span } from "@swb/shared/trace";
 import type { Subprocess } from "bun";
 import { loadConfig } from "../config.ts";
-import { displayName, projectName } from "../derive.ts";
+import { type CutOff, displayName, projectName } from "../derive.ts";
 import { completions, expandHome, type Target, type TargetTree, targetName } from "../dirs.ts";
 import { UsageError } from "../errors.ts";
 import { presetUntil } from "../schedules.ts";
@@ -56,7 +56,7 @@ import type {
 	StatSummary,
 	TerminalProfile,
 	ToWorker,
-	Turn,
+	Transcript,
 } from "./protocol.ts";
 import {
 	age,
@@ -79,6 +79,7 @@ import {
 	shortPath,
 	spinnerFrame,
 	wakeAt,
+	yellow,
 } from "./style.ts";
 
 const VISIT_MS = 1000;
@@ -200,7 +201,7 @@ function toast(text: string, level: Toast["level"]): void {
 	tui.requestRender();
 }
 
-const transcripts = new Map<string, { turns: Turn[] | null; error: string | null }>();
+const transcripts = new Map<string, { transcript: Transcript | null; error: string | null }>();
 
 function launchFor(id: string): Launch | undefined {
 	return launches.find((launch) => launch.id === id);
@@ -269,12 +270,11 @@ const foldKey = (id: string) => `fold:${id}`;
 function stateOf(e: Entry): State {
 	if (launchFor(e.id) && !e.live) return "loading";
 	if (!e.open) return "archived";
-	if (!e.live) {
-		if (e.interrupted) return "interrupted";
-		return isUnseen(e) ? "unseen" : "dormant";
-	}
+	if (e.cutOff) return "cut-off";
 	if (e.activity === "blocked") return "blocked";
 	if (e.activity === "working") return "working";
+	if (e.errored) return "errored";
+	if (!e.live) return isUnseen(e) ? "unseen" : "dormant";
 	return isUnseen(e) ? "unseen" : "idle";
 }
 
@@ -292,7 +292,8 @@ function glyph(state: State, now: number): string {
 			return "○";
 		case "dormant":
 			return gray("○");
-		case "interrupted":
+		case "cut-off":
+		case "errored":
 			return red("⚠");
 		case "archived":
 			return gray("✓");
@@ -322,12 +323,16 @@ function phaseStatus(e: Entry): string {
 			return e.provisional ? `idle${gray(" · no prompt yet")}` : "idle";
 		case "dormant":
 			return "not running";
-		case "interrupted":
-			return `${red("interrupted")}${gray(" · waking resumes it idle")}`;
+		case "cut-off":
+			return `${red("cut off")}${gray(` · ${CAUSES[e.cutOff as CutOff]} · waking continues it`)}`;
+		case "errored":
+			return e.live ? red("errored") : `${red("errored")}${gray(" · not running")}`;
 		case "archived":
 			return gray("archived");
 	}
 }
+
+const CAUSES: Record<CutOff, string> = { shutdown: "shut down", killed: "killed", restart: "machine restarted" };
 
 const archivedKey = (e: Entry) => Math.max(e.activityAt, e.archivedAt ?? 0);
 
@@ -376,7 +381,7 @@ let side: (StageClient & { target: string }) | null = null;
 /** The shell's pane, under whichever pane holds pi. It closes with its shell, so it needs no client tracking. */
 let below: { pane: string; target: string; parent: string } | null = null;
 
-const EMPTY: Card = { head: [], lines: ["Nothing selected."], turns: [], agent: "" };
+const EMPTY: Card = { head: [], lines: ["Nothing selected."], turns: [], tail: [], ending: null, agent: "" };
 
 const stage = {
 	/** The session on the Stage, or the pending new session (id null) when `new` is starting. */
@@ -432,14 +437,27 @@ function syncTitle(): void {
 	);
 }
 
+/** Where a conversation stopped short of a reply. Why it was cut off is its status's to say, not this. */
+function ending(e: Entry, read: Transcript | null): string | null {
+	if (e.cutOff) return red("cut off");
+	if (read?.ending?.kind === "stopped") return yellow("stopped");
+	if (read?.ending?.kind === "error") return red("errored");
+	return null;
+}
+
 function card(e: Entry, lines: string[] = []): Card {
 	const transcript = transcripts.get(e.id);
 	const extra = transcript?.error ? [red(transcript.error)] : [];
+	const read = transcript?.transcript ?? null;
+	const end = transcript ? ending(e, read) : null;
 	return {
 		head: rosterOffScreen() ? [bold(displayName(e)), status(e), gray(shortPath(e.cwd))] : [],
 		lines: [...lines, ...extra],
 		// A screen shows at most a turn per two rows, and the Stage is no taller than the roster.
-		turns: transcript ? (transcript.turns?.slice(-process.stdout.rows) ?? []) : null,
+		turns: transcript ? (read?.turns.slice(-process.stdout.rows) ?? []) : null,
+		// An error's own words hang beneath the turn it ended, like the calls before it.
+		tail: end ? [...(read?.tail ?? []), ...(read?.ending?.kind === "error" ? [read.ending.message] : [])].slice(-process.stdout.rows) : [],
+		ending: end,
 		agent: e.harness,
 	};
 }
@@ -457,7 +475,7 @@ function piStage(): Applied {
 		if (pending.host) return starting(null, pending.host);
 		// A new session has no row yet, so its card is the only place that says it's starting.
 		const lines = pending.keyboard && rosterOffScreen() ? [ESC_LINE] : [];
-		return onCard("loading", null, { head: [cyan("starting a new session")], lines, turns: [], agent: "" });
+		return onCard("loading", null, { head: [cyan("starting a new session")], lines, turns: [], tail: [], ending: null, agent: "" });
 	}
 	const e = stage.staged === null ? undefined : entries.get(stage.staged);
 	if (!e) return onCard("empty", null, EMPTY);
@@ -942,7 +960,7 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
 			break;
 		}
 		case "transcript":
-			transcripts.set(message.id, { turns: message.turns, error: message.error });
+			transcripts.set(message.id, { transcript: message.transcript, error: message.error });
 			apply();
 			break;
 		case "peek":
@@ -2578,7 +2596,7 @@ function familyTally(family: Entry[]): string {
 	const tally: [State[], string][] = [
 		[["working", "loading"], cyan("◐")],
 		[["blocked"], attention("◆")],
-		[["interrupted"], red("⚠")],
+		[["cut-off", "errored"], red("⚠")],
 		[["unseen"], green("●")],
 		[["idle", "dormant"], "○"],
 	];
@@ -2841,7 +2859,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	const title = wrapTextWithAnsi(displayName(e), inner);
 	const titleLines = title.length > 2 ? [title[0] as string, truncateToWidth(title.slice(1).join(" "), inner, "…")] : title;
 	head.push(...titleLines.map((line) => bold(line)));
-	head.push(`${glyph(stateOf(e), now)} ${status(e)}${launchElapsed(e, now)}`);
+	head.push(...wrapTextWithAnsi(`${glyph(stateOf(e), now)} ${status(e)}${launchElapsed(e, now)}`, inner));
 	head.push(
 		gray(
 			`created ${ago(e.createdAt, now)} · ${e.open ? `active ${e.activity !== "idle" ? "now" : ago(e.activityAt, now)}` : `archived ${ago(archivedKey(e), now)}`}`,

@@ -10,7 +10,7 @@ import { archive, ensureEditor, ensureSessionsServer, ensureShell, launch, stop,
 import { loadLayout, markVisited, openStore, saveLayout, setGroup, setView } from "../store.ts";
 import { listSessions, SESSIONS, tmux, tmuxTry } from "../tmux.ts";
 import { ensurePlaceholder, placeholderName } from "./deck.ts";
-import type { Diff, Entry, FromWorker, Snapshot, TerminalProfile, ToWorker, Turn } from "./protocol.ts";
+import type { Diff, Entry, FromWorker, Snapshot, TerminalProfile, ToWorker, Transcript, Turn } from "./protocol.ts";
 import { locateTranscript, readTranscript } from "./transcript.ts";
 
 // The roster's worker owns the db and everything slow: a held writer lock or a 50 MB transcript stalls this
@@ -34,7 +34,7 @@ let schedules = new Map<string, ScheduleView[]>();
 let profile: TerminalProfile | null = null;
 /** The sessions server this Deck last mirrored its terminal into, by pid: a new one is mirrored again. */
 let mirroredServer = "";
-const transcripts = new Map<string, { mtimeMs: number; turns: Turn[] }>();
+const transcripts = new Map<string, { mtimeMs: number; transcript: Transcript }>();
 /** Hosts this Deck launched whose pi hasn't registered yet. */
 const launched = new Set<string>();
 const ORPHAN_DEAD_S = 10;
@@ -148,7 +148,8 @@ function snapshot(): Polled {
 			live: true,
 			activity: "idle",
 			unseen: false,
-			interrupted: false,
+			cutOff: null,
+			errored: false,
 			inactive: false,
 			snoozed: false,
 			snoozedUntil: null,
@@ -285,22 +286,22 @@ function tick(): Set<string> {
 	return names;
 }
 
-/** A transcript's turns, read again only once it has changed on disk. */
-function turnsOf(recorded: string, harness: Harness): Turn[] {
+/** A transcript, read again only once it has changed on disk. */
+function transcriptOf(recorded: string, harness: Harness): Transcript {
 	const path = locateTranscript(recorded, harness);
 	const { mtimeMs } = statSync(path);
 	const cached = transcripts.get(path);
-	if (cached?.mtimeMs === mtimeMs) return cached.turns;
-	const turns = readTranscript(path, harness);
-	transcripts.set(path, { mtimeMs, turns });
-	return turns;
+	if (cached?.mtimeMs === mtimeMs) return cached.transcript;
+	const transcript = readTranscript(path, harness);
+	transcripts.set(path, { mtimeMs, transcript });
+	return transcript;
 }
 
 function transcript(id: string, recorded: string, harness: Harness): void {
 	try {
-		post({ type: "transcript", id, turns: span("worker.transcript", () => turnsOf(recorded, harness)), error: null });
+		post({ type: "transcript", id, transcript: span("worker.transcript", () => transcriptOf(recorded, harness)), error: null });
 	} catch (error) {
-		post({ type: "transcript", id, turns: null, error: (error as Error).message });
+		post({ type: "transcript", id, transcript: null, error: (error as Error).message });
 	}
 }
 
@@ -328,7 +329,7 @@ async function peek(id: string, cwd: string, path: string | null, harness: Harne
 	let last: Turn | null = null;
 	let error: string | null = null;
 	try {
-		if (path) last = turnsOf(path, harness).at(-1) ?? null;
+		if (path) last = transcriptOf(path, harness).turns.at(-1) ?? null;
 	} catch (e) {
 		error = (e as Error).message;
 	}
@@ -350,7 +351,7 @@ function handle(message: ToWorker): void {
 			return;
 		case "wake":
 			try {
-				const host = wake(db, message.id);
+				const host = wake(db, message.id, true);
 				launched.add(host);
 				post({ type: "woke", id: message.id, host });
 			} catch (error) {

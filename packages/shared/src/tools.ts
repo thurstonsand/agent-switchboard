@@ -39,7 +39,7 @@ export const TOOLS = {
 		readOnly: false,
 	},
 	session_cancel: {
-		description: "Interrupt another session's running turn. The session stays open.",
+		description: "Stop another session's running turn. The session stays open.",
 		guidelines: ["Only cancel another session's turn when the user asks for it."],
 		parameters: Type.Object({ session }),
 		readOnly: false,
