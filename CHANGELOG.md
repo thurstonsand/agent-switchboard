@@ -19,6 +19,7 @@ Schema v6: update swb and the pi line together.
 - A dormant session with a message waiting is started by the clock, retrying with backoff, instead of only by its sender.
 - A family goes Inactive only once all of it has.
 - An Operator can no longer start another Operator: `session_launch` from one must name a project's directory.
+- A roster row's time shows nothing while its turn runs, and counts from when the turn finished, not from the prompt that started it. Its Peek says `active now`.
 
 ### Removed
 

@@ -2530,14 +2530,16 @@ function rowLine(row: Row, width: number, now: number): string {
 	}
 	const mark = stage.staged === e.id ? (focus === "stage" ? cyan("▌") : "▌") : " ";
 	const lead = `${mark}${rowLead(row)}`;
-	// A snoozed row says when it wakes instead: ↘ for its next message.
+	// A snoozed row says when it wakes instead: ↘ for its next message. Mid-turn, the glyph already says it's active.
 	const when = !e.open
 		? age(archivedKey(e), now)
 		: e.snoozed
 			? e.snoozedUntil === null
 				? "↘"
 				: wakeAt(e.snoozedUntil, now)
-			: age(e.activityAt, now);
+			: e.activity !== "idle"
+				? ""
+				: age(e.activityAt, now);
 	const worktree = e.cwd !== e.project ? magenta("⎇") : " ";
 	const right = ` ${worktree} ${gray(when.padStart(3))} `;
 	const hidden = row.folded ? ` ${foldedTally(row.family.map((p) => p.entry))}` : "";
@@ -2841,7 +2843,9 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	head.push(...titleLines.map((line) => bold(line)));
 	head.push(`${glyph(stateOf(e), now)} ${status(e)}${launchElapsed(e, now)}`);
 	head.push(
-		gray(`created ${ago(e.createdAt, now)} · ${e.open ? `active ${ago(e.activityAt, now)}` : `archived ${ago(archivedKey(e), now)}`}`),
+		gray(
+			`created ${ago(e.createdAt, now)} · ${e.open ? `active ${e.activity !== "idle" ? "now" : ago(e.activityAt, now)}` : `archived ${ago(archivedKey(e), now)}`}`,
+		),
 	);
 	head.push(rule, gray(tailOf(`${e.harness} · ${shortPath(e.cwd)}`, inner)));
 	const info = peek.info.get(e.id)?.info;
