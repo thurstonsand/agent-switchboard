@@ -6,6 +6,7 @@ import type { ToolResult } from "@swb/shared/tools";
 import { Cron } from "croner";
 import { displayName, sessionState, states } from "./derive.ts";
 import { SwbError } from "./errors.ts";
+import { presetLaunch } from "./harnesses.ts";
 import { randomHex } from "./sessions.ts";
 
 // Schedules deliver a message later, once or on a cron, or launch a new session with it as the goal. They wait in
@@ -68,7 +69,20 @@ export function nextRun(expr: string, after: number): number | null {
 	return cronOf(expr).nextRun(new Date(after))?.getTime() ?? null;
 }
 
-export type Launch = { harness: Harness; cwd: string | null; title: string };
+/** A new session each time it fires, on the preset these fields choose, as session_launch's do. */
+export type Launch = {
+	harness: Harness | null;
+	model: string | null;
+	effort: string | null;
+	agent: string | null;
+	cwd: string | null;
+	title: string;
+};
+
+/** "a new Claude Code session", or with no harness chosen, "a new session". */
+export function newSessionName(launch: Launch): string {
+	return `a new ${launch.harness ? `${harnessName(launch.harness)} ` : ""}session "${launch.title}"`;
+}
 
 export type ScheduleSpec = {
 	from: string;
@@ -107,8 +121,7 @@ function rowOf(db: Db, id: string): ScheduleRow | undefined {
 /** Who a schedule goes to, as the session asking reads it. */
 function recipient(db: Db, row: ScheduleRow, from: string): string {
 	if (row.launch) {
-		const launch = JSON.parse(row.launch) as Launch;
-		return `a new ${harnessName(launch.harness)} session "${launch.title}"`;
+		return newSessionName(JSON.parse(row.launch) as Launch);
 	}
 	return sessionName(db, row.target_id as string, from);
 }
@@ -132,7 +145,7 @@ function scheduled(db: Db, row: ScheduleRow, from: string, snoozed: boolean): To
 }
 
 /** Accepts a schedule; with snooze, its recipient is snoozed until the first fire. */
-export function schedule(db: Db, s: ScheduleSpec): ToolResult {
+export async function schedule(db: Db, s: ScheduleSpec): Promise<ToolResult> {
 	if (!s.body.trim()) throw new SwbError("the message is empty");
 	if (!s.label.trim()) throw new SwbError("the label is empty");
 	if ((s.at === null) === (s.cron === null)) throw new SwbError("give at, to run once, or cron, to recur: one of them");
@@ -140,6 +153,8 @@ export function schedule(db: Db, s: ScheduleSpec): ToolResult {
 	if (s.launch && s.snooze) throw new SwbError("snooze needs an existing session; a launch has none to snooze");
 	const to = s.launch ? null : (s.to ?? s.from);
 	if (to === s.from && s.requestResponse) throw new SwbError("a message to this session can't request a response from it");
+	// Refused now rather than when it fires; it fires on the shortlist as it is then.
+	if (s.launch) await presetLaunch(s.launch);
 	// Under the write lock, so a retried call finds its first, and an archive can't land between the check and the insert.
 	return recordTx(db, () => {
 		if (s.requestId) {
@@ -159,7 +174,7 @@ export function schedule(db: Db, s: ScheduleSpec): ToolResult {
 		if (s.launch) {
 			const cwd = s.launch.cwd ?? source.cwd;
 			if (!existsSync(cwd)) throw new SwbError(`no directory ${cwd}`);
-			launch = JSON.stringify({ harness: s.launch.harness, cwd: realpathSync(cwd), title: s.launch.title });
+			launch = JSON.stringify({ ...s.launch, cwd: realpathSync(cwd) } satisfies Launch);
 		}
 		const nextAt = s.cron !== null ? nextRun(s.cron, now) : when(s.at as string, now, "at");
 		if (nextAt === null) throw new SwbError(`cron: "${s.cron}" never runs`);

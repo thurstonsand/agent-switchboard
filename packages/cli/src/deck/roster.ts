@@ -1,4 +1,4 @@
-import { rmSync, statSync } from "node:fs";
+import { mkdirSync, rmSync, statSync, watch } from "node:fs";
 import { basename, join } from "node:path";
 import { parseArgs } from "node:util";
 import {
@@ -17,18 +17,20 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { harness as asHarness, HARNESSES, type Harness, operatorDir, projectRoot, type SnoozePreset, type View } from "@swb/shared";
+import { harness as asHarness, configDir, type Harness, operatorDir, projectRoot, type SnoozePreset, type View } from "@swb/shared";
 import { mark, span } from "@swb/shared/trace";
 import type { Subprocess } from "bun";
-import { loadConfig } from "../config.ts";
+import { ConfigError, configPath, type Loaded, readConfig } from "../config.ts";
 import { type CutOff, displayName, projectName } from "../derive.ts";
 import { completions, expandHome, type Target, type TargetTree, targetName } from "../dirs.ts";
-import { UsageError } from "../errors.ts";
+import { SwbError, UsageError } from "../errors.ts";
+import { type Catalog, type Choice, defaultLaunch, fromDefault, type LaunchTarget, presetLabels, shortlist } from "../harnesses.ts";
 import { presetUntil } from "../schedules.ts";
-import { newer, nvimEditor, SWB } from "../sessions.ts";
+import { loginShell, newer, nvimEditor, SWB } from "../sessions.ts";
 import type { DeckLayout } from "../store.ts";
 import { CLIENT_CWD, cleanEnv, quote, SESSIONS, tmux, tmuxAsync, tmuxBin, tmuxTry, UI } from "../tmux.ts";
 import { VERSION } from "../version.ts";
+import { writeConfig } from "../write-config.ts";
 import { Control } from "./control.ts";
 import {
 	deckEnv,
@@ -58,6 +60,7 @@ import type {
 	ToWorker,
 	Transcript,
 } from "./protocol.ts";
+import { SettingsPane } from "./settings.ts";
 import {
 	age,
 	attention,
@@ -112,7 +115,12 @@ const [stagePane, stageTty] = tmux(UI, "display", "-p", "-t", rosterPane, "#{P:#
 if (!stagePane || !stageTty) throw new UsageError("__roster: its window names no Stage");
 const paths = deckPaths(deck);
 const placeholder = placeholderName(deck);
-const config = loadConfig();
+/** config.toml as this Deck last applied it; a file that fails to read leaves it be, and says so. */
+let loaded: Loaded = readConfig();
+let config = loaded.config;
+let configError: ConfigError | null = null;
+/** What the harnesses can start, as the worker last found it. */
+let catalog: Catalog | null = null;
 
 // ── perf ────────────────────────────────────────────────────────────────
 
@@ -770,7 +778,8 @@ function wake(id: string, keyboard: boolean): void {
 	apply();
 }
 
-function newSession(cwd: string, group: string | null, harness: Harness = config.harness): void {
+/** A new session on `target`; with none, the worker picks `harness`'s first preset, or the default, once it knows what can start. */
+function newSession(cwd: string, group: string | null, target: LaunchTarget | null, harness: Harness | null = null): void {
 	if (newLaunch()) {
 		toast("a new session is already starting", "info");
 		return;
@@ -779,7 +788,7 @@ function newSession(cwd: string, group: string | null, harness: Harness = config
 	stage.holdForNew = true;
 	stage.staged = null;
 	stage.ended = null;
-	post({ type: "new", cwd, group, harness });
+	post({ type: "new", cwd, group, target, harness });
 	apply();
 	void focusStage();
 }
@@ -847,7 +856,7 @@ function startCursor(): void {
 			.filter((e) => e.project === root)
 			.sort((a, b) => (b.visitedAt ?? 0) - (a.visitedAt ?? 0) || b.activityAt - a.activityAt)[0];
 		if (!recent) {
-			newSession(here, null);
+			newSession(here, null, null);
 			return;
 		}
 		reveal(recent.id);
@@ -1017,6 +1026,10 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
 			toast(`view: ${message.text}`, "error");
 			apply();
 			break;
+		case "catalog":
+			catalog = message.catalog;
+			tui.requestRender();
+			break;
 		case "error":
 			toast(message.text, "error");
 			break;
@@ -1182,6 +1195,8 @@ class Roster implements Component, Focusable {
 	snoozing: { id: string; title: string; choice: number } | null = null;
 	/** The directory picker, `n` and `N`, which takes over the whole roster while it's open. */
 	choosing: Choosing | null = null;
+	/** Settings, which takes over the whole Deck while it's open. */
+	settings: SettingsPane | null = null;
 	search = new Input({ prompt: "/ " });
 	pickerTop = 0;
 	completed: { typed: string; rows: string[] } | null = null;
@@ -1390,6 +1405,12 @@ class Roster implements Component, Focusable {
 		stage.keyAt = performance.now();
 		frameKeyAt = stage.keyAt;
 		toasts = [];
+		if (this.settings) {
+			this.settings.handleInput(data);
+			stage.keyAt = 0;
+			tui.requestRender();
+			return;
+		}
 		if (this.choosing) {
 			this.pickerInput(data);
 			stage.keyAt = 0;
@@ -1466,6 +1487,8 @@ class Roster implements Component, Focusable {
 		else if (k === "N") this.openPicker("add", null, null);
 		else if (k === "/") this.filtering = true;
 		else if (k === "m") this.startNaming();
+		else if (k === ",") openSettings();
+		else if (k === "O" && configError) openConfig(configError.line);
 		else if (k === "?") void showHelp();
 		this.syncStage(true);
 		stage.keyAt = 0;
@@ -1480,6 +1503,7 @@ class Roster implements Component, Focusable {
 	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
 		// A control under the pointer lights up, wherever it is.
 		let relit = false;
+		if (this.settings) return this.settings.handleMouse(event);
 		if (event.type === "move") {
 			const before = this.targetAt(this.pointer);
 			this.pointer = { x: event.x, y: event.y };
@@ -1498,9 +1522,10 @@ class Roster implements Component, Focusable {
 			return { handled: true, render: true };
 		}
 		if (this.choosing) {
-			const listRow = this.pickerTop + event.y - 3;
+			const listRow = this.pickerTop + event.y - PICKER_TOP;
 			if (event.type === "move") {
-				if (this.choosing.confirm || event.y < 3 || event.y >= 3 + this.listHeight) return { handled: true, render: relit };
+				if (this.choosing.confirm || event.y < PICKER_TOP || event.y >= PICKER_TOP + this.listHeight)
+					return { handled: true, render: relit };
 				const count = this.choosing.mode === "pick" ? this.pickRows().length : this.addRows().length;
 				if (listRow < count && listRow !== this.choosing.choice) {
 					this.choosing.choice = listRow;
@@ -1587,7 +1612,8 @@ class Roster implements Component, Focusable {
 			this.naming ||
 			this.snoozing ||
 			this.dragging ||
-			this.archiving !== null
+			this.archiving !== null ||
+			this.settings
 		)
 			return null;
 		const spot = (i: number, source: "pointer" | "cursor"): PeekSpot | null => {
@@ -1950,7 +1976,7 @@ class Roster implements Component, Focusable {
 			group,
 			pin: from,
 			confirm: null,
-			harness: config.harness,
+			preset: 0,
 		};
 		// The last list shows at once; the worker's fresh one replaces it when its scan lands.
 		post({ type: "dirs" });
@@ -2028,8 +2054,9 @@ class Roster implements Component, Focusable {
 
 	start(path: string): void {
 		const choosing = this.choosing as Choosing;
+		const target = pickerTarget(choosing);
 		this.closePicker();
-		newSession(path, path === choosing.from ? choosing.group : null, choosing.harness);
+		newSession(path, path === choosing.from ? choosing.group : null, typeof target === "string" ? null : target);
 	}
 
 	/** M-a d or the row's ✕: asks before taking a directory, or a repository and all its worktrees, off the list. */
@@ -2087,7 +2114,8 @@ class Roster implements Component, Focusable {
 		} else if (choosing.mode === "pick" && (matchesKey(data, "tab") || matchesKey(data, "shift+tab"))) {
 			// Tab picks what runs the new session; in add mode it completes the path instead.
 			const step = matchesKey(data, "shift+tab") ? -1 : 1;
-			choosing.harness = HARNESSES[(HARNESSES.indexOf(choosing.harness) + step + HARNESSES.length) % HARNESSES.length] as Harness;
+			const count = pickerPresets().length;
+			if (count > 0) choosing.preset = (((choosing.preset + step) % count) + count) % count;
 		} else if (choosing.mode === "add" && matchesKey(data, "tab")) {
 			const match = this.addRows()[Math.max(0, choosing.choice)];
 			if (match) {
@@ -2140,9 +2168,13 @@ class Roster implements Component, Focusable {
 			? `${prompt}${this.path.render(Math.max(10, width - 2 - visibleWidth(prompt)))[0] ?? ""}`
 			: (this.search.render(Math.max(10, width - 2))[0] ?? "");
 		// The picker's detail is its path and two blank lines.
-		const bodyHeight = Math.max(1, height - 9);
-		const which = HARNESSES.map((h) => (h === choosing.harness ? cyan(h) : gray(h))).join(gray(" · "));
-		const lines = [` ${bold(adding ? "add a directory" : "new session in")}  ${which} ${gray("⇥")}`, ` ${input}`, gray("─".repeat(width))];
+		const bodyHeight = Math.max(1, height - 10);
+		const lines = [
+			` ${bold(adding ? "add a directory" : "new session in")}`,
+			this.presetRow(1, width),
+			` ${input}`,
+			gray("─".repeat(width)),
+		];
 		let body: [string, (() => void) | null][];
 		let detail: string;
 		if (!adding) {
@@ -2182,7 +2214,7 @@ class Roster implements Component, Focusable {
 		shown.forEach(([, act], i) => {
 			// The remove prompt is modal: only its own answers are buttons.
 			if (!act || choosing.confirm) return;
-			const y = 3 + i;
+			const y = PICKER_TOP + i;
 			// The cursor row's ✕, at its right edge, removes it.
 			if (!adding && top + i === choosing.choice && this.pickRows()[choosing.choice]?.kind === "target")
 				this.targets.push({ y, from: width - 3, to: width, act: () => this.askRemove() });
@@ -2221,6 +2253,11 @@ class Roster implements Component, Focusable {
 	render(width: number): string[] {
 		const t0 = performance.now();
 		const height = tui.terminal.rows;
+		if (this.settings) {
+			syncPeek(wantPeek(null));
+			this.inline = null;
+			return this.settings.render(width, height);
+		}
 		if (this.choosing) {
 			syncPeek(wantPeek(null));
 			this.inline = null;
@@ -2238,7 +2275,12 @@ class Roster implements Component, Focusable {
 		const detail = this.detail(width, now, this.listTop + bodyHeight + 1);
 		const lines = tag === null ? [] : [tag];
 		lines.push(...this.list(rows, index, width, bodyHeight, now));
-		lines.push(gray("─".repeat(width)), ...detail, this.messageLine(now), this.hints(this.listTop + bodyHeight + 1 + detailLines + 1));
+		lines.push(
+			gray("─".repeat(width)),
+			...detail,
+			this.messageLine(now, this.listTop + bodyHeight + 1 + detailLines),
+			this.hints(this.listTop + bodyHeight + 1 + detailLines + 1),
+		);
 		// A wide Deck's Peek is a popup over the Stage; a narrow Deck has no Stage beside the roster, so the roster draws it.
 		const spot = wantPeek(this.peekSpot(rows, index));
 		syncPeek(narrow ? null : spot);
@@ -2369,9 +2411,21 @@ class Roster implements Component, Focusable {
 		return [` ${status(e)}${launchElapsed(e, now)}`, ` ${gray(where)}`, tabs].map((line) => truncateToWidth(line, width, "…"));
 	}
 
-	messageLine(now: number): string {
+	/** A toast, else the config error, which stays until the file is fixed and opens it on a click; y makes it clickable. */
+	messageLine(now: number, y: number | null = null, withConfigError = true): string {
 		toasts = toasts.filter((t) => t.until > now);
 		const t = toasts.at(-1);
+		if (!t && configError && withConfigError) {
+			const error = configError;
+			// Like a legend entry: the key that acts on it, then what's wrong.
+			const text = `${bold("O")} ${red(`config.toml${error.line === null ? "" : `:${error.line}`}: ${error.problem}`)}`;
+			return y === null
+				? ` ${text}`
+				: this.clickable(y, [
+						[" ", null],
+						[text, () => openConfig(error.line)],
+					]);
+		}
 		if (!t) return snapshot && newer(snapshot.swbVersion, VERSION) ? ` ${red(`✗ swb ${snapshot.swbVersion} is in; reopen the Deck`)}` : "";
 		return ` ${t.level === "error" ? red(`✗ ${t.text}`) : green(t.text)}`;
 	}
@@ -2431,6 +2485,10 @@ class Roster implements Component, Focusable {
 				help,
 			];
 		else hints = [enter(row.entry.live ? "focus" : "wake"), ["a", "archive", () => this.toggleArchived()], newAtCursor, help];
+		// Settings joins the legend where it fits.
+		const settings: Hint = [",", "settings", () => openSettings()];
+		const width = (list: Hint[]) => list.reduce((n, [name, label]) => n + 1 + visibleWidth(key(name, label)), 0);
+		if (focus === "roster" && width([...hints, settings]) <= rosterWidth()) hints.push(settings);
 		return this.clickable(
 			y,
 			hints.flatMap(([name, label, act]): [string, (() => void) | null][] => [
@@ -2438,6 +2496,60 @@ class Roster implements Component, Focusable {
 				[key(name, label), act],
 			]),
 		);
+	}
+
+	/** n's presets, in a row of their own: the current one bright, the rest dim, scrolled to keep it in view. Each is a button. */
+	presetRow(y: number, width: number): string {
+		const choosing = this.choosing as Choosing;
+		const presets = pickerPresets();
+		if (presets.length === 0) {
+			const target = pickerTarget(choosing);
+			const text =
+				target === null
+					? gray("finding harnesses…")
+					: typeof target === "string"
+						? red(target)
+						: `${cyan(target.harness)} ${gray("· its own defaults")}`;
+			return truncateToWidth(` ${text}`, width, "…");
+		}
+		const labels = presetLabels(presets.map((c) => c.preset));
+		const at = Math.min(choosing.preset, labels.length - 1);
+		const sep = gray(" · ");
+		// Room left by the ‹ before and the › ⇥ after.
+		const room = width - 6;
+		// The widest run of labels around the current one that fits.
+		let from = at;
+		let to = at + 1;
+		const runWidth = () => labels.slice(from, to).reduce((n, l) => n + visibleWidth(l), 0) + (to - from - 1) * 3;
+		for (let grew = true; grew; ) {
+			grew = false;
+			if (to < labels.length) {
+				to++;
+				if (runWidth() > room) to--;
+				else grew = true;
+			}
+			if (from > 0) {
+				from--;
+				if (runWidth() > room) from++;
+				else grew = true;
+			}
+		}
+		const step = (by: number) => () => {
+			choosing.preset = (((at + by) % labels.length) + labels.length) % labels.length;
+		};
+		const parts: [string, (() => void) | null][] = [from > 0 ? [gray("‹"), step(-1)] : [" ", null]];
+		labels.slice(from, to).forEach((label, i) => {
+			const index = from + i;
+			if (i > 0) parts.push([sep, null]);
+			parts.push([
+				index === at ? bold(cyan(label)) : gray(label),
+				() => {
+					choosing.preset = index;
+				},
+			]);
+		});
+		parts.push(to < labels.length ? [gray(" ›"), step(1)] : ["  ", null], [gray(" ⇥"), step(1)]);
+		return truncateToWidth(this.clickable(y, parts), width, "…");
 	}
 
 	invalidate(): void {}
@@ -2459,9 +2571,28 @@ type Choosing = {
 	/** The directory it opened on, offered whether or not it's listed, until I remove it. */
 	pin: string | null;
 	confirm: { name: string; worktrees: number; path: string; covers: string[] } | null;
-	/** What the new session runs in. */
-	harness: Harness;
+	/** What the new session runs in: an index into pickerPresets. */
+	preset: number;
 };
+
+const PICKER_TOP = 4;
+
+/** What n's Tab steps through: every preset that can start, from the default. */
+function pickerPresets(): Choice[] {
+	return fromDefault(shortlist(config, catalog) ?? []).filter((c) => c.reason === null);
+}
+
+/**
+ * What a session from the picker starts on: its preset, or with none that can, the default's harness on its own
+ * defaults. Null until the harnesses are found, when the worker decides; a string says why nothing can start.
+ */
+function pickerTarget(choosing: Choosing): LaunchTarget | string | null {
+	const presets = pickerPresets();
+	const chosen = presets[Math.min(choosing.preset, presets.length - 1)];
+	if (chosen) return chosen.launch;
+	if (catalog === null && config.targets === null) return null;
+	return defaultLaunch(config, catalog, shortlist(config, catalog) ?? []);
+}
 
 /**
  * How well a name matches the query, lower is better, and which characters matched: the whole name's start, then a
@@ -2526,7 +2657,7 @@ function overlayConfirm(
 	lines.forEach((line, i) => {
 		out[top + i] = line;
 	});
-	const y = 3 + top + 5;
+	const y = PICKER_TOP + top + 5;
 	targets.unshift(
 		{ y, from: left + 2, to: left + 10, act: () => answer(true) },
 		{ y, from: left + 12, to: left + 18, act: () => answer(false) },
@@ -3076,6 +3207,13 @@ async function prefixKey(k: string, id: string | undefined): Promise<void> {
 	}
 	const row = id === undefined ? roster.selected() : roster.rows().find((r) => r.key === id);
 	if (id !== undefined && !row) throw new Error(`no session ${id} in the roster`);
+	if (k === ",") {
+		await focusRoster();
+		openSettings();
+		return;
+	}
+	// Session commands wait while Settings is open.
+	if (roster.settings) return;
 	if (k === "/") {
 		await focusRoster();
 		roster.filtering = true;
@@ -3154,7 +3292,11 @@ function layout(): Promise<void> {
 			if (!narrow && zoomFlag === "1") await tmuxAsync(UI, "resize-pane", "-Z", "-t", rosterPane);
 		}
 		// tmux scales every pane with the window; the roster keeps its configured or dragged width instead.
-		if (!narrow && !rosterHidden && zoomFlag !== "1") await tmuxAsync(UI, "resize-pane", "-t", rosterPane, "-x", String(rosterWidth()));
+		const zoomed = (await tmuxAsync(UI, "display", "-p", "-t", stagePane, "#{window_zoomed_flag}")) === "1";
+		if (!narrow && !rosterHidden && !zoomed) {
+			if (roster.settings) await tmuxAsync(UI, "resize-pane", "-Z", "-t", rosterPane);
+			else await tmuxAsync(UI, "resize-pane", "-t", rosterPane, "-x", String(rosterWidth()));
+		}
 		syncStatus();
 		if (narrow !== wasNarrow) writeStageCard(desired());
 	});
@@ -3194,6 +3336,8 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 			await focusReads;
 			const was = focus;
 			focus = focusedPane === rosterPane ? "roster" : "stage";
+			// Moving to another pane, by ctrl-hjkl or the prefix, leaves Settings.
+			if (focus === "stage" && roster.settings) closeSettings();
 			if (focus === "roster") for (const launch of launches) launch.keyboard = false;
 			// A drag released over another pane never reports its release here.
 			else roster.dragging = null;
@@ -3223,16 +3367,16 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 			break;
 		case "view-swap":
 		case "view-split":
-			await changeView(cmd === "view-swap");
+			if (!roster.settings) await changeView(cmd === "view-swap");
 			break;
 		case "roster":
-			await syncRoster(argv[0] === "focus");
+			if (!roster.settings || argv[0] === "focus") await syncRoster(argv[0] === "focus");
 			break;
 		case "stage":
 			await focusStage();
 			break;
 		case "shell":
-			await toggleShell();
+			if (!roster.settings) await toggleShell();
 			break;
 		case "key":
 			await prefixKey(argv[0] ?? "", argv[1]);
@@ -3331,6 +3475,132 @@ async function showView(e: Entry, next: View): Promise<void> {
 	await tmuxAsync(UI, "select-pane", ...(narrow ? ["-Z"] : []), "-t", pane);
 }
 
+// ── settings ────────────────────────────────────────────────────────────
+
+/** Takes in a config read whole and valid: everything that reads config sees it at once, and the worker gets its copy. */
+function applyLoaded(next: Loaded): void {
+	const before = config;
+	loaded = next;
+	config = next.config;
+	configError = null;
+	post({ type: "config", config });
+	if (JSON.stringify(before.rosterWidth) !== JSON.stringify(config.rosterWidth)) {
+		// A new width is meant to show, over one dragged before it.
+		draggedCols = null;
+		void layout();
+	}
+	if (JSON.stringify(before.dirs) !== JSON.stringify(config.dirs)) post({ type: "dirs" });
+	if (before.wakeOnHighlight !== config.wakeOnHighlight) scheduleHighlightWake();
+	tui.requestRender();
+}
+
+/** config.toml again, after a change on disk: a valid one applies, an invalid one is reported and leaves the Deck as it was. */
+function reloadConfig(): void {
+	try {
+		const next = readConfig();
+		if (next.text === loaded.text && configError === null) return;
+		applyLoaded(next);
+	} catch (error) {
+		if (!(error instanceof ConfigError)) throw error;
+		configError = error;
+		tui.requestRender();
+	}
+}
+
+// The directory, not the file: an editor that saves by renaming a new file into place replaces the file watched.
+mkdirSync(configDir(), { recursive: true });
+let reloadTimer: Timer | null = null;
+watch(configDir(), (_event, file) => {
+	if (file !== null && file !== "config.toml") return;
+	if (reloadTimer) clearTimeout(reloadTimer);
+	reloadTimer = setTimeout(() => {
+		reloadTimer = null;
+		reloadConfig();
+	}, 100);
+});
+
+/** config.toml in the Editor command, in a popup over the Deck, at a line. */
+function openConfig(line: number | null): void {
+	void deckClient().then(async (client) => {
+		if (!client) return;
+		const command = `exec ${config.editor} ${line === null ? "" : `+${line} `}${quote(configPath())}`;
+		const shell = loginShell();
+		await tmuxAsync(
+			UI,
+			"display-popup",
+			"-c",
+			client,
+			"-E",
+			"-w",
+			"90%",
+			"-h",
+			"90%",
+			"-T",
+			" config.toml ",
+			`${shell} -lic ${quote(command)}`,
+		).catch((error: Error) => toast(`editor: ${error.message}`, "error"));
+	});
+}
+
+const settingsHost = {
+	loaded: () => loaded,
+	error: () => configError,
+	save: (updated: Record<string, unknown>, reorder = false): string | null => {
+		try {
+			applyLoaded(writeConfig(loaded, updated, reorder));
+			return null;
+		} catch (error) {
+			if (error instanceof SwbError) return error.message;
+			throw error;
+		}
+	},
+	catalog: () => catalog,
+	refresh: (models: boolean) => post({ type: "refresh", models }),
+	open: openConfig,
+	close: () => closeSettings(),
+	help: () => void showHelp(),
+	paint: { cursor: cursorLine, hover: hoverLine },
+	message: (now: number, withConfigError: boolean) => roster.messageLine(now, null, withConfigError),
+};
+
+/** Settings fills the Deck: the roster zooms its own pane over the Stage, which keeps running underneath. */
+function openSettings(): void {
+	if (roster.settings) return;
+	roster.choosing = null;
+	roster.naming = null;
+	roster.filtering = false;
+	roster.dragging = null;
+	closePeek();
+	if (stage.highlightTimer) clearTimeout(stage.highlightTimer);
+	stage.highlightTimer = null;
+	roster.settings = new SettingsPane(settingsHost);
+	post({ type: "refresh", models: false });
+	zoomRoster(true);
+	tui.requestRender();
+}
+
+function closeSettings(): void {
+	if (!roster.settings) return;
+	roster.settings = null;
+	zoomRoster(false);
+	tui.requestRender();
+}
+
+/** A narrow Deck's roster is zoomed already, and stays so. */
+function zoomRoster(on: boolean): void {
+	stageOps = stageOps.then(() =>
+		sizingRoster(async () => {
+			if (narrow || rosterHidden) return;
+			const zoomed = (await tmuxAsync(UI, "display", "-p", "-t", rosterPane, "#{window_zoomed_flag}")) === "1";
+			if (on !== zoomed) await tmuxAsync(UI, "resize-pane", "-Z", "-t", rosterPane);
+			// Back beside the Stage, at whatever width Settings left it.
+			if (!on) await tmuxAsync(UI, "resize-pane", "-t", rosterPane, "-x", String(rosterWidth()));
+			// Bun's stdout keeps the size from before a zoom until a SIGWINCH reads it again; tmux's own one can land first.
+			process.kill(process.pid, "SIGWINCH");
+		}).catch((error: Error) => toast(`settings: ${error.message}`, "error")),
+	);
+}
+
 // ── view state ──────────────────────────────────────────────────────────
 
 function pickerState(): PickerState | null {
@@ -3353,7 +3623,17 @@ function pickerState(): PickerState | null {
 		rows,
 		choice: choosing.choice,
 		confirm: choosing.confirm?.name ?? null,
-		harness: choosing.harness,
+		...(() => {
+			const presets = pickerPresets();
+			const labels = presetLabels(presets.map((c) => c.preset));
+			const target = pickerTarget(choosing);
+			const at = Math.min(choosing.preset, labels.length - 1);
+			return {
+				preset: labels[at] ?? null,
+				harness: target !== null && typeof target !== "string" ? target.harness : null,
+				presets: labels,
+			};
+		})(),
 	};
 }
 
@@ -3371,17 +3651,19 @@ function viewState(): DeckState {
 		terminalFocused,
 		cursor: cursorRow?.kind === "session" ? cursorRow.entry.id : null,
 		cursorRow: index,
-		mode: roster.choosing
-			? "picker"
-			: roster.archiving !== null
-				? "archive"
-				: roster.filtering
-					? "filter"
-					: roster.naming
-						? "name"
-						: roster.snoozing
-							? "snooze"
-							: "roster",
+		mode: roster.settings
+			? "settings"
+			: roster.choosing
+				? "picker"
+				: roster.archiving !== null
+					? "archive"
+					: roster.filtering
+						? "filter"
+						: roster.naming
+							? "name"
+							: roster.snoozing
+								? "snooze"
+								: "roster",
 		picker: pickerState(),
 		archive: (() => {
 			const e = roster.archiving === null ? undefined : entries.get(roster.archiving);
@@ -3389,6 +3671,8 @@ function viewState(): DeckState {
 			const family = openDescendants(e);
 			return { id: e.id, counts: Bun.stripANSI(familyTally(family)), all: family.length + 1 };
 		})(),
+		settings: roster.settings?.state() ?? null,
+		configError: configError?.message ?? null,
 		drop: drop ? { project: projectName(drop.header.project), group: drop.header.group } : null,
 		filter: roster.query(),
 		hover: roster.hover,
@@ -3542,7 +3826,7 @@ Bun.serve({
 
 post({ type: "init", deck, paths, config, here });
 post({ type: "dirs" });
-if (args.new) newSession(args.new, null, args.harness ? asHarness(args.harness) : config.harness);
+if (args.new) newSession(args.new, null, null, args.harness ? asHarness(args.harness) : null);
 void layout();
 
 /** A Stage's nested client is up once it attaches to the sessions server, which the control client hears. */

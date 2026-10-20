@@ -7,6 +7,7 @@ import { CodexClient } from "./codex/client.ts";
 import { codexSocket } from "./codex/host.ts";
 import { displayName, type SessionState, sessionState, states } from "./derive.ts";
 import { SwbError } from "./errors.ts";
+import { launchFlags, presetLaunch } from "./harnesses.ts";
 import { snooze } from "./schedules.ts";
 import { archive, ensureSessionsServer, launch, unarchive, wake } from "./sessions.ts";
 
@@ -102,7 +103,10 @@ async function deliveredWithin(db: Db, id: string, timeoutMs: number): Promise<b
 
 export type Launch = {
 	from: string | null;
-	harness: Harness;
+	/** The preset to start on, by its fields; none for the default. */
+	harness: Harness | null;
+	effort: string | null;
+	agent: string | null;
 	goal: string;
 	cwd: string | null;
 	title: string | null;
@@ -122,8 +126,10 @@ export async function launchSession(db: Db, l: Launch): Promise<ToolResult> {
 	// An Operator that names no directory would start another Operator in its own folder; starting one is the user's call.
 	if (l.from && dir === operatorDir() && sessionState(db, l.from).operator)
 		throw new SwbError("an Operator can't start another Operator; name a project's directory as cwd");
+	const target = await presetLaunch({ harness: l.harness, model: l.model, effort: l.effort, agent: l.agent });
+	const harness = target.harness;
 	// pi and Claude Code take an id up front; Codex mints its own, which its host reports once it binds.
-	const sessionId = l.harness === "codex" ? undefined : crypto.randomUUID();
+	const sessionId = harness === "codex" ? undefined : crypto.randomUUID();
 	const prompt = l.from
 		? frame(db, {
 				id: "",
@@ -139,20 +145,26 @@ export async function launchSession(db: Db, l: Launch): Promise<ToolResult> {
 		: l.goal;
 	ensureSessionsServer();
 	const host = launch({
-		harness: l.harness,
+		...launchFlags(target),
 		cwd: dir,
 		resume: null,
 		...(sessionId ? { sessionId } : {}),
 		prompt,
-		...(l.title && l.harness === "claude" ? { title: l.title } : {}),
-		...(l.model ? { model: l.model } : {}),
+		...(l.title && harness === "claude" ? { title: l.title } : {}),
 		...(l.from ? { parentId: l.from } : {}),
 	});
 	const id = await registered(db, host, 60_000);
-	if (l.title && l.harness === "codex") await nameThread(host, id, l.title);
-	else if (l.title && l.harness === "pi") await titled(db, id, l.title);
-	const text = `Launched a ${harnessName(l.harness)} session (session: ${id}) in ${dir}.${l.requestResponse ? " It will report back as a message; end your turn rather than waiting." : ""}`;
-	return { text, details: { id, harness: l.harness, host, cwd: dir } };
+	if (l.title && harness === "codex") await nameThread(host, id, l.title);
+	else if (l.title && harness === "pi") await titled(db, id, l.title);
+	const what = [
+		target.provider && target.model ? `${target.provider}/${target.model}` : target.model,
+		target.effort && `${target.effort} effort`,
+		target.agent && `agent ${target.agent}`,
+	]
+		.filter(Boolean)
+		.join(", ");
+	const text = `Launched a ${harnessName(harness)} session${what ? ` (${what})` : ""} (session: ${id}) in ${dir}.${l.requestResponse ? " It will report back as a message; end your turn rather than waiting." : ""}`;
+	return { text, details: { id, harness, host, cwd: dir } };
 }
 
 async function registered(db: Db, host: string, timeoutMs: number): Promise<string> {

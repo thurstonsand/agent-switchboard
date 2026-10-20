@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState } from "../../../packages/cli/src/deck/protocol.ts";
 import { config, launched, seed } from "../harness/deck.ts";
@@ -116,6 +116,33 @@ function typeInto(s: Scenario, id: string, text: string): void {
 }
 
 export const directors: Record<string, Director> = {
+	settings: {
+		harnesses: ["claude", "codex"],
+		setup: async (s) => {
+			files(s);
+			config(s, '# mine: Settings keeps this comment\ninactive_after = "96h" # long weekends\n');
+			await seed(s, { turns: ["plan the v3 migration"], title: "Plan the v3 migration" });
+		},
+		run: async (s) => {
+			const file = join(s.env.XDG_CONFIG_HOME as string, "agent-switchboard", "config.toml");
+			await waitDeck(s, "Settings", (x) => x.mode === "settings");
+			await waitDeck(s, "the shortlist written", (x) => x.settings?.items.some((i) => i.kind === "preset" && i.set) ?? false);
+			await waitDeck(s, "the add search", (x) => x.settings != null && x.settings.adding !== null);
+			await waitDeck(s, "the picker", (x) => x.picker !== null);
+			await waitDeck(s, "the picker closed", (x) => x.picker === null && x.mode === "roster");
+			const good = readFileSync(file, "utf8");
+			expect(good).toContain('inactive_after = "3d" # long weekends');
+			expect(good).toContain("[[targets]]");
+			// A hand edit gone wrong while the Deck is open.
+			writeFileSync(file, good.replace("[[targets]]", '[[targets]]\nmodle = "opus"'));
+			await waitDeck(s, "the error shown", (x) => x.configError !== null);
+			await waitDeck(s, "Settings on the error", (x) => x.mode === "settings");
+			await waitDeck(s, "back to the roster", (x) => x.mode === "roster");
+			writeFileSync(file, good);
+			await waitDeck(s, "the error cleared", (x) => x.configError === null);
+		},
+	},
+
 	"harness-picker": {
 		harnesses: ["claude", "codex"],
 		setup: async (s) => {

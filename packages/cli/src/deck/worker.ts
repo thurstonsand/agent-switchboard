@@ -5,12 +5,13 @@ import { span } from "@swb/shared/trace";
 import type { Config } from "../config.ts";
 import { deriveSessions, type RuntimeRecord, runtimeLive, runtimeRecords, type SessionRow, sessionRows, type World } from "../derive.ts";
 import { addDir, removeDir, targets } from "../dirs.ts";
+import { type Catalog, discover, launchFlags, readCatalog, resolveLaunch, shortlist, writeGuide } from "../harnesses.ts";
 import { type ScheduleView, schedulesBySession, snooze } from "../schedules.ts";
 import { archive, ensureEditor, ensureSessionsServer, ensureShell, launch, stop, unarchive, wake } from "../sessions.ts";
 import { loadLayout, markVisited, openStore, saveLayout, setGroup, setView } from "../store.ts";
 import { listSessions, SESSIONS, tmux, tmuxTry } from "../tmux.ts";
-import { ensurePlaceholder, placeholderName } from "./deck.ts";
-import type { Diff, Entry, FromWorker, Snapshot, TerminalProfile, ToWorker, Transcript, Turn } from "./protocol.ts";
+import { ensurePlaceholder, ensureUiServer, placeholderName } from "./deck.ts";
+import type { Diff, Entry, FromWorker, NewSession, Snapshot, TerminalProfile, ToWorker, Transcript, Turn } from "./protocol.ts";
 import { locateTranscript, readTranscript } from "./transcript.ts";
 
 // The roster's worker owns the db and everything slow: a held writer lock or a 50 MB transcript stalls this
@@ -41,6 +42,68 @@ const ORPHAN_DEAD_S = 10;
 const REAP_GRACE_MS = 10_000;
 /** Reaped hosts this Deck has sent SIGKILL, until their tmux session is gone. */
 const killed = new Set<string>();
+
+/** Model lists older than this are fetched again when the Deck starts. */
+const MODELS_STALE_MS = 24 * 3_600_000;
+
+/** What the harnesses can start, as last found; the cache from before this Deck until this Deck's own lands. */
+let catalog: Catalog | null = readCatalog();
+let discovering = false;
+/** Settles once this Deck has asked the harnesses: a launch that names no preset waits for it. */
+const { promise: found, resolve: foundNow } = Promise.withResolvers<void>();
+
+/** Tells the roster, and every line's session_launch, what the shortlist now holds. */
+function announce(): void {
+	if (!catalog) return;
+	post({ type: "catalog", catalog });
+	writeGuide(shortlist(config, catalog));
+}
+
+function refresh(models: boolean): void {
+	if (discovering) return;
+	discovering = true;
+	const stale = catalog === null || Date.now() - catalog.at > MODELS_STALE_MS;
+	discover(catalog, models || stale, (provisional) => {
+		catalog = provisional;
+		foundNow();
+		announce();
+	})
+		.then((done) => {
+			catalog = done;
+			announce();
+		})
+		.catch((error: Error) => post({ type: "error", text: `harnesses: ${error.message}` }))
+		.finally(() => {
+			discovering = false;
+			foundNow();
+		});
+}
+
+/** Starts a new session: on its target, or, with none, once the harnesses are found, on the preset a launch defaults to. */
+async function startNew(message: NewSession): Promise<void> {
+	try {
+		let target = message.target;
+		if (target === null) {
+			await found;
+			target = resolveLaunch(config, catalog as Catalog, shortlist(config, catalog) ?? [], {
+				harness: message.harness,
+				model: null,
+				effort: null,
+				agent: null,
+			});
+		}
+		ensureSessionsServer();
+		const host = launch({ ...launchFlags(target), cwd: message.cwd, resume: null });
+		launched.add(host);
+		if (message.group !== null) hostGroups.set(host, message.group);
+		post({ type: "created", host });
+	} catch (error) {
+		post({ type: "launchFailed", id: null, text: (error as Error).message });
+	}
+	lastJson = "";
+	dataVersion = -1;
+	tick();
+}
 
 /** Views chosen before a session's first prompt, written once it has a row to mark. */
 const pendingViews = new Map<string, View>();
@@ -345,7 +408,20 @@ function handle(message: ToWorker): void {
 			layoutRoot = projectRoot(message.here);
 			post({ type: "restore", layout: loadLayout(db, layoutRoot) });
 			setInterval(() => span("worker.tick", tick), TICK_MS);
+			if (catalog) post({ type: "catalog", catalog });
+			refresh(false);
 			break;
+		case "config": {
+			const prefixChanged = message.config.prefix !== config.prefix;
+			config = message.config;
+			// The prefix lives on the UI server every Deck shares; reloading its conf moves them all.
+			if (prefixChanged) ensureUiServer(config);
+			announce();
+			break;
+		}
+		case "refresh":
+			refresh(message.models);
+			return;
 		case "layout":
 			saveLayout(db, layoutRoot, message.layout);
 			return;
@@ -359,16 +435,8 @@ function handle(message: ToWorker): void {
 			}
 			break;
 		case "new":
-			try {
-				ensureSessionsServer();
-				const host = launch({ harness: message.harness, cwd: message.cwd, resume: null });
-				launched.add(host);
-				if (message.group !== null) hostGroups.set(host, message.group);
-				post({ type: "created", host });
-			} catch (error) {
-				post({ type: "launchFailed", id: null, text: (error as Error).message });
-			}
-			break;
+			void startNew(message);
+			return;
 		case "visit":
 			// A provisional session has no row to mark until its first prompt.
 			readDb();

@@ -1,7 +1,7 @@
 import { recordTx } from "@swb/shared/record";
 import { launchSession } from "../coordinate.ts";
 import { states } from "../derive.ts";
-import { type Fired, fire, nextDue } from "../schedules.ts";
+import { type Fired, fire, newSessionName, nextDue } from "../schedules.ts";
 import { wake } from "../sessions.ts";
 import { openStore } from "../store.ts";
 
@@ -60,7 +60,7 @@ export async function clock(): Promise<void> {
 				crypto.randomUUID(),
 				l.source,
 				l.source,
-				`swb couldn't launch the new ${l.launch.harness} session "${l.launch.title}" for this schedule: ${error.message}`,
+				`swb couldn't launch ${newSessionName(l.launch)} for this schedule: ${error.message}`,
 				Date.now(),
 				l.scheduleId,
 				l.scheduledFor,
@@ -85,11 +85,13 @@ export async function clock(): Promise<void> {
 				launchSession(db, {
 					from: l.source,
 					harness: l.launch.harness,
+					model: l.launch.model,
+					effort: l.launch.effort,
+					agent: l.launch.agent,
 					goal: l.body,
 					cwd: l.launch.cwd,
 					title: l.launch.title,
 					requestResponse: l.requestResponse,
-					model: null,
 					scheduled: { id: l.scheduleId, at: l.scheduledFor },
 				}).then(
 					(result) => log(result.text),

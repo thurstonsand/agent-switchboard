@@ -47,6 +47,26 @@ export function operatorDir(): string {
 }
 let physicalOperatorDir: string | undefined;
 
+/** The shortlist as agents read it, which swb writes and every line adds to session_launch's description. */
+export function shortlistPath(): string {
+	return join(stateDir(), "shortlist.txt");
+}
+
+/** The shortlist as swb last wrote it, for session_launch's description; empty before swb has found one. */
+export function launchGuide(): string {
+	try {
+		return readFileSync(shortlistPath(), "utf8");
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
+		throw error;
+	}
+}
+
+/** A tool's description as a line hands it out: session_launch's carries the shortlist. */
+export function describeTool(name: string, description: string, guide: string): string {
+	return name === "session_launch" && guide !== "" ? `${description}\n\n${guide}` : description;
+}
+
 export function dbPath(): string {
 	return join(stateDir(), "swb.db");
 }

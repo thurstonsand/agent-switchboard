@@ -1,15 +1,13 @@
-# n starts a session in any harness: Tab in its picker cycles pi, Claude Code, and Codex.
+# n starts a session on a preset: it opens on the default, Claude Code's opus, and Tab steps to Codex's.
 Source common.tape
 
-Type "# n picks a harness: Tab cycles pi, Claude Code, and Codex" Sleep 1s Enter
+Type "# n opens on the default preset; Tab steps through the shortlist" Sleep 1s Enter
 Type "swb" Sleep 400ms Enter
 Wait+Screen /Plan the v3 migration/
 Sleep 1.5s
 Type "n"
-Wait+Screen /new session in/
-Sleep 1.2s
-Tab
-Sleep 1.5s
+Wait+Screen /gpt-6/
+Sleep 2s
 Enter
 Wait+Screen /Claude Code v/
 Sleep 1s
@@ -20,10 +18,8 @@ Alt+a
 Type "h"
 Sleep 800ms
 Type "n"
-Wait+Screen /new session in/
+Wait+Screen /gpt-6/
 Sleep 1s
-Tab
-Sleep 700ms
 Tab
 Sleep 1.5s
 Enter

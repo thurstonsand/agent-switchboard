@@ -48,6 +48,8 @@ export async function launch(args: string[]): Promise<void> {
 		args,
 		options: {
 			harness: { type: "string" },
+			effort: { type: "string" },
+			agent: { type: "string" },
 			cwd: { type: "string" },
 			from: { type: "string" },
 			title: { type: "string" },
@@ -55,11 +57,12 @@ export async function launch(args: string[]): Promise<void> {
 			"request-response": { type: "boolean", default: false },
 		},
 	});
-	if (!values.harness) throw new UsageError("launch: --harness is required");
 	print(
 		await launchSession(openStore(), {
 			from: values.from ?? null,
-			harness: harness(values.harness),
+			harness: values.harness ? harness(values.harness) : null,
+			effort: values.effort ?? null,
+			agent: values.agent ?? null,
 			goal: await Bun.stdin.text(),
 			cwd: values.cwd ?? null,
 			title: values.title ?? null,
@@ -80,6 +83,9 @@ export async function schedule(args: string[]): Promise<void> {
 			cron: { type: "string" },
 			label: { type: "string" },
 			"launch-harness": { type: "string" },
+			"launch-model": { type: "string" },
+			"launch-effort": { type: "string" },
+			"launch-agent": { type: "string" },
 			"launch-cwd": { type: "string" },
 			"launch-title": { type: "string" },
 			"request-response": { type: "boolean", default: false },
@@ -88,14 +94,18 @@ export async function schedule(args: string[]): Promise<void> {
 		},
 	});
 	if (!values.from || values.label === undefined) throw new UsageError("schedule: --from and --label are required");
-	const launching = values["launch-harness"] !== undefined;
-	if (launching && !values["launch-title"]) throw new UsageError("schedule: --launch-harness needs --launch-title");
-	const result = scheduleMessage(openStore(), {
+	const launching = values["launch-title"] !== undefined;
+	const given = ["harness", "model", "effort", "agent", "cwd"].filter((k) => values[`launch-${k}` as keyof typeof values] !== undefined);
+	if (!launching && given.length > 0) throw new UsageError(`schedule: --launch-${given[0]} needs --launch-title`);
+	const result = await scheduleMessage(openStore(), {
 		from: values.from,
 		to: values.to ?? null,
 		launch: launching
 			? {
-					harness: harness(values["launch-harness"] as string),
+					harness: values["launch-harness"] ? harness(values["launch-harness"]) : null,
+					model: values["launch-model"] ?? null,
+					effort: values["launch-effort"] ?? null,
+					agent: values["launch-agent"] ?? null,
 					cwd: values["launch-cwd"] ?? null,
 					title: values["launch-title"] as string,
 				}

@@ -24,7 +24,8 @@ See @CONTEXT.md for project vocabulary.
 - `swb`: opens a Deck where the last one in this Project left off. The roster lists Operators, then open sessions grouped by project, then Inactive, Snoozed, then Archived. Beside it, the Stage shows the selected session as pi, its directory's editor, or a split of both, with an optional shell beneath pi
 - `swb -c`: opens a Deck in pi on this Project's most recent session, or a new one
 - Operators: sessions in swb's Operator folder that coordinate the rest, reading only that folder's AGENTS.md
-- `swb new`, `open`, `adopt`, `archive`, `unarchive`, `snooze`, `quit`, `ls --json`, `dirs --json`: the scriptable surface
+- Settings: every key in config.toml, browsable and editable in the Deck, including the shortlist of presets that `n` and `session_launch` start new sessions on
+- `swb new`, `open`, `adopt`, `archive`, `unarchive`, `snooze`, `quit`, `models`, `ls --json`, `dirs --json`: the scriptable surface
 - Schedules: a session messages itself or another later, once or on a cron, or launches a new one, and can snooze until then. swb's clock fires them from its tmux server, which outlives every Deck
 - `swb drive` and `swb deck state`: an agent drives a Deck exactly as a human does, and captures its screen as text
 - Lines for pi, Claude Code, and Codex: lifecycle, activity, and attention written to the shared db, the same coordination tools in every harness, and delivery of messages between sessions. In pi, swb claims peer coordination from pi-sessions, which keeps its subagents

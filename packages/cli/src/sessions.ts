@@ -3,6 +3,7 @@ import { basename, join } from "node:path";
 import { bootId, type Db, dbPath, type Harness, operatorDir, projectRoot, stateDir } from "@swb/shared";
 import { isArchived, markArchived } from "@swb/shared/record";
 import { now, since } from "@swb/shared/trace";
+import type { Effort } from "./config.ts";
 import { archivedInCodex } from "./deck/transcript.ts";
 import { type RuntimeRow, runtimeLive } from "./derive.ts";
 import { SwbError } from "./errors.ts";
@@ -263,7 +264,7 @@ function clockCurrent(): boolean | null {
  * From the passwd entry: inside swb's tmux servers $SHELL is always their default-shell, /bin/sh,
  * and Bun's os.userInfo() reads $SHELL instead of the passwd entry.
  */
-function loginShell(): string {
+export function loginShell(): string {
 	const query = process.platform === "darwin" ? ["/usr/bin/id", "-P"] : ["getent", "passwd", String(process.getuid?.())];
 	const result = Bun.spawnSync(query, { stdout: "pipe", stderr: "pipe" });
 	const shell = result.stdout.toString().trim().split(":").at(-1);
@@ -286,7 +287,11 @@ export type LaunchSpec = {
 	prompt?: string;
 	/** The name a launcher gave it; Claude Code keeps it as the session's own. */
 	title?: string;
+	/** What runs it, beyond the harness's own defaults: pi's provider, a model, an effort, and a Claude Code agent. */
+	provider?: string;
 	model?: string;
+	effort?: Effort;
+	agent?: string;
 	/** The session that launched this one; an agent launch also skips pi's trust prompt. */
 	parentId?: string;
 };
@@ -294,6 +299,7 @@ export type LaunchSpec = {
 /** The harness's own command line for a launch, run by the user's login shell. */
 function harnessCommand(spec: LaunchSpec, host: string): string[] {
 	const model = spec.model ? ["--model", spec.model] : [];
+	const effort = spec.effort ? [spec.harness === "pi" ? "--thinking" : "--effort", spec.effort] : [];
 	const first = spec.prompt ?? (spec.resume?.continueTurn ? CONTINUE : undefined);
 	const prompt = first ? [first] : [];
 	switch (spec.harness) {
@@ -303,7 +309,8 @@ function harnessCommand(spec: LaunchSpec, host: string): string[] {
 			const id = spec.resume ? ["--session", spec.resume.transcript] : spec.sessionId ? ["--session-id", spec.sessionId] : [];
 			// An agent's launch has no one at the trust prompt.
 			const approve = spec.parentId || spec.sessionId ? ["--approve"] : [];
-			return ["pi", ...id, ...approve, ...model, ...prompt];
+			const provider = spec.provider ? ["--provider", spec.provider] : [];
+			return ["pi", ...id, ...approve, ...provider, ...model, ...effort, ...prompt];
 		}
 		case "claude": {
 			const id = spec.resume ? ["--resume", spec.resume.id] : spec.sessionId ? ["--session-id", spec.sessionId] : [];
@@ -311,7 +318,20 @@ function harnessCommand(spec: LaunchSpec, host: string): string[] {
 			const name = spec.title ? ["--name", spec.title] : [];
 			// /loop's self-pacing wakeup outlives CLAUDE_CODE_DISABLE_CRON. Its flag takes a list, so another option follows.
 			const scheduler = ["--disallowed-tools", "ScheduleWakeup"];
-			return ["claude", ...id, ...scheduler, "--plugin-dir", writeClaudeLine(), ...operator, ...name, ...model, ...prompt];
+			const agent = spec.agent ? ["--agent", spec.agent] : [];
+			return [
+				"claude",
+				...id,
+				...scheduler,
+				"--plugin-dir",
+				writeClaudeLine(),
+				...operator,
+				...name,
+				...agent,
+				...model,
+				...effort,
+				...prompt,
+			];
 		}
 		case "codex":
 			return [
@@ -324,6 +344,7 @@ function harnessCommand(spec: LaunchSpec, host: string): string[] {
 				...(spec.resume?.continueTurn ? ["--continue"] : []),
 				...(spec.cwd === operatorDir() ? ["--operator"] : []),
 				...model,
+				...effort,
 				...(spec.prompt ? ["--prompt", spec.prompt] : []),
 			];
 	}

@@ -161,8 +161,7 @@ async function useTool($, name, e) {
 				[
 					"launch",
 					...from,
-					"--harness",
-					e.harness,
+					...["harness", "model", "effort", "agent"].flatMap((k) => (e[k] ? [`--${k}`, e[k]] : [])),
 					"--cwd",
 					e.cwd ?? line.cwd,
 					"--title",
@@ -185,7 +184,13 @@ async function useTool($, name, e) {
 					...(e.cron !== undefined ? ["--cron", e.cron] : []),
 					...(e.session !== undefined ? ["--to", e.session] : []),
 					...(e.launch
-						? ["--launch-harness", e.launch.harness, "--launch-title", e.launch.title, "--launch-cwd", e.launch.cwd ?? line.cwd]
+						? [
+								...["harness", "model", "effort", "agent"].flatMap((k) => (e.launch[k] ? [`--launch-${k}`, e.launch[k]] : [])),
+								"--launch-title",
+								e.launch.title,
+								"--launch-cwd",
+								e.launch.cwd ?? line.cwd,
+							]
 						: []),
 					...(e.requestResponse ? ["--request-response"] : []),
 					...(e.snooze ? ["--snooze"] : []),

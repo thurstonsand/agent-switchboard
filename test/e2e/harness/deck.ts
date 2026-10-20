@@ -80,7 +80,7 @@ export async function reply(s: Scenario, text: string): Promise<void> {
 export async function seed(s: Scenario, ...conversations: { turns: string[]; title?: string }[]): Promise<string[]> {
 	const ids: string[] = [];
 	for (const { turns, title } of conversations) {
-		s.swb("drive", "start", "--", "new");
+		s.swb("drive", "start", "--", "new", "--harness", "pi");
 		const st = await waitState(s, "the new pi live on the Stage", (x) => x.staged.kind === "live", budgets.piReady);
 		// Unfocused, so watching the turns land doesn't Visit them.
 		s.swb("drive", "focus", "out");

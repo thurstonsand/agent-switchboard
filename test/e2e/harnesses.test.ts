@@ -188,9 +188,10 @@ test("an Operator in Claude Code or Codex reads the Operator AGENTS.md, not the 
 	s.swb("drive", "start", "--size", "160x40");
 	await waitState(s, "ready", (x) => x.ready);
 
+	// n opens on the default preset, Claude Code's; Tab steps to Codex's.
 	for (const [harness, tabs] of [
-		["claude", 1],
-		["codex", 2],
+		["claude", 0],
+		["codex", 1],
 	] as const) {
 		s.keys("M-a", "h");
 		await waitState(s, "the roster focused", (x) => x.focus === "roster");
@@ -455,16 +456,16 @@ test("Codex's own /archive archives in swb, and a Claude session archiving itsel
 	expect(entry(s, pi.id).cutOff).toBeNull();
 });
 
-test("the Deck's n picks a harness with Tab, puts its real TUI on the Stage, and shows its dormant conversation", async () => {
+test("the Deck's n opens on the default preset, puts its real TUI on the Stage, and shows its dormant conversation", async () => {
 	s = scenario("harnesses", "deck", { packages: [], recorder: true, harnesses: ["claude", "codex"] });
 	const [first] = (await seed(s, { turns: ["first"] })) as [string];
 	s.swb("drive", "start", "--size", "160x40");
 	await waitState(s, "ready", (x) => x.ready);
 	await cursorTo(s, first);
 	s.keys("n");
-	await waitState(s, "the picker", (x) => x.picker !== null && x.picker.harness === "pi");
-	s.keys("Tab");
-	await waitState(s, "Claude Code picked", (x) => x.picker?.harness === "claude");
+	// With no shortlist written, the automatic one starts with Claude Code's own default.
+	const opened = await waitState(s, "the picker on the default", (x) => x.picker?.harness === "claude");
+	expect(opened.picker?.presets[0]).toBe("opus");
 	s.save("picker.txt", s.screen());
 	s.keys("Enter");
 	const st = await waitState(s, "Claude on the Stage", (x) => x.staged.kind === "live" && x.focus === "stage", ready);

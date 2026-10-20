@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { Db, operatorDir } from "@swb/shared";
+import { Db, describeTool, launchGuide, operatorDir } from "@swb/shared";
 import { frame, listen, markDelivered, pendingFor, sender } from "@swb/shared/mailbox";
 import {
 	markArchived as archiveMark,
@@ -299,6 +299,7 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
+	const guide = launchGuide();
 	const tool = (
 		name: ToolName,
 		label: string,
@@ -308,8 +309,8 @@ export default function (pi: ExtensionAPI) {
 		pi.registerTool({
 			name,
 			label,
-			description: TOOLS[name].description,
-			promptSnippet: TOOLS[name].description,
+			description: describeTool(name, TOOLS[name].description, guide),
+			promptSnippet: describeTool(name, TOOLS[name].description, guide),
 			promptGuidelines: TOOLS[name].guidelines,
 			parameters: TOOLS[name].parameters,
 			renderCall(args, theme) {
@@ -370,14 +371,25 @@ export default function (pi: ExtensionAPI) {
 	tool(
 		"session_launch",
 		"Launch",
-		(args) => `${args.harness} · ${args.title}`,
-		(args: { harness: string; goal: string; cwd?: string; title: string; requestResponse: boolean }, ctx) =>
+		(args) => `${[args.harness, args.agent, args.model].filter(Boolean).join(" ") || "default"} · ${args.title}`,
+		(
+			args: {
+				harness?: string;
+				model?: string;
+				effort?: string;
+				agent?: string;
+				goal: string;
+				cwd?: string;
+				title: string;
+				requestResponse: boolean;
+			},
+			ctx,
+		) =>
 			swb(
 				proc.launch.bin,
 				[
 					"launch",
-					"--harness",
-					args.harness,
+					...(["harness", "model", "effort", "agent"] as const).flatMap((k) => (args[k] ? [`--${k}`, args[k]] : [])),
 					"--from",
 					self(ctx),
 					"--cwd",
@@ -402,7 +414,7 @@ export default function (pi: ExtensionAPI) {
 				cron?: string;
 				label: string;
 				session?: string;
-				launch?: { harness: string; cwd?: string; title: string };
+				launch?: { harness?: string; model?: string; effort?: string; agent?: string; cwd?: string; title: string };
 				requestResponse?: boolean;
 				snooze?: boolean;
 			},
@@ -423,7 +435,15 @@ export default function (pi: ExtensionAPI) {
 					...(args.cron !== undefined ? ["--cron", args.cron] : []),
 					...(args.session !== undefined ? ["--to", args.session] : []),
 					...(args.launch
-						? ["--launch-harness", args.launch.harness, "--launch-title", args.launch.title, "--launch-cwd", args.launch.cwd ?? ctx.cwd]
+						? [
+								...(["harness", "model", "effort", "agent"] as const).flatMap((k) =>
+									args.launch?.[k] ? [`--launch-${k}`, args.launch[k]] : [],
+								),
+								"--launch-title",
+								args.launch.title,
+								"--launch-cwd",
+								args.launch.cwd ?? ctx.cwd,
+							]
 						: []),
 					...(args.requestResponse ? ["--request-response"] : []),
 					...(args.snooze ? ["--snooze"] : []),

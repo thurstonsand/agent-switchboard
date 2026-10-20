@@ -1,6 +1,7 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { describeTool, launchGuide } from "@swb/shared";
 import { parsed, TOOLS, type ToolName, type ToolResult, toolsAsJson } from "@swb/shared/tools";
 import { launchSession, reachable, send, update, updateOf } from "../coordinate.ts";
 import { SwbError } from "../errors.ts";
@@ -36,12 +37,14 @@ async function call(name: ToolName, args: unknown, from: string, callId: string 
 			const a = parsed(name, args);
 			return launchSession(db, {
 				from,
-				harness: a.harness,
+				harness: a.harness ?? null,
+				model: a.model ?? null,
+				effort: a.effort ?? null,
+				agent: a.agent ?? null,
 				goal: a.goal,
 				cwd: a.cwd ?? null,
 				title: a.title,
 				requestResponse: a.requestResponse,
-				model: null,
 				scheduled: null,
 			});
 		}
@@ -52,7 +55,16 @@ async function call(name: ToolName, args: unknown, from: string, callId: string 
 			return schedule(db, {
 				from,
 				to: a.session ?? null,
-				launch: a.launch ? { harness: a.launch.harness, cwd: a.launch.cwd ?? null, title: a.launch.title } : null,
+				launch: a.launch
+					? {
+							harness: a.launch.harness ?? null,
+							model: a.launch.model ?? null,
+							effort: a.launch.effort ?? null,
+							agent: a.launch.agent ?? null,
+							cwd: a.launch.cwd ?? null,
+							title: a.launch.title,
+						}
+					: null,
 				body: a.message,
 				at: a.at ?? null,
 				cron: a.cron ?? null,
@@ -87,7 +99,11 @@ export async function mcp(): Promise<void> {
 	const annotations = (name: ToolName) =>
 		TOOLS[name].readOnly ? { readOnlyHint: true } : { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
 	server.setRequestHandler(ListToolsRequestSchema, () => ({
-		tools: toolsAsJson().map((tool) => ({ ...tool, annotations: annotations(tool.name) })),
+		tools: toolsAsJson().map((tool) => ({
+			...tool,
+			description: describeTool(tool.name, tool.description, launchGuide()),
+			annotations: annotations(tool.name),
+		})),
 	}));
 	server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
 		const meta = params._meta as { threadId?: unknown; callId?: unknown } | undefined;

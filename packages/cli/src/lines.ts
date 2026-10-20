@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { stateDir } from "@swb/shared";
+import { describeTool, launchGuide, stateDir } from "@swb/shared";
 // A macro: the contract is inlined as JSON at build time, so the CLI never loads TypeBox to start a session.
 import { toolsAsJson } from "@swb/shared/tools" with { type: "macro" };
 import manifest from "../../lines/claude/plugin/.claude-plugin/plugin.json";
@@ -26,9 +26,15 @@ export function writeClaudeLine(): string {
 	write(join(dir, "hooks", "register.js"), register as string);
 	write(
 		join(dir, "hooks", "tools.js"),
-		`// Written by swb: the coordination tools every line offers.\nexport const TOOLS = ${JSON.stringify(toolsAsJson(), null, "\t")};\n`,
+		`// Written by swb: the coordination tools every line offers.\nexport const TOOLS = ${JSON.stringify(tools(), null, "\t")};\n`,
 	);
 	return dir;
+}
+
+/** The tool contracts, session_launch's carrying the shortlist as it stands at this launch. */
+function tools(): { name: string; description: string; inputSchema: unknown }[] {
+	const guide = launchGuide();
+	return toolsAsJson().map((tool) => ({ ...tool, description: describeTool(tool.name, tool.description, guide) }));
 }
 
 /** The id the Codex line's plugin has: the private app-server enables it with -c, so nothing enables it elsewhere. */

@@ -9,10 +9,18 @@ import { HARNESSES, SNOOZE_PRESETS } from "./index.ts";
 export type ToolSpec = { description: string; guidelines: string[]; parameters: TSchema; readOnly: boolean };
 
 const session = Type.String({ description: "The target session's id, from session_reachable." });
-const harnessName = Type.Union(
-	HARNESSES.map((name) => Type.Literal(name)),
-	{ description: "Which harness runs it: pi, claude (Claude Code), or codex." },
-);
+/** A preset by its fields, as session_launch's description lists them. */
+const preset = {
+	harness: Type.Optional(
+		Type.Union(
+			HARNESSES.map((name) => Type.Literal(name)),
+			{ description: "The preset's harness: pi, claude (Claude Code), or codex." },
+		),
+	),
+	model: Type.Optional(Type.String({ description: "The preset's model, as listed." })),
+	effort: Type.Optional(Type.String({ description: "The preset's effort, as listed; needed only to tell apart presets of one model." })),
+	agent: Type.Optional(Type.String({ description: "The preset's Claude Code agent, as listed, in place of model and effort." })),
+};
 
 export const TOOLS = {
 	session_reachable: {
@@ -45,14 +53,14 @@ export const TOOLS = {
 		readOnly: false,
 	},
 	session_launch: {
-		description:
-			"Start a new session on the switchboard, in pi, Claude Code, or Codex, whose first turn is the goal you give it. It shows up on the user's roster.",
+		description: "Start a new session on the switchboard, in pi, Claude Code, or Codex.",
 		guidelines: [
-			"Write the goal as a complete briefing: objective, relevant context, constraints, and what done means. The new session sees nothing else.",
+			"Write the goal as a complete briefing: objective, relevant context, constraints, and what done means.",
 			"Launch a new session when the work is independent of this one, belongs to another directory, or the user asks for one.",
+			"Choose a preset by its note and pass its fields, or omit them all for the default. A combination that isn't a preset is refused.",
 		],
 		parameters: Type.Object({
-			harness: harnessName,
+			...preset,
 			goal: Type.String({ description: "The self-contained briefing, delivered as its first message." }),
 			cwd: Type.Optional(Type.String({ description: "Its working directory; defaults to this session's." })),
 			title: Type.String({ description: "A short title for the roster." }),
@@ -89,11 +97,14 @@ export const TOOLS = {
 			launch: Type.Optional(
 				Type.Object(
 					{
-						harness: harnessName,
+						...preset,
 						cwd: Type.Optional(Type.String({ description: "Its working directory; defaults to this session's." })),
 						title: Type.String({ description: "A short title for the roster." }),
 					},
-					{ description: "Instead of an existing session, launch a new one each time it fires, with the message as its goal." },
+					{
+						description:
+							"Instead of an existing session, launch a new one each time it fires, on a preset as session_launch takes it, with the message as its goal.",
+					},
 				),
 			),
 			requestResponse: Type.Optional(Type.Boolean({ description: "Whether the recipient should reply to this session." })),

@@ -15,6 +15,10 @@ Schema v6: update swb and the pi line together.
 - A dormant session's card ends where its last turn did when it never replied: the tool calls it was making, then `cut off`, `stopped`, or `errored` beneath the provider's error, in pi, Claude Code, and Codex. A cut-off session's status says how: shut down, killed, or machine restarted.
 - An errored session's row wears the cut-off session's `⚠` instead of looking finished, live or not, until its next turn starts; `swb ls --json` gains `errored`.
 - Waking a cut-off session from the Deck continues its turn: pi and Claude Code are told `Continue where you left off.`, and Codex starts a turn with no prompt, going on from its own history. A stopped or errored session wakes idle, and so does any session woken to deliver a message.
+- Settings: `,` in the roster, or `M-a ,` from anywhere, opens every setting by section, with search, edited by keyboard or mouse. Each saves to config.toml as you make it, keeping your comments; a value is dim while it's the default.
+- The shortlist: presets of a harness with a model and effort, or a Claude Code agent, each with a note for agents. `n`'s picker opens on the ★ default and `Tab` steps through the rest, and agents choose from it in `session_launch`. Until you edit it, swb makes one from each harness's own list. `swb models` lists everything the harnesses offer.
+- `harnesses` turns a harness off for new sessions.
+- An edit to config.toml, by hand or from Settings, applies to every open Deck at once. A file swb can't read stops new swb commands at the line at fault; an open Deck keeps what it had, says so in red, and `O` opens the file there.
 
 ### Changed
 
@@ -24,10 +28,12 @@ Schema v6: update swb and the pi line together.
 - An Operator can no longer start another Operator: `session_launch` from one must name a project's directory.
 - A roster row's time shows nothing while its turn runs, and counts from when the turn finished, not from the prompt that started it. Its Peek says `active now`.
 - Interrupted is now Cut off. `swb ls --json`'s `interrupted` boolean is `cutOff`: `"shutdown"`, `"killed"`, `"restart"`, or null. `session_reachable` lists such a session as `cut off`.
+- `session_launch`, and `session_schedule`'s `launch`, take a preset's harness, model, effort, or agent, and start the default with none of them; one that isn't a preset is refused. `swb launch --harness` is optional, and `swb schedule` marks a launch with `--launch-title`.
 
 ### Removed
 
 - `group_by = "worktree"`. A config that still sets `group_by` fails to load; delete the key.
+- `harness`, the harness `n` started. The shortlist's default replaces it; a config that still sets `harness` fails to load.
 
 ### Fixed
 

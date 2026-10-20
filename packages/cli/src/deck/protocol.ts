@@ -2,6 +2,7 @@ import type { Harness, Snooze, View } from "@swb/shared";
 import type { Config } from "../config.ts";
 import type { SessionState } from "../derive.ts";
 import type { TargetTree } from "../dirs.ts";
+import type { Catalog, LaunchTarget } from "../harnesses.ts";
 import type { ScheduleView } from "../schedules.ts";
 import type { DeckLayout } from "../store.ts";
 
@@ -100,8 +101,39 @@ export type PickerState = {
 	rows: { name: string; path: string | null; worktree: boolean; dim: boolean }[];
 	choice: number;
 	confirm: string | null;
-	/** What a session started from it runs in. */
-	harness: Harness;
+	/** What a session started from it runs in: its preset's label and harness, null until the harnesses are found. */
+	preset: string | null;
+	harness: Harness | null;
+	/** Every preset Tab steps through, from the default. */
+	presets: string[];
+};
+
+/** One row of Settings' list as a driver sees it. */
+export type SettingsItem = {
+	kind: string;
+	/** The setting it belongs to, by its TOML key. */
+	key: string | null;
+	label: string;
+	value: string;
+	/** Written in config.toml, rather than the default. */
+	set: boolean;
+	selected: boolean;
+	default?: boolean;
+	note?: string;
+	problem?: string | null;
+};
+
+export type SettingsState = {
+	section: string;
+	area: "rail" | "list";
+	search: string | null;
+	changedOnly: boolean;
+	cursor: number;
+	/** What's being edited: text, choices, chord, or add:<step>. */
+	editing: string | null;
+	error: string | null;
+	items: SettingsItem[];
+	adding: { step: string; query: string; rows: string[]; choice: number } | null;
 };
 
 /** What `GET /state` answers: the Deck as a driver sees it. */
@@ -112,10 +144,13 @@ export type DeckState = {
 	cursor: string | null;
 	/** The cursor's index in `rows`, headers included. */
 	cursorRow: number;
-	mode: "filter" | "name" | "picker" | "snooze" | "archive" | "roster";
+	mode: "filter" | "name" | "picker" | "snooze" | "archive" | "roster" | "settings";
 	picker: PickerState | null;
 	/** The archive prompt: whose, its counts line, and how many `all` would archive. */
 	archive: { id: string; counts: string; all: number } | null;
+	settings: SettingsState | null;
+	/** config.toml as it is on disk can't be read; the Deck keeps what it had. */
+	configError: string | null;
 	/** Mid-drag, the header a release would drop into: its Project, and its Group, if any. */
 	drop: { project: string; group: string | null } | null;
 	filter: string;
@@ -145,11 +180,16 @@ export type DeckPaths = { sock: string; card: string; target: string; side: stri
 /** A Deck's terminal as its programs see it, in hex; `palette` is null when the terminal didn't report all 16. */
 export type TerminalProfile = { foreground: string; background: string; palette: string[] | null; scheme: "light" | "dark" };
 
+/** A new session on `target`, or, with none, on `harness`'s first preset or the default, once the harnesses are found. */
+export type NewSession = { type: "new"; cwd: string; group: string | null; target: LaunchTarget | null; harness: Harness | null };
+
 export type ToWorker =
 	| { type: "init"; deck: string; paths: DeckPaths; config: Config; here: string }
 	| { type: "layout"; layout: DeckLayout }
 	| { type: "wake"; id: string }
-	| { type: "new"; cwd: string; group: string | null; harness: Harness }
+	| { type: "config"; config: Config }
+	| { type: "refresh"; models: boolean }
+	| NewSession
 	| { type: "visit"; id: string }
 	| { type: "archive"; ids: string[] }
 	| { type: "unarchive"; id: string }
@@ -181,4 +221,5 @@ export type FromWorker =
 	| { type: "viewFailed"; id: string; text: string }
 	| { type: "groupFailed"; text: string }
 	| { type: "dirs"; trees: TargetTree[] }
+	| { type: "catalog"; catalog: Catalog }
 	| { type: "error"; text: string };

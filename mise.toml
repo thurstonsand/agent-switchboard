@@ -66,9 +66,16 @@ tar -tzf "$out"/thurstonsand-pi-agent-switchboard-*.tgz
 ls -l "$out"
 """
 
+[tasks.readme]
+description = "Regenerate README.md's settings block from the settings registry"
+run = "bun scripts/settings-readme.ts"
+
+[tasks."readme:check"]
+run = "bun scripts/settings-readme.ts --check"
+
 [tasks.check]
 description = "Full verification gate"
-depends = ["lint", "typecheck", "build", "dist:pi"]
+depends = ["lint", "typecheck", "build", "dist:pi", "readme:check"]
 
 [tasks.install]
 description = "Build swb from this checkout into ~/.local/bin"
