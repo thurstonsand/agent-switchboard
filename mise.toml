@@ -87,7 +87,13 @@ run = [
 [tasks.e2e]
 description = "Real pi in private tmux servers, scripted by the faux provider"
 depends = ["build", "dist:pi"]
-run = "bun test --timeout 180000 --parallel=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) test/e2e"
+run = """
+if [ -n "${CI:-}" ]; then
+  bun test --timeout 180000 --max-concurrency 1 test/e2e
+else
+  bun test --timeout 180000 --parallel=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) test/e2e
+fi
+"""
 
 [tasks.evidence]
 description = "Render every VHS tape"
