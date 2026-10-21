@@ -9,22 +9,25 @@ import { HARNESSES, SNOOZE_PRESETS, VIEWS } from "./index.ts";
 export type ToolSpec = { description: string; guidelines: string[]; parameters: TSchema; readOnly: boolean };
 
 const session = Type.String({ description: "The target session's id, from session_reachable." });
+const requestResponse = Type.Boolean({ description: "Whether the recipient should reply to this session." });
+const cwd = Type.Optional(Type.String({ description: "Its working directory; defaults to this session's." }));
+const title = Type.String({ description: "A short title for the roster." });
 /** A preset by its fields, as session_launch's description lists them. */
 const preset = {
 	harness: Type.Optional(
 		Type.Union(
 			HARNESSES.map((name) => Type.Literal(name)),
-			{ description: "The preset's harness: pi, claude (Claude Code), or codex." },
+			{ description: "pi, claude (Claude Code), or codex." },
 		),
 	),
-	model: Type.Optional(Type.String({ description: "The preset's model, as listed." })),
-	effort: Type.Optional(Type.String({ description: "The preset's effort, as listed; needed only to tell apart presets of one model." })),
-	agent: Type.Optional(Type.String({ description: "The preset's Claude Code agent, as listed, in place of model and effort." })),
+	model: Type.Optional(Type.String({ description: "As listed." })),
+	effort: Type.Optional(Type.String({ description: "As listed; needed only between presets of one model." })),
+	agent: Type.Optional(Type.String({ description: "A Claude Code agent, as listed, in place of model and effort." })),
 };
 
 export const TOOLS = {
 	session_reachable: {
-		description: "List every open session on the switchboard, in any harness (pi, Claude Code, Codex), except this one.",
+		description: "List every open session on the switchboard except this one.",
 		guidelines: [
 			"Use session_reachable to find another session before messaging, cancelling, or archiving it.",
 			"Sessions in other projects and other harnesses are all reachable; a dormant one wakes when messaged.",
@@ -42,7 +45,7 @@ export const TOOLS = {
 		parameters: Type.Object({
 			session,
 			message: Type.String({ description: "The message, self-contained: the recipient doesn't see this conversation." }),
-			requestResponse: Type.Boolean({ description: "Whether the recipient should reply to this session." }),
+			requestResponse,
 		}),
 		readOnly: false,
 	},
@@ -53,17 +56,17 @@ export const TOOLS = {
 		readOnly: false,
 	},
 	session_launch: {
-		description: "Start a new session on the switchboard, in pi, Claude Code, or Codex.",
+		description: "Start a new session on the switchboard, on one of the presets below.",
 		guidelines: [
 			"Write the goal as a complete briefing: objective, relevant context, constraints, and what done means.",
 			"Launch a new session when the work is independent of this one, belongs to another directory, or the user asks for one.",
-			"Omit the preset fields to carry forward what this session runs now. Pass a preset's fields only to switch to it, by its note. A combination that isn't a preset is refused.",
+			"Omit the preset fields to carry forward what this session runs now. To switch, pass the fields of the preset whose note fits the work; anything not listed is refused.",
 		],
 		parameters: Type.Object({
 			...preset,
 			goal: Type.String({ description: "The self-contained briefing, delivered as its first message." }),
-			cwd: Type.Optional(Type.String({ description: "Its working directory; defaults to this session's." })),
-			title: Type.String({ description: "A short title for the roster." }),
+			cwd,
+			title,
 			requestResponse: Type.Boolean({ description: "Whether it should report back to this session when done." }),
 		}),
 		readOnly: false,
@@ -93,13 +96,13 @@ export const TOOLS = {
 				}),
 			),
 			label: Type.String({ description: 'When it runs, in plain words, such as "Weekdays, 8:57 AM".' }),
-			session: Type.Optional(Type.String({ description: "The recipient's id, from session_reachable." })),
+			session: Type.Optional(session),
 			launch: Type.Optional(
 				Type.Object(
 					{
 						...preset,
-						cwd: Type.Optional(Type.String({ description: "Its working directory; defaults to this session's." })),
-						title: Type.String({ description: "A short title for the roster." }),
+						cwd,
+						title,
 					},
 					{
 						description:
@@ -107,7 +110,7 @@ export const TOOLS = {
 					},
 				),
 			),
-			requestResponse: Type.Optional(Type.Boolean({ description: "Whether the recipient should reply to this session." })),
+			requestResponse: Type.Optional(requestResponse),
 			snooze: Type.Optional(Type.Boolean({ description: "Snooze the recipient until this fires." })),
 		}),
 		readOnly: false,
@@ -126,10 +129,10 @@ export const TOOLS = {
 		readOnly: false,
 	},
 	swb_update_session: {
-		description: "Update one session on the switchboard. Omit session to update the current session.",
+		description: "Update one session on the switchboard: this one, unless you name another.",
 		guidelines: [
 			"Archive only when the user asks, or when you started that session and have driven it to completion.",
-			"Archiving the current session quits it when the turn ends: call it last, then end with a brief final message.",
+			"Archiving this session quits it when the turn ends: call it last, then end with a brief final message.",
 			"Archiving refuses any session other than this one that is mid-turn, blocked, cut off, or errored, and names them. If they should go anyway, call again with force, which cancels their turns.",
 			"Unarchiving doesn't restart a session; session_send_message wakes it.",
 			"Snooze or unsnooze only when the user asks.",
@@ -137,7 +140,7 @@ export const TOOLS = {
 			"Retitle a session when the user asks, or when its title no longer says what it is working on.",
 		],
 		parameters: Type.Object({
-			session: Type.Optional(Type.String({ description: "Session id; omit for the current session." })),
+			session: Type.Optional(session),
 			archived: Type.Optional(Type.Boolean({ description: "True to archive, false to unarchive." })),
 			family: Type.Optional(
 				Type.Boolean({ description: "With archived true: archive every open session it started too, and the ones they started." }),
@@ -155,7 +158,7 @@ export const TOOLS = {
 			title: Type.Optional(Type.String({ description: "A new, short title." })),
 			snooze: Type.Optional(
 				Type.Union([...[...SNOOZE_PRESETS, "off"].map((preset) => Type.Literal(preset)), Type.Object({ until: Type.String() })], {
-					description: 'Snooze preset, off to unsnooze, or {"until":"2026-11-05T09:00:00-08:00"} for a custom date.',
+					description: 'How long to snooze it, off to unsnooze, or {"until":"2026-11-05T09:00:00-08:00"} for a set time.',
 				}),
 			),
 		}),
@@ -169,7 +172,7 @@ export const TOOLS = {
 			view: Type.Optional(
 				Type.Union(
 					VIEWS.map((view) => Type.Literal(view)),
-					{ description: "agent, its directory's editor, or a split of both; omit unless user asks for it explicitly." },
+					{ description: "agent, its directory's editor, or a split of both; omit unless the user asks for one." },
 				),
 			),
 		}),
