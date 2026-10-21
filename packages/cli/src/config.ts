@@ -45,12 +45,14 @@ export type Config = {
 	/** The shortlist as written; null while it's the automatic one. */
 	targets: Preset[] | null;
 	warnLongShortlist: boolean;
+	/** Mine, after the ones swb ships, in every Operator's AGENTS.md. */
+	operatorInstructions: string;
 };
 
 /** The roster's width: columns, or a share of the Deck. */
 export type RosterWidth = { cols: number } | { percent: number };
 
-export const SECTIONS = ["General", "Harnesses", "Directories", "Keys & commands"] as const;
+export const SECTIONS = ["General", "Harnesses", "Operators", "Directories", "Keys & commands"] as const;
 export type Section = (typeof SECTIONS)[number];
 
 export type Control =
@@ -63,7 +65,8 @@ export type Control =
 	| { kind: "chord" }
 	| { kind: "paths" }
 	| { kind: "harnesses" }
-	| { kind: "targets" };
+	| { kind: "targets" }
+	| { kind: "prose"; max: number };
 
 /** One setting: everything Settings, search, validation, and the README know about it. */
 export type Setting = {
@@ -133,6 +136,8 @@ function defaultClipboard(): { value: string; from: string } {
 }
 
 const fixed = (value: unknown) => () => ({ value, from: null });
+
+const OPERATOR_INSTRUCTIONS_MAX = 16_000;
 
 export const SETTINGS: Setting[] = [
 	{
@@ -241,6 +246,25 @@ export const SETTINGS: Setting[] = [
 		},
 		example: true,
 		note: "Settings warns once the shortlist passes 10 entries",
+	},
+	{
+		key: ["operator", "instructions"],
+		section: "Operators",
+		label: "Instructions",
+		description: `Yours, added after the ones swb ships, in the AGENTS.md every Operator reads when it starts. Up to ${OPERATOR_INSTRUCTIONS_MAX.toLocaleString("en-US")} characters.`,
+		synonyms: ["agents.md", "claude.md", "prompt", "system", "rules", "dispatcher", "capcom", "custom"],
+		control: { kind: "prose", max: OPERATOR_INSTRUCTIONS_MAX },
+		fallback: fixed(""),
+		apply: (config, value) => {
+			if (typeof value !== "string") throw new Error(`must be a string, got ${JSON.stringify(value)}`);
+			if (value.length > OPERATOR_INSTRUCTIONS_MAX)
+				throw new Error(
+					`must be ${OPERATOR_INSTRUCTIONS_MAX.toLocaleString("en-US")} characters or fewer, got ${value.length.toLocaleString("en-US")}`,
+				);
+			config.operatorInstructions = value;
+		},
+		example: "Prefer Codex for anything in Rust.",
+		note: `after swb's own, in every Operator's AGENTS.md; up to ${OPERATOR_INSTRUCTIONS_MAX.toLocaleString("en-US")} characters`,
 	},
 	{
 		key: ["dirs", "scan"],

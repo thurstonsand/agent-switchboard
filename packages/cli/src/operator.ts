@@ -63,8 +63,13 @@ export function codexOperatorConfig(): string[] {
 
 const CLAUDE = "@AGENTS.md\n";
 
+/** The AGENTS.md swb ships, then mine, from Settings. */
+function operatorAgents(instructions: string): string {
+	return instructions === "" ? agents : `${agents}\n## My preferences\n\n${instructions}\n`;
+}
+
 /** The Operator folder: swb owns its AGENTS.md, CLAUDE.md, extension, and pi settings, and keeps them current. */
-export function ensureOperatorDir(): void {
+export function ensureOperatorDir(instructions: string): void {
 	const dir = operatorDir();
 	const extensions = join(dir, ".pi", "extensions");
 	mkdirSync(extensions, { recursive: true });
@@ -73,7 +78,8 @@ export function ensureOperatorDir(): void {
 	const settingsPath = join(dir, ".pi", "settings.json");
 	if (!existsSync(settingsPath) || readFileSync(settingsPath, "utf8") !== SETTINGS) writeFileSync(settingsPath, SETTINGS);
 	const agentsPath = join(dir, "AGENTS.md");
-	if (!existsSync(agentsPath) || readFileSync(agentsPath, "utf8") !== agents) writeFileSync(agentsPath, agents);
+	const text = operatorAgents(instructions);
+	if (!existsSync(agentsPath) || readFileSync(agentsPath, "utf8") !== text) writeFileSync(agentsPath, text);
 	// Claude Code reads a CLAUDE.md here or above in place of AGENTS.md; this one makes sure it's the Operator's.
 	const claudePath = join(dir, "CLAUDE.md");
 	if (!existsSync(claudePath) || readFileSync(claudePath, "utf8") !== CLAUDE) writeFileSync(claudePath, CLAUDE);

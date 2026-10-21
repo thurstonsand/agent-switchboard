@@ -26,6 +26,7 @@ import { type CutOff, displayName, openDescendants, projectName } from "../deriv
 import { completions, expandHome, type Target, type TargetTree, targetName } from "../dirs.ts";
 import { SwbError, UsageError } from "../errors.ts";
 import { type Catalog, type Choice, defaultLaunch, fromDefault, type LaunchTarget, presetLabels, shortlist } from "../harnesses.ts";
+import { ensureOperatorDir } from "../operator.ts";
 import { presetUntil } from "../schedules.ts";
 import { loginShell, newer, nvimEditor, SWB } from "../sessions.ts";
 import type { DeckLayout } from "../store.ts";
@@ -3327,6 +3328,7 @@ function stopDiscovery(): void {
 }
 
 function cleanup(): never {
+	roster.settings?.saveProse();
 	stopDiscovery();
 	tmuxTry(SESSIONS, "kill-session", "-t", `=${placeholder}`);
 	removeDeckFiles(deck);
@@ -3515,6 +3517,7 @@ function applyLoaded(next: Loaded): void {
 	}
 	if (JSON.stringify(before.dirs) !== JSON.stringify(config.dirs)) post({ type: "dirs" });
 	if (before.wakeOnHighlight !== config.wakeOnHighlight) scheduleHighlightWake();
+	if (before.operatorInstructions !== config.operatorInstructions) ensureOperatorDir(config.operatorInstructions);
 	tui.requestRender();
 }
 
@@ -3585,6 +3588,7 @@ const settingsHost = {
 	help: () => void showHelp(),
 	paint: { cursor: cursorLine, hover: hoverLine },
 	message: (now: number, withConfigError: boolean) => roster.messageLine(now, null, withConfigError),
+	requestRender: () => tui.requestRender(),
 };
 
 /** Settings fills the Deck: the roster zooms its own pane over the Stage, which keeps running underneath. */
@@ -3605,6 +3609,7 @@ function openSettings(): void {
 
 function closeSettings(): void {
 	if (!roster.settings) return;
+	roster.settings.saveProse();
 	roster.settings = null;
 	zoomRoster(false);
 	tui.requestRender();

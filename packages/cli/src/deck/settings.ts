@@ -1,8 +1,10 @@
 import {
 	decodeKittyPrintable,
+	Editor,
 	Input,
 	matchesKey,
 	parseKey,
+	type TUI,
 	type TuiMouseEvent,
 	truncateToWidth,
 	visibleWidth,
@@ -49,6 +51,7 @@ export type SettingsHost = {
 	help: () => void;
 	paint: { cursor: (line: string, focused: boolean) => string; hover: (line: string) => string };
 	message: (now: number, withConfigError: boolean) => string;
+	requestRender: () => void;
 };
 
 type Item =
@@ -78,6 +81,19 @@ type Editing =
 	| { kind: "choices"; s: Setting; choice: number }
 	| { kind: "chord"; captured: string | null; error: string | null };
 
+/** A prose setting's editor, the whole of its section: saved a second after the last edit, and on the way out. */
+type Prose = {
+	s: Setting;
+	max: number;
+	editor: Editor;
+	view: { rows: number };
+	/** The saved text the editor last matched; it follows a hand edit to the file while nothing here is unsaved. */
+	synced: string;
+	timer: Timer | null;
+	/** Until a key changes the text, [ and ] still move between sections, so passing through never writes them in. */
+	typed: boolean;
+};
+
 /** Adding a preset: search the catalog, then pick its effort, then write its note. */
 type Adding = {
 	step: "search" | "effort" | "note";
@@ -97,10 +113,18 @@ type ClickTarget = { y: number; from: number; to: number; act: () => void };
 const RAIL = 18;
 const NARROW_BELOW = 100;
 const LONG_LIST = 10;
+const SAVE_AFTER = 1000;
+
+// The editor's autocomplete list, which Settings never opens.
+const SELECT_THEME = { selectedPrefix: cyan, selectedText: cyan, description: gray, scrollInfo: gray, noMatch: gray };
+
+/** Prose a save couldn't write, by setting key, for the next Settings to open on. */
+const drafts = new Map<string, string>();
 
 const SECTION_ABOUT: Record<Section, string> = {
 	General: "How the roster looks and when sessions move or stop.",
 	Harnesses: "What new sessions start in.",
+	Operators: "Tell your Operators how to speak, behave, and work with you.",
 	Directories: "Where n looks for places to start sessions.",
 	"Keys & commands": "The prefix key and the commands swb runs for you.",
 };
@@ -124,6 +148,11 @@ function show(s: Setting, value: unknown): string {
 		}
 		case "harnesses":
 			return (value as string[]).join(", ");
+		case "prose": {
+			const lines = (value as string).split("\n");
+			if (value === "") return "none";
+			return `${lines.length} line${lines.length === 1 ? "" : "s"}, ${(value as string).length.toLocaleString("en-US")} characters`;
+		}
 		default:
 			return String(value);
 	}
@@ -176,6 +205,22 @@ function toToml(p: Preset): Record<string, unknown> {
 	};
 }
 
+/** Prose as it saves: no blank lines around it, but a first line's indent kept. */
+function tidy(text: string): string {
+	return text.replace(/^\s*\n/, "").trimEnd();
+}
+
+/** A paste's printable text, as pi's own paste keeps it, cut to `room` without splitting a character. */
+function pasteable(text: string, room: number): string {
+	let out = "";
+	for (const c of text.replace(/\r\n?/g, "\n")) {
+		if (c !== "\n" && c !== "\t" && c.charCodeAt(0) < 32) continue;
+		if (out.length + c.length > room) break;
+		out += c;
+	}
+	return out;
+}
+
 /** A field holding `value`, ready to type at its end; setValue alone leaves the cursor at the start. */
 function prefill(input: Input, value: string): void {
 	input.setValue(value);
@@ -192,6 +237,7 @@ export class SettingsPane {
 	scroll = 0;
 	editing: Editing | null = null;
 	adding: Adding | null = null;
+	prose: Prose | null = null;
 	/** The list row under the pointer; null once a key is pressed or the pointer leaves. */
 	hover: number | null = null;
 	pointer: { x: number; y: number } | null = null;
@@ -331,6 +377,8 @@ export class SettingsPane {
 			if (this.host.loaded().config.targets !== null) this.save(withValue(this.raw(), ["targets"], undefined));
 			return;
 		}
+		// A page of writing is never one key from gone; emptying it in its editor clears it.
+		if (s.control.kind === "prose") return;
 		if (this.isSet(s)) this.set(s, undefined);
 	}
 
@@ -363,7 +411,10 @@ export class SettingsPane {
 				else if (c.kind === "enum") this.cycle(item.s, 1);
 				else if (c.kind === "chord") this.editing = { kind: "chord", captured: null, error: null };
 				else if (c.kind === "paths") this.startText({ kind: "addEntry", s: item.s }, "");
-				else this.startText({ kind: "setting", s: item.s }, String(this.valueOf(item.s)));
+				else if (c.kind === "prose") {
+					this.setSection(SECTIONS.indexOf(item.s.section));
+					this.area = "list";
+				} else this.startText({ kind: "setting", s: item.s }, String(this.valueOf(item.s)));
 				break;
 			}
 			case "entry":
@@ -520,6 +571,120 @@ export class SettingsPane {
 			}
 		}
 		return gray("⏎ saves · esc cancels");
+	}
+
+	// ── prose ──────────────────────────────────────────────────────────
+
+	/** The prose setting this section is, when it's shown whole rather than as a search result. */
+	proseShown(): Setting | null {
+		if (this.query() !== "" || this.changedOnly) return null;
+		return SETTINGS.find((s) => s.section === SECTIONS[this.section] && s.control.kind === "prose") ?? null;
+	}
+
+	proseFocused(): boolean {
+		return this.proseShown() !== null && this.area === "list" && !this.searching;
+	}
+
+	/** pi's own prompt editor on the setting, from a draft a failed save left, else the saved text. */
+	proseFor(s: Setting): Prose {
+		if (this.prose?.s === s) return this.prose;
+		if (s.control.kind !== "prose") throw new Error(`${s.key.join(".")} isn't prose`);
+		// The editor asks its TUI only for terminal.rows, to show a third of them, and requestRender. Settings sets rows
+		// so that third is the room it has.
+		const view = { rows: 0 };
+		const tui = { terminal: view, requestRender: this.host.requestRender } as unknown as TUI;
+		const editor = new Editor(tui, { borderColor: gray, selectList: SELECT_THEME }, { paddingX: 1 });
+		const synced = this.valueOf(s) as string;
+		editor.setText(drafts.get(s.key.join(".")) ?? synced);
+		this.prose = { s, max: s.control.max, editor, view, synced, timer: null, typed: false };
+		return this.prose;
+	}
+
+	/** Writes the editor's text if it changed. A failed save says why on the message line and keeps the text as a draft. */
+	saveProse(): void {
+		const prose = this.prose;
+		if (!prose) return;
+		if (prose.timer) clearTimeout(prose.timer);
+		prose.timer = null;
+		const text = tidy(prose.editor.getText());
+		const key = prose.s.key.join(".");
+		if (text !== this.valueOf(prose.s) && this.set(prose.s, text) !== null) {
+			drafts.set(key, prose.editor.getText());
+			this.host.requestRender();
+			return;
+		}
+		prose.synced = text;
+		drafts.delete(key);
+	}
+
+	/** Every key but Tab and esc is the editor's. Text past the cap is never let in, so there's nothing to refuse. */
+	proseInput(s: Setting, data: string): void {
+		const prose = this.proseFor(s);
+		const k = decodeKittyPrintable(data) ?? data;
+		if (matchesKey(data, "escape")) {
+			this.host.close();
+			return;
+		}
+		if (matchesKey(data, "tab") || matchesKey(data, "shift+tab")) {
+			this.saveProse();
+			if (!this.narrow) this.area = "rail";
+			return;
+		}
+		if (!prose.typed && (k === "[" || k === "]")) {
+			this.setSection(this.section + (k === "[" ? -1 : 1));
+			return;
+		}
+		const editor = prose.editor;
+		const before = editor.getText();
+		const room = prose.max - before.length;
+		// pi-tui hands a paste over whole, between these.
+		const paste = data.startsWith("\x1b[200~") && data.endsWith("\x1b[201~");
+		const typed = paste
+			? undefined
+			: (decodeKittyPrintable(data) ?? (!data.startsWith("\x1b") && data.charCodeAt(0) >= 32 && data !== "\x7f" ? data : undefined));
+		// Writing wants new lines more than it wants to submit, and a paste in full, not pi's [paste #1] marker.
+		if (matchesKey(data, "enter") || matchesKey(data, "shift+enter")) {
+			if (room > 0) editor.handleInput("\n");
+		} else if (paste) editor.insertTextAtCursor(pasteable(data.slice(6, -6), room));
+		else if (typed === undefined || typed.length <= room) editor.handleInput(data);
+		// A yank is the one other way text comes in; one that won't fit is taken back whole.
+		if (editor.getText().length > prose.max && editor.getText().length > before.length) editor.setText(before);
+		if (editor.getText() === before) return;
+		prose.typed = true;
+		if (prose.timer) clearTimeout(prose.timer);
+		prose.timer = setTimeout(() => this.saveProse(), SAVE_AFTER);
+	}
+
+	/** What's being written and how much room is left, then the editor, rules above and below, filling the rest. */
+	proseRows(s: Setting, width: number, height: number): string[] {
+		const title = ` ${bold(s.label)}  ${gray(SECTION_ABOUT[s.section])}`;
+		const counter = this.proseCounter(s);
+		const head = `${title}${" ".repeat(Math.max(1, width - visibleWidth(title) - visibleWidth(counter) - 1))}${counter}`;
+		return [head, ...this.proseEditorRows(s, width, height - 1)];
+	}
+
+	/** The editor, its rules above and below. */
+	proseEditorRows(s: Setting, width: number, height: number): string[] {
+		const prose = this.proseFor(s);
+		const saved = this.valueOf(s) as string;
+		if (saved !== prose.synced && tidy(prose.editor.getText()) === prose.synced) {
+			prose.editor.setText(saved);
+			prose.synced = saved;
+		}
+		// It shows floor(rows × 0.3) lines of text: all the room between its rules.
+		prose.view.rows = Math.ceil((height - 1.5) / 0.3);
+		prose.editor.borderColor = this.proseFocused() ? cyan : gray;
+		const rows = prose.editor.render(width);
+		const bottom = rows.pop() as string;
+		while (rows.length < height - 1) rows.push("");
+		return [...rows.slice(0, height - 1), bottom];
+	}
+
+	proseCounter(s: Setting): string {
+		const prose = this.proseFor(s);
+		const used = prose.editor.getText().length;
+		const count = `${used.toLocaleString("en-US")} / ${prose.max.toLocaleString("en-US")}`;
+		return used >= prose.max ? red(count) : gray(count);
 	}
 
 	// ── adding a preset ────────────────────────────────────────────────
@@ -683,6 +848,8 @@ export class SettingsPane {
 	}
 
 	setSection(index: number): void {
+		this.saveProse();
+		if (this.prose) this.prose.typed = false;
 		this.section = (index + SECTIONS.length) % SECTIONS.length;
 		this.search.setValue("");
 		this.searching = false;
@@ -748,6 +915,11 @@ export class SettingsPane {
 				this.cursor = this.firstSelectable(this.items());
 				this.scroll = 0;
 			}
+			return;
+		}
+		const prose = this.proseFocused() ? this.proseShown() : null;
+		if (prose) {
+			this.proseInput(prose, data);
 			return;
 		}
 		const k = decodeKittyPrintable(data) ?? data;
@@ -842,9 +1014,12 @@ export class SettingsPane {
 			this.hover = hover;
 			return { handled: true, render: relit };
 		}
+		const prose = this.adding || this.host.error() ? null : this.proseShown();
+		const inEditor = prose !== null && event.x >= this.listLeft && event.y >= this.listTop && event.y < this.listTop + this.listHeight;
 		if (event.type === "wheel") {
 			const delta = Math.sign(event.wheelDelta ?? 0);
-			if (this.adding?.step === "search") this.moveAdd(delta);
+			if (inEditor) this.proseFor(prose).editor.handleInput(delta < 0 ? "\x1b[A" : "\x1b[B");
+			else if (this.adding?.step === "search") this.moveAdd(delta);
 			else this.move(delta);
 			return { handled: true, render: true };
 		}
@@ -883,6 +1058,18 @@ export class SettingsPane {
 			target.act();
 			return { handled: true, render: true };
 		}
+		if (inEditor) {
+			this.area = "list";
+			this.searching = false;
+			this.proseFor(prose).editor.handleMouse({
+				...event,
+				x: event.x - this.listLeft,
+				// Below the title row.
+				y: event.y - this.listTop - 1,
+				width: event.width - this.listLeft,
+			});
+			return { handled: true, render: true };
+		}
 		const at = this.itemAt(event.y);
 		if (at !== null) {
 			this.cursor = at;
@@ -915,9 +1102,11 @@ export class SettingsPane {
 		const now = Date.now();
 		const lines: string[] = [this.header(width)];
 		const bodyHeight = Math.max(3, height - 7);
-		this.listTop = 2;
-		this.listHeight = bodyHeight;
 		const error = this.host.error();
+		// An editor takes the rule and the footer's rows too: its own bottom rule stands in for the one under the list.
+		const prose = !error && !this.adding && this.proseShown() !== null;
+		this.listTop = 2;
+		this.listHeight = prose ? bodyHeight + 3 : bodyHeight;
 		let body: string[];
 		if (error) {
 			lines.push(gray("─".repeat(width)));
@@ -927,12 +1116,13 @@ export class SettingsPane {
 			body = this.addBody(width, bodyHeight);
 		} else {
 			lines.push(this.searchLine(width));
-			body = this.body(width, bodyHeight);
+			body = this.body(width, this.listHeight);
 		}
 		lines.push(...body);
 		const rule =
 			this.narrow || error || this.adding ? "─".repeat(width) : `${"─".repeat(RAIL)}┴${"─".repeat(Math.max(0, width - RAIL - 1))}`;
-		lines.push(gray(rule), ...this.footer(width, error), this.messageLine(now), this.legend(height - 1, width, error));
+		if (!prose) lines.push(gray(rule), ...this.footer(width, error));
+		lines.push(this.messageLine(now), this.legend(height - 1, width, error));
 		return lines.map((line) => truncateToWidth(line, width, "…", true));
 	}
 
@@ -997,6 +1187,12 @@ export class SettingsPane {
 	}
 
 	body(width: number, height: number): string[] {
+		const prose = this.proseShown();
+		if (prose) {
+			this.shown = [];
+			this.listLeft = this.narrow ? 0 : RAIL + 1;
+			return this.railed(this.proseRows(prose, width - this.listLeft, height));
+		}
 		const items = this.items();
 		this.shown = items;
 		if (!selectable(items[this.cursor])) this.cursor = this.firstSelectable(items);
@@ -1042,11 +1238,13 @@ export class SettingsPane {
 		}
 		while (rows.length < height) rows.push("");
 		if (items.length === 0) rows[0] = gray(this.changedOnly && this.query() === "" ? "   nothing changed yet" : "   no settings match");
+		return this.railed(rows);
+	}
+
+	/** The list's rows with the section rail beside them, when there's room for it. */
+	railed(rows: string[]): string[] {
 		if (this.narrow) return rows;
-		return rows.map((row, r) => {
-			const y = this.listTop + r;
-			return `${this.railCell(r, y)}${gray("│")}${row}`;
-		});
+		return rows.map((row, r) => `${this.railCell(r, this.listTop + r)}${gray("│")}${row}`);
 	}
 
 	railCell(r: number, y: number): string {
@@ -1158,7 +1356,7 @@ export class SettingsPane {
 			[label, null],
 			[shown, s.control.kind === "paths" ? null : () => this.activateAt(i)],
 		];
-		if (lit) {
+		if (lit && s.control.kind !== "prose") {
 			const fallback = s.fallback();
 			if (set)
 				parts.push(
@@ -1392,6 +1590,9 @@ export class SettingsPane {
 				hints.push(["⏎", "choose", press("\r")], ["↑ ↓", "move", () => {}], ["C-r", "refresh", () => this.host.refresh(true)]);
 			else hints.push(["⏎", step === "effort" ? "next" : "add", press("\r")]);
 			hints.push(["esc", step === "search" ? "cancel" : "back", press("\x1b")]);
+		} else if (this.proseFocused()) {
+			if (!this.narrow) hints.push(["⇥", "sections", press("\t")]);
+			hints.push(["C--", "undo", press("\x1f")], ["esc", "sessions", press("\x1b")]);
 		} else if (this.editing) hints.push(["⏎", "save", press("\r")], ["esc", "cancel", press("\x1b")]);
 		else {
 			const item = this.current();
@@ -1415,7 +1616,11 @@ export class SettingsPane {
 			else if (item?.kind === "shortlist" || item?.kind === "addPreset") hints.push(["⏎", "add", press("\r")]);
 			else hints.push(["⏎", "edit", press("\r")]);
 			const s = this.settingOf(item);
-			if (s && (this.isSet(s) || (s.control.kind === "targets" && this.host.loaded().config.targets !== null)))
+			if (
+				s &&
+				s.control.kind !== "prose" &&
+				(this.isSet(s) || (s.control.kind === "targets" && this.host.loaded().config.targets !== null))
+			)
 				hints.push(["r", "reset", press("r")]);
 			hints.push(["/", "search", press("/")], ["O", "file", press("O")]);
 		}
@@ -1485,6 +1690,10 @@ export class SettingsPane {
 						return { ...base, kind: item.kind, label: "", value: "", set: false };
 				}
 			}),
+			prose: (() => {
+				const s = this.proseShown();
+				return s ? { text: this.proseFor(s).editor.getText(), focused: this.proseFocused() } : null;
+			})(),
 			adding: this.adding
 				? {
 						step: this.adding.step,

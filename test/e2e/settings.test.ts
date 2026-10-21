@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState, SettingsItem } from "../../packages/cli/src/deck/protocol.ts";
-import { config, waitState } from "./harness/deck.ts";
+import { config, state, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -137,7 +137,7 @@ test("a new prefix, pressed rather than typed, moves the open Deck to it at once
 	const deck = (await waitState(s, "ready", (x) => x.ready)).deck;
 	s.keys(",");
 	await waitState(s, "Settings", (x) => x.mode === "settings");
-	s.keys("]", "]", "]");
+	s.keys("]", "]", "]", "]");
 	await waitState(s, "Keys & commands", (x) => x.settings?.section === "Keys & commands");
 	s.keys("Enter");
 	await waitState(s, "waiting for a chord", (x) => x.settings?.editing === "chord");
@@ -194,4 +194,77 @@ test("the shortlist is automatic until its first edit writes it out; ↺ brings 
 	s.keys("r");
 	await waitState(s, "automatic again", (x) => x.settings?.items.find((i) => i.kind === "preset")?.set === false);
 	expect(read()).toBe("# mine\n");
+});
+
+test("an Operator's instructions are written straight into Settings' Operators section, save themselves, and stop at the cap", async () => {
+	s = scenario("settings", "operator");
+	s.swb("drive", "start", "--size", "160x40");
+	await waitState(s, "ready", (x) => x.ready);
+	const agents = join(s.env.XDG_CONFIG_HOME as string, "agent-switchboard", "operator", "AGENTS.md");
+	const shipped = readFileSync(agents, "utf8");
+	expect(shipped).toContain("CAPCOM");
+	expect(shipped).not.toContain("## My preferences");
+	const text = () => state(s).settings?.prose?.text;
+
+	// ] lands in the editor itself; until something's typed, ] and [ pass on through.
+	s.keys(",", "]", "]");
+	const st = await waitState(
+		s,
+		"Operators, in the editor",
+		(x) => x.settings?.section === "Operators" && x.settings.prose?.focused === true,
+	);
+	expect(st.settings?.prose?.text).toBe("");
+	s.keys("]");
+	await waitState(s, "passed through to Directories", (x) => x.settings?.section === "Directories");
+	s.keys("[");
+	await waitState(s, "back in the editor", (x) => x.settings?.prose?.focused === true);
+
+	// No save key: a second after the last keystroke it's in config.toml, and in the Operator's AGENTS.md.
+	s.keys("-l", "Prefer Codex for anything in Rust.", "Enter", "-l", "Ask before releasing.");
+	await until(() => existsSync(file()) && read().includes("Ask before releasing."), budgets.settle, "saved by itself");
+	expect(read()).toBe('[operator]\ninstructions = "Prefer Codex for anything in Rust.\\nAsk before releasing."\n');
+	await until(() => readFileSync(agents, "utf8") !== shipped, budgets.settle, "AGENTS.md rewritten");
+	expect(readFileSync(agents, "utf8")).toBe(`${shipped}\n## My preferences\n\nPrefer Codex for anything in Rust.\nAsk before releasing.\n`);
+	expect(s.screen()).toContain("56 / 16,000");
+	s.save("operator-saved.txt", s.screen());
+
+	// pi's undo, ctrl+-, reaches the editor through tmux.
+	s.keys("-l", " Oops");
+	await until(() => text()?.endsWith(" Oops") ?? false, budgets.settle, "typed");
+	s.keys("C--");
+	await until(() => text() === "Prefer Codex for anything in Rust.\nAsk before releasing.", budgets.settle, "undone");
+
+	// A paste past the cap goes in as far as the cap and no further; typing past it adds nothing. Nothing is refused.
+	const paste = join(s.root, "paste.txt");
+	writeFileSync(paste, `\n${"x".repeat(16_000)}`);
+	s.tmux(s.servers.drive, "load-buffer", "-b", "big", paste);
+	s.tmux(s.servers.drive, "paste-buffer", "-p", "-b", "big", "-t", "=drive:");
+	await until(() => text()?.length === 16_000, budgets.settle, "the paste cut at the cap");
+	s.keys("-l", "zz", "Enter");
+	await Bun.sleep(300);
+	expect(text()?.length).toBe(16_000);
+	expect(text()).not.toContain("z");
+	await until(() => readFileSync(agents, "utf8").endsWith("xxxx\n"), budgets.settle, "the full text saved");
+	expect(s.screen()).toContain("16,000 / 16,000");
+	expect(s.screen()).not.toContain("✗");
+	s.save("operator-full.txt", s.screen());
+
+	// Tab gives the keyboard back to the rail; a hand edit to the file shows in the editor.
+	s.keys("Tab");
+	await waitState(s, "the rail", (x) => x.settings?.prose?.focused === false);
+	config(s, '[operator]\ninstructions = "short"\n');
+	await until(() => text() === "short", budgets.settle, "the hand edit shown");
+
+	// esc leaves at once, and what was typed a moment before is saved on the way out.
+	s.keys("Enter", "-l", "!", "Escape");
+	await waitState(s, "back to the roster", (x) => x.mode === "roster");
+	expect(read()).toBe('[operator]\ninstructions = "short!"\n');
+
+	// Emptied, it leaves the file, and the Operator's AGENTS.md is swb's alone again.
+	s.keys(",", "]", "]");
+	await waitState(s, "the editor again", (x) => x.settings?.prose?.focused === true);
+	s.keys("C-u");
+	await waitState(s, "cleared", (x) => item(x, "operator.instructions")?.set === false);
+	expect(read().trim()).toBe("");
+	await until(() => readFileSync(agents, "utf8") === shipped, budgets.settle, "AGENTS.md swb's alone");
 });

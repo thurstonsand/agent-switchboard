@@ -143,6 +143,34 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"operator-instructions": {
+		setup: async (s) => {
+			files(s);
+			await seed(s, { turns: ["plan the v3 migration"], title: "Plan the v3 migration" });
+		},
+		run: async (s) => {
+			const agents = join(s.env.XDG_CONFIG_HOME as string, "agent-switchboard", "operator", "AGENTS.md");
+			const st = await waitDeck(s, "the editor", (x) => x.settings?.prose?.focused === true);
+			const shipped = readFileSync(agents, "utf8");
+			// Saved with no key pressed for it.
+			await until(() => readFileSync(agents, "utf8").endsWith("lead with the one that's waited longest.\n"), TAPE, "AGENTS.md rewritten");
+			expect(readFileSync(agents, "utf8").startsWith(`${shipped}\n## My preferences\n\nPrefer Codex`)).toBe(true);
+			// After the tape's look at what it typed.
+			await Bun.sleep(3000);
+			// A long style guide pasted in, as the tape can't: the shipped instructions, over and over, past the cap.
+			const paste = join(s.root, "paste.md");
+			writeFileSync(paste, `\n\n${shipped.repeat(Math.ceil(16_000 / shipped.length))}`);
+			const roster = s.tmux(s.servers.ui, "display", "-p", "-t", `=${st.deck}:.0`, "#{pane_id}");
+			s.tmux(s.servers.ui, "load-buffer", "-b", "guide", paste);
+			s.tmux(s.servers.ui, "paste-buffer", "-p", "-b", "guide", "-t", roster);
+			await waitDeck(s, "the paste cut at the cap", (x) => x.settings?.prose?.text.length === 16_000);
+			await waitDeck(s, "back to the roster", (x) => x.mode === "roster");
+			// What the tape typed at the cap never went in.
+			expect(readFileSync(agents, "utf8")).not.toContain("and one more thing");
+			expect(readFileSync(agents, "utf8").length).toBeGreaterThan(shipped.length + 15_000);
+		},
+	},
+
 	"harness-picker": {
 		harnesses: ["claude", "codex"],
 		setup: async (s) => {

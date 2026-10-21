@@ -74,7 +74,7 @@ In the roster, `j`/`k` move, `Enter` focuses the session (waking it if it's dorm
 
 ### Operators
 
-The Operators section sits atop the roster: sessions that coordinate the others rather than work in a Project. `n` on it opens the picker on `~/.config/agent-switchboard/operator`, where `Tab` picks its preset; that folder's AGENTS.md, which swb keeps current, makes it the dispatcher. An Operator reads only that AGENTS.md, not the user-level one or any above it, and reaches the other sessions through swb's tools. Codex is the exception: it always reads `~/.codex/AGENTS.md`. Its new sessions are always `session_launch`es, in whichever harness suits the work, and its subagents are off, since the Deck can't see them. It can't start another Operator. To promote an existing pi session, `/mv` it into that folder.
+The Operators section sits atop the roster: sessions that coordinate the others rather than work in a Project. `n` on it opens the picker on `~/.config/agent-switchboard/operator`, where `Tab` picks its preset; that folder's AGENTS.md, which swb keeps current, makes it the dispatcher. An Operator reads only that AGENTS.md, not the user-level one or any above it, and reaches the other sessions through swb's tools. Codex is the exception: it always reads `~/.codex/AGENTS.md`. Its new sessions are always `session_launch`es, in whichever harness suits the work, and its subagents are off, since the Deck can't see them. It can't start another Operator. Settings' Operators section holds your own instructions, which swb adds after its own in that AGENTS.md. To promote an existing pi session, `/mv` it into that folder.
 
 ## Settings
 
@@ -94,6 +94,9 @@ harnesses = ["pi", "claude", "codex"] # which harnesses new sessions may start i
 warn_long_shortlist = true # Settings warns once the shortlist passes 10 entries
 editor = "nvim"           # defaults to $EDITOR
 clipboard = "wl-copy"     # defaults to wl-copy, else xclip, else pbcopy
+
+[operator]
+instructions = "Prefer Codex for anything in Rust." # after swb's own, in every Operator's AGENTS.md; up to 16,000 characters
 
 [dirs]
 scan = ["~/code"]         # git checkouts and their worktrees beneath these; none by default

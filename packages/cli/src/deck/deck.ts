@@ -311,7 +311,7 @@ export async function openDeck(intent: DeckIntent): Promise<void> {
 	if (!process.stdout.isTTY) throw new SwbError("swb needs a terminal");
 	const config = span("deck.config", loadConfig);
 	span("deck.store", openStore);
-	span("deck.operator", ensureOperatorDir);
+	span("deck.operator", () => ensureOperatorDir(config.operatorInstructions));
 	// Reap a crashed Deck's placeholder first; left standing, it holds the sessions server back from restarting.
 	span("deck.reap", liveDecks);
 	span("deck.sessions-server", ensureSessionsServer);

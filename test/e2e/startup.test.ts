@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { entry, reply, seed, state, waitState } from "./harness/deck.ts";
+import { config, entry, reply, seed, state, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -19,12 +19,14 @@ export default function peek(pi) {
 	pi.on("before_agent_start", (event) => {
 		const dir = join(process.env.HOME, "e2e-signals");
 		mkdirSync(dir, { recursive: true });
-		writeFileSync(join(dir, "context"), JSON.stringify((event.systemPromptOptions.contextFiles ?? []).map((f) => f.path)));
+		const files = event.systemPromptOptions.contextFiles ?? [];
+		writeFileSync(join(dir, "context"), JSON.stringify(files.map((f) => f.path)));
+		writeFileSync(join(dir, "context-text"), files.map((f) => f.content).join("\\n"));
 	});
 }
 `;
 
-test("n then Enter on Operators starts a trusted pi that reads only swb's current AGENTS.md and can't start subagents", async () => {
+test("n then Enter on Operators starts a trusted pi that reads only swb's current AGENTS.md, with my instructions, and can't start subagents", async () => {
 	s = scenario("phase6", "operators", { packages: ["pi-sessions"], recorder: true });
 	const agentDir = s.env.PI_CODING_AGENT_DIR as string;
 	// A symlinked config dir, as dotfile managers leave it: pi's cwd is the physical path.
@@ -35,6 +37,7 @@ test("n then Enter on Operators starts a trusted pi that reads only swb's curren
 	const operator = join(physical, "agent-switchboard/operator");
 	mkdirSync(operator, { recursive: true });
 	writeFileSync(join(operator, "AGENTS.md"), "# a stale copy from an older swb\n");
+	config(s, '[operator]\ninstructions = "SWB-MY-INSTRUCTIONS\\nsecond line"\n');
 	writeFileSync(join(s.home, "AGENTS.md"), "# an ancestor's instructions\n");
 	writeFileSync(join(agentDir, "AGENTS.md"), "# the user's instructions\n");
 	mkdirSync(join(agentDir, "extensions"));
@@ -59,6 +62,8 @@ test("n then Enter on Operators starts a trusted pi that reads only swb's curren
 	expect(entry(s, id)).toMatchObject({ operator: true, cwd: operator });
 	expect(JSON.parse(s.signal("context"))).toEqual([join(operator, "AGENTS.md")]);
 	expect(readFileSync(join(operator, "AGENTS.md"), "utf8")).toContain("CAPCOM");
+	expect(s.signal("context-text")).toContain("CAPCOM");
+	expect(s.signal("context-text")).toContain("\n## My preferences\n\nSWB-MY-INSTRUCTIONS\nsecond line\n");
 
 	const before = s.ls().map((e) => e.id);
 	s.keys("-l", "tools", "Enter");

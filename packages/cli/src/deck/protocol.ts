@@ -133,6 +133,8 @@ export type SettingsState = {
 	editing: string | null;
 	error: string | null;
 	items: SettingsItem[];
+	/** The section's editor, when it's one: what's in it, saved or not, and whether it has the keyboard. */
+	prose: { text: string; focused: boolean } | null;
 	adding: { step: string; query: string; rows: string[]; choice: number } | null;
 };
 
