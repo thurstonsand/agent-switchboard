@@ -38,7 +38,12 @@ test("a finished turn is Unseen while the Deck's terminal is unfocused, and a fo
 test("a first turn started by a custom message, as a handoff child's is, is tracked; killed mid-turn it is Interrupted", async () => {
 	s = scenario("phase3", "custom-kickoff");
 	s.swb("drive", "start", "--", "new");
-	const st = await waitState(s, "the new pi live with the keyboard", (x) => x.staged.kind === "live" && x.focus === "stage");
+	const st = await waitState(
+		s,
+		"the new pi live with the keyboard",
+		(x) => x.staged.kind === "live" && x.focus === "stage",
+		budgets.piReady,
+	);
 	const id = st.staged.id as string;
 	s.keys("-l", "/e2e-kick hold k1", "Enter");
 	await until(() => s.signal("k1.entered") !== "", budgets.settle, "the kicked-off turn");

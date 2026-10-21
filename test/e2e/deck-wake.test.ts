@@ -128,7 +128,7 @@ test("moving the cursor while n's pi starts stages that row, and the pi landing 
 test("n and swb new show the new pi as a provisional row before any prompt; /new inside it moves the selection", async () => {
 	s = scenario("phase2", "provisional");
 	s.swb("drive", "start", "--", "new");
-	const first = await waitState(s, "the new pi live", (x) => x.staged.kind === "live");
+	const first = await waitState(s, "the new pi live", (x) => x.staged.kind === "live", budgets.piReady);
 	const row = sessionRows(first).find((r) => r.id === first.staged.id) as SessionStateRow;
 	expect(row).toMatchObject({ provisional: true, title: first.staged.id });
 	expect(first.cursor).toBe(first.staged.id);

@@ -82,7 +82,7 @@ test("a pi on the Stage repaints when the terminal flips, in copy mode too, whil
 test("the roster and a live pi report the harness terminal's background, and both follow drive theme dark", async () => {
 	s = scenario("phase2", "theme");
 	s.swb("drive", "start", "--", "new");
-	const st = await waitState(s, "the new pi live", (x) => x.staged.kind === "live");
+	const st = await waitState(s, "the new pi live", (x) => x.staged.kind === "live", budgets.piReady);
 	await waitState(s, "the roster's light background", (x) => x.colors.background === "#f9f5d7");
 	expect(await piColor(st.staged.host as string, "11")).toBe(LIGHT_BG);
 	s.save("light.ansi", s.swb("drive", "capture", "--ansi"));
@@ -144,7 +144,7 @@ test("a working session's frames reach the terminal synchronized through both tm
 test("a drag in regular-mode pi reaches drive clipboard through both tmux layers", async () => {
 	s = scenario("phase2", "clipboard");
 	s.swb("drive", "start", "--", "new");
-	await waitState(s, "the new pi live", (x) => x.staged.kind === "live");
+	await waitState(s, "the new pi live", (x) => x.staged.kind === "live", budgets.piReady);
 	await reply(s, "copy-me-please");
 	// The reply signals when pi asks for it, and pi draws a turn typed during startup only once startup ends.
 	const rows = await until(

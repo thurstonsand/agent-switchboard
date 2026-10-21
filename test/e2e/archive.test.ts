@@ -113,7 +113,7 @@ test("a archives an idle live session and kills its pi; a on an Archived row lea
 test("/archive archives and quits; before the first prompt it refuses", async () => {
 	s = scenario("phase3", "pi-archive");
 	s.swb("drive", "start", "--", "new");
-	await waitState(s, "the new pi live with the keyboard", (x) => x.staged.kind === "live" && x.focus === "stage");
+	await waitState(s, "the new pi live with the keyboard", (x) => x.staged.kind === "live" && x.focus === "stage", budgets.piReady);
 	s.keys("-l", "/archive", "Enter");
 	await until(() => s.screen().includes("nothing to archive before the first prompt"), budgets.settle, "the provisional refusal");
 	s.save("provisional-refused.txt", s.screen());

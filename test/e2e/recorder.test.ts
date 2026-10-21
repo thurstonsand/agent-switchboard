@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { SCHEMA_VERSION } from "../../packages/shared/src/index.ts";
+import { waitState } from "./harness/deck.ts";
 import { budgets, release, repo, type Scenario, scenario, until, which } from "./harness/index.ts";
 import { entry, prompt, runtimes, startManaged, waitFor } from "./harness/recorder.ts";
 
@@ -32,6 +33,7 @@ async function firstTurn(): Promise<void> {
 
 	// Unfocused, so the Deck watching the turn land doesn't Visit it.
 	s.swb("drive", "focus", "out");
+	await waitState(s, "terminal unfocused", (x) => !x.terminalFocused);
 	release(s, "first");
 	const idle = await until(() => entry(s, runtime.session_id).activity === "idle" && entry(s, runtime.session_id), budgets.settle, "idle");
 	expect(idle).toMatchObject({ live: true, unseen: true });
@@ -82,6 +84,7 @@ test("blocked during an attention span, working after it, idle only once the tur
 	await until(() => entry(s, runtime.session_id)?.activity === "blocked", budgets.settle, "blocked");
 	// Unfocused, so the Deck watching the turn land doesn't Visit it.
 	s.swb("drive", "focus", "out");
+	await waitState(s, "terminal unfocused", (x) => !x.terminalFocused);
 	release(s, "gate");
 	await until(() => entry(s, runtime.session_id).activity === "idle", budgets.settle, "idle");
 	expect(entry(s, runtime.session_id).unseen).toBe(true);
