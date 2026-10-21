@@ -22,6 +22,7 @@ export type Preset = {
 	provider: string | null;
 	/** Null for an agent, whose own definition sets its model and effort. */
 	model: string | null;
+	/** Null for the harness's own default. */
 	effort: Effort | null;
 	/** A Claude Code agent the whole session runs as. */
 	agent: string | null;
@@ -427,7 +428,7 @@ function presets(value: unknown): Preset[] {
 				fail("model")(error);
 			}
 			try {
-				effort = oneOf(HARNESS_EFFORTS[harness], entry.effort);
+				if (entry.effort !== undefined) effort = oneOf(HARNESS_EFFORTS[harness], entry.effort);
 			} catch (error) {
 				fail("effort")(error);
 			}

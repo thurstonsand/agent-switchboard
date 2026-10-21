@@ -26,7 +26,7 @@ function block(): string {
 	const example = `[[presets]]                 # the shortlist; without any, swb makes one from each harness's own
 harness = "claude"          # "pi", "claude", or "codex"
 model = "opus"
-effort = "high"             # off, minimal, low, medium, high, xhigh, max, ultra, as the harness takes them
+effort = "high"             # off, minimal, low, medium, high, xhigh, max, ultra, as the harness takes them; none for its default
 use = "Hard design and review" # a line for agents choosing among them
 default = true              # what n opens on, and a launch's fallback; else the first
 

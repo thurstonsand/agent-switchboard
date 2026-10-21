@@ -35,9 +35,19 @@ Screenshot ../artifacts/phase6/videos/settings-shortlist-yours.png
 Type "a"
 Sleep 600ms
 Type "explore"
-Wait+Screen /Read-only agent/
+Wait+Screen /read-only search agent/
 Sleep 1.5s
 Screenshot ../artifacts/phase6/videos/settings-add.png
+Ctrl+U
+Type "opus everyday"
+Wait+Screen /everyday/
+Sleep 800ms
+Enter
+Wait+Screen /Claude Code's own/
+Sleep 1.5s
+Screenshot ../artifacts/phase6/videos/settings-add-effort.png
+Escape
+Sleep 600ms
 Escape
 Sleep 600ms
 Escape

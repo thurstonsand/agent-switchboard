@@ -27,7 +27,7 @@ import {
 	type Setting,
 	setting,
 } from "../config.ts";
-import { type Catalog, type Choice, effortMark, type Model, presetLabel, searchMatch, shortlist } from "../harnesses.ts";
+import { type Catalog, type Choice, effortLevels, effortMark, type Model, presetLabel, searchMatch, shortlist } from "../harnesses.ts";
 import { setOrReset, withValue } from "../write-config.ts";
 import type { SettingsState } from "./protocol.ts";
 import { bold, cyan, dim, gray, green, key, red, shortPath, yellow } from "./style.ts";
@@ -188,10 +188,10 @@ export function tmuxKey(data: string): string | null {
 }
 
 /** The levels a preset's harness and model take. */
-function effortsFor(preset: Preset, catalog: Catalog | null): Effort[] {
+function effortsFor(preset: Preset, catalog: Catalog | null): (Effort | null)[] {
 	if (preset.agent) return [];
 	const listed = catalog?.models[preset.harness].find((m) => m.model === preset.model && m.provider === preset.provider);
-	return listed && preset.harness !== "claude" ? listed.efforts : HARNESS_EFFORTS[preset.harness];
+	return listed ? effortLevels(listed) : HARNESS_EFFORTS[preset.harness];
 }
 
 /** A preset as [[presets]] writes it: no empty note, and the ★ only where it is. */
@@ -199,7 +199,7 @@ function toToml(p: Preset): Record<string, unknown> {
 	return {
 		harness: p.harness,
 		...(p.provider ? { provider: p.provider } : {}),
-		...(p.agent ? { agent: p.agent } : { model: p.model, effort: p.effort }),
+		...(p.agent ? { agent: p.agent } : { model: p.model, ...(p.effort ? { effort: p.effort } : {}) }),
 		...(p.use ? { use: p.use } : {}),
 		...(p.default ? { default: true } : {}),
 	};
@@ -457,11 +457,11 @@ export class SettingsPane {
 			const preset = this.presets()[item.index];
 			if (!preset) return;
 			const levels = effortsFor(preset, this.host.catalog());
-			const at = preset.effort === null ? -1 : levels.indexOf(preset.effort);
+			const at = levels.indexOf(preset.effort);
 			const next = wrap
 				? levels[(at + delta + levels.length) % levels.length]
 				: levels[Math.max(0, Math.min(levels.length - 1, at + delta))];
-			if (!next || next === preset.effort) return;
+			if (next === undefined || next === preset.effort) return;
 			this.editPresets((list) => {
 				(list[item.index] as Preset).effort = next;
 				return list;
@@ -773,14 +773,14 @@ export class SettingsPane {
 		adding.picked = row.model;
 		// An agent's own definition sets its effort.
 		adding.step = row.model.agent ? "note" : "effort";
-		adding.effort = row.model.effort === null ? 0 : Math.max(0, row.model.efforts.indexOf(row.model.effort));
+		adding.effort = Math.max(0, effortLevels(row.model).indexOf(row.model.effort));
 		prefill(adding.note, row.model.note);
 	}
 
 	finishAdding(): void {
 		const adding = this.adding as Adding;
 		const m = adding.picked as Model;
-		const effort = m.agent ? null : (m.efforts[adding.effort] as Effort);
+		const effort = m.agent ? null : (effortLevels(m)[adding.effort] ?? null);
 		const preset: Preset = {
 			harness: m.harness,
 			provider: m.provider,
@@ -823,7 +823,7 @@ export class SettingsPane {
 			return;
 		}
 		if (adding.step === "effort") {
-			const levels = (adding.picked as Model).efforts;
+			const levels = effortLevels(adding.picked as Model);
 			if (matchesKey(data, "up") || matchesKey(data, "left")) adding.effort = Math.max(0, adding.effort - 1);
 			else if (matchesKey(data, "down") || matchesKey(data, "right")) adding.effort = Math.min(levels.length - 1, adding.effort + 1);
 			else if (matchesKey(data, "enter")) adding.step = "note";
@@ -1445,7 +1445,7 @@ export class SettingsPane {
 		const adding = this.adding as Adding;
 		if (adding.step !== "search") {
 			const m = adding.picked as Model;
-			return ` ${gray("adding")} ${bold(presetLabel({ ...m, effort: m.efforts[adding.effort] as Effort, use: "", default: false }))} ${gray(`· ${harnessName(m.harness)}`)}`;
+			return ` ${gray("adding")} ${bold(presetLabel({ ...m, effort: effortLevels(m)[adding.effort] ?? null, use: "", default: false }))} ${gray(`· ${harnessName(m.harness)}`)}`;
 		}
 		const catalog = this.host.catalog();
 		const count = this.addRows().filter((r) => r.kind !== "group").length;
@@ -1464,10 +1464,12 @@ export class SettingsPane {
 		if (adding.step === "effort") {
 			const m = adding.picked as Model;
 			const rows = [` ${bold("Effort")}`];
-			m.efforts.forEach((e, i) => {
+			effortLevels(m).forEach((e, i) => {
 				const y = this.listTop + rows.length;
 				const line = truncateToWidth(
-					`   ${e.padEnd(8)} ${effortMark(e) || " "}${e === m.effort ? gray("   its default") : ""}`,
+					e === null
+						? `   ${"default".padEnd(8)}   ${gray(`${harnessName(m.harness)}'s own`)}`
+						: `   ${e.padEnd(8)} ${effortMark(e) || " "}${e === m.effort ? gray("   its default") : ""}`,
 					width,
 					"…",
 					true,
@@ -1675,7 +1677,7 @@ export class SettingsPane {
 							...base,
 							kind: item.kind,
 							label: presetLabel(choice.preset),
-							value: `${choice.preset.harness}${choice.preset.provider ? `/${choice.preset.provider}` : ""} ${choice.preset.agent ? `agent ${choice.preset.agent}` : `${choice.preset.model} ${choice.preset.effort}`}`,
+							value: `${choice.preset.harness}${choice.preset.provider ? `/${choice.preset.provider}` : ""} ${choice.preset.agent ? `agent ${choice.preset.agent}` : [choice.preset.model, choice.preset.effort].filter(Boolean).join(" ")}`,
 							set: this.host.loaded().config.presets !== null,
 							default: choice.preset.default,
 							note: choice.note,

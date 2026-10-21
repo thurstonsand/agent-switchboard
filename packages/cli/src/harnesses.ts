@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { HARNESSES, type Harness, pidAlive, shortlistPath, stateDir } from "@swb/shared";
 import { harnessName } from "@swb/shared/mailbox";
 import { type Config, EFFORTS, type Effort, HARNESS_EFFORTS, loadConfig, type Preset } from "./config.ts";
@@ -54,26 +54,16 @@ export function searchMatch(m: Model, words: string[]): boolean {
 	return !m.superseded && words.every((w) => text.includes(w));
 }
 
-/** Medium adds nothing; each level away from it adds a step. */
+/** The efforts a preset of this model can start at: first, when its harness doesn't say what it defaults to, its default. */
+export function effortLevels(m: Model): (Effort | null)[] {
+	return m.effort === null && m.efforts.length > 0 ? [null, ...m.efforts] : m.efforts;
+}
+
+/** Medium adds nothing, nor does a harness's own default; each level away from medium adds a step. */
 export function effortMark(effort: Effort | null): string {
 	if (effort === null) return "";
 	return { off: "⁻³", minimal: "⁻²", low: "⁻¹", medium: "", high: "²", xhigh: "³", max: "⁴", ultra: "⁵" }[effort];
 }
-
-// Claude Code lists no models and describes none; these follow Codex's notes, tier for tier.
-const CLAUDE_ALIASES: { model: string; note: string; effort: Effort }[] = [
-	{ model: "opus", note: "Workhorse model for coding and everyday work.", effort: "medium" },
-	{ model: "fable", note: "Frontier intelligence for the most demanding work.", effort: "high" },
-	{ model: "sonnet", note: "Balanced model for straightforward work.", effort: "medium" },
-	{ model: "haiku", note: "Fast and affordable model for easier tasks.", effort: "medium" },
-	{ model: "opusplan", note: "Plans with Opus, then builds with Sonnet.", effort: "medium" },
-];
-const CLAUDE_AGENTS: { agent: string; note: string }[] = [
-	{ agent: "Explore", note: "Read-only agent for fast codebase search." },
-	{ agent: "Plan", note: "Read-only agent that researches before planning." },
-];
-/** Claude Code's default model, which it starts with no --model. */
-const CLAUDE_DEFAULT = "opus";
 
 /**
  * Runs a command the way sessions launch: through the login shell, interactive, so its PATH is theirs. In a session of
@@ -119,46 +109,107 @@ function readJson(path: string): Record<string, unknown> | null {
 	}
 }
 
-function claudeModels(): { models: Model[]; curated: Model[] } {
-	const dir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
-	const chosen = readJson(join(dir, "settings.json"))?.availableModels;
-	const entry = (model: string | null, agent: string | null, note: string, effort: Effort | null, group: string): Model => ({
-		harness: "claude",
-		provider: null,
-		model,
-		agent,
-		group,
-		note,
-		effort,
-		efforts: agent ? [] : HARNESS_EFFORTS.claude,
-		isDefault: agent === null && model === CLAUDE_DEFAULT,
-		superseded: false,
+/**
+ * Starts a harness's own server through the login shell, writes it `lines`, and returns the first line it writes back
+ * that `pick` takes. The server answers and then waits for more, so it's stopped once that line is in.
+ */
+async function serverReply<T>(command: string, lines: object[], pick: (message: Record<string, unknown>) => T | undefined): Promise<T> {
+	const proc = Bun.spawn([loginShell(), "-lic", command], {
+		cwd: homedir(),
+		detached: true,
+		stdin: "pipe",
+		stdout: "pipe",
+		stderr: "pipe",
 	});
-	const alias = (name: string) => {
-		const known = CLAUDE_ALIASES.find((a) => a.model === name);
-		return entry(name, null, known?.note ?? "", known?.effort ?? "medium", "aliases");
-	};
-	const curated =
-		Array.isArray(chosen) && chosen.length > 0 && chosen.every((m) => typeof m === "string")
-			? (chosen as string[]).map(alias)
-			: ["opus", "fable", "sonnet", "haiku"].map(alias);
-	const own = existsSync(join(dir, "agents"))
-		? readdirSync(join(dir, "agents"))
-				.filter((file) => file.endsWith(".md"))
-				.map((file) => {
-					const text = readFileSync(join(dir, "agents", file), "utf8");
-					const name = /^name:\s*(.+)$/m.exec(text)?.[1]?.trim() ?? basename(file, ".md");
-					const note = /^description:\s*(.+)$/m.exec(text)?.[1]?.trim() ?? "";
-					return entry(null, name, note, null, "agents");
-				})
-		: [];
-	const models = [
-		...CLAUDE_ALIASES.map((a) => alias(a.model)),
-		...curated.filter((m) => !CLAUDE_ALIASES.some((a) => a.model === m.model)),
-		...CLAUDE_AGENTS.map((a) => entry(null, a.agent, a.note, null, "agents")),
-		...own,
-	];
-	return { models, curated };
+	proc.stdin.write(`${lines.map((l) => JSON.stringify(l)).join("\n")}\n`);
+	proc.stdin.flush();
+	let reply: T | undefined;
+	const timer = setTimeout(() => proc.kill(), 30_000);
+	let buffered = "";
+	const decoder = new TextDecoder();
+	for await (const chunk of proc.stdout) {
+		buffered += decoder.decode(chunk, { stream: true });
+		reply = buffered
+			.split("\n")
+			.filter((line) => line.startsWith("{"))
+			.flatMap((line) => {
+				try {
+					return [JSON.parse(line) as Record<string, unknown>];
+				} catch {
+					return [];
+				}
+			})
+			.map(pick)
+			.find((r) => r !== undefined);
+		if (reply !== undefined) break;
+	}
+	clearTimeout(timer);
+	proc.kill();
+	if (reply === undefined) {
+		const err = (await new Response(proc.stderr).text()).trim();
+		throw new Error(`${command.replace(/^exec /, "")} gave no answer${err ? `: ${err.split("\n").at(-1)}` : ""}`);
+	}
+	return reply;
+}
+
+type ClaudeModel = {
+	value: string;
+	resolvedModel: string;
+	description: string;
+	supportsEffort?: boolean;
+	supportedEffortLevels?: string[];
+};
+type ClaudeInit = { models: ClaudeModel[]; agents: { name: string; description: string }[] };
+
+/**
+ * Claude Code's own list, from the initialize request its SDK makes: the models this account may use, its default
+ * among them, and its agents. Hooks and MCP servers stay off, so none of the user's run. It never says what effort a
+ * model runs at by default, so that's left to Claude Code.
+ */
+async function claudeModels(): Promise<Model[]> {
+	const reply = await serverReply(
+		`exec claude -p --input-format stream-json --output-format stream-json --verbose --settings '{"disableAllHooks":true}' --strict-mcp-config --no-session-persistence`,
+		[{ type: "control_request", request_id: "swb", request: { subtype: "initialize" } }],
+		(m) => (m.type === "control_response" ? (m.response as { response?: ClaudeInit; error?: string }) : undefined),
+	);
+	if (reply.error || !reply.response) throw new Error(`claude initialize: ${reply.error ?? "no response"}`);
+	const init = reply.response;
+	if (init.models.length === 0) throw new Error("claude listed no models");
+	const fallback = init.models.find((m) => m.value === "default")?.resolvedModel;
+	const models = init.models
+		.filter((m) => m.value !== "default")
+		.map(
+			(m, i, all): Model => ({
+				harness: "claude",
+				provider: null,
+				model: m.value,
+				agent: null,
+				group: "models",
+				note: m.description,
+				effort: null,
+				efforts:
+					m.supportsEffort === false
+						? []
+						: (m.supportedEffortLevels?.filter((e): e is Effort => EFFORTS.includes(e as Effort)) ?? HARNESS_EFFORTS.claude),
+				isDefault: all.findIndex((n) => n.resolvedModel === fallback) === i,
+				superseded: false,
+			}),
+		);
+	const agents = init.agents.map(
+		(a): Model => ({
+			harness: "claude",
+			provider: null,
+			model: null,
+			agent: a.name,
+			group: "agents",
+			note: a.description,
+			effort: null,
+			efforts: [],
+			isDefault: false,
+			superseded: false,
+		}),
+	);
+	return [...models, ...agents];
 }
 
 type CodexModel = {
@@ -190,45 +241,8 @@ async function codexModels(): Promise<Model[]> {
 		{ jsonrpc: "2.0", method: "initialized" },
 		{ jsonrpc: "2.0", id: 1, method: "model/list", params: {} },
 	];
-	const proc = Bun.spawn([loginShell(), "-lic", "exec codex app-server"], {
-		cwd: homedir(),
-		detached: true,
-		stdin: "pipe",
-		stdout: "pipe",
-		stderr: "pipe",
-	});
-	proc.stdin.write(`${lines.map((l) => JSON.stringify(l)).join("\n")}\n`);
-	proc.stdin.flush();
-	type Reply = { id?: number; result?: { data: CodexModel[] }; error?: { message: string } };
-	let reply: Reply | undefined;
-	const timer = setTimeout(() => proc.kill(), 30_000);
-	// The server answers and then waits for more, so it's stopped once the list is in.
-	let buffered = "";
-	const decoder = new TextDecoder();
-	for await (const chunk of proc.stdout) {
-		buffered += decoder.decode(chunk, { stream: true });
-		const done = buffered
-			.split("\n")
-			.filter((line) => line.startsWith("{"))
-			.flatMap((line) => {
-				try {
-					return [JSON.parse(line) as Reply];
-				} catch {
-					return [];
-				}
-			})
-			.find((m) => m.id === 1);
-		if (done) {
-			reply = done;
-			break;
-		}
-	}
-	clearTimeout(timer);
-	proc.kill();
-	if (!reply) {
-		const err = (await new Response(proc.stderr).text()).trim();
-		throw new Error(`codex app-server gave no model list${err ? `: ${err.split("\n").at(-1)}` : ""}`);
-	}
+	type Reply = { result?: { data: CodexModel[] }; error?: { message: string } };
+	const reply = await serverReply("exec codex app-server", lines, (m) => (m.id === 1 ? (m as Reply) : undefined));
 	if (reply.error || !reply.result) throw new Error(`codex model/list: ${reply.error?.message ?? "no result"}`);
 	return reply.result.data
 		.filter((m) => !m.hidden)
@@ -325,6 +339,11 @@ function listed(curated: Model[], catalog: Model[]): Model[] {
 	});
 }
 
+/** Claude Code's and Codex's own short lists are their models in their order, past the superseded ones. */
+function curated(models: Model[]): Model[] {
+	return models.filter((m) => m.agent === null && !m.superseded);
+}
+
 const catalogPath = () => join(stateDir(), "catalog.json");
 
 export function readCatalog(): Catalog | null {
@@ -390,20 +409,23 @@ export async function discover(
 	const asked = Date.now();
 	const statuses = await Promise.all(HARNESSES.map(detect));
 	const status = Object.fromEntries(HARNESSES.map((h, i) => [h, statuses[i]])) as Record<Harness, HarnessStatus>;
-	const claude = claudeModels();
-	// Claude Code's and pi's own lists are files; Codex's needs its server, so it stands as last found until then.
+	// pi's own list is a file; the model lists need their harnesses, so they stand as last found until then.
 	onStatus({
 		at: Date.now(),
 		status,
-		models: { claude: claude.models, pi: previous?.models.pi ?? [], codex: previous?.models.codex ?? [] },
-		curated: { claude: claude.curated, codex: previous?.curated.codex ?? [], pi: listed(piCurated(), previous?.models.pi ?? []) },
+		models: { claude: previous?.models.claude ?? [], pi: previous?.models.pi ?? [], codex: previous?.models.codex ?? [] },
+		curated: {
+			claude: curated(previous?.models.claude ?? []),
+			codex: curated(previous?.models.codex ?? []),
+			pi: listed(piCurated(), previous?.models.pi ?? []),
+		},
 		errors: { pi: null, claude: null, codex: null },
-		listedAt: { claude: asked, pi: previous?.listedAt.pi ?? 0, codex: previous?.listedAt.codex ?? 0 },
+		listedAt: { claude: previous?.listedAt.claude ?? 0, pi: previous?.listedAt.pi ?? 0, codex: previous?.listedAt.codex ?? 0 },
 	});
-	const lists: Record<Harness, Model[]> = { pi: [], claude: claude.models, codex: [] };
+	const lists: Record<Harness, Model[]> = { pi: [], claude: [], codex: [] };
 	const errors: Record<Harness, string | null> = { pi: null, claude: null, codex: null };
-	const listedAt: Record<Harness, number> = { pi: 0, claude: asked, codex: 0 };
-	const wanted = (["pi", "codex"] as const).filter((h) => status[h].problem === null);
+	const listedAt: Record<Harness, number> = { pi: 0, claude: 0, codex: 0 };
+	const wanted = HARNESSES.filter((h) => status[h].problem === null);
 	const usable = (c: Catalog | null, h: Harness, since: number) =>
 		c !== null && c.errors[h] === null && c.models[h].length > 0 && c.listedAt[h] >= since;
 	const kept = models ? null : previous;
@@ -420,7 +442,7 @@ export async function discover(
 				if (usable(latest, h, asked)) return take(latest as Catalog, h);
 				if (usable(kept, h, 0)) return take(kept as Catalog, h);
 				try {
-					lists[h] = h === "pi" ? await piModels() : await retried(codexModels);
+					lists[h] = h === "pi" ? await piModels() : h === "claude" ? await claudeModels() : await retried(codexModels);
 					listedAt[h] = Date.now();
 				} catch (error) {
 					errors[h] = (error as Error).message;
@@ -431,7 +453,7 @@ export async function discover(
 			at: Date.now(),
 			status,
 			models: lists,
-			curated: { claude: claude.curated, codex: lists.codex.filter((m) => !m.superseded), pi: listed(piCurated(), lists.pi) },
+			curated: { claude: curated(lists.claude), codex: curated(lists.codex), pi: listed(piCurated(), lists.pi) },
 			errors,
 			listedAt,
 		};
@@ -515,7 +537,7 @@ export function shortlist(config: Config, catalog: Catalog | null): Choice[] | n
 	return out;
 }
 
-/** A written preset whose model its harness no longer lists. Claude Code lists none, so its are never missing. */
+/** A written preset whose model its harness no longer lists. Claude Code takes full ids it doesn't list, so its are never missing. */
 function missing(catalog: Catalog | null, preset: Preset): string | null {
 	if (!catalog || preset.harness === "claude" || catalog.errors[preset.harness] !== null) return null;
 	const listed = catalog.models[preset.harness];
@@ -563,7 +585,7 @@ export function presetLabels(presets: Preset[]): string[] {
 function presetLine(c: Choice): string {
 	const p = c.preset;
 	const fields = p.agent ? [p.harness, `agent ${p.agent}`] : [p.harness, p.provider ? `${p.provider}/${p.model}` : p.model, p.effort];
-	return `- ${fields.join(", ")}${c.note ? `: ${c.note}` : ""}`;
+	return `- ${fields.filter(Boolean).join(", ")}${c.note ? `: ${c.note}` : ""}`;
 }
 
 /** The shortlist as agents read it in session_launch's description, written for every line to pick up. */
