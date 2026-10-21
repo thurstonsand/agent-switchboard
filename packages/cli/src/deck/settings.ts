@@ -712,12 +712,17 @@ export class SettingsPane {
 		const q = adding.query.getValue().trim().toLowerCase();
 		const words = q.split(/\s+/).filter(Boolean);
 		const rows: AddRow[] = [];
+		const typed = adding.query.getValue().trim();
+		// What's typed is offered as a model id only once no listed model matches it.
+		const unlisted =
+			typed !== "" &&
+			!/\s/.test(typed) &&
+			!HARNESSES.some((h) => enabled.includes(h) && (catalog?.models[h] ?? []).some((m) => searchMatch(m, words)));
 		for (const harness of HARNESSES) {
 			if (!enabled.includes(harness)) continue;
 			const models = (catalog?.models[harness] ?? []).filter((m) => searchMatch(m, words));
-			const typed = adding.query.getValue().trim();
 			const custom: Model[] = [];
-			if (typed !== "" && !/\s/.test(typed) && !models.some((m) => m.model === typed || `${m.provider}/${m.model}` === typed)) {
+			if (unlisted) {
 				const [provider, model] =
 					harness === "pi" && typed.includes("/") ? [typed.split("/")[0] as string, typed.slice(typed.indexOf("/") + 1)] : [null, typed];
 				if (harness !== "pi" || provider)

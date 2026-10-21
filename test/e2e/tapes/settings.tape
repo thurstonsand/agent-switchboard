@@ -39,6 +39,11 @@ Wait+Screen /read-only search agent/
 Sleep 1.5s
 Screenshot ../artifacts/phase6/videos/settings-add.png
 Ctrl+U
+Type "opus[1m]"
+Wait+Screen /as a model id/
+Sleep 1.2s
+Screenshot ../artifacts/phase6/videos/settings-add-unlisted.png
+Ctrl+U
 Type "opus everyday"
 Wait+Screen /everyday/
 Sleep 800ms
