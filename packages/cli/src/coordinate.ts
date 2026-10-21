@@ -6,7 +6,7 @@ import type { ToolArgs, ToolResult } from "@swb/shared/tools";
 import { CodexClient } from "./codex/client.ts";
 import { codexSocket } from "./codex/host.ts";
 import { deckShowing, postCommand } from "./deck/deck.ts";
-import { type InUse, inUse } from "./deck/transcript.ts";
+import { inUse } from "./deck/transcript.ts";
 import { displayName, openDescendants, projectName, type SessionState, sessionState, states } from "./derive.ts";
 import { SwbError } from "./errors.ts";
 import { type Caller, launchFlags, presetLaunch } from "./harnesses.ts";
@@ -119,8 +119,6 @@ export type Launch = {
 	model: string | null;
 	/** The schedule that launches it, and when that was due, which its goal's frame says. */
 	scheduled: { id: string; at: number } | null;
-	/** What `from` runs now, from a line that knows it before its transcript does; null to read its transcript. */
-	running: InUse | null;
 };
 
 /** Starts a new managed session whose first turn is the goal, and waits until its harness has registered it. */
@@ -134,7 +132,7 @@ export async function launchSession(db: Db, l: Launch): Promise<ToolResult> {
 	if (l.from && dir === operatorDir() && sessionState(db, l.from).operator)
 		throw new SwbError("an Operator can't start another Operator; name a project's directory as cwd");
 	const asked = l.harness !== null || l.model !== null || l.effort !== null || l.agent !== null;
-	const caller = !asked && l.from ? callerOf(db, l.from, l.running) : null;
+	const caller = !asked && l.from ? callerOf(db, l.from) : null;
 	const target = await presetLaunch({ harness: l.harness, model: l.model, effort: l.effort, agent: l.agent }, caller);
 	const harness = target.harness;
 	// pi and Claude Code take an id up front; Codex mints its own, which its host reports once it binds.
@@ -176,11 +174,13 @@ export async function launchSession(db: Db, l: Launch): Promise<ToolResult> {
 	return { text, details: { id, harness, host, cwd: dir } };
 }
 
-function callerOf(db: Db, id: string, running: InUse | null): Caller {
-	const row = db.get("SELECT harness, transcript FROM sessions WHERE session_id = ?", id);
+/** What a session runs on now: Claude Code's as its line recorded its last request, pi's and Codex's from their transcripts. */
+function callerOf(db: Db, id: string): Caller {
+	const row = db.get("SELECT harness, transcript, model, effort FROM sessions WHERE session_id = ?", id);
 	if (!row) throw new SwbError(`no session ${id}`);
 	const harness = row.harness as Harness;
-	return { harness, ...(running ?? inUse(row.transcript as string, harness)) };
+	if (harness === "claude") return { harness, model: row.model as string | null, effort: row.effort as string | null };
+	return { harness, ...inUse(row.transcript as string, harness) };
 }
 
 async function registered(db: Db, host: string, timeoutMs: number): Promise<string> {

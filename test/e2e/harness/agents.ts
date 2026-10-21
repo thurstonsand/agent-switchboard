@@ -7,22 +7,37 @@ export const ready = 60_000;
 /** Starts a session in a harness the way session_launch does, and returns its row once its first turn has settled. */
 export async function launched(
 	s: Scenario,
-	harness: "pi" | "claude" | "codex",
+	harness: "pi" | "claude" | "codex" | null,
 	goal: string,
 	from?: string,
 	flags: string[] = [],
 ): Promise<LsEntry> {
 	const out = JSON.parse(
-		await Bun.spawn([`${s.bin}/swb`, "launch", "--harness", harness, ...flags, "--cwd", s.project, ...(from ? ["--from", from] : [])], {
-			env: s.env,
-			cwd: s.project,
-			stdin: new Blob([goal]),
-			stdout: "pipe",
-			stderr: "inherit",
-		}).stdout.text(),
+		await Bun.spawn(
+			[
+				`${s.bin}/swb`,
+				"launch",
+				...(harness ? ["--harness", harness] : []),
+				...flags,
+				"--cwd",
+				s.project,
+				...(from ? ["--from", from] : []),
+			],
+			{
+				env: s.env,
+				cwd: s.project,
+				stdin: new Blob([goal]),
+				stdout: "pipe",
+				stderr: "inherit",
+			},
+		).stdout.text(),
 	) as { details: { id: string } };
 	const id = out.details.id;
-	return until(() => s.ls().find((e) => e.id === id && e.activity === "idle"), ready, `the ${harness} session's first turn to settle`);
+	return until(
+		() => s.ls().find((e) => e.id === id && e.activity === "idle"),
+		ready,
+		`the ${harness ?? "carried"} session's first turn to settle`,
+	);
 }
 
 /** Sends a message the way session_send_message does, from a session, and returns swb's receipt. */

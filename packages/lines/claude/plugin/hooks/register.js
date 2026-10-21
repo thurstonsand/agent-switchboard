@@ -23,9 +23,8 @@ const line = {
 	pending: [],
 	/** A title set through swb, { target, title }, that Claude Code takes as its own with the next prompt. */
 	title: null,
-	/** The model and effort of this session's latest model request, which its transcript only has once the turn ends. */
-	model: "",
-	effort: "",
+	/** The model and effort of this session's last model request recorded, so only a change is recorded again. */
+	request: "",
 	/** The last record in flight; each waits for the one before, so swb sees them in order. */
 	recording: Promise.resolve(""),
 };
@@ -150,6 +149,8 @@ async function useTool($, name, e) {
 	// The caller is whoever Claude Code says this session is now, never a value cached from an event that can be missed.
 	const self = await $.session.id();
 	const from = ["--from", self];
+	// A launch carries forward the model and effort this session runs on, which swb reads from its records.
+	if (name === "session_launch" || name === "session_schedule") await line.recording;
 	switch (name) {
 		case "session_reachable":
 			return swb($, ["reachable", ...from]);
@@ -168,8 +169,6 @@ async function useTool($, name, e) {
 					"launch",
 					...from,
 					...["harness", "model", "effort", "agent"].flatMap((k) => (e[k] ? [`--${k}`, e[k]] : [])),
-					...(line.model ? ["--from-model", line.model] : []),
-					...(line.effort ? ["--from-effort", line.effort] : []),
 					"--cwd",
 					e.cwd ?? line.cwd,
 					"--title",
@@ -253,6 +252,7 @@ async function follow($, start) {
 		line.transcript = "";
 		line.busy = false;
 		line.blocked = false;
+		line.request = "";
 	}
 	if (start?.transcript_path) line.transcript = start.transcript_path;
 }
@@ -352,10 +352,15 @@ export function register(on) {
 	});
 
 	// A model request means the permission prompt was answered.
+	// Its transcript records the model of each turn but never the effort, so the line records both as each request goes out.
+	// An effort given as a number of tokens isn't a level, and is recorded as none.
 	on("turn.step", async function* ($, e, next) {
-		if (!e.agentId) {
-			line.model = e.model ?? "";
-			line.effort = e.effort ?? "";
+		if (line.managed && !e.agentId && e.model) {
+			const effort = typeof e.effort === "string" ? e.effort : "";
+			if (`${e.model}\t${effort}` !== line.request) {
+				line.request = `${e.model}\t${effort}`;
+				void record($, ["request", "--session", line.session, "--model", e.model, ...(effort ? ["--effort", effort] : [])]);
+			}
 		}
 		if (line.managed && !e.agentId && line.blocked) {
 			line.blocked = false;

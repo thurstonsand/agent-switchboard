@@ -176,15 +176,8 @@ test("session_launch with no preset carries the caller's harness and model forwa
 			.join("\n"),
 	);
 	const call = (title: string) => `call session_launch {"goal":"reply ${title}","title":"${title}","requestResponse":false}`;
-	/** The model a Claude Code session's turn runs on, as its transcript opens the turn with it. */
-	const claudeModel = (id: string) => {
-		const [row] = s.query<{ transcript: string }>("select transcript from sessions where session_id = ?", id);
-		return readFileSync(row?.transcript as string, "utf8")
-			.split("\n")
-			.filter(Boolean)
-			.map((line) => JSON.parse(line) as { attachment?: { type?: string; identity?: { modelId?: string } } })
-			.findLast((e) => e.attachment?.type === "model")?.attachment?.identity?.modelId;
-	};
+	/** The model of a Claude Code session's latest request, as its line saw it go out. */
+	const claudeModel = (id: string) => s.query<{ model: string }>("select model from sessions where session_id = ?", id)[0]?.model;
 	const child = (parent: string, title: string) =>
 		until(() => s.ls().find((e) => e.parentId === parent && e.title === title && e.activity === "idle"), ready, `${title} launched`);
 
@@ -196,4 +189,45 @@ test("session_launch with no preset carries the caller's harness and model forwa
 	const carried = await child(opus.id, "from opus");
 	expect(carried.harness).toBe("claude");
 	expect(claudeModel(carried.id)).toContain("opus");
+});
+
+test("a Claude Code session's effort carries into what it launches, live or dormant, and survives a wake", async () => {
+	s = scenario("harnesses", "claude-effort", { packages: [], recorder: true, harnesses: ["claude"] });
+	config(
+		s,
+		[
+			["sonnet", "medium", "default = true"],
+			["opus", "medium", ""],
+			["opus", "high", ""],
+		]
+			.map(([model, effort, extra]) => `[[presets]]\nharness = "claude"\nmodel = "${model}"\neffort = "${effort}"\n${extra}\n`)
+			.join("\n"),
+	);
+	/** The model and effort of a session's latest request, as its line saw it go out. */
+	const runs = (id: string) => s.query<{ model: string; effort: string }>("select model, effort from sessions where session_id = ?", id)[0];
+	const call = (title: string) => `call session_launch {"goal":"reply ${title}","title":"${title}","requestResponse":false}`;
+
+	const opus = await launched(s, "claude", call("live"), undefined, ["--model", "opus", "--effort", "high"]);
+	expect(runs(opus.id)).toEqual({ model: expect.stringContaining("opus"), effort: "high" });
+	const live = await until(
+		() => s.ls().find((e) => e.parentId === opus.id && e.title === "live" && e.activity === "idle"),
+		ready,
+		"the live caller's launch",
+	);
+	expect(runs(live.id)).toEqual({ model: expect.stringContaining("opus"), effort: "high" });
+
+	s.swb("quit");
+	await until(() => s.ls().every((e) => !e.live), 30_000, "every session to stop");
+	const dormant = await launched(s, null, "reply dormant", opus.id);
+	expect(runs(dormant.id)).toEqual({ model: expect.stringContaining("opus"), effort: "high" });
+
+	expect((await send(s, dormant.id, opus.id, "reply woken")).text).toBeTruthy();
+	await until(
+		() =>
+			s.requests("claude").some((r) => String(r.prompt).includes("reply woken")) &&
+			s.ls().find((e) => e.id === opus.id && e.live && e.activity === "idle"),
+		ready,
+		"the woken caller's turn",
+	);
+	expect(runs(opus.id)).toEqual({ model: expect.stringContaining("opus"), effort: "high" });
 });

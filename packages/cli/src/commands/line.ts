@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { pidAlive } from "@swb/shared";
 import { frame, listen, markDelivered, markOffered, pendingFor, sender } from "@swb/shared/mailbox";
-import { endHosting, pendingTitle, recordTx, setPhase, settle, startHosting, startTurn, turnErrored } from "@swb/shared/record";
+import { endHosting, pendingTitle, recordTx, sawRequest, setPhase, settle, startHosting, startTurn, turnErrored } from "@swb/shared/record";
 import { claudeTitle } from "../deck/transcript.ts";
 import { UsageError } from "../errors.ts";
 import { openStore } from "../store.ts";
@@ -43,6 +43,8 @@ export function record(args: string[]): void {
 			cwd: { type: "string" },
 			transcript: { type: "string" },
 			parent: { type: "string" },
+			model: { type: "string" },
+			effort: { type: "string" },
 		},
 		allowPositionals: true,
 	});
@@ -91,6 +93,11 @@ export function record(args: string[]): void {
 			// Quiet, since a failed run-shell draws its status over some other session's harness.
 			if (archived) tmuxTry(SESSIONS, "run-shell", "-b", `kill -TERM ${panePid(host)} 2>/dev/null || :`);
 			console.log(JSON.stringify({ archived }));
+			return;
+		}
+		case "request": {
+			if (!values.model) throw new UsageError("__record request: --model is required");
+			sawRequest(db, need("session"), values.model, values.effort ?? null);
 			return;
 		}
 		case "errored":

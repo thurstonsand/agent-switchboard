@@ -42,8 +42,7 @@ const USAGE = `swb: Agent Switchboard
                                hide a session in Snoozed until then, or its next message; TIME is ISO 8601, local unless it has an offset
   swb quit [--force]           stop every session, Deck, and the clock; sessions stay open, dormant
   swb wake ID                  start a dormant session in the background
-  swb launch [--harness H] [--model M] [--effort E] [--agent A] [--cwd DIR] [--from ID [--from-model M] [--from-effort E]]
-             [--title T] [--request-response]
+  swb launch [--harness H] [--model M] [--effort E] [--agent A] [--cwd DIR] [--from ID] [--title T] [--request-response]
                                start a new session in the background on the shortlist's preset matching those; naming none, the
                                preset nearest what --from runs now, else the default; its goal on stdin
   swb send --from ID --to ID [--request-response] [--request-id KEY] [--cancel]

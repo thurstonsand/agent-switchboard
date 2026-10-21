@@ -46,7 +46,6 @@ async function call(name: ToolName, args: unknown, from: string, callId: string 
 				title: a.title,
 				requestResponse: a.requestResponse,
 				scheduled: null,
-				running: null,
 			});
 		}
 		case "session_schedule": {

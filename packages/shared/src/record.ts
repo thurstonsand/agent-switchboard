@@ -109,6 +109,18 @@ export function startTurn(db: Db, t: Turn): void {
 	});
 }
 
+/**
+ * The model and effort of a session's latest model request, as its line saw it go out; effort is null when the request
+ * named none. Claude Code's line records these, since its transcript has no effort; pi and Codex keep both in theirs.
+ */
+export function sawRequest(db: Db, sessionId: string, model: string, effort: string | null): void {
+	recordTx(db, () => {
+		if (!db.get("SELECT 1 FROM sessions WHERE session_id = ?", sessionId))
+			throw new Error(`no session ${sessionId} to record a request on`);
+		db.run("UPDATE sessions SET model = ?, effort = ? WHERE session_id = ?", model, effort, sessionId);
+	});
+}
+
 /** Blocked on the person, or back to working; never reopens an idle session. */
 export function setPhase(db: Db, sessionId: string, phase: "working" | "blocked"): void {
 	recordTx(db, () => db.run("UPDATE sessions SET phase = ? WHERE session_id = ? AND phase != 'idle'", phase, sessionId));

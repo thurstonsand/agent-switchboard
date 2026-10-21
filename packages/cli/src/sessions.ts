@@ -3,7 +3,7 @@ import { basename, join } from "node:path";
 import { bootId, type Db, dbPath, type Harness, operatorDir, projectRoot, stateDir } from "@swb/shared";
 import { isArchived, markArchived } from "@swb/shared/record";
 import { now, since } from "@swb/shared/trace";
-import type { Effort } from "./config.ts";
+import { type Effort, HARNESS_EFFORTS } from "./config.ts";
 import { archivedInCodex } from "./deck/transcript.ts";
 import { type RuntimeRow, runtimeLive } from "./derive.ts";
 import { SwbError } from "./errors.ts";
@@ -547,16 +547,20 @@ export function wake(db: Db, id: string, continueTurn: boolean): string {
 		const recorded = new Set(db.all("SELECT tmux_session FROM runtimes").map((row) => row.tmux_session as string));
 		const inFlight = hosts.find(([name, kind, launchId]) => kind === "pi" && launchId === id && !recorded.has(name as string));
 		if (inFlight) return inFlight[0] as string;
-		const session = db.get("SELECT cwd, project_root, harness, transcript, phase FROM sessions WHERE session_id = ?", id);
+		const session = db.get("SELECT cwd, project_root, harness, transcript, phase, effort FROM sessions WHERE session_id = ?", id);
 		if (!session) throw new SwbError(`no session ${id}`);
 		// tmux starts a missing directory in $HOME, away from the session's Project.
 		const cwd = existsSync(session.cwd as string) ? (session.cwd as string) : (session.project_root as string);
 		// Not live, so a phase other than idle means its process died mid-turn.
 		const cutOff = session.phase !== "idle" && !isArchived(db, id);
+		const harness = session.harness as Harness;
+		// Claude Code resumes on its last model but its own default effort, so the effort its line last saw goes back in.
+		const effort = harness === "claude" ? (session.effort as Effort | null) : null;
 		return launch({
-			harness: session.harness as Harness,
+			harness,
 			cwd,
 			resume: { id, transcript: session.transcript as string, continueTurn: continueTurn && cutOff },
+			...(effort && HARNESS_EFFORTS.claude.includes(effort) ? { effort } : {}),
 		});
 	});
 }

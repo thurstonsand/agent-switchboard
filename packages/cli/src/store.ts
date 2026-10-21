@@ -113,7 +113,9 @@ const MIGRATIONS: string[] = [
 	INSERT INTO marks_v6 (session_id, archived_at, visited_at, view, group_name)
 		SELECT session_id, archived_at, visited_at, CASE view WHEN 'pi' THEN 'agent' ELSE view END, group_name FROM marks;
 	DROP TABLE marks;
-	ALTER TABLE marks_v6 RENAME TO marks;`,
+	ALTER TABLE marks_v6 RENAME TO marks;
+	ALTER TABLE sessions ADD COLUMN model TEXT;
+	ALTER TABLE sessions ADD COLUMN effort TEXT;`,
 ];
 
 if (MIGRATIONS.length !== SCHEMA_VERSION) throw new Error(`${MIGRATIONS.length} migrations for schema v${SCHEMA_VERSION}`);
