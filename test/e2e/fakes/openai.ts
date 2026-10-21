@@ -4,10 +4,11 @@
 //   call <tool> <json>   call the tool whose name ends in <tool> with <json>, then answer "tool done"
 //   run <command>        run <command> through the shell, then answer "ran <command>"
 //   fail <text>          fail the request with a 400, which isn't retried
+//   hold-compact <name>  the next /compact signals <name>.entered and waits for <name>.release before it summarizes
 // A message from another session (it starts "Message from session") is answered "got <its last line>".
 // Every request is appended to $FAKE_LOG as one JSON line: the user texts it saw, the tools it was offered, and its
 // whole input, instructions included.
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync, writeFileSync } from "node:fs";
 import { agentStep, titleOf } from "./agent.ts";
 
 const port = Number(process.env.FAKE_PORT ?? 0);
@@ -73,6 +74,13 @@ const server = Bun.serve({
 		const answering = last?.type === "message";
 		let output: object;
 		const [verb, ...rest] = prompt.split(" ");
+		const compactHold = prompt.startsWith("You are performing a CONTEXT CHECKPOINT COMPACTION")
+			? texts.map((text) => /^hold-compact (\S+)/.exec(text)?.[1]).find(Boolean)
+			: undefined;
+		if (compactHold) {
+			writeFileSync(`${signals}/${compactHold}.entered`, "entered\n");
+			while (!existsSync(`${signals}/${compactHold}.release`)) await Bun.sleep(100);
+		}
 		if (verb === "fail")
 			return Response.json(
 				{ error: { type: "invalid_request_error", code: null, param: null, message: `invalid request: ${rest.join(" ")}` } },

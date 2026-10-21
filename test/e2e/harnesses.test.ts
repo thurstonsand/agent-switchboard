@@ -287,6 +287,20 @@ test("pi, Claude Code, and Codex message each other: idle sessions start a turn,
 	s.save("mid-turn.txt", [pane(pi.id), pane(claude.id), pane(codex.id)].join("\n=====\n"));
 });
 
+test("a message Codex refuses mid-compaction is delivered once the compaction ends, with nothing else written", async () => {
+	s = scenario("harnesses", "codex-compact", { packages: [], recorder: true, harnesses: ["codex"] });
+	const [pi, codex] = await Promise.all([launched("pi", "reply pi-up"), launched("codex", "hold-compact k1")]);
+	type(codex.id, "/compact");
+	await until(() => s.signal("k1.entered") !== "", ready, "Codex compacting");
+	// A compact turn can't be steered, so this turn/start fails; the next poll has no new db write to wake it.
+	const sent = send(pi.id, codex.id, "SWB-after-compact please ack");
+	await Bun.sleep(2000);
+	release(s, "k1");
+	expect((await sent).details.delivered).toBe(true);
+	await until(() => pane(codex.id).includes("got SWB-after-compact please ack"), budgets.settle, "Codex answering after the compaction");
+	s.save("compact.txt", pane(codex.id));
+});
+
 test("swb adopt tracks Claude Code and Codex sessions run outside swb, and wakes each on its own conversation", async () => {
 	s = scenario("harnesses", "adopt", { packages: [], recorder: true, harnesses: ["claude", "codex"] });
 	const outside = (argv: string[]) => {

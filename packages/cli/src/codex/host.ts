@@ -370,7 +370,6 @@ class CodexLine {
 		if (!thread) return;
 		const version = this.db.dataVersion();
 		if (version === this.seenVersion) return;
-		this.seenVersion = version;
 		for (const m of pendingFor(this.db, thread.id)) {
 			if (m.kind === "cancel") {
 				// Only the TUI is subscribed to its turns, so the running one is looked up.
@@ -389,6 +388,8 @@ class CodexLine {
 		// A title set through swb becomes the thread's own name, which thread/name/updated records back.
 		const title = pendingTitle(this.db, thread.id);
 		if (title !== null && title !== thread.name) await this.client.request("thread/name/set", { threadId: thread.id, name: title });
+		// Seen only once all of it went through: a turn/start Codex refuses, as mid-compaction, retries on the next poll instead of waiting for another write.
+		this.seenVersion = version;
 	}
 
 	end(): void {

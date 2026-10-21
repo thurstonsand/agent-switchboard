@@ -48,6 +48,7 @@ Schema v6: update swb and the pi line together.
 - On tmux 3.8, a pi on the Stage stayed tuned to your terminal's old theme after it switched between light and dark: a light screen with your messages in dark boxes. It follows the switch again, in copy mode too, and every session sees your terminal's foreground and palette along with its background. With several Decks open, the one you use last sets the colours.
 - A Deck stopping an idle session sends it one SIGTERM, then SIGKILL if it's still running 10 seconds later, instead of a SIGTERM every 250 ms until it exits. A late one no longer draws `'kill -TERM <pid>' returned 1` over another session.
 - A Codex session's app-server and the tools it's running end with its host, however the host ends, instead of finishing the turn alone with nothing left to show it. An app-server that dies ends its session as cut off, killed, instead of leaving its TUI reconnecting forever.
+- A message Codex refused, such as one that arrived during `/compact`, waited for some unrelated write to the db before swb tried it again. It goes through once Codex takes it.
 - A card no longer shows Claude Code's `[Request interrupted by user]` as something you typed, or its `API Error: …` as a reply.
 
 ## 0.6.4 — 2026-10-16
