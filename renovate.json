@@ -1,6 +1,9 @@
 {
 	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
-	"extends": ["config:recommended", "security:minimumReleaseAgeNpm"],
+	"extends": ["config:recommended"],
+	"minimumReleaseAge": "3 days",
+	"internalChecksFilter": "strict",
+	"ignorePaths": ["docs/wayfinding/**"],
 	"packageRules": [
 		{
 			"description": "The harnesses swb runs. Each takes its latest release as soon as it ships, so swb meets a new harness before its users do; everything else keeps the release-age gate.",
@@ -22,6 +25,12 @@
 		{
 			"description": "Pinned to the version pi ships. Pi's extension loader aliases typebox to its own bundled copy, so our declaration only types what pi executes and must match it. It moves when pi moves, not on Renovate's schedule.",
 			"matchPackageNames": ["typebox"],
+			"enabled": false
+		},
+		{
+			"description": "conda-forge has no lookup Renovate can resolve for these, so every run fails on them. mise pins them by hand.",
+			"matchDatasources": ["conda"],
+			"matchPackageNames": ["ttyd", "ffmpeg"],
 			"enabled": false
 		}
 	]
