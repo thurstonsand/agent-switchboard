@@ -1,22 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import {
-	config,
-	cursorTo,
-	entry,
-	launched,
-	launchTry,
-	piSessions,
-	reply,
-	rowIndex,
-	seed,
-	sessionRows,
-	state,
-	title,
-	waitState,
-} from "./harness/deck.ts";
-import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
+import { config, cursorTo, entry, reply, seed, sessionRows, state, waitState } from "./harness/deck.ts";
+import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
+import { liveSession } from "./harness/lifecycle.ts";
 
 let s: Scenario;
 afterEach(async () => {
@@ -28,22 +15,11 @@ afterEach(async () => {
 	await s.cleanup();
 });
 
-const TURN_RUNNING = "turn running: wait for it to complete";
 const rowState = (id: string) => sessionRows(state(s)).find((r) => r.id === id)?.state;
-
-/** A new session on the Stage, keyboard on pi, one turn in. */
-async function liveSession(turn: string): Promise<{ id: string; host: string }> {
-	s.swb("drive", "start", "--", "new");
-	const st = await waitState(s, "the new pi live with the keyboard", (x) => x.staged.kind === "live" && x.focus === "stage");
-	await reply(s, turn);
-	const id = st.staged.id as string;
-	await until(() => entry(s, id)?.activity === "idle", budgets.settle, "idle");
-	return { id, host: st.staged.host as string };
-}
 
 test("a finished turn is Unseen while the Deck's terminal is unfocused, and a focused second on the Stage clears it", async () => {
 	s = scenario("phase3", "unseen");
-	const { id } = await liveSession("first");
+	const { id } = await liveSession(s, "first");
 	await until(() => !entry(s, id).unseen, 3000, "the first turn seen on the focused Stage");
 	s.swb("drive", "focus", "out");
 	await waitState(s, "terminal unfocused", (x) => !x.terminalFocused);
@@ -57,37 +33,6 @@ test("a finished turn is Unseen while the Deck's terminal is unfocused, and a fo
 	await until(() => !entry(s, id).unseen, 3000, "visited once focused");
 	expect(rowState(id)).toBe("idle");
 	s.save("focused-seen.txt", s.screen());
-});
-
-test("archive is refused mid-turn from the roster, the CLI, and pi; once idle, swb archive kills the pi", async () => {
-	s = scenario("phase3", "archive-refused");
-	const { id, host } = await liveSession("ready");
-	s.keys("-l", "hold h1", "Enter");
-	await until(() => s.signal("h1.entered") !== "", budgets.settle, "the held turn");
-	await until(() => entry(s, id).activity === "working", budgets.settle, "working");
-
-	const cli = s.swbTry("archive", id);
-	expect(cli.code).toBe(1);
-	expect(cli.err.trim()).toBe(`swb: ${TURN_RUNNING}`);
-
-	s.keys("-l", "/archive", "Enter");
-	await until(() => s.screen().includes(TURN_RUNNING), budgets.settle, "pi's refusal");
-	s.save("pi-refused.txt", s.screen());
-
-	s.keys("M-a", "h");
-	await waitState(s, "roster focus", (x) => x.focus === "roster");
-	s.keys("a");
-	const refused = await waitState(s, "the roster's refusal", (x) => x.toasts.some((t) => t.text === TURN_RUNNING));
-	expect(refused.toasts).toContainEqual({ text: TURN_RUNNING, level: "error" });
-	s.save("roster-refused.txt", s.screen());
-	expect(entry(s, id)).toMatchObject({ open: true, live: true, activity: "working" });
-
-	release(s, "h1");
-	await until(() => entry(s, id).activity === "idle", budgets.settle, "idle");
-	s.swb("archive", id);
-	expect(entry(s, id)).toMatchObject({ open: false, live: false });
-	await until(() => !piSessions(s).includes(host), budgets.settle, "pi killed");
-	s.save("archived.txt", `${s.screen()}\n${JSON.stringify(s.ls(), null, 2)}`);
 });
 
 test("a first turn started by a custom message, as a handoff child's is, is tracked; killed mid-turn it is Interrupted", async () => {
@@ -107,223 +52,6 @@ test("a first turn started by a custom message, as a handoff child's is, is trac
 	// The same process left behind by an earlier boot went with the machine.
 	s.query("UPDATE runtimes SET boot_id = 'an-earlier-boot' WHERE session_id = ?", id);
 	expect(entry(s, id).cutOff).toBe("restart");
-});
-
-test("swb_update_session archives from inside a turn, and pi quits only once the turn's final message lands", async () => {
-	s = scenario("phase3", "archive-tool");
-	const { id, host } = await liveSession("ready");
-	s.keys("-l", "archive now", "Enter");
-	await until(() => !piSessions(s).includes(host), budgets.settle, "pi quit");
-	expect(entry(s, id)).toMatchObject({ open: false, live: false, cutOff: null });
-	const { transcript } = s.query("SELECT transcript FROM sessions WHERE session_id = ?", id)[0] as { transcript: string };
-	expect(readFileSync(transcript, "utf8")).toContain("tool done now");
-	expect(s.query("SELECT tmux_session FROM runtimes")).toHaveLength(0);
-	s.save("archived-by-tool.txt", `${s.screen()}\n${JSON.stringify(s.ls(), null, 2)}`);
-});
-
-test("a provider retry inside the archiving turn does not reopen the session", async () => {
-	s = scenario("phase3", "archive-retry");
-	const { id, host } = await liveSession("ready");
-	s.keys("-l", "archive flaky", "Enter");
-	await until(() => !piSessions(s).includes(host), budgets.settle, "pi quit");
-	expect(existsSync(join(s.env.HOME as string, "e2e-signals", "flaky.failed"))).toBe(true);
-	expect(entry(s, id)).toMatchObject({ open: false, live: false, cutOff: null });
-	const { transcript } = s.query("SELECT transcript FROM sessions WHERE session_id = ?", id)[0] as { transcript: string };
-	expect(readFileSync(transcript, "utf8")).toContain("tool done flaky");
-	s.save("archived-through-retry.txt", `${s.screen()}\n${JSON.stringify(s.ls(), null, 2)}`);
-});
-
-test("a archives an idle live session and kills its pi; a on an Archived row leaves it dormant and open; the cursor stays put", async () => {
-	s = scenario("phase3", "archive-toggle");
-	const [a, b, , d] = (await seed(s, { turns: ["a"] }, { turns: ["b"] }, { turns: ["c"] }, { turns: ["d"] })) as [
-		string,
-		string,
-		string,
-		string,
-	];
-	s.swb("archive", d);
-	s.swb("drive", "start");
-	await cursorTo(s, b);
-	s.keys("w");
-	const up = await waitState(s, "b live", (x) => x.staged.id === b && x.staged.kind === "live", budgets.piReady);
-	const at = rowIndex(up, b);
-	s.keys("a");
-	const after = await waitState(s, "b archived", (x) => rowIndex(x, b) === -1);
-	expect(rowIndex(after, after.cursor as string)).toBe(at);
-	expect(after.cursor).toBe(a);
-	await until(() => !piSessions(s).includes(up.staged.host as string), budgets.settle, "b's pi killed");
-	expect(entry(s, b)).toMatchObject({ open: false, live: false });
-	s.save("archived-b.txt", s.screen());
-
-	s.keys("G", "Enter");
-	await waitState(s, "Archived expanded", (x) => x.rows.some((r) => r.kind === "section" && r.label === "Archived" && r.expanded));
-	await cursorTo(s, d);
-	const onD = await waitState(s, "archived d on the Stage", (x) => x.cursor === d && x.staged.kind === "dormant");
-	await until(() => s.screen().includes("a unarchive"), budgets.settle, "the archived legend");
-	s.save("archived-card.txt", s.screen());
-	const archivedAt = rowIndex(onD, d);
-	s.keys("a");
-	await until(() => entry(s, d).open, budgets.settle, "d open again");
-	const reopened = await waitState(s, "d back among the open", (x) => rowIndex(x, d) < archivedAt && x.cursor === b);
-	expect(rowIndex(reopened, b)).toBe(archivedAt);
-	expect(entry(s, d)).toMatchObject({ open: true, live: false });
-	expect(piSessions(s)).toHaveLength(0);
-	s.save("unarchived-d.txt", s.screen());
-});
-
-test("/archive archives and quits; before the first prompt it refuses", async () => {
-	s = scenario("phase3", "pi-archive");
-	s.swb("drive", "start", "--", "new");
-	await waitState(s, "the new pi live with the keyboard", (x) => x.staged.kind === "live" && x.focus === "stage");
-	s.keys("-l", "/archive", "Enter");
-	await until(() => s.screen().includes("nothing to archive before the first prompt"), budgets.settle, "the provisional refusal");
-	s.save("provisional-refused.txt", s.screen());
-	await reply(s, "done");
-	const id = state(s).staged.id as string;
-	const host = state(s).staged.host as string;
-	s.keys("-l", "/archive", "Enter");
-	await until(() => entry(s, id)?.open === false && !entry(s, id).live, budgets.settle, "archived and quit");
-	await until(() => !piSessions(s).includes(host), budgets.settle, "tmux session gone");
-	expect(s.query("SELECT tmux_session FROM runtimes")).toHaveLength(0);
-	s.save("pi-archived.txt", `${s.screen()}\n${JSON.stringify(s.ls(), null, 2)}`);
-});
-
-test("a new prompt in an archived session unarchives it", async () => {
-	s = scenario("phase3", "prompt-unarchives");
-	const [id] = (await seed(s, { turns: ["before"] })) as [string];
-	s.swb("archive", id);
-	expect(entry(s, id).open).toBe(false);
-	s.swb("drive", "start", "--", "open", id);
-	await waitState(s, "archived row selected", (x) => x.cursor === id && x.staged.kind === "dormant");
-	s.keys("Enter");
-	await waitState(s, "live with the keyboard", (x) => x.staged.kind === "live" && x.focus === "stage", budgets.piReady);
-	expect(entry(s, id).open).toBe(false);
-	await reply(s, "after");
-	await until(() => entry(s, id).open, budgets.settle, "open again");
-	await waitState(s, "the row open again", (x) => sessionRows(x).find((r) => r.id === id)?.state !== "archived");
-	s.save("unarchived-by-prompt.txt", `${s.screen()}\n${JSON.stringify(s.ls(), null, 2)}`);
-});
-
-test("Inactive after inactive_after, never while blocked or unseen", async () => {
-	s = scenario("phase3", "inactive");
-	const [unseen] = (await seed(s, { turns: ["unseen"] })) as [string];
-	config(s, 'inactive_after = "2s"\n');
-	const { id: blocked } = await liveSession("ready");
-	s.keys("-l", "attention b1", "Enter");
-	await until(() => entry(s, blocked)?.activity === "blocked", budgets.settle, "blocked");
-	await Bun.sleep(3000);
-	expect(entry(s, blocked).inactive).toBe(false);
-	expect(entry(s, unseen)).toMatchObject({ unseen: true, inactive: false });
-	expect(state(s).rows.some((r) => r.kind === "section" && r.label === "Inactive")).toBe(false);
-	await until(() => title(s) === "swb ◆1 ●1", budgets.settle, "the title counting both");
-	s.save("blocked-and-unseen.txt", s.screen());
-
-	release(s, "b1");
-	await until(() => entry(s, blocked).inactive, 8000, "the released session goes inactive once seen and quiet");
-	await until(() => title(s) === "swb ●1", budgets.settle, "the title counting only the unseen");
-	s.keys("M-a", "h");
-	await waitState(s, "roster focus", (x) => x.focus === "roster");
-	await cursorTo(s, unseen);
-	s.keys("Enter");
-	await waitState(s, "unseen live on view", (x) => x.staged.id === unseen && x.staged.kind === "live", budgets.piReady);
-	await until(() => entry(s, unseen).inactive, 8000, "visited, then inactive");
-	await until(() => title(s) === "swb", budgets.settle, "the title counting nothing");
-	const st = await waitState(s, "Inactive section", (x) => x.rows.some((r) => r.kind === "section" && r.label === "Inactive"));
-	s.save("inactive.txt", `${s.screen()}\n${JSON.stringify(st.rows, null, 2)}`);
-});
-
-test("a on a session that started others still open asks first: esc keeps them, a archives it alone, A all of them; M-a a asks from the Stage", async () => {
-	s = scenario("phase8", "archive-family");
-	const other = join(s.root, "other");
-	mkdirSync(other);
-	const root = await launched(s, "reply root", { cwd: s.project, title: "root" });
-	const child = await launched(s, "reply child", { from: root, title: "child" });
-	const grandchild = await launched(s, "reply grandchild", { from: child, title: "grandchild" });
-	const away = await launched(s, "reply away", { from: root, cwd: other, title: "away" });
-	const family = [root, child, grandchild, away];
-	const open = () => family.map((id) => entry(s, id).open);
-	s.swb("drive", "start");
-	await waitState(s, "the family on the roster", (x) => x.ready && rowIndex(x, grandchild) !== -1);
-
-	await cursorTo(s, root);
-	s.keys("a");
-	let st = await waitState(s, "the archive prompt", (x) => x.mode === "archive");
-	// Everything it started, in any Project, and none of it seen yet.
-	expect(st.archive).toEqual({ id: root, counts: "●3", all: 4 });
-	await until(() => s.screen().includes("Archive  a this  A all 4  esc abort"), budgets.settle, "the prompt's choices");
-	s.save("prompt.txt", s.screen());
-	s.save("prompt.ansi", s.swb("drive", "capture", "--ansi"));
-	s.keys("Escape");
-	await waitState(s, "the prompt gone", (x) => x.mode === "roster" && x.archive === null);
-	expect(open()).toEqual([true, true, true, true]);
-
-	s.keys("a");
-	await waitState(s, "asked again", (x) => x.mode === "archive");
-	s.keys("a");
-	await until(() => !entry(s, root).open, budgets.settle, "root archived alone");
-	expect(open()).toEqual([false, true, true, true]);
-	// Its child stands on its own while it's archived, and goes back under it when it returns.
-	st = await waitState(s, "the child a root of its own", (x) => sessionRows(x).find((r) => r.id === child)?.origin === "session");
-	expect(sessionRows(st).find((r) => r.id === child)).toMatchObject({ level: 0, origin: "session" });
-	s.swb("unarchive", root);
-	st = await waitState(s, "the child back under root", (x) => sessionRows(x).find((r) => r.id === child)?.level === 1);
-	expect(sessionRows(st).find((r) => r.id === grandchild)).toMatchObject({ level: 2, origin: null });
-
-	await cursorTo(s, root);
-	s.keys("Enter");
-	await waitState(s, "root's pi focused", (x) => x.focus === "stage" && x.staged.id === root && x.staged.kind === "live", budgets.piReady);
-	s.keys("M-a", "a");
-	await waitState(s, "the prompt, with the keyboard", (x) => x.mode === "archive" && x.focus === "roster");
-	const lines = s.screen().split("\n");
-	const y = lines.findIndex((line) => line.includes("A all 4"));
-	s.swb("drive", "click", String((lines[y] as string).indexOf("A all 4") + 1), String(y));
-	await until(() => open().every((o) => !o), budgets.settle, "the whole family archived by a click");
-	await waitState(s, "the prompt gone", (x) => x.mode === "roster");
-	s.save("archived-all.txt", s.screen());
-});
-
-test("a family goes Inactive only as a whole: while one member is active, so are the rest", async () => {
-	s = scenario("phase8", "inactive-family");
-	config(s, 'inactive_after = "5s"\n');
-	const root = await launched(s, "reply root", { cwd: s.project, title: "root" });
-	const child = await launched(s, "reply child", { from: root, title: "child" });
-	const alone = await launched(s, "reply alone", { cwd: s.project, title: "alone" });
-	const visit = async (id: string) => {
-		await cursorTo(s, id);
-		s.keys("Enter");
-		await until(() => !entry(s, id).unseen, budgets.settle, `${id} visited`);
-		s.keys("M-a", "h");
-		await waitState(s, "the roster focused", (x) => x.focus === "roster");
-	};
-	s.swb("drive", "start");
-	// The child is visited last, so the next Deck opens on it, leaving Inactive folded away.
-	for (const id of [alone, root, child]) await visit(id);
-	s.swb("drive", "stop");
-	await until(() => [root, child, alone].every((id) => entry(s, id).inactive), 15_000, "all three quiet and seen");
-
-	// A new turn in the child makes it active again, and its parent with it; the unrelated session stays Inactive.
-	const sent = Bun.spawn([`${s.bin}/swb`, "send", "--from", root, "--to", child], { env: s.env, stdin: new Blob(["reply again"]) });
-	expect(await sent.exited).toBe(0);
-	await until(() => !entry(s, child).inactive, budgets.settle, "the child active");
-	expect(entry(s, root).inactive).toBe(false);
-	expect(entry(s, alone).inactive).toBe(true);
-	s.swb("drive", "start");
-	const st = await waitState(
-		s,
-		"the family open, alone Inactive",
-		(x) => x.ready && x.rows.some((r) => r.kind === "section" && r.label === "Inactive"),
-	);
-	expect(sessionRows(st).map((r) => [r.title, r.level])).toEqual([
-		["root", 0],
-		["child", 1],
-	]);
-	s.save("inactive-family.txt", `${s.screen()}\n${JSON.stringify(st.rows, null, 2)}`);
-	await visit(child);
-	await until(
-		() => entry(s, root).inactive && entry(s, child).inactive,
-		20_000,
-		"the family Inactive together once all of it is seen and quiet",
-	);
 });
 
 test("y copies swb open <id> and Y copies @session:<id> through the clipboard command", async () => {
@@ -386,30 +114,4 @@ test("swb adopt tracks a session pi ran outside swb, wakes it managed, and refus
 	expect(s.swbTry("adopt", stray).err.trim()).toBe(
 		`swb: adopt: pi won't find stray-y from ${s.project}; move it to ${dirname(transcript as string)}`,
 	);
-});
-
-test("swb_update_session archives a whole family; one member mid-turn refuses the whole call by name until force, which cancels that turn", async () => {
-	s = scenario("phase3", "archive-family");
-	const root = await launched(s, "reply root", { cwd: s.project, title: "Root" });
-	const one = await launched(s, "reply one", { from: root, title: "One" });
-	const grand = await launched(s, "reply grand", { from: one, title: "Grand" });
-	const held = launchTry(s, "reply child fam", { from: root, title: "Held" });
-	await until(() => s.signal("child.fam.entered") !== "", budgets.piReady, "Held's turn running");
-	const heldId = (JSON.parse((await held).out) as { details: { id: string } }).details.id;
-	const family = [root, one, grand, heldId];
-	const { id: caller } = await liveSession("caller");
-
-	s.keys("-l", `call swb_update_session {"session":"${root}","archived":true,"family":true,"title":"Never set"}`, "Enter");
-	await until(() => s.screen().includes("Nothing changed"), budgets.settle, "the refusal");
-	expect(s.screen()).toContain('"Held" is mid-turn');
-	for (const id of family) expect(entry(s, id).open).toBe(true);
-	expect(entry(s, root).title).toBe("Root");
-	s.save("refused.txt", s.screen());
-
-	s.keys("-l", `call swb_update_session {"session":"${root}","archived":true,"family":true,"force":true}`, "Enter");
-	await until(() => family.every((id) => !entry(s, id).open && !entry(s, id).live), budgets.settle, "the family archived and stopped");
-	expect(entry(s, heldId).cutOff).toBeNull();
-	expect(entry(s, caller)).toMatchObject({ open: true, live: true });
-	expect(s.screen()).toContain("Cancelled the turns of");
-	s.save("forced.txt", s.screen());
 });

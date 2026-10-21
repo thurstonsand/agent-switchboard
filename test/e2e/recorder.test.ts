@@ -1,8 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { SCHEMA_VERSION } from "../../packages/shared/src/index.ts";
-import { budgets, type LsEntry, release, repo, type Scenario, scenario, until, which } from "./harness/index.ts";
+import { budgets, release, repo, type Scenario, scenario, until, which } from "./harness/index.ts";
+import { entry, prompt, runtimes, startManaged, waitFor } from "./harness/recorder.ts";
 
 let s: Scenario;
 afterEach(async () => {
@@ -13,46 +14,28 @@ afterEach(async () => {
 	await s.cleanup();
 });
 
-type Runtime = { tmux_session: string; session_id: string; cwd: string; pid: number };
 type SessionRow = { session_id: string; phase: string; title: string | null; last_prompt_at: number; last_settled_at: number | null };
 
-const runtimes = () => s.query<Runtime>("SELECT * FROM runtimes");
 const rows = () => s.query<SessionRow>("SELECT * FROM sessions");
-const entry = (id: string) => s.ls().find((e) => e.id === id) as LsEntry;
-
-/** `swb new` in the drive harness, waiting until pi is ready and its runtime row exists. */
-async function startManaged(): Promise<Runtime> {
-	s.swb("drive", "start", "--", "new");
-	await until(() => s.screen().includes("faux-1"), budgets.piReady, "managed pi to be ready");
-	return until(() => runtimes()[0], budgets.settle, "the runtime row");
-}
-
-async function prompt(text: string): Promise<void> {
-	s.keys("-l", text, "Enter");
-}
-
-async function waitFor(name: string): Promise<void> {
-	await until(() => s.signal(name) !== "", budgets.settle, name);
-}
 
 /** Phase 1's first turn: a provisional runtime becomes a Session that works, settles, and takes its title. */
 async function firstTurn(): Promise<void> {
-	const runtime = await startManaged();
+	const runtime = await startManaged(s);
 	expect(s.ls()).toEqual([]);
 	expect(runtime.cwd).toBe(s.project);
 
-	await prompt("hold first");
-	await waitFor("first.entered");
-	const working = entry(runtime.session_id);
+	await prompt(s, "hold first");
+	await waitFor(s, "first.entered");
+	const working = entry(s, runtime.session_id);
 	expect(working).toMatchObject({ live: true, open: true, activity: "working", cutOff: null, project: s.project, cwd: s.project });
 	expect(working.title).toBeNull();
 
 	release(s, "first");
-	const idle = await until(() => entry(runtime.session_id).activity === "idle" && entry(runtime.session_id), budgets.settle, "idle");
+	const idle = await until(() => entry(s, runtime.session_id).activity === "idle" && entry(s, runtime.session_id), budgets.settle, "idle");
 	expect(idle).toMatchObject({ live: true, unseen: true });
 
-	await prompt("/name Recorder smoke");
-	await until(() => entry(runtime.session_id).title === "Recorder smoke", budgets.settle, "the title");
+	await prompt(s, "/name Recorder smoke");
+	await until(() => entry(s, runtime.session_id).title === "Recorder smoke", budgets.settle, "the title");
 	s.save("screen.txt", s.screen());
 }
 
@@ -91,54 +74,54 @@ test("the dist:pi bundle, packed and installed with pi install as npm publishes 
 
 test("blocked during an attention span, working after it, idle only once the turn settles", async () => {
 	s = scenario("phase1", "attention");
-	const runtime = await startManaged();
-	await prompt("attention gate");
-	await waitFor("gate.entered");
-	await until(() => entry(runtime.session_id)?.activity === "blocked", budgets.settle, "blocked");
+	const runtime = await startManaged(s);
+	await prompt(s, "attention gate");
+	await waitFor(s, "gate.entered");
+	await until(() => entry(s, runtime.session_id)?.activity === "blocked", budgets.settle, "blocked");
 	release(s, "gate");
-	await until(() => entry(runtime.session_id).activity === "idle", budgets.settle, "idle");
-	expect(entry(runtime.session_id).unseen).toBe(true);
+	await until(() => entry(s, runtime.session_id).activity === "idle", budgets.settle, "idle");
+	expect(entry(s, runtime.session_id).unseen).toBe(true);
 });
 
 test("/reload keeps recording, /new moves the runtime row to a new id and leaves the old session dormant", async () => {
 	s = scenario("phase1", "reload-new");
-	const runtime = await startManaged();
-	await prompt("reply before");
-	await until(() => entry(runtime.session_id)?.activity === "idle", budgets.settle, "first turn");
-	await prompt("/reload");
+	const runtime = await startManaged(s);
+	await prompt(s, "reply before");
+	await until(() => entry(s, runtime.session_id)?.activity === "idle", budgets.settle, "first turn");
+	await prompt(s, "/reload");
 	await Bun.sleep(1000);
-	await prompt("/name after reload");
-	await until(() => entry(runtime.session_id).title === "after reload", budgets.settle, "title after reload");
+	await prompt(s, "/name after reload");
+	await until(() => entry(s, runtime.session_id).title === "after reload", budgets.settle, "title after reload");
 
-	await prompt("/new");
-	const moved = await until(() => runtimes().find((r) => r.session_id !== runtime.session_id), budgets.settle, "the runtime to move");
+	await prompt(s, "/new");
+	const moved = await until(() => runtimes(s).find((r) => r.session_id !== runtime.session_id), budgets.settle, "the runtime to move");
 	expect(moved.tmux_session).toBe(runtime.tmux_session);
-	expect(runtimes()).toHaveLength(1);
-	expect(entry(runtime.session_id)).toMatchObject({ live: false, activity: "idle", cutOff: null, open: true });
-	await prompt("reply second");
-	await until(() => entry(moved.session_id)?.activity === "idle", budgets.settle, "second session idle");
+	expect(runtimes(s)).toHaveLength(1);
+	expect(entry(s, runtime.session_id)).toMatchObject({ live: false, activity: "idle", cutOff: null, open: true });
+	await prompt(s, "reply second");
+	await until(() => entry(s, moved.session_id)?.activity === "idle", budgets.settle, "second session idle");
 	expect(s.ls()).toHaveLength(2);
 });
 
 test("a migration under a running recorder turns its footer red at the next write, and it stays red through /reload", async () => {
 	s = scenario("phase1", "version-mismatch");
-	const runtime = await startManaged();
-	await prompt("reply one");
-	await until(() => entry(runtime.session_id)?.activity === "idle", budgets.settle, "first turn");
+	const runtime = await startManaged(s);
+	await prompt(s, "reply one");
+	await until(() => entry(s, runtime.session_id)?.activity === "idle", budgets.settle, "first turn");
 	const before = rows();
 	const conn = s.db();
 	conn.exec("PRAGMA user_version = 99");
 	conn.close();
-	await prompt("reply two");
+	await prompt(s, "reply two");
 	await until(() => s.screen().includes("swb: not recording: db schema is v99"), budgets.settle, "the red footer");
 	const conn2 = s.db();
 	conn2.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 	conn2.close();
 	const starts = s.signal("session_start");
-	await prompt("/reload");
+	await prompt(s, "/reload");
 	await until(() => s.signal("session_start").length > starts.length, budgets.settle, "the reload");
-	await prompt("reply three");
-	await waitFor("replied.three");
+	await prompt(s, "reply three");
+	await waitFor(s, "replied.three");
 	const screen = s.screen();
 	s.save("screen.txt", screen);
 	expect(screen).toContain("swb: not recording");
@@ -191,46 +174,26 @@ test("swb refuses a db newer than itself, and a recorder started against a misma
 		"the red footer",
 	);
 	s.save("screen.txt", screen);
-	expect(runtimes()).toEqual([]);
+	expect(runtimes(s)).toEqual([]);
 });
 
 test("kill-server leaves an idle session dormant and a mid-turn one cut off", async () => {
 	s = scenario("phase1", "kill-server");
-	const first = await startManaged();
-	await prompt("reply idle one");
-	await until(() => entry(first.session_id)?.activity === "idle", budgets.settle, "first idle");
+	const first = await startManaged(s);
+	await prompt(s, "reply idle one");
+	await until(() => entry(s, first.session_id)?.activity === "idle", budgets.settle, "first idle");
 	s.swb("drive", "stop");
 	s.swb("drive", "start", "--", "new");
-	const second = await until(() => runtimes().find((r) => r.tmux_session !== first.tmux_session), budgets.piReady, "second runtime");
+	const second = await until(() => runtimes(s).find((r) => r.tmux_session !== first.tmux_session), budgets.piReady, "second runtime");
 	await until(() => s.screen().includes("faux-1"), budgets.piReady, "second pi ready");
-	await prompt("hold forever");
-	await waitFor("forever.entered");
+	await prompt(s, "hold forever");
+	await waitFor(s, "forever.entered");
 	s.tmux(s.servers.sessions, "kill-server");
-	await until(() => !entry(second.session_id).live, budgets.settle, "dead");
-	expect(entry(first.session_id)).toMatchObject({ live: false, activity: "idle", cutOff: null });
-	expect(entry(second.session_id)).toMatchObject({ live: false, activity: "idle" });
+	await until(() => !entry(s, second.session_id).live, budgets.settle, "dead");
+	expect(entry(s, first.session_id)).toMatchObject({ live: false, activity: "idle", cutOff: null });
+	expect(entry(s, second.session_id)).toMatchObject({ live: false, activity: "idle" });
 	// Losing its terminal, pi may or may not record its shutdown before it dies; either way the turn was cut off.
-	expect(entry(second.session_id).cutOff).not.toBeNull();
-});
-
-test("a never-prompted session is killed when its last viewer detaches; a prompted one survives", async () => {
-	s = scenario("phase1", "detach");
-	const blank = await startManaged();
-	s.swb("drive", "stop");
-	await until(
-		() => !s.tmux(s.servers.sessions, "list-sessions", "-F", "#{session_name}").includes(blank.tmux_session),
-		budgets.settle,
-		"the provisional session to die",
-	);
-
-	s.swb("drive", "start", "--", "new");
-	const kept = await until(() => runtimes().find((r) => r.tmux_session !== blank.tmux_session), budgets.piReady, "second runtime");
-	await until(() => s.screen().includes("faux-1"), budgets.piReady, "pi ready");
-	await prompt("reply keep me");
-	await until(() => entry(kept.session_id)?.activity === "idle", budgets.settle, "idle");
-	s.swb("drive", "stop");
-	await Bun.sleep(1000);
-	expect(entry(kept.session_id).live).toBe(true);
+	expect(entry(s, second.session_id).cutOff).not.toBeNull();
 });
 
 test("bare pi, without the token, writes nothing", async () => {
@@ -243,138 +206,6 @@ test("bare pi, without the token, writes nothing", async () => {
 	s.tmux(server, "send-keys", "-t", "pi", "-l", "reply bare");
 	s.tmux(server, "send-keys", "-t", "pi", "Enter");
 	await until(() => capture().split("bare").length > 2, budgets.settle, "the reply");
-	expect(runtimes()).toEqual([]);
+	expect(runtimes(s)).toEqual([]);
 	expect(rows()).toEqual([]);
 });
-
-test("re-running swb against a server started with an older embedded config re-sources it, and the hooks call the new path", async () => {
-	s = scenario("phase1", "config-resource");
-	await startManaged();
-	s.tmux(s.servers.sessions, "set", "-g", "@swb_conf_version", "stale");
-	s.tmux(s.servers.sessions, "set-hook", "-gu", "client-detached");
-	s.swb("drive", "stop");
-
-	const moved = `${s.root}/moved/swb`;
-	mkdirSync(dirname(moved));
-	copyFileSync(`${s.bin}/swb`, moved);
-	rmSync(`${s.bin}/swb`);
-	symlinkSync(moved, `${s.bin}/swb`);
-	await startManaged();
-
-	const hooks = s.tmux(s.servers.sessions, "show-hooks", "-g");
-	s.save("hooks.txt", hooks);
-	expect(hooks).toContain(`client-detached[0] run-shell -b "${moved} detached`);
-	expect(hooks).not.toContain(`${repo}/dist/swb`);
-	expect(s.tmux(s.servers.sessions, "show", "-gqv", "@swb_conf_version")).not.toBe("stale");
-});
-
-test("Alt+Enter arrives as CSI-u and Shift+Enter still works", async () => {
-	s = scenario("phase1", "alt-enter");
-	await startManaged();
-	expect(await typed("M-Enter")).toEqual(["\x1b[13;3u"]);
-	expect(await typed("S-Enter")).toEqual(["\x1b[13;2u"]);
-});
-
-test("clicking a link in fullscreen pi opens it, though pi started with no client to ask whether tmux forwards hyperlinks", async () => {
-	s = scenario("phase1", "links");
-	const settings = join(s.env.PI_CODING_AGENT_DIR as string, "settings.json");
-	writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, "utf8")), tuiMode: "fullscreen" }));
-	const opened = join(s.home, "opened");
-	for (const opener of ["xdg-open", "open"]) {
-		writeFileSync(join(s.bin, opener), `#!/bin/sh\nprintf %s "$1" > ${opened}\n`, { mode: 0o755 });
-	}
-	await startManaged();
-	await prompt("reply see [the docs](mailto:ops@example.com)");
-	await waitFor("replied.see [the docs](mailto:ops@example.com)");
-	const lines = await until(
-		() => {
-			const screen = s.screen().split("\n");
-			return screen.findLastIndex((line) => line.includes("see the docs")) >= 0 && screen;
-		},
-		budgets.settle,
-		"the reply's link",
-	);
-	const row = lines.findLastIndex((line) => line.includes("see the docs"));
-	s.swb("drive", "click", `${(lines[row] as string).indexOf("the docs") + 1}`, `${row}`);
-	await until(() => existsSync(opened), budgets.settle, "the opener");
-	expect(readFileSync(opened, "utf8")).toBe("mailto:ops@example.com");
-});
-
-test("a user tmux.conf binding M-z and setting window-style changes nothing inside pi", async () => {
-	s = scenario("phase1", "user-tmux-conf");
-	const conf = "bind -n M-z display-message hijacked\nset -g window-style bg=red\n";
-	writeFileSync(`${s.home}/.tmux.conf`, conf);
-	mkdirSync(`${s.home}/.config/tmux`, { recursive: true });
-	writeFileSync(`${s.home}/.config/tmux/tmux.conf`, conf);
-	await startManaged();
-	expect(await typed("M-z")).toEqual(["\x1b[122;3u"]);
-	const replies = await typed("-l", "/e2e-bg", "Enter");
-	expect(replies).toContain("\x1b]11;rgb:f9f9/f5f5/d7d7\x1b\\");
-});
-
-test("a session live in one managed pi cannot be opened in another", async () => {
-	s = scenario("phase1", "single-host");
-	const first = await startManaged();
-	await prompt("/name Only here");
-	await prompt("reply once");
-	await until(() => entry(first.session_id)?.activity === "idle", budgets.settle, "the first turn");
-
-	const second = launchBeside("second", "");
-	await until(() => second().includes("faux-1"), budgets.piReady, "the second pi");
-	s.tmux(s.servers.sessions, "send-keys", "-t", "second", "-l", "/resume");
-	s.tmux(s.servers.sessions, "send-keys", "-t", "second", "Enter");
-	await until(() => second().includes("Only here"), budgets.settle, "the picker");
-	s.tmux(s.servers.sessions, "send-keys", "-t", "second", "-l", "Only here");
-	s.tmux(s.servers.sessions, "send-keys", "-t", "second", "Enter");
-	const refused = await until(() => second().includes("already open in another pi") && second(), budgets.settle, "the /resume refusal");
-	s.save("resume-refused.txt", refused);
-
-	const third = launchBeside("third", `--session-id ${first.session_id}`);
-	const red = await until(
-		() => third().includes(`swb: not recording: session ${first.session_id} is already open`) && third(),
-		budgets.piReady,
-		"the red footer",
-	);
-	s.save("session-id-refused.txt", red);
-	expect(runtimes().filter((r) => r.session_id === first.session_id)).toEqual([first]);
-});
-
-/** Raw terminal input pi receives for one `drive keys` call. */
-async function typed(...keys: string[]): Promise<string[]> {
-	const log = `${s.home}/e2e-signals/input.log`;
-	writeFileSync(log, "");
-	s.keys(...keys);
-	await Bun.sleep(500);
-	return readFileSync(log, "utf8")
-		.split("\n")
-		.filter(Boolean)
-		.map((line) => JSON.parse(line));
-}
-
-/** A managed pi on the sessions server with no viewer, launched with swb's token; returns its screen. */
-function launchBeside(name: string, args: string): () => string {
-	const db = `${s.home}/.local/state/agent-switchboard/swb.db`;
-	s.tmux(
-		s.servers.sessions,
-		"new-session",
-		"-d",
-		"-s",
-		name,
-		"-x",
-		"140",
-		"-y",
-		"40",
-		"-c",
-		s.project,
-		"-e",
-		"SWB_MANAGED=1",
-		"-e",
-		`SWB_DB=${db}`,
-		"-e",
-		`SWB_TMUX_SESSION=${name}`,
-		"-e",
-		`SWB_BIN=${s.bin}/swb`,
-		`${s.bin}/pi ${args}`,
-	);
-	return () => s.tmux(s.servers.sessions, "capture-pane", "-p", "-t", name);
-}
