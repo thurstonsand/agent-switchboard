@@ -55,7 +55,7 @@ test("M-a v splits the editor at 65% beside pi; M-a h and l walk all three panes
 	expect(roster.width).toBe(42);
 	expect(Math.abs(editor.width / (editor.width + pi.width + 1) - 0.65)).toBeLessThan(0.02);
 	// From pi view with the keyboard on the Stage, the keyboard stays on pi.
-	expect(activePane(s, st)).toBe(2);
+	await until(() => activePane(s, st) === 2, budgets.settle, "the keyboard on pi");
 	await until(() => s.screen().includes("hello"), budgets.settle, "pi redrawn at its new width");
 	s.save("split.txt", s.screen());
 
@@ -158,9 +158,12 @@ test("split shows pi below 160 columns and returns on widening, survives reopeni
 	s.swb("drive", "resize", "150x50");
 	await waitState(s, "pi alone at 150", (x) => !x.layout.split && x.layout.width === 150);
 	s.keys("M-a", "v", "M-a", "v");
-	const told = await waitState(s, "a split refusal", (x) => x.toasts.some((t) => t.text === "split needs 160 columns; showing pi"));
+	const told = await waitState(
+		s,
+		"a split refusal, the keyboard on pi",
+		(x) => x.toasts.some((t) => t.text === "split needs 160 columns; showing pi") && x.focus === "stage",
+	);
 	expect(told.staged).toMatchObject({ view: "agent", savedView: "split" });
-	expect(told.focus).toBe("stage");
 	await prefixKeys(s, "M-a", "h", "the roster focused", (x) => x.focus === "roster");
 
 	s.swb("drive", "resize", "90x40");

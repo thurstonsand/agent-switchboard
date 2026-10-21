@@ -30,6 +30,8 @@ async function firstTurn(): Promise<void> {
 	expect(working).toMatchObject({ live: true, open: true, activity: "working", cutOff: null, project: s.project, cwd: s.project });
 	expect(working.title).toBeNull();
 
+	// Unfocused, so the Deck watching the turn land doesn't Visit it.
+	s.swb("drive", "focus", "out");
 	release(s, "first");
 	const idle = await until(() => entry(s, runtime.session_id).activity === "idle" && entry(s, runtime.session_id), budgets.settle, "idle");
 	expect(idle).toMatchObject({ live: true, unseen: true });

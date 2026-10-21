@@ -219,7 +219,9 @@ test("a session an agent started nests under it; its Peek's started-by line and 
 	st = await waitState(
 		s,
 		"c3 under root, in lab, and far on the roster",
-		(x) => sessionRows(x).some((r) => r.id === c3 && r.group === "lab") && sessionRows(x).some((r) => r.id === far && !r.provisional),
+		(x) =>
+			sessionRows(x).some((r) => r.id === c3 && r.group === "lab" && r.title === "c3") &&
+			sessionRows(x).some((r) => r.id === far && !r.provisional),
 	);
 	const lines = lineage(st);
 	expect(lines.slice(lines.indexOf("root"), lines.indexOf("root") + 3)).toEqual(["root", "  c3", "  c2"]);
