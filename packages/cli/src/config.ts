@@ -43,7 +43,7 @@ export type Config = {
 	/** The harnesses new sessions may start in; resuming is never restricted. */
 	harnesses: Harness[];
 	/** The shortlist as written; null while it's the automatic one. */
-	targets: Preset[] | null;
+	presets: Preset[] | null;
 	warnLongShortlist: boolean;
 	/** Mine, after the ones swb ships, in every Operator's AGENTS.md. */
 	operatorInstructions: string;
@@ -65,7 +65,7 @@ export type Control =
 	| { kind: "chord" }
 	| { kind: "paths" }
 	| { kind: "harnesses" }
-	| { kind: "targets" }
+	| { kind: "presets" }
 	| { kind: "prose"; max: number };
 
 /** One setting: everything Settings, search, validation, and the README know about it. */
@@ -218,16 +218,16 @@ export const SETTINGS: Setting[] = [
 		note: "which harnesses new sessions may start in; all of them by default",
 	},
 	{
-		key: ["targets"],
+		key: ["presets"],
 		section: "Harnesses",
 		label: "Shortlist",
 		description:
 			"What n offers and agents choose from when they start a session. The ★ is the default: n opens on it, and Tab steps through the list in order from there.",
-		synonyms: ["targets", "presets", "models", "effort", "default", "launch"],
-		control: { kind: "targets" },
+		synonyms: ["presets", "models", "effort", "default", "launch"],
+		control: { kind: "presets" },
 		fallback: fixed(null),
 		apply: (config, value) => {
-			config.targets = value === null ? null : presets(value);
+			config.presets = value === null ? null : presets(value);
 		},
 		example: null,
 		note: "",
@@ -237,7 +237,7 @@ export const SETTINGS: Setting[] = [
 		section: "Harnesses",
 		label: "Warn about long shortlists",
 		description: "Agents see every entry. More than 10 can crowd their choice, and Settings says so while this is on.",
-		synonyms: ["targets", "warning"],
+		synonyms: ["presets", "warning"],
 		control: { kind: "bool" },
 		fallback: fixed(true),
 		apply: (config, value) => {
@@ -396,17 +396,17 @@ export function setting(key: string): Setting {
 	return found;
 }
 
-const TARGET_KEYS = ["harness", "provider", "model", "effort", "agent", "use", "default"];
+const PRESET_KEYS = ["harness", "provider", "model", "effort", "agent", "use", "default"];
 
 function presets(value: unknown): Preset[] {
-	if (!Array.isArray(value)) throw new Error("must be a list of [[targets]] tables");
+	if (!Array.isArray(value)) throw new Error("must be a list of [[presets]] tables");
 	const out = value.map((raw, i): Preset => {
-		const at = (key: string, message: string) => new ConfigProblem(["targets", String(i), key], message);
-		if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw new ConfigProblem(["targets", String(i)], "must be a table");
+		const at = (key: string, message: string) => new ConfigProblem(["presets", String(i), key], message);
+		if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw new ConfigProblem(["presets", String(i)], "must be a table");
 		const entry = raw as Record<string, unknown>;
-		for (const key of Object.keys(entry)) if (!TARGET_KEYS.includes(key)) throw at(key, `unknown key targets.${key}`);
+		for (const key of Object.keys(entry)) if (!PRESET_KEYS.includes(key)) throw at(key, `unknown key presets.${key}`);
 		const fail = (key: string) => (error: unknown) => {
-			throw at(key, `targets.${key} ${(error as Error).message}`);
+			throw at(key, `presets.${key} ${(error as Error).message}`);
 		};
 		let harness: Harness = "pi";
 		try {
@@ -414,10 +414,10 @@ function presets(value: unknown): Preset[] {
 		} catch (error) {
 			fail("harness")(error);
 		}
-		if (harness !== "claude" && entry.agent !== undefined) throw at("agent", "only a Claude Code target runs as an agent");
+		if (harness !== "claude" && entry.agent !== undefined) throw at("agent", "only a Claude Code preset runs as an agent");
 		const agent = entry.agent !== undefined;
 		for (const key of ["model", "effort"])
-			if (agent && entry[key] !== undefined) throw at(key, `an agent target's ${key} comes from the agent`);
+			if (agent && entry[key] !== undefined) throw at(key, `an agent preset's ${key} comes from the agent`);
 		let model: string | null = null;
 		let effort: Effort | null = null;
 		if (!agent) {
@@ -432,8 +432,8 @@ function presets(value: unknown): Preset[] {
 				fail("effort")(error);
 			}
 		}
-		if (harness === "pi" && entry.provider === undefined) throw at("harness", "a pi target needs a provider");
-		if (harness !== "pi" && entry.provider !== undefined) throw at("provider", "only a pi target has a provider");
+		if (harness === "pi" && entry.provider === undefined) throw at("harness", "a pi preset needs a provider");
+		if (harness !== "pi" && entry.provider !== undefined) throw at("provider", "only a pi preset has a provider");
 		const optional = (key: string) => {
 			if (entry[key] === undefined) return null;
 			try {
@@ -442,8 +442,8 @@ function presets(value: unknown): Preset[] {
 				return fail(key)(error);
 			}
 		};
-		if (entry.use !== undefined && typeof entry.use !== "string") throw at("use", "targets.use must be a string");
-		if (entry.default !== undefined && typeof entry.default !== "boolean") throw at("default", "targets.default must be true or false");
+		if (entry.use !== undefined && typeof entry.use !== "string") throw at("use", "presets.use must be a string");
+		if (entry.default !== undefined && typeof entry.default !== "boolean") throw at("default", "presets.default must be true or false");
 		return {
 			harness,
 			provider: optional("provider"),
@@ -457,7 +457,7 @@ function presets(value: unknown): Preset[] {
 	if (out.filter((p) => p.default).length > 1) throw new Error("can have only one default");
 	out.forEach((p, i) => {
 		const twin = out.findIndex((q) => sameLaunch(p, q));
-		if (twin !== i) throw new ConfigProblem(["targets", String(i)], `targets ${twin + 1} and ${i + 1} start the same thing`);
+		if (twin !== i) throw new ConfigProblem(["presets", String(i)], `presets ${twin + 1} and ${i + 1} start the same thing`);
 	});
 	return out;
 }

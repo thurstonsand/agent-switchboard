@@ -470,8 +470,8 @@ export function blocked(config: Config, catalog: Catalog | null, harness: Harnes
  * flags, and no effort, which is shown as the harness's own default. Null until the harnesses have been found.
  */
 export function shortlist(config: Config, catalog: Catalog | null): Choice[] | null {
-	if (config.targets) {
-		const list = config.targets.map(
+	if (config.presets) {
+		const list = config.presets.map(
 			(preset): Choice => ({
 				preset,
 				launch: { harness: preset.harness, provider: preset.provider, model: preset.model, effort: preset.effort, agent: preset.agent },

@@ -170,9 +170,9 @@ test("session_launch with no preset carries the caller's harness and model forwa
 		]
 			.map(
 				([harness, model, extra]) =>
-					`[[targets]]\nharness = "${harness}"\nmodel = "${model}"\neffort = "medium"\nuse = "${model}"\n${extra}\n`,
+					`[[presets]]\nharness = "${harness}"\nmodel = "${model}"\neffort = "medium"\nuse = "${model}"\n${extra}\n`,
 			)
-			.concat('[[targets]]\nharness = "pi"\nprovider = "faux"\nmodel = "faux-1"\neffort = "off"\nuse = "scripted"\n')
+			.concat('[[presets]]\nharness = "pi"\nprovider = "faux"\nmodel = "faux-1"\neffort = "off"\nuse = "scripted"\n')
 			.join("\n"),
 	);
 	const call = (title: string) => `call session_launch {"goal":"reply ${title}","title":"${title}","requestResponse":false}`;

@@ -2581,7 +2581,7 @@ function pickerTarget(choosing: Choosing): LaunchTarget | string | null {
 	const presets = pickerPresets();
 	const chosen = presets[Math.min(choosing.preset, presets.length - 1)];
 	if (chosen) return chosen.launch;
-	if (catalog === null && config.targets === null) return null;
+	if (catalog === null && config.presets === null) return null;
 	return defaultLaunch(config, catalog, shortlist(config, catalog) ?? []);
 }
 

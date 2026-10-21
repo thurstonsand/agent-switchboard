@@ -23,20 +23,20 @@ function block(): string {
 		const assignment = `${second ?? first} = ${value}`;
 		lines.push(s.note ? `${assignment.padEnd(25)} # ${s.note}` : assignment);
 	}
-	const example = `[[targets]]                 # the shortlist; without any, swb makes one from each harness's own
+	const example = `[[presets]]                 # the shortlist; without any, swb makes one from each harness's own
 harness = "claude"          # "pi", "claude", or "codex"
 model = "opus"
 effort = "high"             # off, minimal, low, medium, high, xhigh, max, ultra, as the harness takes them
 use = "Hard design and review" # a line for agents choosing among them
-default = true              # what n opens on and agents get when they pick none; else the first
+default = true              # what n opens on, and a launch's fallback; else the first
 
-[[targets]]
+[[presets]]
 harness = "pi"
-provider = "openrouter"     # pi's targets name their provider
+provider = "openrouter"     # pi's presets name their provider
 model = "moonshotai/kimi-k3"
 effort = "low"
 
-[[targets]]
+[[presets]]
 harness = "claude"
 agent = "Explore"           # Claude Code only: the whole session runs as this agent, on its model and effort`;
 	return ["```toml", ...lines, "", example, "```"].join("\n");

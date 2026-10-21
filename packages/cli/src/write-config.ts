@@ -33,7 +33,7 @@ export function setOrReset(raw: Record<string, unknown>, s: Setting, value: unkn
 /**
  * Writes `updated` over the file Settings read as `from`. A file changed since then is left alone, so a hand edit is never
  * lost; the new file is validated whole and checked to parse back to exactly `updated` before it replaces the old one.
- * `reorder` lets toml-patch move [[targets]] entries to match.
+ * `reorder` lets toml-patch move [[presets]] entries to match.
  */
 export function writeConfig(from: Loaded, updated: Record<string, unknown>, reorder = false): Loaded {
 	const path = configPath();
@@ -52,11 +52,11 @@ export function writeConfig(from: Loaded, updated: Record<string, unknown>, reor
 	}
 	let text: string;
 	try {
-		// toml-patch can't start an array of tables, so the first [[targets]] is appended as its own text.
-		if (updated.targets !== undefined && from.raw.targets === undefined) {
-			const { targets, ...rest } = updated;
+		// toml-patch can't start an array of tables, so the first [[presets]] is appended as its own text.
+		if (updated.presets !== undefined && from.raw.presets === undefined) {
+			const { presets, ...rest } = updated;
 			const body = patch(current, rest).trimEnd();
-			text = `${body}${body === "" ? "" : "\n\n"}${stringify({ targets }).trimEnd()}\n`;
+			text = `${body}${body === "" ? "" : "\n\n"}${stringify({ presets }).trimEnd()}\n`;
 		} else text = patch(current, updated, { updateOrder: reorder });
 	} catch (error) {
 		throw new SwbError(`toml-patch couldn't make this edit (${(error as Error).message}); nothing saved. Edit config.toml by hand instead`);

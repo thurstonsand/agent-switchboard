@@ -132,9 +132,9 @@ export const directors: Record<string, Director> = {
 			await waitDeck(s, "the picker closed", (x) => x.picker === null && x.mode === "roster");
 			const good = readFileSync(file, "utf8");
 			expect(good).toContain('inactive_after = "3d" # long weekends');
-			expect(good).toContain("[[targets]]");
+			expect(good).toContain("[[presets]]");
 			// A hand edit gone wrong while the Deck is open.
-			writeFileSync(file, good.replace("[[targets]]", '[[targets]]\nmodle = "opus"'));
+			writeFileSync(file, good.replace("[[presets]]", '[[presets]]\nmodle = "opus"'));
 			await waitDeck(s, "the error shown", (x) => x.configError !== null);
 			await waitDeck(s, "Settings on the error", (x) => x.mode === "settings");
 			await waitDeck(s, "back to the roster", (x) => x.mode === "roster");

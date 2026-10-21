@@ -187,7 +187,7 @@ test("the shortlist is automatic until its first edit writes it out; ↺ brings 
 	s.keys("Enter", "-l", "Scripted turns", "Enter");
 	await waitState(s, "written", (x) => x.settings?.items.find((i) => i.kind === "preset")?.set === true);
 	expect(read()).toBe(
-		'# mine\n\n[[targets]]\nharness = "pi"\nprovider = "faux"\nmodel = "faux-1"\neffort = "off"\nuse = "Scripted turns"\ndefault = true\n',
+		'# mine\n\n[[presets]]\nharness = "pi"\nprovider = "faux"\nmodel = "faux-1"\neffort = "off"\nuse = "Scripted turns"\ndefault = true\n',
 	);
 	s.save("written.txt", s.screen());
 

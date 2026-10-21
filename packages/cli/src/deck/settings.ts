@@ -194,7 +194,7 @@ function effortsFor(preset: Preset, catalog: Catalog | null): Effort[] {
 	return listed && preset.harness !== "claude" ? listed.efforts : HARNESS_EFFORTS[preset.harness];
 }
 
-/** A preset as [[targets]] writes it: no empty note, and the ★ only where it is. */
+/** A preset as [[presets]] writes it: no empty note, and the ★ only where it is. */
 function toToml(p: Preset): Record<string, unknown> {
 	return {
 		harness: p.harness,
@@ -314,7 +314,7 @@ export class SettingsPane {
 				out.push(...(["claude", "codex", "pi"] as const).map((harness): Item => ({ kind: "harness", harness })));
 				continue;
 			}
-			if (s.control.kind === "targets") {
+			if (s.control.kind === "presets") {
 				if (out.length > 0) out.push({ kind: "blank" });
 				const count = this.presets().length;
 				out.push({ kind: "shortlist" }, ...Array.from({ length: count }, (_, index): Item => ({ kind: "preset", index })), {
@@ -352,7 +352,7 @@ export class SettingsPane {
 		if (!item) return null;
 		if (item.kind === "setting" || item.kind === "entry" || item.kind === "addEntry") return item.s;
 		if (item.kind === "harness") return setting("harnesses");
-		if (item.kind === "shortlist" || item.kind === "preset" || item.kind === "addPreset") return setting("targets");
+		if (item.kind === "shortlist" || item.kind === "preset" || item.kind === "addPreset") return setting("presets");
 		if (item.kind === "warning") return setting("warn_long_shortlist");
 		return null;
 	}
@@ -373,8 +373,8 @@ export class SettingsPane {
 	reset(item = this.current()): void {
 		const s = this.settingOf(item);
 		if (!s) return;
-		if (s.control.kind === "targets") {
-			if (this.host.loaded().config.targets !== null) this.save(withValue(this.raw(), ["targets"], undefined));
+		if (s.control.kind === "presets") {
+			if (this.host.loaded().config.presets !== null) this.save(withValue(this.raw(), ["presets"], undefined));
 			return;
 		}
 		// A page of writing is never one key from gone; emptying it in its editor clears it.
@@ -388,7 +388,7 @@ export class SettingsPane {
 		if (typeof next === "string") return next;
 		if (next.length > 0 && !next.some((p) => p.default)) (next[0] as Preset).default = true;
 		const value = next.length === 0 ? undefined : next.map(toToml);
-		return this.save(withValue(this.raw(), ["targets"], value), reorder);
+		return this.save(withValue(this.raw(), ["presets"], value), reorder);
 	}
 
 	toggleHarness(harness: Harness): void {
@@ -985,7 +985,7 @@ export class SettingsPane {
 		else if (k === "a") {
 			const s = this.settingOf(item);
 			if (s?.control.kind === "paths") this.startText({ kind: "addEntry", s }, "");
-			else if (s?.control.kind === "targets" || s?.control.kind === "harnesses") this.startAdding();
+			else if (s?.control.kind === "presets" || s?.control.kind === "harnesses") this.startAdding();
 		} else if (k === "x") this.removeItem(item);
 		else if (k === "J" || k === "K") this.shift(k === "J" ? 1 : -1, item);
 		else if (k === "*" && item?.kind === "preset") this.starPreset(item.index);
@@ -1391,7 +1391,7 @@ export class SettingsPane {
 	}
 
 	shortlistParts(width: number): [string, (() => void) | null][] {
-		const custom = this.host.loaded().config.targets !== null;
+		const custom = this.host.loaded().config.presets !== null;
 		const title = ` ${bold("Shortlist")}`;
 		const right: [string, (() => void) | null] = custom ? [gray("↺"), () => this.reset({ kind: "shortlist" })] : [gray("automatic"), null];
 		const pad = Math.max(1, width - 3 - visibleWidth(title) - visibleWidth(right[0]));
@@ -1403,7 +1403,7 @@ export class SettingsPane {
 		const choice = this.choices()[index];
 		if (!choice) return [];
 		const p = choice.preset;
-		const custom = this.host.loaded().config.targets !== null;
+		const custom = this.host.loaded().config.presets !== null;
 		const paint = custom ? (s: string) => s : dim;
 		const star = p.default ? (choice.reason ? red("★") : "★") : choice.reason ? red("✗") : " ";
 		const where = p.provider ? `${p.harness} · ${p.provider}` : p.harness;
@@ -1619,7 +1619,7 @@ export class SettingsPane {
 			if (
 				s &&
 				s.control.kind !== "prose" &&
-				(this.isSet(s) || (s.control.kind === "targets" && this.host.loaded().config.targets !== null))
+				(this.isSet(s) || (s.control.kind === "presets" && this.host.loaded().config.presets !== null))
 			)
 				hints.push(["r", "reset", press("r")]);
 			hints.push(["/", "search", press("/")], ["O", "file", press("O")]);
@@ -1676,7 +1676,7 @@ export class SettingsPane {
 							kind: item.kind,
 							label: presetLabel(choice.preset),
 							value: `${choice.preset.harness}${choice.preset.provider ? `/${choice.preset.provider}` : ""} ${choice.preset.agent ? `agent ${choice.preset.agent}` : `${choice.preset.model} ${choice.preset.effort}`}`,
-							set: this.host.loaded().config.targets !== null,
+							set: this.host.loaded().config.presets !== null,
 							default: choice.preset.default,
 							note: choice.note,
 							problem: choice.reason,
