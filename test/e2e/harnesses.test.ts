@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { commands, host, launched, pane, ready, send, type } from "./harness/agents.ts";
 import { config, cursorTo, entry, seed, state, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
@@ -189,6 +190,15 @@ test("session_launch with no preset carries the caller's harness and model forwa
 	const carried = await child(opus.id, "from opus");
 	expect(carried.harness).toBe("claude");
 	expect(claudeModel(carried.id)).toContain("opus");
+});
+
+test("on a fresh install, swb new starts the automatic shortlist's default, Claude Code, once its models are listed", async () => {
+	s = scenario("harnesses", "first-new", { packages: [], recorder: true, harnesses: ["claude"] });
+	expect(existsSync(join(s.env.XDG_STATE_HOME as string, "agent-switchboard", "catalog.json"))).toBe(false);
+	s.swb("drive", "start", "--", "new");
+	await waitState(s, "the new session live", (x) => x.staged.kind === "live", budgets.piReady);
+	const started = s.tmux(s.servers.sessions, "list-panes", "-a", "-F", "#{pane_start_command}");
+	expect(started).toMatch(/-lic 'exec \S*claude/);
 });
 
 test("a Claude Code session's effort carries into what it launches, live or dormant, and survives a wake", async () => {

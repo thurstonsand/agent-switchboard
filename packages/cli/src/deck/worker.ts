@@ -63,9 +63,11 @@ function refresh(models: boolean): void {
 	if (discovering) return;
 	discovering = true;
 	const stale = catalog === null || Date.now() - catalog.at > MODELS_STALE_MS;
+	// With no catalog yet, the provisional one has no model lists, so a launch waits for the lists.
+	const first = catalog === null;
 	discover(catalog, models || stale, (provisional) => {
 		catalog = provisional;
-		foundNow();
+		if (!first) foundNow();
 		announce();
 	})
 		.then((done) => {
