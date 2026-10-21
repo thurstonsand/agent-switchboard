@@ -11,6 +11,9 @@ import { agentStep } from "./fakes/agent.ts";
 //   fail <text>       end the turn on a provider error that isn't retried
 //   hold <name>       signal <name>.entered, wait for <name>.release, answer "released <name>"
 //   attention <name>  like hold, inside a glimpse attention span
+//   confirm <name>    ask in pi's own confirm dialog, signalling <name>.entered, then answer "tool done <name>"
+//   both <name>       inside a glimpse attention span, ask like confirm, signal <name>.answered, then hold the span
+//                     until <name>.release
 //   subagent <name>   launch a real pi-sessions subagent whose task is `reply child <name>`; the child holds like
 //                     `hold child.<name>` before answering
 //   handoff <name>    launch a new pi session through swb's session_launch, with the goal `reply child <name>`
@@ -170,6 +173,10 @@ export default function (pi: ExtensionAPI) {
 				return fauxAssistantMessage(fauxToolCall("swb_update_session", { archived: true }), { stopReason: "toolUse" });
 			case "attention":
 				return fauxAssistantMessage(fauxToolCall("e2e_attention", { name: arg }), { stopReason: "toolUse" });
+			case "confirm":
+				return fauxAssistantMessage(fauxToolCall("e2e_confirm", { name: arg }), { stopReason: "toolUse" });
+			case "both":
+				return fauxAssistantMessage(fauxToolCall("e2e_both", { name: arg }), { stopReason: "toolUse" });
 			default:
 				throw new Error(`scenario: unknown prompt ${JSON.stringify(prompt)}`);
 		}
@@ -207,6 +214,38 @@ export default function (pi: ExtensionAPI) {
 		if (!existsSync(join(signals, "shutdown.hold"))) return;
 		signal("shutdown.entered");
 		await released("shutdown", undefined);
+	});
+
+	pi.registerTool({
+		name: "e2e_confirm",
+		label: "E2E confirm",
+		description: "Asks the person to confirm, in pi's own dialog",
+		parameters: Type.Object({ name: Type.String() }),
+		async execute(_id, params, _abort, _update, ctx) {
+			signal(`${params.name}.entered`);
+			const yes = await ctx.ui.confirm(`Confirm ${params.name}?`, "The e2e scenario asks.");
+			return { content: [{ type: "text", text: yes ? "confirmed" : "declined" }], details: undefined };
+		},
+	});
+
+	pi.registerTool({
+		name: "e2e_both",
+		label: "E2E both",
+		description: "Asks in pi's own dialog inside a glimpse attention span, which outlasts it",
+		parameters: Type.Object({ name: Type.String() }),
+		async execute(_id, params, abort, _update, ctx) {
+			const attentionId = `e2e-${params.name}`;
+			pi.events.emit("glimpseui:attention:request", { attentionId });
+			try {
+				signal(`${params.name}.entered`);
+				await ctx.ui.confirm(`Confirm ${params.name}?`, "The e2e scenario asks.");
+				signal(`${params.name}.answered`);
+				await released(params.name, abort);
+			} finally {
+				pi.events.emit("glimpseui:attention:resolve", { attentionId });
+			}
+			return { content: [{ type: "text", text: "both done" }], details: undefined };
+		},
 	});
 
 	pi.on("session_start", (_event, ctx) => {

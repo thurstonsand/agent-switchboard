@@ -340,6 +340,15 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"pi-dialog": {
+		run: async (s) => {
+			await entered(s, "deploy");
+			await waitLs(s, "blocked", (ls) => ls[0]?.activity === "blocked");
+			await waitDeck(s, "the row blocked", (x) => x.rows.some((r) => r.kind === "session" && r.state === "blocked"));
+			await waitLs(s, "idle once answered", (ls) => ls[0]?.activity === "idle");
+		},
+	},
+
 	"wake-enter-esc": {
 		setup: async (s) => {
 			await seed(

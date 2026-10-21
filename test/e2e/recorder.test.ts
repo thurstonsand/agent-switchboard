@@ -85,6 +85,35 @@ test("blocked during an attention span, working after it, idle only once the tur
 	expect(entry(s, runtime.session_id).unseen).toBe(true);
 });
 
+test("blocked while pi's own dialog waits on me mid-turn, idle once answered and settled", async () => {
+	s = scenario("phase1", "dialog");
+	const runtime = await startManaged(s);
+	await prompt(s, "confirm deploy");
+	await waitFor(s, "deploy.entered");
+	await until(() => entry(s, runtime.session_id)?.activity === "blocked", budgets.settle, "blocked on the dialog");
+	await until(() => s.screen().includes("Confirm deploy?"), budgets.settle, "the dialog on screen");
+	s.save("dialog.txt", s.screen());
+	s.keys("Enter");
+	await until(() => entry(s, runtime.session_id).activity === "idle", budgets.settle, "idle once answered");
+	expect(s.screen()).toContain("tool done deploy");
+});
+
+test("a dialog inside a Glimpse span: still blocked after the dialog closes, until the span resolves", async () => {
+	s = scenario("phase1", "dialog-and-attention");
+	const runtime = await startManaged(s);
+	await prompt(s, "both gate");
+	await waitFor(s, "gate.entered");
+	await until(() => entry(s, runtime.session_id)?.activity === "blocked", budgets.settle, "blocked");
+	await until(() => s.screen().includes("Confirm gate?"), budgets.settle, "the dialog on screen");
+	s.keys("Enter");
+	await waitFor(s, "gate.answered");
+	// The dialog's end reaches the line a microtask later; long enough for it to have cleared a lone wait.
+	await Bun.sleep(1000);
+	expect(entry(s, runtime.session_id).activity).toBe("blocked");
+	release(s, "gate");
+	await until(() => entry(s, runtime.session_id).activity === "idle", budgets.settle, "idle once the span resolves");
+});
+
 test("/reload keeps recording, /new moves the runtime row to a new id and leaves the old session dormant", async () => {
 	s = scenario("phase1", "reload-new");
 	const runtime = await startManaged(s);

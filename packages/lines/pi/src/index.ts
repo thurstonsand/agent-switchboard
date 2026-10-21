@@ -248,16 +248,23 @@ export default function (pi: ExtensionAPI) {
 		});
 	});
 
-	const attention = (open: boolean) => (data: unknown) => {
-		const attentionId = (data as { attentionId?: unknown }).attentionId;
-		if (typeof attentionId !== "string" || !current) return;
-		if (open) proc.attention.add(attentionId);
-		else proc.attention.delete(attentionId);
+	/** Blocked while anything waits on the person: a dialog through ctx.ui, or a Glimpse attention span. */
+	const waiting = (key: string, open: boolean) => {
+		if (!current) return;
+		if (open) proc.attention.add(key);
+		else proc.attention.delete(key);
 		const phase = proc.attention.size > 0 ? "blocked" : "working";
 		write(current, (db, id) => setPhase(db, id, phase));
 	};
+	const attention = (open: boolean) => (data: unknown) => {
+		const attentionId = (data as { attentionId?: unknown }).attentionId;
+		if (typeof attentionId === "string") waiting(`glimpse:${attentionId}`, open);
+	};
 	pi.events.on("glimpseui:attention:request", attention(true));
 	pi.events.on("glimpseui:attention:resolve", attention(false));
+	// pi reports only the outermost of nested dialogs, so one key covers them all.
+	pi.on("ui_prompt_start", () => waiting("ui-prompt", true));
+	pi.on("ui_prompt_end", () => waiting("ui-prompt", false));
 
 	// The last reply's stop, read when the run settles: a retry that succeeds replaces an error before then.
 	let stopReason: string | undefined;
