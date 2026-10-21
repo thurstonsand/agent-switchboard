@@ -1407,7 +1407,8 @@ export class SettingsPane {
 		const paint = custom ? (s: string) => s : dim;
 		const star = p.default ? (choice.reason ? red("★") : "★") : choice.reason ? red("✗") : " ";
 		const where = p.provider ? `${p.harness} · ${p.provider}` : p.harness;
-		const model = p.agent ?? `${p.model}${effortMark(p.effort)}`;
+		// The picker draws a harness's own effort as it draws medium; here, where it's set, it says so.
+		const model = p.agent ?? (p.effort === null ? `${p.model} ${gray("default")}` : `${p.model}${effortMark(p.effort)}`);
 		const noteWidth = Math.max(0, width - 48);
 		const note = choice.reason && i === this.cursor ? red(choice.reason) : gray(truncateToWidth(choice.note, noteWidth, "…"));
 		const editing = this.editing?.kind === "text" && this.editing.target.kind === "note" && i === this.cursor;
@@ -1415,7 +1416,7 @@ export class SettingsPane {
 			[`${String(index + 1).padStart(2)} `, null],
 			[star, () => this.starPreset(index)],
 			[` ${paint(where.padEnd(16).slice(0, 16))} `, null],
-			[paint(model.padEnd(22)), () => this.step(1, { kind: "preset", index }, true)],
+			[paint(`${model}${" ".repeat(Math.max(0, 22 - visibleWidth(model)))}`), () => this.step(1, { kind: "preset", index }, true)],
 			[" ", null],
 			[editing ? this.inputCell(noteWidth) : note, null],
 		];
