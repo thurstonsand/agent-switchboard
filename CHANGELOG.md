@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 — 2026-10-21
 
 Schema v6: update swb and the pi line together.
 
@@ -40,19 +40,17 @@ Schema v6: update swb and the pi line together.
 ### Fixed
 
 - Archiving or stopping a session that no Deck started (the clock, a schedule, or `session_launch` did) took 5 seconds, waiting on a pane that stayed open after its harness quit. Every session's pane now closes with its harness once the session has registered.
-
-### Removed
-
-- `group_by = "worktree"`. A config that still sets `group_by` fails to load; delete the key.
-- `harness`, the harness `n` started. The shortlist's default replaces it; a config that still sets `harness` fails to load.
-
-### Fixed
-
+- A pi session waiting on a dialog, the confirm, select, input, or editor any extension opens, read as working: only a Glimpse wait read as blocked. It reads blocked until you answer, and a dialog inside a Glimpse wait leaves it blocked until both end. A dialog opened while the session is idle still reads idle.
 - On tmux 3.8, a pi on the Stage stayed tuned to your terminal's old theme after it switched between light and dark: a light screen with your messages in dark boxes. It follows the switch again, in copy mode too, and every session sees your terminal's foreground and palette along with its background. With several Decks open, the one you use last sets the colours.
 - A Deck stopping an idle session sends it one SIGTERM, then SIGKILL if it's still running 10 seconds later, instead of a SIGTERM every 250 ms until it exits. A late one no longer draws `'kill -TERM <pid>' returned 1` over another session.
 - A Codex session's app-server and the tools it's running end with its host, however the host ends, instead of finishing the turn alone with nothing left to show it. An app-server that dies ends its session as cut off, killed, instead of leaving its TUI reconnecting forever.
 - A message Codex refused, such as one that arrived during `/compact`, waited for some unrelated write to the db before swb tried it again. It goes through once Codex takes it.
 - A card no longer shows Claude Code's `[Request interrupted by user]` as something you typed, or its `API Error: …` as a reply.
+
+### Removed
+
+- `group_by = "worktree"`. A config that still sets `group_by` fails to load; delete the key.
+- `harness`, the harness `n` started. The shortlist's default replaces it; a config that still sets `harness` fails to load.
 
 ## 0.6.4 — 2026-10-16
 
