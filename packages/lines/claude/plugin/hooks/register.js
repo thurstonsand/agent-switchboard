@@ -272,7 +272,8 @@ async function registerTools($) {
 
 async function registerTool($, tool) {
 	try {
-		await $.tool.register(tool);
+		// Straight into the model's tool list, not behind tool search, so the agent sees them like its own.
+		await $.tool.register({ ...tool, isDeferred: false });
 	} catch (error) {
 		$.ui.log(`swb: tool ${tool.name} not registered: ${error.message}`);
 	}

@@ -1,3 +1,4 @@
+import { rmSync, statSync } from "node:fs";
 import { instanced } from "@swb/shared";
 import { SwbError } from "./errors.ts";
 
@@ -59,18 +60,32 @@ export async function tmuxAsync(server: string, ...args: string[]): Promise<stri
 
 /** kill-server returns before the server exits; a new-session in that window reaches the dying server and fails. */
 export function killServer(server: string): void {
-	const running = tmuxTry(server, "display", "-p", "#{pid}");
+	const running = tmuxTry(server, "display", "-p", "#{pid}\t#{socket_path}");
 	if (!running.ok) return;
+	const [pid, socket] = running.out.split("\t") as [string, string];
+	const listening = inode(socket);
 	// A second upgrader can lose the race to the first; the server is gone either way.
 	tmuxTry(server, "kill-server");
-	const pid = Number(running.out);
 	for (;;) {
 		try {
-			process.kill(pid, 0);
+			process.kill(Number(pid), 0);
 		} catch {
-			return;
+			break;
 		}
 		Bun.sleepSync(10);
+	}
+	// A job the server forked for a hook, like session-closed's `swb gc`, holds its listening socket until it execs, and
+	// the next server's first client would connect to that and read EOF. Unless another swb already started a new one there.
+	if (listening !== null && inode(socket) === listening) rmSync(socket, { force: true });
+}
+
+/** A socket's inode, or null once it's gone: another swb can stop the server first. */
+function inode(path: string): number | null {
+	try {
+		return statSync(path).ino;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+		throw error;
 	}
 }
 

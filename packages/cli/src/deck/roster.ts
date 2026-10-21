@@ -3307,7 +3307,27 @@ function quit(): void {
 	void tmuxAsync(UI, "kill-session", "-t", `=${deck}`);
 }
 
+/**
+ * The worker's harness discovery runs each command in a session of its own, which neither the pane's SIGHUP nor this
+ * process exiting reaches: a `pi --list-models` left running would outlive the Deck. Those sessions are the only
+ * children here that lead their own process group.
+ */
+function stopDiscovery(): void {
+	const children = Bun.spawnSync(["pgrep", "-P", String(process.pid)])
+		.stdout.toString()
+		.split("\n")
+		.filter(Boolean);
+	for (const pid of children) {
+		try {
+			process.kill(-Number(pid), "SIGKILL");
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+		}
+	}
+}
+
 function cleanup(): never {
+	stopDiscovery();
 	tmuxTry(SESSIONS, "kill-session", "-t", `=${placeholder}`);
 	removeDeckFiles(deck);
 	ctl.close();
