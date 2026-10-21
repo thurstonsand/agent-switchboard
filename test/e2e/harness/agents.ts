@@ -33,11 +33,14 @@ export async function launched(
 		).stdout.text(),
 	) as { details: { id: string } };
 	const id = out.details.id;
-	return until(
+	const settled = await until(
 		() => s.ls().find((e) => e.id === id && e.activity === "idle"),
 		ready,
 		`the ${harness ?? "carried"} session's first turn to settle`,
 	);
+	// The app-server settles the turn before a loaded TUI does, which refuses /new and /compact until then.
+	if (settled.harness === "codex") await until(() => pane(s, id).includes("Worked for"), ready, "Codex's TUI done with the turn");
+	return settled;
 }
 
 /** Sends a message the way session_send_message does, from a session, and returns swb's receipt. */
@@ -72,9 +75,13 @@ export function pane(s: Scenario, id: string): string {
 	return s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-S", "-500", "-t", `=${host(s, id)}:`);
 }
 
-/** Types a prompt into a session's own TUI, as a person would. */
+/**
+ * Types a prompt into a session's own TUI, as a person would. Pasted, so a TUI that reads it late still sees the Enter
+ * as its own key: Codex takes keys arriving with a burst of typing as part of a paste, and leaves the prompt unsent.
+ */
 export function type(s: Scenario, id: string, text: string): void {
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, id)}:`, "-l", text);
+	s.tmux(s.servers.sessions, "set-buffer", "-b", "e2e-type", "--", text);
+	s.tmux(s.servers.sessions, "paste-buffer", "-p", "-d", "-b", "e2e-type", "-t", `=${host(s, id)}:`);
 	Bun.sleepSync(300);
 	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, id)}:`, "Enter");
 }

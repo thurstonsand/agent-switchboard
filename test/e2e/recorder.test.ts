@@ -80,6 +80,8 @@ test("blocked during an attention span, working after it, idle only once the tur
 	await prompt(s, "attention gate");
 	await waitFor(s, "gate.entered");
 	await until(() => entry(s, runtime.session_id)?.activity === "blocked", budgets.settle, "blocked");
+	// Unfocused, so the Deck watching the turn land doesn't Visit it.
+	s.swb("drive", "focus", "out");
 	release(s, "gate");
 	await until(() => entry(s, runtime.session_id).activity === "idle", budgets.settle, "idle");
 	expect(entry(s, runtime.session_id).unseen).toBe(true);
