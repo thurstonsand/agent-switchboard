@@ -1,5 +1,6 @@
 // What a scripted agent does with swb's tools, the same in every harness's fake model:
 //   tell <pi|claude|codex> <message>   find that harness's session with session_reachable, then message it
+//   flood <pi|claude|codex> <n>        tell it a message of <n> characters
 //   launch <pi|claude|codex> <title>   start a session there with session_launch, whose goal is the title
 //   show <title>                       find the session with that title with session_reachable, then swb_show_session it
 //   update <title> <json>              find it the same way, then swb_update_session it with those arguments
@@ -39,8 +40,8 @@ export function agentStep(prompt: string, toolOutput: string | null): Step {
 	}
 	const [verb, harness, ...rest] = prompt.trim().split(" ");
 	const name = NAMES[harness ?? ""];
-	if (!name || (verb !== "tell" && verb !== "launch")) return null;
-	const words = rest.join(" ");
+	if (!name || (verb !== "tell" && verb !== "launch" && verb !== "flood")) return null;
+	const words = verb === "flood" ? "x".repeat(Number(rest[0])) : rest.join(" ");
 	if (verb === "launch") {
 		if (toolOutput === null) return { tool: "session_launch", args: { harness, title: words, goal: words, requestResponse: false } };
 		return { text: toolOutput };

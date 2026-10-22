@@ -146,6 +146,29 @@ test("agents use swb's tools across harnesses: list, message, launch, and cancel
 	s.save("agents.txt", [pane(s, pi.id), pane(s, claude.id), pane(s, codex.id), pane(s, child.id)].join("\n=====\n"));
 });
 
+test("a message over 100,000 characters is refused in every harness, and one at the limit is delivered", async () => {
+	s = scenario("harnesses", "limit", { packages: [], recorder: true, harnesses: ["claude", "codex"] });
+	const [pi, claude, codex] = await Promise.all([
+		launched(s, "pi", "reply pi-up"),
+		launched(s, "claude", "reply claude up"),
+		launched(s, "codex", "reply codex up"),
+	]);
+	const refusal = "the message is 100,001 characters, over the 100,000 limit";
+	type(s, pi.id, "flood claude 100001");
+	type(s, codex.id, "flood pi 100001");
+	type(s, claude.id, "flood codex 100000");
+	await until(() => pane(s, pi.id).includes(refusal), budgets.settle, "pi told its message is too long");
+	await until(() => s.requests("codex").some((r) => String(r.toolOutput).includes(refusal)), budgets.settle, "Codex told the same");
+	await until(
+		() => s.query("select 1 from messages where length(body) = 100000 and delivered_at is not null").length === 1,
+		ready,
+		"Claude's message at the limit delivered to Codex",
+	);
+	expect(s.query("select source_id, target_id from messages where length(body) >= 100000")).toEqual([
+		{ source_id: claude.id, target_id: codex.id },
+	]);
+});
+
 test("a message to a dormant Claude Code or Codex session wakes it on its own conversation and delivers", async () => {
 	s = scenario("harnesses", "wake", { packages: [], recorder: true, harnesses: ["claude", "codex"] });
 	const [pi, claude, codex] = await Promise.all([

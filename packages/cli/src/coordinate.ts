@@ -8,7 +8,7 @@ import { codexSocket } from "./codex/host.ts";
 import { deckShowing, postCommand } from "./deck/deck.ts";
 import { inUse } from "./deck/transcript.ts";
 import { displayName, openDescendants, projectName, type SessionState, sessionState, states } from "./derive.ts";
-import { SwbError } from "./errors.ts";
+import { checkBody, SwbError } from "./errors.ts";
 import { type Caller, launchFlags, presetLaunch } from "./harnesses.ts";
 import { snooze } from "./schedules.ts";
 import { archive, ensureSessionsServer, launch, unarchive, wake } from "./sessions.ts";
@@ -48,7 +48,7 @@ export type Send = { from: string; to: string; body: string; requestResponse: bo
 /** Accepts a message for a session, waking it if it's dormant, and waits a while for its line to deliver it. */
 export async function send(db: Db, m: Send): Promise<ToolResult> {
 	if (m.to === m.from) throw new SwbError("a session can't message itself");
-	if (m.kind === "message" && !m.body.trim()) throw new SwbError("the message is empty");
+	if (m.kind === "message") checkBody("message", m.body);
 	const target = sessionState(db, m.to);
 	// A forced archive marks a session before it cancels the turn, so a cancel may reach one already archived.
 	if (!target.open && m.kind === "message") throw new SwbError(`"${displayName(target)}" is archived; unarchive it first`);
@@ -123,7 +123,7 @@ export type Launch = {
 
 /** Starts a new managed session whose first turn is the goal, and waits until its harness has registered it. */
 export async function launchSession(db: Db, l: Launch): Promise<ToolResult> {
-	if (!l.goal.trim()) throw new SwbError("the goal is empty");
+	checkBody("goal", l.goal);
 	const cwd = l.cwd ?? (l.from ? sessionState(db, l.from).cwd : null);
 	if (!cwd) throw new SwbError("a directory is required");
 	if (!existsSync(cwd)) throw new SwbError(`no directory ${cwd}`);

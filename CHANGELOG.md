@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- A message, launch goal, or scheduled message over 100,000 characters is refused when it's sent, in pi, Claude Code, and Codex, telling the agent to put the detail in a file and send its path. One Codex refused for its length used to stop every message queued behind it.
+
 ## 0.7.0 — 2026-10-21
 
 Schema v6: update swb and the pi line together.

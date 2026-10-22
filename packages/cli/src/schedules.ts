@@ -5,7 +5,7 @@ import { recordTx, titleOf } from "@swb/shared/record";
 import type { ToolResult } from "@swb/shared/tools";
 import { Cron } from "croner";
 import { displayName, sessionState, states } from "./derive.ts";
-import { SwbError } from "./errors.ts";
+import { checkBody, SwbError } from "./errors.ts";
 import { presetLaunch } from "./harnesses.ts";
 import { randomHex } from "./sessions.ts";
 
@@ -145,7 +145,7 @@ function scheduled(db: Db, row: ScheduleRow, from: string, snoozed: boolean): To
 
 /** Accepts a schedule; with snooze, its recipient is snoozed until the first fire. */
 export async function schedule(db: Db, s: ScheduleSpec): Promise<ToolResult> {
-	if (!s.body.trim()) throw new SwbError("the message is empty");
+	checkBody("message", s.body);
 	if (!s.label.trim()) throw new SwbError("the label is empty");
 	if ((s.at === null) === (s.cron === null)) throw new SwbError("give at, to run once, or cron, to recur: one of them");
 	if (s.to !== null && s.launch !== null) throw new SwbError("give session or launch, not both");
