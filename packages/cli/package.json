@@ -3,8 +3,8 @@
 	"private": true,
 	"type": "module",
 	"dependencies": {
-		"@decimalturn/toml-patch": "3.3.0",
-		"@earendil-works/pi-tui": "^1.3.0",
+		"@decimalturn/toml-patch": "3.3.1",
+		"@earendil-works/pi-tui": "^1.4.0",
 		"@modelcontextprotocol/sdk": "1.32.1",
 		"@swb/shared": "workspace:*",
 		"croner": "10.0.1",
