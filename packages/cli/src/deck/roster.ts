@@ -247,7 +247,7 @@ function sectionOf(e: Entry): "archived" | "snoozed" | "operators" | "inactive" 
 	if (!e.open) return "archived";
 	if (e.snoozed) return "snoozed";
 	if (e.operator) return "operators";
-	return e.inactive && !launchFor(e.id) ? "inactive" : "open";
+	return e.inactive ? "inactive" : "open";
 }
 
 function parentOf(e: Entry): Entry | undefined {

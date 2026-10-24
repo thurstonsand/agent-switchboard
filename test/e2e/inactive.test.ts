@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
-import { config, cursorTo, entry, launched, seed, sessionRows, state, title, waitState } from "./harness/deck.ts";
+import type { DeckState } from "../../packages/cli/src/deck/protocol.ts";
+import { config, cursorTo, entry, launched, rowIndex, seed, sessionRows, state, title, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 import { liveSession } from "./harness/lifecycle.ts";
 
@@ -39,6 +40,25 @@ test("Inactive after inactive_after, never while blocked or unseen", async () =>
 	await until(() => title(s) === "swb", budgets.settle, "the title counting nothing");
 	const st = await waitState(s, "Inactive section", (x) => x.rows.some((r) => r.kind === "section" && r.label === "Inactive"));
 	s.save("inactive.txt", `${s.screen()}\n${JSON.stringify(st.rows, null, 2)}`);
+
+	// Waking a session isn't activity: it stays in Inactive while it loads, and after.
+	const sectionOf = (x: DeckState) => x.rows.slice(0, rowIndex(x, unseen)).findLast((r) => r.kind === "section")?.label;
+	s.tmux(s.servers.sessions, "kill-session", "-t", `=${st.staged.host}`);
+	await until(() => !entry(s, unseen).live, budgets.settle, "dormant");
+	s.keys("M-a", "h");
+	await waitState(s, "roster focus", (x) => x.focus === "roster");
+	const inactiveRow = (x: DeckState) => x.rows.findIndex((r) => r.kind === "section" && r.label === "Inactive");
+	const at = state(s);
+	s.keys(...Array<string>(Math.abs(inactiveRow(at) - at.cursorRow)).fill(inactiveRow(at) > at.cursorRow ? "j" : "k"));
+	await waitState(s, "cursor on Inactive", (x) => x.cursorRow === inactiveRow(x));
+	s.keys("Enter");
+	await waitState(s, "Inactive expanded", (x) => rowIndex(x, unseen) !== -1);
+	await cursorTo(s, unseen);
+	s.keys("Enter");
+	const waking = await waitState(s, "waking", (x) => x.waking.some((w) => w.id === unseen));
+	expect(sectionOf(waking)).toBe("Inactive");
+	const woke = await waitState(s, "woken", (x) => x.staged.id === unseen && x.staged.kind === "live", budgets.piReady);
+	expect(sectionOf(woke)).toBe("Inactive");
 });
 
 test("a family goes Inactive only as a whole: while one member is active, so are the rest", async () => {
