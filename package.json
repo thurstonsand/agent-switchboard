@@ -13,7 +13,7 @@
 		"@openai/codex": "^0.164.0",
 		"@thurstonsand/pi-wt": "^1.16.0",
 		"@types/bun": "1.4.3",
-		"pi-sessions": "^0.20.0",
+		"pi-sessions": "^0.21.0",
 		"typescript": "7.0.2"
 	}
 }

@@ -1,7 +1,7 @@
 [tools]
 bun = "1.4.3"
 node = "24"
-"aqua:biomejs/biome" = "2.5.15"
+"aqua:biomejs/biome" = "2.6.3"
 "aqua:tmux/tmux-builds" = "3.7c"
 "aqua:charmbracelet/vhs" = "0.12.1"
 "conda:ttyd" = "1.7.7"
