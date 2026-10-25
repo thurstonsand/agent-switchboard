@@ -54,13 +54,13 @@ test("M-a v splits the editor at 65% beside pi; M-a h and l walk all three panes
 	expect(panes(s, st).length).toBe(3);
 	expect(roster.width).toBe(42);
 	expect(Math.abs(editor.width / (editor.width + pi.width + 1) - 0.65)).toBeLessThan(0.02);
-	// From pi view with the keyboard on the Stage, the keyboard stays on pi.
-	await until(() => activePane(s, st) === 2, budgets.settle, "the keyboard on pi");
+	// Even from pi view with the keyboard on pi, splitting means I want to look at the editor.
+	await until(() => activePane(s, st) === 1, budgets.settle, "the keyboard on the editor");
+	await waitState(s, "focus on the editor", (x) => x.focus === "editor");
 	await until(() => s.screen().includes("hello"), budgets.settle, "pi redrawn at its new width");
 	s.save("split.txt", s.screen());
 
 	const walk: [string, number][] = [
-		["h", 1],
 		["h", 0],
 		["h", 0],
 		["l", 1],
@@ -187,7 +187,7 @@ test("M-a s puts the directory's shell under pi, right of the split editor; ctrl
 	s = scenario("phase7", "shell");
 	config(s, 'editor = "cat -v"');
 	await started(s, "--size", "200x50", "--", "new");
-	await prefixKeys(s, "M-a", "v", "split", (x) => x.layout.split && x.focus === "stage");
+	await prefixKeys(s, "M-a", "v", "split", (x) => x.layout.split && x.focus === "editor");
 	let st = await prefixKeys(s, "M-a", "s", "the shell, with the keyboard", (x) => x.layout.shell && x.focus === "shell");
 	const [roster, editor, pi, shell] = boxes(s, st) as [Box, Box, Box, Box];
 	expect(boxes(s, st).length).toBe(4);

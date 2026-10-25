@@ -20,11 +20,12 @@ Alt+a
 Type "v"
 Wait+Screen /(?s)README.*faux-1|faux-1.*README/
 Sleep 2s
-Alt+a
-Type "h"
-Sleep 1.5s
+Screenshot ../artifacts/phase6/videos/editor-split.png
 Alt+a
 Type "l"
+Sleep 1.5s
+Alt+a
+Type "h"
 Sleep 3s
 Alt+a
 Type "s"

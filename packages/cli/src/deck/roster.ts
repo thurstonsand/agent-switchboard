@@ -3464,8 +3464,8 @@ async function toggleShell(): Promise<void> {
 }
 
 /**
- * `e` swaps pi and the Editor by what's showing, so an Editor that died comes back, and does nothing in split. `v` enters split with the keyboard on the pane matching the
- * old view, and leaves it for whichever pane had the keyboard.
+ * `e` swaps pi and the Editor by what's showing, so an Editor that died comes back, and does nothing in split. `v` enters split with the keyboard on the Editor, and
+ * leaves it for whichever pane had the keyboard.
  */
 async function changeView(swap: boolean): Promise<void> {
 	const e = stage.applied.id === null ? undefined : entries.get(stage.applied.id);
@@ -3483,9 +3483,8 @@ async function changeView(swap: boolean): Promise<void> {
 	await showView(e, next);
 }
 
-/** The keyboard goes to the pane the view brought up; entering split, to the one matching what showed before. */
+/** The keyboard goes to the pane the view brought up; entering split, to the Editor, since that's what I split to look at. */
 async function showView(e: Entry, next: View): Promise<void> {
-	const showing = stage.applied.view;
 	if (next !== "agent") {
 		editorsAsked.delete(e.cwd);
 		editorsLost.delete(e.cwd);
@@ -3497,8 +3496,7 @@ async function showView(e: Entry, next: View): Promise<void> {
 	post({ type: "view", id: e.id, view: next });
 	apply();
 	await stageOps;
-	const pane = next === "split" && showing === "agent" && side ? side.pane : stagePane;
-	await tmuxAsync(UI, "select-pane", ...(narrow ? ["-Z"] : []), "-t", pane);
+	await tmuxAsync(UI, "select-pane", ...(narrow ? ["-Z"] : []), "-t", stagePane);
 }
 
 // ── settings ────────────────────────────────────────────────────────────

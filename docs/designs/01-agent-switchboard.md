@@ -136,7 +136,7 @@ The final visual spec comes from the Deck mock rounds (see [ticket 09](../wayfin
 **Prefix** (`M-a`, rebindable), handled by the UI server:
 - `Tab` toggles focus between the roster and the Stage. `h` and `l` move focus one pane left or right: roster, then editor and pi in split view.
 - `e` swaps the view between pi and the Editor. In split it does nothing.
-- `v` toggles split view. Entering split keeps the keyboard on the pane matching the previous view; leaving it shows the pane that had the keyboard, full width.
+- `v` toggles split view. Entering split puts the keyboard on the editor; leaving it shows the pane that had the keyboard, full width.
 - `z` hides the roster, so the Stage fills the Deck. While it does, in a narrow Deck too, the Deck turns on its status line, `◂ <prefix> z show list`, and a click there brings the roster back.
 - `?` shows help; any key or click closes it.
 - `M-a` sends a literal `M-a` to pi. The sessions server has no prefix, so nothing in between catches it.
