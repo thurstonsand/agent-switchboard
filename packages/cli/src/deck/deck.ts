@@ -32,7 +32,7 @@ export function deckPaths(deck: string): DeckPaths {
 		card: join(dir, `${deck}.card.json`),
 		target: join(dir, `${deck}.target`),
 		side: join(dir, `${deck}.side`),
-		below: join(dir, `${deck}.below`),
+		shell: join(dir, `${deck}.shell`),
 		peek: join(dir, `${deck}.peek.json`),
 	};
 }
@@ -403,7 +403,7 @@ export function liveDecks(): string[] {
 
 export function removeDeckFiles(deck: string): void {
 	const paths = deckPaths(deck);
-	for (const path of [paths.sock, paths.card, paths.target, paths.side, paths.below, paths.peek]) rmSync(path, { force: true });
+	for (const path of [paths.sock, paths.card, paths.target, paths.side, paths.shell, paths.peek]) rmSync(path, { force: true });
 }
 
 export async function fetchState(deck: string): Promise<DeckState> {

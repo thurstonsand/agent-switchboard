@@ -74,7 +74,7 @@ function keys(prefix: string): [string, string][] {
 		[`${prefix} Tab`, "the sidebar, or back to the pane you left"],
 		[`${prefix} e`, "swap the agent and the editor"],
 		[`${prefix} v`, "split the editor beside the agent"],
-		[`${prefix} s`, "a shell below the agent; ctrl-d closes it"],
+		[`${prefix} s`, "a shell beside, below, or in place of the agent; ctrl-d closes it"],
 		[`${prefix} z`, "hide or show the sidebar; click ◂ to show it"],
 		[`${prefix} S`, "snooze or unsnooze, as s in the sidebar"],
 		[`${prefix} <key>`, "n N w x a p y Y / m , as in the sidebar"],

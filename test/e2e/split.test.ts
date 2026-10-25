@@ -188,7 +188,7 @@ test("M-a s puts the directory's shell under pi, right of the split editor; ctrl
 	config(s, 'editor = "cat -v"');
 	await started(s, "--size", "200x50", "--", "new");
 	await prefixKeys(s, "M-a", "v", "split", (x) => x.layout.split && x.focus === "editor");
-	let st = await prefixKeys(s, "M-a", "s", "the shell, with the keyboard", (x) => x.layout.shell && x.focus === "shell");
+	let st = await prefixKeys(s, "M-a", "s", "the shell, with the keyboard", (x) => x.layout.shell === "below" && x.focus === "shell");
 	const [roster, editor, pi, shell] = boxes(s, st) as [Box, Box, Box, Box];
 	expect(boxes(s, st).length).toBe(4);
 	expect(shell.left).toBe(pi.left);
@@ -249,16 +249,119 @@ test("M-a s puts the directory's shell under pi, right of the split editor; ctrl
 
 	s.keys("C-l", "C-j");
 	await waitState(s, "shell", (x) => x.focus === "shell");
-	st = await prefixKeys(s, "M-a", "s", "the shell hidden, the keyboard on pi", (x) => !x.layout.shell && x.focus === "stage");
+	st = await prefixKeys(s, "M-a", "s", "the shell hidden, the keyboard on pi", (x) => x.layout.shell === null && x.focus === "stage");
 	expect(boxes(s, st).length).toBe(3);
 	expect(shells(s).length).toBe(1);
-	await prefixKeys(s, "M-a", "s", "the same shell back", (x) => x.layout.shell && x.focus === "shell");
+	await prefixKeys(s, "M-a", "s", "the same shell back", (x) => x.layout.shell === "below" && x.focus === "shell");
 	await until(() => s.screen().includes("shell-42"), budgets.settle, "its scrollback kept");
 
 	s.keys("C-d");
-	st = await waitState(s, "ctrl-d closes it", (x) => !x.layout.shell && x.layout.split);
+	st = await waitState(s, "ctrl-d closes it", (x) => x.layout.shell === null && x.layout.split);
 	expect(boxes(s, st).length).toBe(3);
 	await until(() => shells(s).length === 0, budgets.settle, "the shell's session gone");
-	await prefixKeys(s, "M-a", "s", "a fresh shell", (x) => x.layout.shell && x.focus === "shell");
+	await prefixKeys(s, "M-a", "s", "a fresh shell", (x) => x.layout.shell === "below" && x.focus === "shell");
 	expect(s.screen()).not.toContain("shell-42");
+});
+
+test("the shell opens beside a wide pi and below a tall one, keeps its side while it fits, takes pi's place with room for neither, and shell_position fixes it", async () => {
+	s = scenario("phase7", "shell-position");
+	config(s, 'editor = "cat -v"');
+	await started(s, "--size", "200x50", "--", "new");
+	// pi's pane is 157 × 50: 50 rows of cells twice as tall as wide come to less than 157 columns, so beside.
+	let st = await prefixKeys(s, "M-a", "s", "the shell beside pi", (x) => x.layout.shell === "beside" && x.focus === "shell");
+	let [, pi, shell] = boxes(s, st) as [Box, Box, Box];
+	expect(shell.top).toBe(pi.top);
+	expect(shell.left).toBe(pi.left + pi.width + 1);
+	expect(Math.min(pi.width, shell.width)).toBeGreaterThanOrEqual(60);
+	s.keys("-l", "echo shell-$((6*7))", "Enter");
+	await until(() => s.screen().includes("shell-42"), budgets.settle, "the shell answering");
+	s.save("beside.txt", s.screen());
+
+	// 90 rows would put a new shell below; this one keeps its side while it fits.
+	s.swb("drive", "resize", "200x90");
+	await until(() => (boxes(s, st)[2]?.height ?? 0) > 80, budgets.settle, "the Deck 90 rows tall");
+	await Bun.sleep(500);
+	st = state(s);
+	expect(st.layout.shell).toBe("beside");
+	expect(boxes(s, st).length).toBe(3);
+	// 107 columns can't hold two 60-column halves, so it moves below, keeping the keyboard and its scrollback.
+	s.swb("drive", "resize", "150x50");
+	st = await waitState(s, "below at 150x50", (x) => x.layout.width === 150 && x.layout.shell === "below" && x.focus === "shell");
+	[, pi, shell] = boxes(s, st) as [Box, Box, Box];
+	expect(shell.left).toBe(pi.left);
+	expect(shell.top).toBe(pi.top + pi.height + 1);
+	await until(() => s.screen().includes("shell-42"), budgets.settle, "its scrollback kept");
+	s.save("below-when-narrow.txt", s.screen());
+	s.swb("drive", "resize", "200x50");
+	await waitState(s, "still below at 200x50", (x) => x.layout.width === 200 && x.layout.shell === "below");
+	// Hidden and shown again, it chooses afresh.
+	await prefixKeys(s, "M-a", "s", "the shell hidden", (x) => x.layout.shell === null && x.focus === "stage");
+	await prefixKeys(s, "M-a", "s", "beside again", (x) => x.layout.shell === "beside" && x.focus === "shell");
+
+	// 77 columns and 15 rows split neither way: the shell takes pi's pane, keyboard and all.
+	s.swb("drive", "resize", "120x15");
+	st = await waitState(s, "replacing pi at 120x15", (x) => x.layout.width === 120 && x.layout.shell === "replace" && x.focus === "shell");
+	expect(boxes(s, st).length).toBe(2);
+	s.keys("-l", "echo over-$((6*7))", "Enter");
+	await until(() => s.screen().includes("over-42") && !s.screen().includes("hello"), budgets.settle, "the shell in pi's place");
+	expect(s.screen().split("\n")[0]).toMatch(/swb.*shell/);
+	s.save("replace.txt", s.screen());
+	// Room again, it splits pi once more, keeping the keyboard.
+	s.swb("drive", "resize", "200x50");
+	st = await waitState(s, "beside at 200x50", (x) => x.layout.width === 200 && x.layout.shell === "beside" && x.focus === "shell");
+	expect(boxes(s, st).length).toBe(3);
+	// A narrow Deck always has it replace pi, and M-a s still opens and closes it there.
+	s.swb("drive", "resize", "90x40");
+	await waitState(s, "replacing pi when narrow", (x) => x.layout.rosterOnly && x.layout.shell === "replace" && x.focus === "shell");
+	await until(() => s.screen().includes("over-42"), budgets.settle, "the shell on a narrow Deck");
+	await prefixKeys(s, "M-a", "s", "the shell hidden, pi back", (x) => x.layout.shell === null && x.focus === "stage");
+	await until(() => s.screen().includes("hello"), budgets.settle, "pi back in its pane");
+	await prefixKeys(s, "M-a", "s", "the shell replacing pi again", (x) => x.layout.shell === "replace" && x.focus === "shell");
+	// In a short split, it takes pi's half and leaves the editor.
+	s.swb("drive", "resize", "200x15");
+	await waitState(s, "beside on a wide, short Deck", (x) => x.layout.width === 200 && x.layout.shell === "beside");
+	st = await prefixKeys(
+		s,
+		"M-a",
+		"v",
+		"split, the shell replacing pi",
+		(x) => x.layout.split && x.layout.shell === "replace" && x.focus === "editor",
+	);
+	expect(boxes(s, st).length).toBe(3);
+	await prefixKeys(s, "M-a", "l", "M-a l to the shell", (x) => x.focus === "shell");
+	s.save("replace-split.txt", s.screen());
+	await prefixKeys(
+		s,
+		"M-a",
+		"v",
+		"split left for the shell's pane",
+		(x) => !x.layout.split && x.layout.shell === "beside" && x.focus === "shell",
+	);
+	s.swb("drive", "resize", "200x50");
+	await waitState(s, "still beside at 200x50", (x) => x.layout.width === 200 && x.layout.shell === "beside");
+	// Splitting with the shell beside still gives the Editor 65% of the Stage, and the shell goes under pi.
+	st = await prefixKeys(s, "M-a", "v", "split, the shell below pi", (x) => x.layout.split && x.layout.shell === "below");
+	await until(() => boxes(s, state(s)).length === 4, budgets.settle, "four panes");
+	const [, splitEditor, splitPi, splitShell] = boxes(s, state(s)) as [Box, Box, Box, Box];
+	expect(Math.abs(splitEditor.width / (splitEditor.width + splitPi.width + 1) - 0.65)).toBeLessThan(0.02);
+	expect(splitShell.left).toBe(splitPi.left);
+	// tmux takes M-a l to whichever of pi and the shell had the keyboard last.
+	if ((await prefixKeys(s, "M-a", "l", "M-a l off the editor", (x) => x.focus !== "editor")).focus !== "shell")
+		await prefixKeys(s, "M-a", "j", "M-a j to the shell", (x) => x.focus === "shell");
+	st = await prefixKeys(
+		s,
+		"M-a",
+		"v",
+		"split left, the shell beside pi with the keyboard",
+		(x) => !x.layout.split && x.layout.shell === "beside" && x.focus === "shell",
+	);
+	const [, wholePi, wholeShell] = boxes(s, st) as [Box, Box, Box];
+	expect(Math.abs(wholePi.width - wholeShell.width)).toBeLessThanOrEqual(1);
+
+	config(s, 'editor = "cat -v"\nshell_position = "below"\n');
+	await waitState(s, "shell_position below moves it", (x) => x.layout.shell === "below" && x.focus === "shell");
+	s.swb("drive", "resize", "200x15");
+	const told = await waitState(s, "beside where below can't fit", (x) => x.layout.width === 200 && x.layout.shell === "beside");
+	expect(told.toasts.map((t) => t.text)).toContain("a shell below needs 21 rows; showing it beside");
+	s.save("forced-fallback.txt", s.screen());
 });

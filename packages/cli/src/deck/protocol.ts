@@ -168,7 +168,7 @@ export type DeckState = {
 		view: View;
 		savedView: View;
 	};
-	layout: { width: number; rosterOnly: boolean; split: boolean; shell: boolean; rosterHidden: boolean };
+	layout: { width: number; rosterOnly: boolean; split: boolean; shell: ShellAt | null; rosterHidden: boolean };
 	waking: { id: string | null; keyboardWaiting: boolean }[];
 	rows: StateRow[];
 	colors: { background: string | null; scheme: string | null };
@@ -176,8 +176,11 @@ export type DeckState = {
 	perf: { render: StatSummary; switchClient: StatSummary; keyToSwitch: StatSummary; keyToFrame: StatSummary };
 };
 
+/** Where the shell sits against the pane holding the agent, or that it replaces the agent in its pane, when neither half would have room. */
+export type ShellAt = "below" | "beside" | "replace";
+
 /** `side` is the target file of the Stage's second pane, which exists only while split is showing; `peek` is the Peek's. */
-export type DeckPaths = { sock: string; card: string; target: string; side: string; below: string; peek: string };
+export type DeckPaths = { sock: string; card: string; target: string; side: string; shell: string; peek: string };
 
 /** A Deck's terminal as its programs see it, in hex; `palette` is null when the terminal didn't report all 16. */
 export type TerminalProfile = { foreground: string; background: string; palette: string[] | null; scheme: "light" | "dark" };

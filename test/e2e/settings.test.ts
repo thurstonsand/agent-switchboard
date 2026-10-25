@@ -62,14 +62,14 @@ test("Settings edits config.toml by keyboard and mouse, keeps its comments, and 
 	expect(read()).toBe(COMMENTED);
 
 	// A duration typed in, read back as it's typed.
-	s.keys("j", "j", "Enter", "C-u", "-l", "3d");
+	s.keys("j", "j", "j", "Enter", "C-u", "-l", "3d");
 	await until(() => s.screen().includes("= 3 days"), budgets.settle, "the duration read back");
 	s.keys("Enter");
 	await waitState(s, "3d saved", (x) => item(x, "inactive_after")?.value === "3d");
 	expect(read()).toContain('inactive_after = "3d" # long weekends');
 
 	// A bad value is refused in place and nothing is written.
-	s.keys("k", "Enter", "C-u", "-l", "5", "Enter");
+	s.keys("k", "k", "Enter", "C-u", "-l", "5", "Enter");
 	await until(() => s.screen().includes("must be columns (20 or more)"), budgets.settle, "the width refused");
 	expect(read()).not.toContain("roster_width");
 	s.keys("Escape");

@@ -21,7 +21,7 @@ See @CONTEXT.md for project vocabulary.
 
 ## Features
 
-- `swb`: opens a Deck where the last one in this Project left off. The roster lists Operators, then open sessions grouped by project, then Inactive, Snoozed, then Archived. Beside it, the Stage shows the selected session's agent, its directory's editor, or a split of both, with an optional shell beneath the agent
+- `swb`: opens a Deck where the last one in this Project left off. The roster lists Operators, then open sessions grouped by project, then Inactive, Snoozed, then Archived. Beside it, the Stage shows the selected session's agent, its directory's editor, or a split of both, with an optional shell beside, below, or in place of the agent
 - `swb -c`: opens a Deck on this Project's most recent session, or a new one
 - Operators: sessions in swb's Operator folder that coordinate the rest, reading only that folder's AGENTS.md
 - Settings: every key in config.toml, browsable and editable in the Deck, including the shortlist of presets that `n` and `session_launch` start new sessions on

@@ -457,8 +457,8 @@ export const directors: Record<string, Director> = {
 			await waitDeck(s, "the editor view", (x) => x.staged.view === "editor" && x.focus === "editor");
 			await waitDeck(s, "back to pi", (x) => x.staged.view === "agent");
 			await waitDeck(s, "split", (x) => x.layout.split && x.staged.view === "split");
-			await waitDeck(s, "the shell", (x) => x.layout.shell && x.focus === "shell");
-			await waitDeck(s, "ctrl-d closed it", (x) => !x.layout.shell && x.layout.split);
+			await waitDeck(s, "the shell, below pi in split", (x) => x.layout.shell === "below" && x.focus === "shell");
+			await waitDeck(s, "ctrl-d closed it", (x) => x.layout.shell === null && x.layout.split);
 		},
 	},
 
@@ -476,7 +476,7 @@ export const directors: Record<string, Director> = {
 			const live = await waitDeck(s, "pi live with the keyboard", (x) => x.staged.kind === "live" && x.focus === "stage");
 			const [first, next] = live.rows.flatMap((r) => (r.kind === "session" ? [r.id] : [])) as [string, string];
 			expect(live.staged.id).toBe(first);
-			await waitDeck(s, "split, the shell under pi", (x) => x.layout.split && x.layout.shell && x.focus === "shell");
+			await waitDeck(s, "split, the shell under pi", (x) => x.layout.split && x.layout.shell === "below" && x.focus === "shell");
 			await waitDeck(s, "M-a k up to pi", (x) => x.focus === "stage");
 			await waitDeck(s, "M-a h to the editor", (x) => x.focus === "editor");
 			await waitDeck(s, "M-a h to the sidebar", (x) => x.focus === "roster");
@@ -993,11 +993,11 @@ export const directors: Record<string, Director> = {
 			await click("show list");
 			await waitDrive(s, "the roster back", (x) => !x.layout.rosterHidden);
 			await click(" shell ");
-			await waitDrive(s, "the shell", (x) => x.layout.shell && x.focus === "shell");
+			await waitDrive(s, "the shell", (x) => x.layout.shell !== null && x.focus === "shell");
 			s.keys("-l", "echo the shell came from a click", "Enter");
 			await Bun.sleep(1000);
 			await click(" shell ");
-			await waitDrive(s, "the shell closed", (x) => !x.layout.shell);
+			await waitDrive(s, "the shell closed", (x) => x.layout.shell === null);
 			await click("? keys");
 			await click("any key or click closes", 1000);
 			await until(() => !s.swb("drive", "capture").includes("any key or click closes"), TAPE, "help closed by a click");

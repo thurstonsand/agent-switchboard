@@ -60,7 +60,7 @@ test("a pi on the Stage repaints when the terminal flips, in copy mode too, whil
 	await reply(s, "one");
 	await until(() => userMessageBg(host) === "219;229;229", budgets.settle, "pi's light user message");
 	s.keys("M-a", "s");
-	await waitState(s, "the shell, with the keyboard", (x) => x.layout.shell && x.focus === "shell");
+	await waitState(s, "the shell, with the keyboard", (x) => x.layout.shell !== null && x.focus === "shell");
 
 	// tmux 3.8 tells pi before the sessions server mirrors the terminal, so pi's own query would see the old colors.
 	s.swb("drive", "theme", "dark");

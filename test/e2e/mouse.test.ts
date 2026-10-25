@@ -84,10 +84,10 @@ test("the mouse reaches everything the keys do: a row's Peek, the hidden or narr
 	await until(() => !s.screen().includes("show list"), budgets.settle, "the status line gone with it");
 
 	await click(" shell ");
-	await waitState(s, "the shell shown", (x) => x.layout.shell && x.focus === "shell");
+	await waitState(s, "the shell shown", (x) => x.layout.shell !== null && x.focus === "shell");
 	s.save("shell.txt", s.screen());
 	await click(" shell ");
-	await waitState(s, "the shell hidden", (x) => !x.layout.shell);
+	await waitState(s, "the shell hidden", (x) => x.layout.shell === null);
 
 	await click("? keys");
 	await onScreen("any key or click closes", "the key help");

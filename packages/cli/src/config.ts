@@ -39,6 +39,7 @@ export type Config = {
 	clipboard: string;
 	prefix: string;
 	rosterWidth: RosterWidth;
+	shellPosition: ShellPosition;
 	/** Where the directory picker looks for places to start sessions, beyond the ones sessions have used. */
 	dirs: DirsConfig;
 	/** The harnesses new sessions may start in; resuming is never restricted. */
@@ -52,6 +53,9 @@ export type Config = {
 
 /** The roster's width: columns, or a share of the Deck. */
 export type RosterWidth = { cols: number } | { percent: number };
+
+/** Where the shell opens against the agent's pane: along its longer side, or one way while there's room. */
+export type ShellPosition = "auto" | "below" | "beside";
 
 export const SECTIONS = ["General", "Harnesses", "Operators", "Directories", "Keys & commands"] as const;
 export type Section = (typeof SECTIONS)[number];
@@ -172,6 +176,28 @@ export const SETTINGS: Setting[] = [
 		},
 		example: 42,
 		note: 'columns, or a share of the Deck like "25%"; never more than half',
+	},
+	{
+		key: ["shell_position"],
+		section: "General",
+		label: "Shell position",
+		description:
+			"Where M-a s opens the directory's shell: along the longer side of the agent's pane, or always below or beside it while both halves have room. With room for neither, it takes the agent's place.",
+		synonyms: ["terminal", "split", "orientation", "vertical", "horizontal", "layout"],
+		control: {
+			kind: "enum",
+			choices: [
+				{ value: "auto", about: "beside a wide pane, below a tall one" },
+				{ value: "below", about: "under the agent" },
+				{ value: "beside", about: "to the agent's right" },
+			],
+		},
+		fallback: fixed("auto"),
+		apply: (config, value) => {
+			config.shellPosition = oneOf(["auto", "below", "beside"], value);
+		},
+		example: "auto",
+		note: '"below" or "beside" fixes it, except where only the other fits; with room for neither, it replaces the agent',
 	},
 	{
 		key: ["inactive_after"],

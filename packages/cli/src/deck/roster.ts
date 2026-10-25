@@ -55,6 +55,7 @@ import type {
 	PeekInfo,
 	PeekView,
 	PickerState,
+	ShellAt,
 	Snapshot,
 	State,
 	StatSummary,
@@ -177,6 +178,9 @@ let terminalFocused = true;
 let rosterHidden = false;
 let narrow = false;
 let deckWidth = 0;
+let deckHeight = 0;
+/** A cell's height in widths, as the terminal reports its pixels; most fonts are near 2. */
+let cellRatio = 2;
 /** A roster width set by dragging its border, which window resizes keep instead of roster_width. */
 let draggedCols: number | null = null;
 /** While swb itself moves or sizes the roster, its resizes aren't drags; sizings counts each start and end. */
@@ -352,29 +356,29 @@ type Applied = {
 	target: string;
 	/** The Stage's second pane, which only split has. */
 	side: string | null;
-	/** The directory's shell, under pi. */
-	below: string | null;
+	/** The directory's shell, and where it sits against pi's pane; replacing pi, the shell is that pane's target. */
+	shell: { target: string; at: ShellAt } | null;
 };
 
 function onCard(kind: Applied["kind"], id: string | null, card: Card): Applied {
-	return { kind, id, host: null, card, view: "agent", target: placeholder, side: null, below: null };
+	return { kind, id, host: null, card, view: "agent", target: placeholder, side: null, shell: null };
 }
 
 /** A pi still starting, on view so whatever it asks before it registers (a missing cwd, project trust) can be answered. */
 function starting(id: string | null, host: string): Applied {
-	return { kind: "loading", id, host: null, card: null, view: "agent", target: host, side: null, below: null };
+	return { kind: "loading", id, host: null, card: null, view: "agent", target: host, side: null, shell: null };
 }
 
 function piShown(a: Applied): boolean {
-	return a.kind === "live" && a.view !== "editor";
+	return a.kind === "live" && a.view !== "editor" && a.shell?.at !== "replace";
 }
 
 /** A nested client of the sessions server in one of the Stage's panes. */
 type StageClient = { pane: string; tty: string; up: boolean };
 const main: StageClient = { pane: stagePane, tty: "", up: false };
 let side: (StageClient & { target: string }) | null = null;
-/** The shell's pane, under whichever pane holds pi. It closes with its shell, so it needs no client tracking. */
-let below: { pane: string; target: string; parent: string } | null = null;
+/** The shell's pane, against whichever pane holds pi. It closes with its shell, so it needs no client tracking. */
+let shellPane: { pane: string; target: string; at: ShellAt; parent: string } | null = null;
 
 const EMPTY: Card = { head: [], lines: ["Nothing selected."], turns: [], tail: [], ending: null, agent: "" };
 
@@ -482,19 +486,45 @@ function piStage(): Applied {
 			card(e, failed ? [`${harnessName(e.harness)} quit before it was ready:`, ...stage.ended.lines] : []),
 		);
 	}
-	if (e.live && e.host) return { kind: "live", id: e.id, host: e.host, card: null, view: "agent", target: e.host, side: null, below: null };
+	if (e.live && e.host) return { kind: "live", id: e.id, host: e.host, card: null, view: "agent", target: e.host, side: null, shell: null };
 	const launch = launchFor(e.id);
 	if (launch?.host) return starting(e.id, launch.host);
 	if (launch) return onCard("loading", e.id, card(e, launch.keyboard && rosterOffScreen() ? [ESC_LINE] : []));
 	return onCard("dormant", e.id, card(e));
 }
 
-/** The session's own view, as far as it can show, and its directory's shell when this Deck shows it. */
+/** The session's own view, as far as it can show, and its directory's shell when this Deck shows it, in pi's pane when it can't split it. */
 function desired(): Applied {
 	const d = viewed();
 	const e = d.id === null ? undefined : entries.get(d.id);
-	const shell = e?.open && !narrow && shellsShown.has(e.cwd) ? snapshot?.shells[e.cwd] : undefined;
-	return shell ? { ...d, below: shell } : d;
+	const target = e?.open && shellsShown.has(e.cwd) ? snapshot?.shells[e.cwd] : undefined;
+	if (!target) return d;
+	const shell = { target, at: shellAt(d, target) };
+	if (shell.at !== "replace") return { ...d, shell };
+	return d.side ? { ...d, side: target, shell } : { ...d, target, shell };
+}
+
+/** Each half of the pane the shell splits keeps at least this much: pi is cramped below 60 columns, and a shell below 10 rows. */
+const SHELL_MIN_COLS = 60;
+const SHELL_MIN_ROWS = 10;
+
+/**
+ * zellij's rule: a shell goes below a pane that's taller than it is wide, counting a cell's height in widths, and beside one
+ * that isn't. Unlike zellij, one that doesn't fit its way takes the other, and one that fits neither takes pi's pane. Under auto, a shell keeps its side through resizes
+ * while it fits, so it doesn't jump; another directory's shell, or entering or leaving split, chooses again.
+ */
+function shellAt(d: Applied, target: string): ShellAt {
+	const stageCols = rosterHidden ? deckWidth : deckWidth - rosterWidth() - 1;
+	const cols = d.side ? Math.round(stageCols * 0.35) : stageCols;
+	const fits = { beside: cols >= 2 * SHELL_MIN_COLS + 1, below: deckHeight >= 2 * SHELL_MIN_ROWS + 1 };
+	// A narrow Deck zooms whichever pane has the keyboard, so a second one would never show beside the first.
+	if (narrow) return "replace";
+	const prev = stage.applied.shell;
+	const sameStage = prev?.target === target && (stage.applied.side === null) === (d.side === null);
+	if (config.shellPosition === "auto" && sameStage && prev.at !== "replace" && fits[prev.at]) return prev.at;
+	const want = config.shellPosition !== "auto" ? config.shellPosition : deckHeight * cellRatio > cols ? "below" : "beside";
+	const other = want === "below" ? "beside" : "below";
+	return fits[want] ? want : fits[other] ? other : "replace";
 }
 
 /** Directories whose shell this Deck shows; a shell that exits leaves the set. */
@@ -603,32 +633,50 @@ function syncSide(): void {
 	});
 }
 
-/** Creates or kills the shell's pane to match what is applied, under pi's pane; leaving it keeps the keyboard where it is. */
-function syncBelow(): void {
+/**
+ * Creates, moves, or kills the shell's pane to match what is applied, against pi's pane. A shell that moves keeps the keyboard if it
+ * had it, out of pi's pane too; one that goes leaves it on pi.
+ */
+function syncShell(fromOver: boolean): void {
 	stageOps = stageOps.then(async () => {
-		const want = stage.applied.below;
+		const want = stage.applied.shell?.at === "replace" ? null : stage.applied.shell;
 		const parent = side?.pane ?? stagePane;
+		const refocus = fromOver && focusedPane === parent;
 		try {
-			if (below && (want !== below.target || parent !== below.parent)) {
-				const { pane } = below;
-				below = null;
-				// Ctrl-D in the shell already closed it.
-				await tmuxAsync(UI, "kill-pane", "-t", pane).catch(() => {});
-				if (focusedPane === pane) await tmuxAsync(UI, "select-pane", "-t", parent);
+			if (shellPane && (want?.target !== shellPane.target || want.at !== shellPane.at || parent !== shellPane.parent)) {
+				const moving = want?.target === shellPane.target;
+				await dropShellPane();
+				if (!moving) shellKeys = false;
 			}
-			if (want === null || below) return;
-			writeAtomic(paths.below, want);
+			if (want === null || shellPane) return;
+			writeAtomic(paths.shell, want.target);
 			const created = await tmuxAsync(
 				UI,
-				...["split-window", "-v", "-d", "-l", "50%", "-t", parent, "-P", "-F", "#{pane_id}"],
+				...["split-window", want.at === "beside" ? "-h" : "-v", "-d", "-l", "50%", "-t", parent, "-P", "-F", "#{pane_id}"],
 				...deckEnv(),
-				stageScript(deck, paths.below, true),
+				stageScript(deck, paths.shell, true),
 			);
-			below = { pane: created, target: want, parent };
+			shellPane = { pane: created, target: want.target, at: want.at, parent };
+			if (refocus || shellKeys) await tmuxAsync(UI, "select-pane", "-t", created);
 		} catch (error) {
 			toast(`shell: ${(error as Error).message}`, "error");
+		} finally {
+			shellKeys = false;
 		}
 	});
+}
+
+/** Whether the shell's pane had the keyboard when it went, for the one that replaces it to take. */
+let shellKeys = false;
+
+async function dropShellPane(): Promise<void> {
+	if (!shellPane) return;
+	const { pane, parent } = shellPane;
+	shellPane = null;
+	shellKeys ||= focusedPane === pane;
+	// Ctrl-D in the shell already closed it.
+	await tmuxAsync(UI, "kill-pane", "-t", pane).catch(() => {});
+	if (focusedPane === pane) await tmuxAsync(UI, "select-pane", "-t", parent).catch(() => {});
 }
 
 /** The labels the Stage's panes wear on their top edges, as last set. */
@@ -644,9 +692,10 @@ function syncLabels(): void {
 		harness = e.harness;
 	}
 	stageOps = stageOps.then(async () => {
-		const want: [string, string][] = [[stagePane, a.view === "agent" ? harness : "editor"]];
-		if (side) want.push([side.pane, harness]);
-		if (below) want.push([below.pane, "shell"]);
+		const replaced = a.shell?.at === "replace";
+		const want: [string, string][] = [[stagePane, replaced && a.side === null ? "shell" : a.view === "agent" ? harness : "editor"]];
+		if (side) want.push([side.pane, replaced ? "shell" : harness]);
+		if (shellPane) want.push([shellPane.pane, "shell"]);
 		const key = JSON.stringify(want);
 		if (key === labels) return;
 		// One command per pane: a shell's pane closes with its shell, ahead of the apply that forgets it.
@@ -692,14 +741,35 @@ function apply(): void {
 	}
 	tui.requestRender();
 	// A pane coming or going moves the Stage's panes out from under the Peek; render puts it back.
-	if (d.side !== prev.side || d.below !== prev.below) closePeek();
+	const shellMoved = d.shell?.target !== prev.shell?.target || d.shell?.at !== prev.shell?.at;
+	if (d.side !== prev.side || shellMoved) closePeek();
+	// Split's pane is cut from the whole Stage, and leaving split gives its columns back to the Editor's pane, so a shell's pane
+	// beside or below either goes first; syncShell puts it back where it now belongs.
+	if ((d.side === null) !== (prev.side === null)) stageOps = stageOps.then(dropShellPane);
 	if (d.side !== prev.side || d.side !== (side?.target ?? null)) syncSide();
-	if (d.below !== (below?.target ?? null) || d.side !== prev.side) syncBelow();
-	if (nvimEditor(config.editor) && (d.view !== "agent") !== (prev.view !== "agent")) tagEditor(d.view !== "agent");
+	if (shellMoved || d.side !== prev.side) syncShell(prev.shell?.at === "replace" && d.shell?.target === prev.shell.target);
+	if (shellMoved && d.shell && !narrow && config.shellPosition !== "auto" && d.shell.at !== config.shellPosition) {
+		const room = config.shellPosition === "beside" ? `${2 * SHELL_MIN_COLS + 1} columns` : `${2 * SHELL_MIN_ROWS + 1} rows`;
+		const where = d.shell.at === "replace" ? `in ${e ? harnessName(e.harness) : "the agent"}'s place` : d.shell.at;
+		toast(`a shell ${config.shellPosition} needs ${room}; showing it ${where}`, "info");
+	}
+	if (nvimEditor(config.editor) && editorShown(d) !== editorShown(prev)) tagEditor(editorShown(d));
 	syncLabels();
 	if (d.target === prev.target) return;
 	writeAtomic(paths.target, d.target);
 	switchStage(main, d.target, false);
+}
+
+/** Whether the Stage's first pane shows the Editor, which a shell replacing it in editor view hides. */
+function editorShown(a: Applied): boolean {
+	return a.view === "split" || (a.view === "editor" && a.shell?.at !== "replace");
+}
+
+/** The pane the shell is in: its own, or pi's when it replaces pi. */
+function shellShownIn(): string | null {
+	const a = stage.applied;
+	if (a.shell?.at === "replace") return a.side !== null ? (side?.pane ?? null) : stagePane;
+	return shellPane?.pane ?? null;
 }
 
 function watching(): string | null {
@@ -2393,7 +2463,7 @@ class Roster implements Component, Focusable {
 			}
 			// The shell is a toggle beside the views, not one of them.
 			if (!narrow)
-				parts.push([gray(" · "), null], [stage.applied.below ? cursorLine(" shell ", true) : gray(" shell "), () => void toggleShell()]);
+				parts.push([gray(" · "), null], [stage.applied.shell ? cursorLine(" shell ", true) : gray(" shell "), () => void toggleShell()]);
 			tabs = this.clickable(narrow ? top + 2 : top, parts);
 		}
 		if (!narrow) return [truncateToWidth(tabs, width, "…")];
@@ -3160,9 +3230,10 @@ function syncRoster(toRoster: boolean): Promise<void> {
 						const width = await tmuxAsync(UI, "display", "-p", "-t", side.pane, "#{pane_width}");
 						join.push(";", "join-pane", "-h", "-d", "-l", width, "-s", side.pane, "-t", stagePane);
 					}
-					if (below) {
-						const height = await tmuxAsync(UI, "display", "-p", "-t", below.pane, "#{pane_height}");
-						join.push(";", "join-pane", "-v", "-d", "-l", height, "-s", below.pane, "-t", below.parent);
+					if (shellPane) {
+						const beside = shellPane.at === "beside";
+						const size = await tmuxAsync(UI, "display", "-p", "-t", shellPane.pane, beside ? "#{pane_width}" : "#{pane_height}");
+						join.push(";", "join-pane", beside ? "-h" : "-v", "-d", "-l", size, "-s", shellPane.pane, "-t", shellPane.parent);
 					}
 					// The roster's window began empty when it broke away, so it has no last pane: the Stage pane goes first, for
 					// l and Tab to return to.
@@ -3269,12 +3340,23 @@ function peekButtons(row: Row): [label: string, key: string][] {
 function layout(): Promise<void> {
 	closePeek();
 	return sizingRoster(async () => {
-		deckWidth = Number(await tmuxAsync(UI, "display", "-p", "-t", stagePane, "#{window_width}"));
+		const size = await tmuxAsync(
+			UI,
+			"display",
+			"-p",
+			"-t",
+			stagePane,
+			"#{window_width}\t#{window_height}\t#{client_cell_width}\t#{client_cell_height}",
+		);
+		const [width, height, cellWidth, cellHeight] = size.split("\t").map(Number) as [number, number, number, number];
+		deckWidth = width;
+		deckHeight = height;
+		if (cellWidth > 0 && cellHeight > 0) cellRatio = Math.round(cellHeight / cellWidth);
+		const wasNarrow = narrow;
+		narrow = deckWidth < NARROW_BELOW;
 		apply();
 		await stageOps;
 		const [zoomFlag, active] = (await tmuxAsync(UI, "display", "-p", "-t", stagePane, "#{window_zoomed_flag}\t#{pane_active}")).split("\t");
-		const wasNarrow = narrow;
-		narrow = deckWidth < NARROW_BELOW;
 		if (narrow) await syncRoster(false);
 		if (narrow !== wasNarrow) {
 			if (narrow) await tmuxAsync(UI, "set", "-t", deck, "@swb_narrow", "1");
@@ -3439,19 +3521,15 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 	tui.requestRender();
 }
 
-/** Shows or hides the shell under pi for the staged session's directory, and the keyboard follows it in and back out. */
+/** Shows or hides the shell beside, below, or in place of pi for the staged session's directory, and the keyboard follows it in and back out. */
 async function toggleShell(): Promise<void> {
 	const e = stage.applied.id === null ? undefined : entries.get(stage.applied.id);
 	if (!e?.open) {
 		toast("no open session on view", "info");
 		return;
 	}
-	if (narrow) {
-		toast(`the shell needs ${NARROW_BELOW} columns`, "info");
-		return;
-	}
 	if (shellsShown.delete(e.cwd)) {
-		const inShell = below !== null && focusedPane === below.pane;
+		const inShell = focus === "stage" && focusedPane === shellShownIn();
 		apply();
 		if (inShell) await focusStage();
 		return;
@@ -3460,7 +3538,8 @@ async function toggleShell(): Promise<void> {
 	shellsShown.add(e.cwd);
 	apply();
 	await stageOps;
-	if (below) await tmuxAsync(UI, "select-pane", "-t", below.pane);
+	const pane = shellShownIn();
+	if (pane) await tmuxAsync(UI, "select-pane", ...(narrow ? ["-Z"] : []), "-t", pane);
 }
 
 /**
@@ -3483,7 +3562,7 @@ async function changeView(swap: boolean): Promise<void> {
 	await showView(e, next);
 }
 
-/** The keyboard goes to the pane the view brought up; entering split, to the Editor, since that's what I split to look at. */
+/** The keyboard goes to the pane the view brought up, or stays in the shell; entering split, to the Editor, since that's what I split to look at. */
 async function showView(e: Entry, next: View): Promise<void> {
 	if (next !== "agent") {
 		editorsAsked.delete(e.cwd);
@@ -3492,11 +3571,13 @@ async function showView(e: Entry, next: View): Promise<void> {
 	}
 	if (next !== "editor" && !e.live) wake(e.id, focus === "stage");
 	if (next === "split" && deckWidth < SPLIT_FROM) toast(`split needs ${SPLIT_FROM} columns; showing ${harnessName(e.harness)}`, "info");
+	// Leaving split from a shell replacing pi keeps the keyboard in the shell, wherever it lands.
+	const inShell = next !== "split" && focus === "stage" && focusedPane === shellShownIn();
 	localViews.set(e.id, next);
 	post({ type: "view", id: e.id, view: next });
 	apply();
 	await stageOps;
-	await tmuxAsync(UI, "select-pane", ...(narrow ? ["-Z"] : []), "-t", stagePane);
+	await tmuxAsync(UI, "select-pane", ...(narrow ? ["-Z"] : []), "-t", (inShell && shellShownIn()) || stagePane);
 }
 
 // ── settings ────────────────────────────────────────────────────────────
@@ -3515,6 +3596,7 @@ function applyLoaded(next: Loaded): void {
 	}
 	if (JSON.stringify(before.dirs) !== JSON.stringify(config.dirs)) post({ type: "dirs" });
 	if (before.wakeOnHighlight !== config.wakeOnHighlight) scheduleHighlightWake();
+	if (before.shellPosition !== config.shellPosition) apply();
 	if (before.operatorInstructions !== config.operatorInstructions) ensureOperatorDir(config.operatorInstructions);
 	tui.requestRender();
 }
@@ -3710,9 +3792,9 @@ function viewState(): DeckState {
 		focus:
 			focus === "roster"
 				? "roster"
-				: focusedPane === below?.pane
+				: focusedPane === shellShownIn()
 					? "shell"
-					: focusedPane === stagePane && applied.view !== "agent"
+					: focusedPane === stagePane && editorShown(applied)
 						? "editor"
 						: "stage",
 		staged: {
@@ -3722,7 +3804,13 @@ function viewState(): DeckState {
 			view: applied.view,
 			savedView: staged ? viewOf(staged) : "agent",
 		},
-		layout: { width: deckWidth, rosterOnly: narrow, split: side !== null, shell: below !== null, rosterHidden },
+		layout: {
+			width: deckWidth,
+			rosterOnly: narrow,
+			split: side !== null,
+			shell: applied.shell?.at === "replace" ? "replace" : (shellPane?.at ?? null),
+			rosterHidden,
+		},
 		waking: launches.map((launch) => ({ id: launch.id, keyboardWaiting: launch.keyboard })),
 		rows: rows.map((row) =>
 			row.kind === "session"
