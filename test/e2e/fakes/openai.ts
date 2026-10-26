@@ -1,7 +1,8 @@
 // A fake OpenAI Responses API that scripts a real Codex TUI offline. The latest user text picks the script:
 //   reply <text>         answer "<text>"
 //   hold <name>          signal <name>.entered, wait for <name>.release through the shell, answer "released <name>"
-//   call <tool> <json>   call the tool whose name ends in <tool> with <json>, then answer "tool done"
+//   call <tool> <json>   call the tool whose name ends in <tool> with <json>, then answer "tool done"; after a multi-agent
+//                        v2 spawn_agent, wait for the subagent first, as a model does, so `codex exec` doesn't end it
 //   run <command>        run <command> through the shell, then answer "ran <command>"
 //   fail <text>          fail the request with a 400, which isn't retried
 //   hold-compact <name>  the next /compact signals <name>.entered and waits for <name>.release before it summarizes
@@ -157,6 +158,15 @@ const server = Bun.serve({
 			const [tool, ...json] = rest;
 			const found = tools.find((candidate) => candidate.name === tool) ?? { name: tool as string };
 			output = { type: "function_call", call_id: `call_${n}`, ...found, arguments: json.join(" ") || "{}" };
+		} else if (
+			verb === "call" &&
+			rest[0] === "spawn_agent" &&
+			last?.type === "function_call_output" &&
+			names.includes("wait_agent") &&
+			!input.some((item) => item.name === "wait_agent")
+		) {
+			const found = tools.find((candidate) => candidate.name === "wait_agent") ?? { name: "wait_agent" };
+			output = { type: "function_call", call_id: `call_${n}`, ...found, arguments: JSON.stringify({ timeout_ms: 30_000 }) };
 		} else {
 			const titled = /^Generate a concise, single-line task title[\s\S]*?User prompt:\n([\s\S]+)/.exec(prompt)?.[1];
 			const text = titled
