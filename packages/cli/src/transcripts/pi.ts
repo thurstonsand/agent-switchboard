@@ -1,5 +1,5 @@
 import { SwbError } from "../errors.ts";
-import { type Conversation, type Ending, type Entry, lines, type Part, textOf } from "./conversation.ts";
+import { type Conversation, type Ending, type Entry, lines, type Part, type Subagent, textOf } from "./conversation.ts";
 
 type PiBlock = { type?: string; text?: string; id?: string; name?: string; arguments?: unknown };
 type PiMessage = {
@@ -19,6 +19,8 @@ type PiEntry = {
 	message?: PiMessage;
 	content?: unknown;
 	summary?: string;
+	customType?: string;
+	data?: { childSessionId?: string; childSessionFile?: string; title?: string };
 };
 
 function ending({ stopReason, errorMessage }: PiMessage): Ending | null {
@@ -61,6 +63,13 @@ function entry(e: PiEntry): Pick<Entry, "role" | "parts" | "ending"> {
 	return { role: "context", parts: [], ending: null };
 }
 
+/** pi-sessions records each subagent it launches in the parent, with the child's own session file. */
+function subagent(e: PiEntry): Subagent[] {
+	const d = e.data;
+	if (e.type !== "custom" || e.customType !== "pi-sessions.subagent_launched" || !d?.childSessionId || !d.childSessionFile) return [];
+	return [{ id: d.childSessionId, label: d.title ?? d.childSessionId, path: d.childSessionFile }];
+}
+
 /** pi v3: entries link by parentId, and the session continues from the last one. */
 export function readPi(path: string): Conversation {
 	const all = lines(path) as PiEntry[];
@@ -71,7 +80,7 @@ export function readPi(path: string): Conversation {
 		.slice(1)
 		.filter((e) => e.id !== undefined)
 		.map((e): Entry => ({ ref: e.id as string, parent: e.parentId ?? null, at: e.timestamp ?? null, ...entry(e) }));
-	return { entries, leaf: entries.at(-1)?.ref ?? null };
+	return { entries, leaf: entries.at(-1)?.ref ?? null, subagents: all.flatMap(subagent) };
 }
 
 /** The model and thinking level pi last switched to. */

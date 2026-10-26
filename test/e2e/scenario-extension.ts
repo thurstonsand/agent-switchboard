@@ -84,7 +84,7 @@ export default function (pi: ExtensionAPI) {
 		if (!last) throw new Error("scenario: empty context");
 		const typed = context.messages.findLast((message) => message.role === "user");
 		const promptText = typed ? text(typed).trim() : "";
-		if (/^(Question about session |ask(?:-id)? )/.test(promptText)) {
+		if (/^(Question about session |ask(?:-id)? |search )/.test(promptText)) {
 			mkdirSync(signals, { recursive: true });
 			appendFileSync(
 				join(signals, "recall.jsonl"),

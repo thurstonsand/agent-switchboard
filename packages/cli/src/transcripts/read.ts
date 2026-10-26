@@ -9,13 +9,16 @@ export function locateTranscript(path: string, harness: Harness): string {
 	return harness === "codex" ? locateRollout(path) : path;
 }
 
-/** A session's conversation, read from its harness's own transcript. Each reader fails loudly on a format it doesn't know. */
-export function readConversation(path: string, harness: Harness): Conversation {
+/**
+ * A session's conversation, or one of its subagents', read from its harness's own transcript. Each reader fails loudly
+ * on a format it doesn't know.
+ */
+export function readConversation(path: string, harness: Harness, subagent = false): Conversation {
 	switch (harness) {
 		case "pi":
 			return readPi(path);
 		case "claude":
-			return readClaude(path);
+			return readClaude(path, subagent);
 		case "codex":
 			return readCodex(path);
 	}

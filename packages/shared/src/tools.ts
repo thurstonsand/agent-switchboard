@@ -172,6 +172,20 @@ export const TOOLS = {
 		}),
 		readOnly: false,
 	},
+	session_search: {
+		description:
+			"Search every session's conversation on the switchboard but this one's, open or archived, subagents included, for what was asked, said, or done. Lists the sessions that match, best first, with the passages that matched.",
+		guidelines: [
+			'Plain words must all appear, each as a word or its start; "quoted phrases" match exactly; OR, -word, and parentheses narrow it.',
+			"Filter in the same query: harness:pi|claude|codex, project:NAME, file:PATH (read or changed), after: and before: a date, an ISO 8601 time, or a duration ago (P7D), archived:yes|no. Filters alone list the most recent sessions that pass.",
+			"Once session_search finds a session, ask it what you need with session_ask.",
+		],
+		parameters: Type.Object({
+			query: Type.String({ description: 'Words, phrases, and filters, such as "redirect loop" file:src/auth.ts after:P14D.' }),
+			limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "How many sessions to list; 10 by default." })),
+		}),
+		readOnly: true,
+	},
 	session_ask: {
 		description:
 			"Ask a question about another session's conversation, open or archived. A reader with its own context reads that session's transcript and answers, so the transcript never fills this conversation.",

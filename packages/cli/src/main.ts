@@ -3,7 +3,7 @@ import { codexHost } from "./codex/host.ts";
 import { adopt } from "./commands/adopt.ts";
 import { archive } from "./commands/archive.ts";
 import { clock } from "./commands/clock.ts";
-import { launch, reachable, recall, schedule, schedules, send, show, unschedule, update } from "./commands/coordinate.ts";
+import { launch, reachable, recall, schedule, schedules, search, send, show, unschedule, update } from "./commands/coordinate.ts";
 import { deckCommand, deckNotify, help } from "./commands/deck.ts";
 import { detached } from "./commands/detached.ts";
 import { dirs } from "./commands/dirs.ts";
@@ -50,7 +50,10 @@ const USAGE = `swb: Agent Switchboard
   swb send --from ID --to ID [--request-response] [--request-id KEY] [--cancel]
                                message a session, waking it if dormant; the body on stdin
   swb reachable --from ID      every open session but the caller, as a line's tool reads it
+  swb search --from ID [--limit N]
+                               every session's conversation but the caller's, searched, as session_search reads it; the query on stdin
   swb recall read ID           a session's conversation, as session_ask's reader reads it
+  swb recall sync              bring the search index up to date with every session's transcripts
   swb schedule --from ID [--to ID | --launch-title T [--launch-harness H] [--launch-model M] [--launch-effort E]
                [--launch-agent A] [--launch-cwd DIR] [--launch-group NAME | --launch-no-group]] (--at WHEN | --cron EXPR)
                --label TEXT [--request-response] [--snooze] [--request-id KEY]
@@ -146,6 +149,8 @@ async function main(args: string[]): Promise<void> {
 			return send(rest);
 		case "reachable":
 			return reachable(rest);
+		case "search":
+			return search(rest);
 		case "recall":
 			return recall(rest);
 		case "wake":

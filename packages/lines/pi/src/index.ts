@@ -348,6 +348,14 @@ export default function (pi: ExtensionAPI) {
 	);
 
 	tool(
+		"session_search",
+		"Search sessions",
+		(args) => String(args.query ?? ""),
+		(args: { query: string; limit?: number }, ctx, _toolCallId, signal) =>
+			swb(proc.launch.bin, ["search", "--from", self(ctx), ...(args.limit ? ["--limit", String(args.limit)] : [])], args.query, signal),
+	);
+
+	tool(
 		"session_ask",
 		"Ask session",
 		(args) => titleOf(args.session),

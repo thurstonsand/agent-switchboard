@@ -26,6 +26,7 @@ See @CONTEXT.md for project vocabulary.
 - Operators: sessions in swb's Operator folder that coordinate the rest, reading only that folder's AGENTS.md
 - Settings: every key in config.toml, browsable and editable in the Deck, including the shortlist of presets that `n` and `session_launch` start new sessions on
 - `swb new`, `open`, `adopt`, `archive`, `unarchive`, `snooze`, `quit`, `models`, `ls --json`, `dirs --json`: the scriptable surface
+- Recall: `session_search` and `session_ask` search and question any session's conversation, open or archived, its subagents' included, from any harness, each harness asking through a reader of its own
 - Schedules: a session messages itself or another later, once or on a cron, or launches a new one, and can snooze until then. swb's clock fires them from its tmux server, which outlives every Deck
 - `swb drive` and `swb deck state`: an agent drives a Deck exactly as a human does, and captures its screen as text
 - Lines for pi, Claude Code, and Codex: lifecycle, activity, and attention written to the shared db, the same coordination tools in every harness, and delivery of messages between sessions. In pi, swb claims peer coordination from pi-sessions, which keeps its subagents

@@ -53,6 +53,7 @@ Some scenarios install pi-sessions and pi-wt from `node_modules`, at the version
 
 - Database: `${XDG_STATE_HOME:-~/.local/state}/agent-switchboard/swb.db` (directory `0700`, file `0600`)
 - Settings: `${XDG_CONFIG_HOME:-~/.config}/agent-switchboard/config.toml`; unknown keys are an error. Each setting is declared once, in `SETTINGS` in `packages/cli/src/config.ts`, which the Settings pane and README's block (`mise run readme`) both read
+- Search index: `${XDG_STATE_HOME:-~/.local/state}/agent-switchboard/recall.db`, every Session's transcripts and its subagents' in FTS5, rebuilt from them whenever its own version moves, so it never migrates. Each search catches up on what changed, and the clock keeps it warm
 - Catalog: `${XDG_STATE_HOME:-~/.local/state}/agent-switchboard/catalog.json`, what each harness can start and the models it offers; `catalog.lock` lets one swb at a time read the model lists
 - Operator folder: `${XDG_CONFIG_HOME:-~/.config}/agent-switchboard/operator`. Every Deck rewrites its `AGENTS.md`, `CLAUDE.md`, `.pi/extensions/operator.js`, and `.pi/settings.json` from the copies swb ships, with `operator.instructions` after the shipped AGENTS.md, and again whenever that setting changes; Claude Code and Codex Operators get the rest of their limits as launch flags
 - Deck layout: the `deck_layouts` table, one row per Project root: the cursor, folds, and roster width the next Deck there starts from

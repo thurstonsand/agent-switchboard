@@ -29,7 +29,10 @@ export type Entry = {
 	ending: Ending | null;
 };
 
-export type Conversation = { entries: Entry[]; leaf: string | null };
+/** A subagent the session ran, whose own transcript is evidence the session owns. */
+export type Subagent = { id: string; label: string; path: string };
+
+export type Conversation = { entries: Entry[]; leaf: string | null; subagents: Subagent[] };
 
 /** A transcript's JSON lines; the last may be mid-write, and is skipped until it parses. */
 export function lines(path: string): unknown[] {

@@ -2,19 +2,21 @@ import { recordTx } from "@swb/shared/record";
 import { launchSession } from "../coordinate.ts";
 import { states } from "../derive.ts";
 import { type Fired, fire, newSessionName, nextDue } from "../schedules.ts";
-import { wake } from "../sessions.ts";
+import { SWB, wake } from "../sessions.ts";
 import { openStore } from "../store.ts";
 import { SESSIONS, tmuxTry } from "../tmux.ts";
 
 // `swb __clock`: the sessions server's control pane, which lives as long as the server does. It fires schedules on
-// time, and starts any dormant session with mail waiting. It reads the wall clock every tick, so after the machine
-// sleeps, whatever came due meanwhile fires on the first tick after it wakes.
+// time, starts any dormant session with mail waiting, and keeps the search index warm. It reads the wall clock every
+// tick, so after the machine sleeps, whatever came due meanwhile fires on the first tick after it wakes.
 
 const TICK_MS = 250;
 const RECONCILE_MS = 15_000;
 /** A session that won't start is tried again after this, doubling, up to WAKE_RETRY_MAX_MS. */
 const WAKE_RETRY_MS = 30_000;
 const WAKE_RETRY_MAX_MS = 10 * 60_000;
+/** The index syncs at most this often, in its own process, so a search finds little left to catch up on. */
+const SYNC_GAP_MS = 5_000;
 
 function log(text: string): void {
 	console.error(`${new Date().toISOString()} ${text}`);
@@ -84,12 +86,27 @@ export async function clock(): Promise<void> {
 		);
 	};
 
+	let stale = true;
+	let syncing = false;
+	let synced = 0;
+	const warm = (now: number) => {
+		if (!stale || syncing || now - synced < SYNC_GAP_MS) return;
+		stale = false;
+		syncing = true;
+		synced = now;
+		Bun.spawn([SWB, "recall", "sync"], { stdio: ["ignore", "ignore", "inherit"] }).exited.then((code) => {
+			syncing = false;
+			if (code !== 0) log(`indexing exited ${code}`);
+		});
+	};
+
 	log(`clock started (pid ${process.pid})`);
 	for (;;) {
 		const now = Date.now();
 		const current = db.dataVersion();
 		if (current !== version) {
 			version = current;
+			stale = true;
 			due = nextDue(db);
 			settleHosts();
 		}
@@ -118,6 +135,7 @@ export async function clock(): Promise<void> {
 			}
 			wakeWaiting(now);
 		} else if (now - reconciled > RECONCILE_MS) wakeWaiting(now);
+		warm(now);
 		await Bun.sleep(TICK_MS);
 	}
 }

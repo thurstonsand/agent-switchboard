@@ -14,7 +14,8 @@ import {
 } from "@swb/shared/tools";
 import { launchSession, reachable, send, show, update } from "../coordinate.ts";
 import { SwbError } from "../errors.ts";
-import { recallRead } from "../recall.ts";
+import { recallRead } from "../recall/read.ts";
+import { search } from "../recall/search.ts";
 import { listSchedules, schedule, unschedule } from "../schedules.ts";
 import { openStore } from "../store.ts";
 import { VERSION } from "../version.ts";
@@ -96,6 +97,10 @@ async function call(name: ToolName, args: unknown, from: string, callId: string 
 		case "swb_show_session": {
 			const a = parsed(name, args);
 			return show(db, from, a.session, a.view ?? null);
+		}
+		case "session_search": {
+			const a = parsed(name, args);
+			return search(db, from, a.query, a.limit);
 		}
 		case "session_ask": {
 			const a = parsed(name, args);

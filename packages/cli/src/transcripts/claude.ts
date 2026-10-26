@@ -1,4 +1,6 @@
-import { type Conversation, type Entry, lines, type Part, textOf } from "./conversation.ts";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
+import { type Conversation, type Entry, lines, type Part, type Subagent, textOf } from "./conversation.ts";
 
 type ClaudeBlock = { type?: string; id?: string; name?: string; input?: unknown; tool_use_id?: string; content?: unknown };
 type ClaudeEntry = {
@@ -44,10 +46,10 @@ function entry(e: ClaudeEntry): Pick<Entry, "role" | "parts" | "ending"> {
  * Claude Code: entries link by parentUuid, and a compaction's boundary by logicalParentUuid to the history it
  * summarized. The session continues from the last leaf, not simply the last line: a conversation Claude Code writes as
  * it exits can come out of order, a branch of its attachments last. Refs are a uuid's first 8 characters, or all of it
- * where two share them.
+ * where two share them. A subagent's own transcript holds only its sidechain.
  */
-export function readClaude(path: string): Conversation {
-	const raw = (lines(path) as (ClaudeEntry & { uuid: string })[]).filter((e) => e.uuid && !e.isSidechain);
+export function readClaude(path: string, sidechain = false): Conversation {
+	const raw = (lines(path) as (ClaudeEntry & { uuid: string })[]).filter((e) => e.uuid && Boolean(e.isSidechain) === sidechain);
 	const heads = new Map<string, number>();
 	for (const { uuid } of raw) heads.set(uuid.slice(0, 8), (heads.get(uuid.slice(0, 8)) ?? 0) + 1);
 	const refs = new Map(raw.map(({ uuid }) => [uuid, heads.get(uuid.slice(0, 8)) === 1 ? uuid.slice(0, 8) : uuid]));
@@ -56,7 +58,24 @@ export function readClaude(path: string): Conversation {
 		return { ref: refs.get(e.uuid) as string, parent: (parent && refs.get(parent)) || null, at: e.timestamp ?? null, ...entry(e) };
 	});
 	const parents = new Set(entries.map((e) => e.parent));
-	return { entries, leaf: entries.findLast((e) => !parents.has(e.ref))?.ref ?? null };
+	return { entries, leaf: entries.findLast((e) => !parents.has(e.ref))?.ref ?? null, subagents: sidechain ? [] : subagents(path) };
+}
+
+/** session_ask's own readers are swb's, not the session's work. */
+const READER_TYPE = "swb:reader";
+
+/** Claude Code keeps each subagent's transcript beside the session's, with its type and task in a sidecar. */
+function subagents(path: string): Subagent[] {
+	const dir = join(dirname(path), basename(path, ".jsonl"), "subagents");
+	if (!existsSync(dir)) return [];
+	return readdirSync(dir).flatMap((name) => {
+		const id = /^agent-(.+)\.jsonl$/.exec(name)?.[1];
+		if (!id) return [];
+		const sidecar = join(dir, `agent-${id}.meta.json`);
+		const meta = existsSync(sidecar) ? (JSON.parse(readFileSync(sidecar, "utf8")) as { agentType?: string; description?: string }) : {};
+		if (meta.agentType === READER_TYPE) return [];
+		return [{ id, label: meta.description ?? meta.agentType ?? id, path: join(dir, name) }];
+	});
 }
 
 /** The session's latest given name (`--name`, `/rename`), else the latest title Claude Code generated for it. */

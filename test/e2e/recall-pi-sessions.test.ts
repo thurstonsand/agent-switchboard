@@ -44,9 +44,8 @@ test("managed pi yields recall to swb, keeps subagents, and stays yielded after 
 	await reply(s, "SWB-parent-mark");
 	const parent = s.ls()[0]?.id as string;
 	const managed = await tools("managed");
-	// session_ask is swb's own, registered at load beside pi-sessions without a conflict; session_search isn't swb's yet.
-	expect(managed).not.toContain("session_search");
-	expect(managed.filter((name) => name === "session_ask")).toEqual(["session_ask"]);
+	// session_search and session_ask are swb's own, registered at load beside pi-sessions without a conflict.
+	for (const name of ["session_search", "session_ask"]) expect(managed.filter((tool) => tool === name)).toEqual([name]);
 	for (const name of ["session_launch", "subagent_list", "subagent_send", "subagent_cancel", "subagent_launch"])
 		expect(managed).toContain(name);
 	await until(() => entry(s, parent).activity === "idle", budgets.settle, "parent idle");
@@ -79,6 +78,18 @@ test("managed pi yields recall to swb, keeps subagents, and stays yielded after 
 	s.save("managed-history.txt", history());
 	s.save("managed-reloaded.txt", screen);
 	release(s, "child.recall");
+	// The subagent's conversation is the parent's evidence: search finds the parent, in the subagent.
+	const found = await until(
+		() => {
+			const search = Bun.spawnSync([`${s.bin}/swb`, "search", "--from", "nobody"], { env: s.env, stdin: Buffer.from('"child recall"') });
+			const out = search.stdout.toString();
+			return out.includes('in subagent \\"child recall\\"') && out;
+		},
+		budgets.piReady,
+		"the subagent's turn in the index",
+	);
+	s.save("subagent-search.json", found);
+	expect(JSON.parse(found).details.sessions.map((x: { id: string }) => x.id)).toEqual([parent]);
 });
 
 test("the pinned, older pi-sessions keeps a managed pi from starting, naming the tool both register", async () => {

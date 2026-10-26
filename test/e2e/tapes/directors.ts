@@ -256,6 +256,27 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"session-search": {
+		harnesses: ["claude", "codex"],
+		setup: async (s) => {
+			files(s);
+			const claude = await launch(s, "claude", "Fix the login redirect");
+			const codex = await launch(s, "codex", "Document the v3 endpoints");
+			await launch(s, "pi", "Planner");
+			typeInto(s, claude, "reply The redirect loop came from a stale session cookie; clearing it on logout fixes it");
+			typeInto(s, codex, "reply The endpoint docs now say /login redirects to /v3/home");
+			await waitLs(s, "both turns settled", (ls) => ls.filter((e) => e.harness !== "pi").every((e) => e.activity === "idle"));
+			await Bun.sleep(1500);
+			s.swb("archive", claude);
+			await waitLs(s, "the login session archived", (ls) => ls.find((e) => e.id === claude)?.live === false);
+		},
+		run: async (s) => {
+			const answered = () => s.signal("recall.jsonl").match(/"prompt":"search [^"]*","role":"toolResult"/g) ?? [];
+			await until(() => answered().length === 2, TAPE, "both searches answered");
+			await Bun.sleep(3000);
+		},
+	},
+
 	"show-session": {
 		setup: async (s) => {
 			const infra = join(s.root, "infra");

@@ -210,6 +210,8 @@ async function useTool($, name, e) {
 	switch (name) {
 		case "session_reachable":
 			return swb($, ["reachable", ...from]);
+		case "session_search":
+			return swb($, ["search", ...from, ...(e.limit ? ["--limit", String(e.limit)] : [])], e.query);
 		case "session_send_message":
 			return swb(
 				$,

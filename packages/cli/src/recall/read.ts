@@ -2,9 +2,9 @@ import type { Db, Harness } from "@swb/shared";
 import { harnessName } from "@swb/shared/mailbox";
 import { titleOf } from "@swb/shared/record";
 import type { ToolResult } from "@swb/shared/tools";
-import { readTranscript } from "./deck/transcript.ts";
-import { SwbError } from "./errors.ts";
-import { locateTranscript } from "./transcripts/read.ts";
+import { readTranscript } from "../deck/transcript.ts";
+import { SwbError } from "../errors.ts";
+import { locateTranscript } from "../transcripts/read.ts";
 
 // What session_ask's reader reads, the same in every harness: a session's conversation from its own transcript.
 

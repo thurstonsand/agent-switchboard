@@ -72,7 +72,7 @@ export function readCodex(path: string): Conversation {
 		const read = entry(line);
 		if (read) entries.push({ ref: String(i + 1), parent: entries.at(-1)?.ref ?? null, at: line.timestamp ?? null, ...read });
 	});
-	return { entries, leaf: entries.at(-1)?.ref ?? null };
+	return { entries, leaf: entries.at(-1)?.ref ?? null, subagents: [] };
 }
 
 /**

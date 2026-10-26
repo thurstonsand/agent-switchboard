@@ -6,6 +6,7 @@
 //   update <title> <json>              find it the same way, then swb_update_session it with those arguments
 //   ask <title> :: <question>          find it the same way, then session_ask it the question; answers "asked: <result>"
 //   ask-id <id> :: <question>          session_ask that session directly, archived or not
+//   search <query>                     session_search the query; answers "searched"
 // session_ask's reader, whose prompt starts "Question about session <id>:", reads it with recall_read and answers
 // "reader found: <every SWB- marker in it>", or "reader found nothing".
 // Each call gets the prompt and the output of the tool it called last (null for a fresh turn), and answers the next
@@ -44,6 +45,8 @@ export function agentStep(prompt: string, toolOutput: string | null): Step {
 		const markers = [...new Set([...toolOutput.matchAll(/SWB-[A-Za-z0-9-]+/g)].map((m) => m[0]))];
 		return { text: markers.length > 0 ? `reader found: ${markers.join(" ")}` : "reader found nothing" };
 	}
+	const searching = /^search (.+)$/s.exec(prompt.trim());
+	if (searching) return toolOutput === null ? { tool: "session_search", args: { query: searching[1] } } : { text: "searched" };
 	const asking = /^(ask|ask-id) (.+?) :: (.+)$/s.exec(prompt.trim());
 	if (asking) {
 		const [, verb, target, question] = asking as unknown as [string, string, string, string];

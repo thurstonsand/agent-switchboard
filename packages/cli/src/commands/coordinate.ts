@@ -8,7 +8,8 @@ import {
 	update as updateSession,
 } from "../coordinate.ts";
 import { UsageError } from "../errors.ts";
-import { recallRead } from "../recall.ts";
+import { recallRead } from "../recall/read.ts";
+import { search as searchSessions, syncAll } from "../recall/search.ts";
 import { unschedule as cancelSchedule, listSchedules, schedule as scheduleMessage } from "../schedules.ts";
 import { ensureSessionsServer } from "../sessions.ts";
 import { openStore } from "../store.ts";
@@ -25,11 +26,19 @@ export function reachable(args: string[]): void {
 	print(listReachable(openStore(), values.from));
 }
 
-/** The reader's tools as every line's reader runs them: `swb recall read ID`. */
+/** session_search, the query on stdin. */
+export async function search(args: string[]): Promise<void> {
+	const { values } = parseArgs({ args, options: { from: { type: "string" }, limit: { type: "string" } } });
+	if (!values.from) throw new UsageError("search: --from is required");
+	print(searchSessions(openStore(), values.from, await Bun.stdin.text(), values.limit === undefined ? undefined : Number(values.limit)));
+}
+
+/** The reader's tools as every line's reader runs them, `swb recall read ID`, and the clock's `swb recall sync`. */
 export function recall(args: string[]): void {
 	const [op, id] = args;
-	if (op !== "read" || !id) throw new UsageError("recall: read ID");
-	print(recallRead(openStore(), id));
+	if (op === "sync" && !id) syncAll(openStore());
+	else if (op === "read" && id) print(recallRead(openStore(), id));
+	else throw new UsageError("recall: read ID | sync");
 }
 
 export async function send(args: string[]): Promise<void> {
