@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CodexClient } from "../../packages/cli/src/codex/client.ts";
 import { host, launched, pane, recalled, subagentDone, type } from "./harness/agents.ts";
@@ -226,3 +226,81 @@ test("a Claude Code subagent appears in the map, and its refs search and read it
 	const caller = await launched(s, "pi", "reply caller ready");
 	expect(await ask(caller.id, parent.id, "What did the subagent find?")).toContain("SWB-sub-beacon");
 });
+
+/**
+ * Codex's own subagents, in either multi-agent version. A model picks its version, so v1 needs the bundled catalog with
+ * the fake's model marked v1, its agent tools offered directly rather than through tool search.
+ */
+function multiAgent(version: "v1" | "v2"): void {
+	const config = join(s.home, ".codex/config.toml");
+	let top = "";
+	if (version === "v1") {
+		const bundled = Bun.spawnSync([`${s.bin}/codex`, "debug", "models", "--bundled"], { env: s.env });
+		const catalog = JSON.parse(bundled.stdout.toString()) as { models: { slug: string }[] };
+		for (const model of catalog.models)
+			if (model.slug === "gpt-5.5") Object.assign(model, { multi_agent_version: "v1", supports_search_tool: false });
+		writeFileSync(join(s.home, ".codex/catalog.json"), JSON.stringify(catalog));
+		top = `model_catalog_json = ${JSON.stringify(join(s.home, ".codex/catalog.json"))}\n`;
+	}
+	const feature = version === "v1" ? "multi_agent" : "multi_agent_v2";
+	writeFileSync(config, `${top}${readFileSync(config, "utf8")}\n[features]\n${feature} = true\n`);
+}
+
+for (const version of ["v1", "v2"] as const)
+	test(`a Codex multi-agent ${version} subagent is its parent's evidence, apart from the parent's own turns, and never a Session`, async () => {
+		s = scenario("recall-reader", `codex-subagent-${version}`, { packages: [], recorder: true, harnesses: ["codex"] });
+		multiAgent(version);
+		const parent = await launched(s, "codex", "reply parent ready");
+		// v2's message is OpenAI's encrypted token, as a real model writes it.
+		const token = `gAAAAA${Buffer.from("reply SWB-codex-child").toString("base64url")}`;
+		const spawn = version === "v1" ? { message: "reply SWB-codex-child" } : { message: token, task_name: "find_beacon" };
+		type(s, parent.id, `call spawn_agent ${JSON.stringify(spawn)}`);
+		const map = await until(
+			() => {
+				const now = recall("begin", parent.id, { question: "What did the subagent find?" });
+				// The child's rollout can be listed before its prompt is written into it.
+				const whole = version === "v1" ? / · "reply SWB-codex-child"$/m : /^- sub:[^/]+\/ · "find_beacon" · \d+ entries · /m;
+				return whole.test(now) && now;
+			},
+			budgets.piReady,
+			"the subagent in its parent's map",
+		);
+		s.save("map.txt", map);
+		console.log(map);
+		const line = /^- (sub:[^/]+\/) · "([^"]+)" · \d+ entries · .*$/m.exec(map);
+		const sub = line?.[1] as string;
+		if (version === "v2") expect(line?.[2]).toBe("find_beacon");
+		if (version === "v1") expect(line?.[0]).toEndWith(' · "reply SWB-codex-child"');
+
+		// The child's reply is under its own refs; a v2 child's copy of its parent's conversation isn't searched twice.
+		const hits = await until(
+			() => {
+				const now = recall("search", parent.id, { query: "SWB-codex-child" });
+				return now.includes(` · subagent "${line?.[2]}", `) && now.includes(" · agent · ") && now;
+			},
+			budgets.piReady,
+			"the subagent's reply in the index",
+		);
+		s.save("hits.txt", hits);
+		console.log(hits);
+		const inSub = hits.split("\n").filter((l) => l.startsWith(`- ${sub}`));
+		expect(inSub.map((l) => / · (user|agent|call|result) · /.exec(l)?.[1])).toEqual(
+			version === "v1" ? ["agent", "user"].sort() : ["agent"],
+		);
+		const ref = /^- (\S+) · subagent .* · agent · /m.exec(inSub.join("\n"))?.[1] as string;
+		const read = recalled(s, parent.id, { ref, before: 20 });
+		expect(read).toContain("SWB-codex-child");
+		expect(read).not.toContain("parent ready");
+
+		const search = Bun.spawnSync([`${s.bin}/swb`, "search", "--from", "nobody"], { env: s.env, stdin: Buffer.from('"SWB-codex-child"') });
+		expect(search.stdout.toString()).toContain(`in subagent \\"${line?.[2]}\\"`);
+		expect(s.ls().map((e) => e.id)).toEqual([parent.id]);
+		// Its parent's spawn call reads without the token, which says nothing to anyone but OpenAI.
+		if (version === "v2") {
+			const call = recall("search", parent.id, { query: "find_beacon" });
+			s.save("spawn-call.txt", call);
+			const line = call.split("\n").find((l) => l.includes(" · tool call · "));
+			expect(line).toContain('"message":"[encrypted]"');
+			expect(line).not.toContain("gAAAAA");
+		}
+	});

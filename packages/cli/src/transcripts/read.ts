@@ -20,7 +20,7 @@ export function readConversation(path: string, harness: Harness, subagent = fals
 		case "claude":
 			return readClaude(path, subagent);
 		case "codex":
-			return readCodex(path);
+			return readCodex(path, subagent);
 	}
 }
 

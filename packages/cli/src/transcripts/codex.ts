@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { SwbError } from "../errors.ts";
-import { type Conversation, type Entry, lines, type Part, textOf } from "./conversation.ts";
+import { type Conversation, type Entry, lines, type Part, type Subagent, textOf } from "./conversation.ts";
 
 type CodexLine = {
 	type?: string;
@@ -18,10 +18,33 @@ type CodexLine = {
 		message?: string;
 		error?: { message?: string };
 		history_base?: { thread_id: string; end_ordinal_exclusive: number };
+		subagent_history_start_ordinal?: number;
 		id?: string;
+		item?: Spawned;
 	};
 	ordinal?: number;
 };
+
+/**
+ * How a session's rollout records a subagent it started: multi-agent v1 by its spawn_agent call, naming each child and
+ * its nickname; v2 by the child starting, under its task's path.
+ */
+type Spawned = {
+	type?: string;
+	tool?: string;
+	receiver_agents?: { thread_id: string; agent_nickname?: string | null }[];
+	kind?: string;
+	agent_thread_id?: string;
+	agent_path?: string | null;
+};
+
+function spawned(item: Spawned | undefined): { id: string; label: string }[] {
+	if (item?.type === "CollabAgentToolCall" && item.tool === "spawn_agent")
+		return (item.receiver_agents ?? []).map((a) => ({ id: a.thread_id, label: a.agent_nickname ?? a.thread_id }));
+	if (item?.type === "SubAgentActivity" && item.kind === "started" && item.agent_thread_id)
+		return [{ id: item.agent_thread_id, label: item.agent_path?.split("/").at(-1) ?? item.agent_thread_id }];
+	return [];
+}
 
 /** Codex records a provider's error body as it came; its own message is inside. */
 function codexError(message: string): string {
@@ -42,6 +65,16 @@ function parsed(args: unknown): unknown {
 	}
 }
 
+/**
+ * What one agent tells another through Codex's own tools, a subagent's task among them, OpenAI encrypts as a Fernet
+ * token that only it reads. It says nothing to search or read, so it stands as `[encrypted]`.
+ */
+const FERNET = /^gAAAAA[\w-]{20,}={0,2}$/;
+function sealed(args: unknown): unknown {
+	if (args === null || typeof args !== "object" || Array.isArray(args)) return args;
+	return Object.fromEntries(Object.entries(args).map(([k, v]) => [k, typeof v === "string" && FERNET.test(v) ? "[encrypted]" : v]));
+}
+
 /** A tool's output: text, or content items, or both under content. */
 function output(value: unknown): string {
 	if (typeof value === "string") return value;
@@ -57,10 +90,16 @@ function entry({ type, payload: p }: CodexLine): Pick<Entry, "role" | "parts" | 
 	if (type === "compacted") return { role: "compaction", parts: [{ type: "text", text: p?.message ?? "" }], ending: null };
 	if (type !== "response_item" || !p) return null;
 	const call = (args: unknown): Part[] => [{ type: "call", id: p.call_id ?? null, name: p.name ?? "tool", args }];
-	if (p.type === "function_call") return { role: "agent", parts: call(parsed(p.arguments)), ending: null };
+	if (p.type === "function_call") return { role: "agent", parts: call(sealed(parsed(p.arguments))), ending: null };
 	if (p.type === "custom_tool_call") return { role: "agent", parts: call(p.input), ending: null };
 	if (p.type === "function_call_output" || p.type === "custom_tool_call_output")
 		return { role: "tool", parts: [{ type: "result", id: p.call_id ?? null, text: output(p.output) }], ending: null };
+	// A message from another agent: a v2 subagent's task, or its answer to its parent. OpenAI encrypts a task's payload,
+	// and only its plain header is kept.
+	if (p.type === "agent_message") {
+		const body = textOf(p.content, "input_text").trim();
+		return { role: "user", parts: body === "" ? [] : [{ type: "text", text: body }], ending: null };
+	}
 	if (p.type !== "message") return null;
 	const body = textOf(p.content, p.role === "assistant" ? "output_text" : "input_text").trim();
 	const parts: Part[] = body === "" ? [] : [{ type: "text", text: body }];
@@ -115,10 +154,13 @@ function findRollout(near: string, thread: string, id: string, list: (dir: strin
 /**
  * Codex rollouts: items in order, each entry's ref its line number. A revert leaves the rollout as it was and goes on
  * in a new one, which starts from a point in it, or afresh when it undid every turn. A thread's conversation reads its
- * rollouts oldest first, numbering lines on through them, and what each revert cut off becomes a branch.
+ * rollouts oldest first, numbering lines on through them, and what each revert cut off becomes a branch. A subagent's
+ * rollout can open with a copy of its parent's conversation, which is the parent's and left out; its own subagents, if
+ * Codex lets it have any, aren't kept.
  */
-export function readCodex(path: string): Conversation {
+export function readCodex(path: string, subagent = false): Conversation {
 	const entries: Entry[] = [];
+	const children = new Map<string, string>();
 	let tip: string | null = null;
 	let ref = 0;
 	const histories = new Map<string, { ordinal: number; tip: string | null }[]>();
@@ -153,21 +195,31 @@ export function readCodex(path: string): Conversation {
 			history = read(from).filter((h) => h.ordinal < base.end_ordinal_exclusive);
 		}
 		tip = history.at(-1)?.tip ?? null;
+		const start = meta?.subagent_history_start_ordinal ?? 0;
 		all.forEach((line, i) => {
 			ref += 1;
 			const ordinal = line.ordinal ?? i;
-			const item = entry(line);
+			const item = ordinal < start ? null : entry(line);
 			if (item) {
 				entries.push({ ref: String(ref), parent: tip, at: line.timestamp ?? null, ...item });
 				tip = String(ref);
 			}
 			history.push({ ordinal, tip });
+			if (line.type === "event_msg" && line.payload?.type === "item_completed")
+				for (const child of spawned(line.payload.item)) children.set(child.id, child.label);
 		});
 		histories.set(file, history);
 		return history;
 	};
 	read(path);
-	return { entries, leaf: tip, subagents: [] };
+	const subagents: Subagent[] = subagent
+		? []
+		: [...children].flatMap(([id, label]) => {
+				// A child that hasn't written its rollout yet shows up once its parent's next line lands.
+				const found = findRollout(path, id, id, list);
+				return found ? [{ id, label, path: found }] : [];
+			});
+	return { entries, leaf: tip, subagents };
 }
 
 /**

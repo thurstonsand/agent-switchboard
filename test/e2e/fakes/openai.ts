@@ -5,8 +5,8 @@
 //   run <command>        run <command> through the shell, then answer "ran <command>"
 //   fail <text>          fail the request with a 400, which isn't retried
 //   hold-compact <name>  the next /compact signals <name>.entered and waits for <name>.release before it summarizes
-// A message from another session (it starts "Message from session") is answered "got <its last line>", and
-// session_ask's reader follows readerStep.
+// A message from another session (it starts "Message from session") is answered "got <its last line>", a multi-agent
+// v2 subagent's task is its prompt, and session_ask's reader follows readerStep.
 // Every request is appended to $FAKE_LOG as one JSON line: the user texts it saw, the tools it was offered, and its
 // whole input, instructions included.
 import { appendFileSync, existsSync, writeFileSync } from "node:fs";
@@ -31,8 +31,15 @@ type Tool = { type: string; name?: string; tools?: Tool[] };
 
 function userTexts(input: Item[]): string[] {
 	return input
-		.filter((item) => item.type === "message" && item.role === "user")
-		.map((item) => (item.content ?? []).map((part) => part.text ?? "").join(""))
+		.flatMap((item) => {
+			if (item.type === "message" && item.role === "user") return [(item.content ?? []).map((part) => part.text ?? "").join("")];
+			// A multi-agent v2 subagent's task. OpenAI's model writes it as a token only OpenAI reads; this one's is
+			// "gAAAAA" and the prompt in base64url, which only the fake reads.
+			const task = (item.content ?? []).find((part) => part.type === "encrypted_content") as { encrypted_content?: string } | undefined;
+			const token = task?.encrypted_content ?? "";
+			const text = token.startsWith("gAAAAA") ? Buffer.from(token.slice(6), "base64url").toString() : token;
+			return item.type === "agent_message" && text ? [text] : [];
+		})
 		.filter((text) => !text.startsWith("<environment_context>") && !text.startsWith("# AGENTS.md"));
 }
 
