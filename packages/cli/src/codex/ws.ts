@@ -7,6 +7,8 @@ import { randomBytes } from "node:crypto";
 export class UnixWebSocket {
 	#socket: Bun.Socket<undefined> | undefined;
 	#buffer = Buffer.alloc(0);
+	/** What the socket hasn't taken yet: Bun's sockets write what fits and keep none of the rest. */
+	#unsent = Buffer.alloc(0);
 	#upgraded = false;
 	#fragments: Buffer[] = [];
 	#onMessage: (text: string) => void = () => {};
@@ -35,6 +37,7 @@ export class UnixWebSocket {
 					}
 					ws.#drain();
 				},
+				drain: () => ws.#flush(),
 				close: () => {
 					reject(new Error(`websocket ${path} closed during upgrade`));
 					ws.#onClose();
@@ -76,7 +79,18 @@ export class UnixWebSocket {
 					: Buffer.concat([Buffer.from([0x80 | opcode, 0x80 | 127]), bigEndian64(length)]);
 		const masked = Buffer.alloc(length);
 		for (let i = 0; i < length; i++) masked[i] = (payload[i] as number) ^ (mask[i % 4] as number);
-		this.#socket?.write(Buffer.concat([head, mask, masked]));
+		this.#write(Buffer.concat([head, mask, masked]));
+	}
+
+	#write(bytes: Buffer): void {
+		this.#unsent = Buffer.concat([this.#unsent, bytes]);
+		this.#flush();
+	}
+
+	#flush(): void {
+		if (!this.#socket || this.#unsent.length === 0) return;
+		const written = this.#socket.write(this.#unsent);
+		this.#unsent = this.#unsent.subarray(Math.max(0, written));
 	}
 
 	#drain(): void {
