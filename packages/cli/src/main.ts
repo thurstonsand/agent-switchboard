@@ -42,17 +42,20 @@ const USAGE = `swb: Agent Switchboard
                                hide a session in Snoozed until then, or its next message; TIME is ISO 8601, local unless it has an offset
   swb quit [--force]           stop every session, Deck, and the clock; sessions stay open, dormant
   swb wake ID                  start a dormant session in the background
-  swb launch [--harness H] [--model M] [--effort E] [--agent A] [--cwd DIR] [--from ID] [--title T] [--request-response]
+  swb launch [--harness H] [--model M] [--effort E] [--agent A] [--cwd DIR] [--from ID] [--title T]
+             [--group NAME | --no-group] [--request-response]
                                start a new session in the background on the shortlist's preset matching those; naming none, the
-                               preset nearest what --from runs now, else the default; its goal on stdin
+                               preset nearest what --from runs now, else the default; its goal on stdin. It starts in --from's
+                               Group when both are in one Project, unless --group or --no-group says otherwise
   swb send --from ID --to ID [--request-response] [--request-id KEY] [--cancel]
                                message a session, waking it if dormant; the body on stdin
   swb reachable --from ID      every open session but the caller, as a line's tool reads it
   swb schedule --from ID [--to ID | --launch-title T [--launch-harness H] [--launch-model M] [--launch-effort E]
-               [--launch-agent A] [--launch-cwd DIR]] (--at WHEN | --cron EXPR) --label TEXT [--request-response] [--snooze]
-               [--request-id KEY]
-                               message a session later, or launch one on a preset, as swb launch does; the body on stdin. WHEN is ISO 8601: a time, local
-                               unless it has an offset, or a duration (PT2H); EXPR is 5-field cron in local time
+               [--launch-agent A] [--launch-cwd DIR] [--launch-group NAME | --launch-no-group]] (--at WHEN | --cron EXPR)
+               --label TEXT [--request-response] [--snooze] [--request-id KEY]
+                               message a session later, or launch one on a preset and in a Group, as swb launch does; the body
+                               on stdin. WHEN is ISO 8601: a time, local unless it has an offset, or a duration (PT2H); EXPR is
+                               5-field cron in local time
   swb schedules --from ID      the schedules a session set or receives
   swb unschedule ID --from ID  cancel a pending schedule
   swb show ID --from ID [--view agent|editor|split]

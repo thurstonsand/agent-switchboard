@@ -42,7 +42,6 @@ export function record(args: string[]): void {
 			session: { type: "string" },
 			cwd: { type: "string" },
 			transcript: { type: "string" },
-			parent: { type: "string" },
 			model: { type: "string" },
 			effort: { type: "string" },
 		},
@@ -77,7 +76,7 @@ export function record(args: string[]): void {
 				cwd: need("cwd"),
 				transcript: path,
 				title: title(path),
-				parentId: values.parent ?? null,
+				host,
 			});
 			return;
 		}

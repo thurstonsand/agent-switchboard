@@ -50,8 +50,8 @@ Every managed session's agent gets the same tools, whatever its harness:
 - `session_reachable`: every other open session, in any harness or project, live or dormant, with its Group if it's in one
 - `session_send_message`: a message to one of them, arriving mid-turn when it's working, or starting a turn when it's idle; a dormant one is woken first
 - `session_cancel`: stops another session's turn
-- `session_launch`: starts a new session in any harness, whose first turn is the goal it's given
-- `session_schedule`: a message for later, once (`at`: an ISO 8601 time or duration) or on a 5-field cron, to this session, another, or a new session launched when it fires; `snooze` snoozes the recipient until then
+- `session_launch`: starts a new session in any harness, whose first turn is the goal it's given, in the launcher's Group when both are in one Project; `group` names another, or `null` none
+- `session_schedule`: a message for later, once (`at`: an ISO 8601 time or duration) or on a 5-field cron, to this session, another, or a new session launched when it fires, in a Group as `session_launch` picks it; `snooze` snoozes the recipient until then
 - `session_schedules` and `session_unschedule`: the schedules a session set or receives, and cancelling one
 - `swb_update_session`: archives, unarchives, snoozes, or unsnoozes a session, moves it into a Group, or retitles it, any of them in one call. `family` archives everything it started too; a member mid-turn, blocked, cut off, or errored refuses the whole call by name, changing nothing, until `force` archives it anyway and cancels the turn. A new title becomes the harness's own name: pi and Codex take it at once, a dormant one as it starts, and Claude Code with its next prompt. Renaming the session in its harness later wins
 - `swb_show_session`: takes you to another session, moving the Deck you're watching this one in onto it and starting it if it's dormant, as clicking its row would; `view` (`agent`, `editor`, or `split`) opens it in a given view instead of the one it was last left in

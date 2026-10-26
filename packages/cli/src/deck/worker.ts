@@ -32,6 +32,8 @@ let dataVersion = -1;
 let rows: SessionRow[] = [];
 let runtimes: RuntimeRecord[] = [];
 let schedules = new Map<string, ScheduleView[]>();
+/** What each launch left for the first session its process records, by tmux session, until that session takes it. */
+let launches = new Map<string, { parentId: string | null; group: string | null }>();
 let profile: TerminalProfile | null = null;
 /** The sessions server this Deck last mirrored its terminal into, by pid: a new one is mirrored again. */
 let mirroredServer = "";
@@ -101,9 +103,8 @@ async function startNew(message: NewSession): Promise<void> {
 			);
 		}
 		ensureSessionsServer();
-		const host = launch({ ...launchFlags(target), cwd: message.cwd, resume: null });
+		const host = db.tx(() => launch(db, { ...launchFlags(target), cwd: message.cwd, resume: null, group: message.group }));
 		launched.add(host);
-		if (message.group !== null) hostGroups.set(host, message.group);
 		post({ type: "created", host });
 	} catch (error) {
 		post({ type: "launchFailed", id: null, text: (error as Error).message });
@@ -117,8 +118,6 @@ async function startNew(message: NewSession): Promise<void> {
 const pendingViews = new Map<string, View>();
 /** Likewise for Groups. */
 const pendingGroups = new Map<string, string | null>();
-/** The Group a new session joins, by the host launched for it, until its pi registers a session id. */
-const hostGroups = new Map<string, string>();
 
 function post(message: FromWorker): void {
 	self.postMessage(message);
@@ -131,17 +130,16 @@ function readDb(): void {
 	rows = sessionRows(db);
 	runtimes = runtimeRecords(db);
 	schedules = schedulesBySession(db);
+	launches = new Map(
+		db
+			.all("SELECT tmux_session, parent_id, group_name FROM launches")
+			.map((row) => [row.tmux_session as string, { parentId: row.parent_id as string | null, group: row.group_name as string | null }]),
+	);
 	for (const [id, view] of pendingViews) {
 		if (!rows.some((row) => row.session_id === id)) continue;
 		pendingViews.delete(id);
 		setView(db, id, view);
 		rows = sessionRows(db);
-	}
-	for (const runtime of runtimes) {
-		const name = hostGroups.get(runtime.tmux_session);
-		if (name === undefined) continue;
-		hostGroups.delete(runtime.tmux_session);
-		pendingGroups.set(runtime.session_id, name);
 	}
 	for (const [id, name] of pendingGroups) {
 		if (!rows.some((row) => row.session_id === id)) continue;
@@ -164,7 +162,6 @@ function snapshot(): Polled {
 		"#{pane_dead}",
 		"#{pane_dead_time}",
 		"#{@swb_version}",
-		"#{@swb_parent}",
 		"#{@swb_reaped}",
 	);
 	const died: Record<string, string[]> = {};
@@ -185,7 +182,7 @@ function snapshot(): Polled {
 	}
 	const alive = listed.filter(([, kind, , , , dead]) => kind === "pi" && dead !== "1");
 	const attached = new Map(alive.map(([name, , count]) => [name as string, count === "1"]));
-	const reaped = new Map(alive.filter((row) => row[9]).map((row) => [row[0] as string, Number(row[9])]));
+	const reaped = new Map(alive.filter((row) => row[8]).map((row) => [row[0] as string, Number(row[8])]));
 	const w: World = { now: Date.now(), bootId: boot, hosts: new Set(attached.keys()), inactiveAfterMs: config.inactiveAfterMs };
 	const known = new Set(rows.map((row) => row.session_id));
 	const entries: Entry[] = deriveSessions(rows, w).map((state, i) => {
@@ -199,21 +196,18 @@ function snapshot(): Polled {
 			schedules: schedules.get(row.session_id) ?? [],
 		};
 	});
-	const parents = new Map(listed.map(([name, , , , , , , , parent]) => [name as string, (parent as string) || null]));
 	for (const runtime of runtimes) {
 		if (known.has(runtime.session_id) || !runtimeLive(runtime, w.bootId, w.hosts)) continue;
-		const parentId = parents.get(runtime.tmux_session) ?? null;
-		// What its first turn will copy: the parent's Group, when both are in one Project.
-		const parent = rows.find((row) => row.session_id === parentId && row.project_root === runtime.project_root);
+		const launch = launches.get(runtime.tmux_session);
 		entries.push({
 			id: runtime.session_id,
 			harness: runtime.harness,
-			parentId,
+			parentId: launch?.parentId ?? null,
 			title: null,
 			project: runtime.project_root,
 			cwd: runtime.cwd,
 			branch: null,
-			group: pendingGroups.get(runtime.session_id) ?? parent?.group_name ?? null,
+			group: pendingGroups.has(runtime.session_id) ? (pendingGroups.get(runtime.session_id) ?? null) : (launch?.group ?? null),
 			operator: runtime.cwd === operatorDir(),
 			open: true,
 			live: true,

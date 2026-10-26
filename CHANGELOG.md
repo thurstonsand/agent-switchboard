@@ -2,9 +2,20 @@
 
 ## Unreleased
 
+Schema v7: update swb and the pi line together.
+
+### Added
+
+- `session_launch`, and `session_schedule`'s `launch`, take a `group`: a name starts the new session in that Group, in any Project, and `null` starts it in none. Left out, it starts in its parent's Group as before when both are in one Project. `swb launch` takes `--group` and `--no-group`, and `swb schedule` takes `--launch-group` and `--launch-no-group`.
+
 ### Changed
 
 - A message, launch goal, or scheduled message over 100,000 characters is refused when it's sent, in pi, Claude Code, and Codex, telling the agent to put the detail in a file and send its path. One Codex refused for its length used to stop every message queued behind it.
+- A Group's name takes only letters, digits, spaces, and `-` `_` `.`: `m` in the roster won't type anything else, and the tools and CLI refuse it. Groups already named otherwise keep their names.
+
+### Fixed
+
+- A launch's parent and Group go to the first session its process records, in every harness. In pi, `/new` before the first prompt in a session `n` started inside a Group keeps the new session in that Group, and the roster no longer nests a `/new` after a launched session's first turn under its launcher.
 
 ## 0.7.0 — 2026-10-21
 

@@ -67,7 +67,7 @@ function rosterLine(text: string): string | undefined {
 		.find((line) => line.includes(text));
 }
 
-test("a session an agent started nests under it; its Peek's started-by line and p go to the parent; h folds a family; a child starts in its parent's Group, then keeps its own; an Operator can't start another", async () => {
+test("a session an agent started nests under it; its Peek's started-by line and p go to the parent; h folds a family; a child starts in its parent's Group, or the one its launch names, then keeps its own; an Operator can't start another", async () => {
 	s = scenario("phase8", "lineage");
 	const other = join(s.root, "other");
 	const operatorDir = join(s.env.XDG_CONFIG_HOME as string, "agent-switchboard/operator");
@@ -167,7 +167,10 @@ test("a session an agent started nests under it; its Peek's started-by line and 
 	await cursorTo(s, root);
 	s.keys("m");
 	await waitState(s, "naming", (x) => x.mode === "name");
-	s.keys("-l", "lab", "Enter");
+	s.keys("-l", "lab");
+	s.keys("\\;");
+	await waitState(s, "the ; refused", (x) => x.toasts.some((t) => t.text === "a Group's name can't hold \";\""));
+	s.keys("Enter");
 	st = await waitState(
 		s,
 		"root alone in lab",
@@ -192,40 +195,57 @@ test("a session an agent started nests under it; its Peek's started-by line and 
 	s.save("grouped.txt", s.screen());
 
 	// A child started now begins in its parent's Group; one in another Project, where that Group isn't, takes none.
-	// Held before their first turns, both are still provisional, and already sit where those turns will put them.
+	// A launch that names a Group overrides both: null keeps one out of lab, and lab carries into the other Project.
+	// Held before their first turns, all are still provisional, and already sit where those turns will put them.
 	mkdirSync(join(s.home, "e2e-signals"), { recursive: true });
 	writeFileSync(join(s.home, "e2e-signals", "turn.hold"), "");
 	const pending = [
 		launchTry(s, "reply c3", { from: root, title: "c3" }),
 		launchTry(s, "reply far", { from: root, cwd: other, title: "far" }),
+		launchTry(s, "reply loose", { from: root, title: "loose", group: null }),
+		launchTry(s, "reply carried", { from: root, cwd: other, title: "carried", group: "lab" }),
 	];
-	st = await waitState(s, "both children provisional", (x) => sessionRows(x).filter((r) => r.provisional).length === 2, budgets.piReady);
-	const held = sessionRows(st).filter((r) => r.provisional);
-	const near = held.find((r) => r.group === "lab");
-	const away = held.find((r) => r.group === null);
-	expect(near).toMatchObject({ level: 1, origin: null });
-	expect(away).toMatchObject({ level: 0, origin: "session" });
+	st = await waitState(s, "every child provisional", (x) => sessionRows(x).filter((r) => r.provisional).length === 4, budgets.piReady);
+	/** Each held row's place: its Project's header, its Group, and how it nests. */
+	const placed = (x: DeckState) => {
+		let project = "";
+		return x.rows.flatMap((r) => {
+			if (r.kind === "header") project = r.project;
+			return r.kind === "session" && r.provisional ? [{ id: r.id, project, group: r.group, level: r.level, origin: r.origin }] : [];
+		});
+	};
+	const held = placed(st);
+	const at = (project: string, group: string | null) => held.filter((r) => r.project === project && r.group === group);
+	expect(at("project", "lab")).toEqual([expect.objectContaining({ level: 1, origin: null })]);
+	expect(at("project", null)).toEqual([expect.objectContaining({ level: 0, origin: "session" })]);
+	expect(at("other", null)).toEqual([expect.objectContaining({ level: 0, origin: "session" })]);
+	expect(at("other", "lab")).toEqual([expect.objectContaining({ level: 0, origin: "session" })]);
 	s.save("provisional.txt", s.screen());
 	release(s, "turn");
-	const [c3, far] = (await Promise.all(
+	const [c3, far, loose, carried] = (await Promise.all(
 		pending.map(async (launch) => {
 			const { code, out, err } = await launch;
 			if (code !== 0) throw new Error(`swb launch exited ${code}: ${err}`);
 			return (JSON.parse(out) as { details: { id: string } }).details.id;
 		}),
-	)) as [string, string];
-	expect(near?.id).toBe(c3);
-	expect(away?.id).toBe(far);
+	)) as [string, string, string, string];
+	expect(at("project", "lab")[0]?.id).toBe(c3);
+	expect(at("other", null)[0]?.id).toBe(far);
+	expect(at("project", null)[0]?.id).toBe(loose);
+	expect(at("other", "lab")[0]?.id).toBe(carried);
 	st = await waitState(
 		s,
-		"c3 under root, in lab, and far on the roster",
+		"c3 under root, in lab, and the rest on the roster",
 		(x) =>
 			sessionRows(x).some((r) => r.id === c3 && r.group === "lab" && r.title === "c3") &&
-			sessionRows(x).some((r) => r.id === far && !r.provisional),
+			[far, loose, carried].every((id) => sessionRows(x).some((r) => r.id === id && !r.provisional)),
 	);
 	const lines = lineage(st);
 	expect(lines.slice(lines.indexOf("root"), lines.indexOf("root") + 3)).toEqual(["root", "  c3", "  c2"]);
 	expect(sessionRows(st).find((r) => r.id === far)).toMatchObject({ origin: "session", group: null });
-	expect(entry(s, c3).group).toBe("lab");
-	expect(entry(s, far).group).toBeNull();
+	expect(sessionRows(st).find((r) => r.id === loose)).toMatchObject({ origin: "session", group: null });
+	expect(sessionRows(st).find((r) => r.id === carried)).toMatchObject({ origin: "session", group: "lab" });
+	expect(st.rows).toContainEqual({ kind: "header", project: "other", group: "lab", expanded: true });
+	s.save("launch-groups.txt", s.screen());
+	expect([c3, far, loose, carried].map((id) => entry(s, id).group)).toEqual(["lab", null, null, "lab"]);
 });

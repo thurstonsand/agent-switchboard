@@ -70,16 +70,23 @@ export function startHosting(db: Db, h: Hosting): void {
 	});
 }
 
-export type Turn = { harness: Harness; sessionId: string; cwd: string; transcript: string; title: string | null; parentId: string | null };
+/** `host` is the tmux session of the process recording it. */
+export type Turn = { harness: Harness; host: string; sessionId: string; cwd: string; transcript: string; title: string | null };
 
 /**
  * A turn begins: the session's row is created at its first turn. Only a turn that starts from idle moves
  * last_prompt_at, so a retry or a queued message inside one turn can't undo an archive made during it.
+ *
+ * The first session its process records takes what the launch left for it, its parent and Group, and the launch's
+ * row goes with it; a session after that one, from a /new or /clear, takes neither. Returns the parent it took.
  */
-export function startTurn(db: Db, t: Turn): void {
-	recordTx(db, () => {
+export function startTurn(db: Db, t: Turn): string | null {
+	return recordTx(db, () => {
 		const now = Date.now();
 		const first = !db.get("SELECT 1 FROM sessions WHERE session_id = ?", t.sessionId);
+		const launch = first ? db.get("DELETE FROM launches WHERE tmux_session = ? RETURNING parent_id, group_name", t.host) : undefined;
+		const parentId = (launch?.parent_id as string | null | undefined) ?? null;
+		const group = (launch?.group_name as string | null | undefined) ?? null;
 		db.run(
 			`INSERT INTO sessions (session_id, harness, parent_id, cwd, project_root, transcript, title, branch, phase, created_at, last_prompt_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'working', ?, ?)
@@ -87,7 +94,7 @@ export function startTurn(db: Db, t: Turn): void {
 			   last_prompt_at = CASE WHEN sessions.phase = 'idle' THEN excluded.last_prompt_at ELSE sessions.last_prompt_at END`,
 			t.sessionId,
 			t.harness,
-			t.parentId,
+			parentId,
 			t.cwd,
 			projectRoot(t.cwd),
 			t.transcript,
@@ -96,16 +103,13 @@ export function startTurn(db: Db, t: Turn): void {
 			now,
 			now,
 		);
-		// A child starts in its parent's Group, copied once; from then on each one's Group is its own.
-		if (first && t.parentId)
+		if (group !== null)
 			db.run(
-				`INSERT INTO marks (session_id, group_name)
-				 SELECT ?, m.group_name FROM sessions p JOIN marks m USING (session_id)
-				 WHERE p.session_id = ? AND p.project_root = ? AND m.group_name IS NOT NULL`,
+				"INSERT INTO marks (session_id, group_name) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET group_name = excluded.group_name",
 				t.sessionId,
-				t.parentId,
-				projectRoot(t.cwd),
+				group,
 			);
+		return parentId;
 	});
 }
 

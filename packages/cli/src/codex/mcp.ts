@@ -44,6 +44,7 @@ async function call(name: ToolName, args: unknown, from: string, callId: string 
 				goal: a.goal,
 				cwd: a.cwd ?? null,
 				title: a.title,
+				group: a.group,
 				requestResponse: a.requestResponse,
 				scheduled: null,
 			});
@@ -63,6 +64,7 @@ async function call(name: ToolName, args: unknown, from: string, callId: string 
 							agent: a.launch.agent ?? null,
 							cwd: a.launch.cwd ?? null,
 							title: a.launch.title,
+							group: a.launch.group,
 						}
 					: null,
 				body: a.message,

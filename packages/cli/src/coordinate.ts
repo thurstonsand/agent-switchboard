@@ -1,5 +1,5 @@
 import { existsSync, realpathSync } from "node:fs";
-import { type Db, type Harness, operatorDir, type View } from "@swb/shared";
+import { type Db, type Harness, operatorDir, projectRoot, type View } from "@swb/shared";
 import { frame, harnessName, type MessageKind, ring } from "@swb/shared/mailbox";
 import { markArchived, recordTx, titleOf } from "@swb/shared/record";
 import type { ToolArgs, ToolResult } from "@swb/shared/tools";
@@ -9,6 +9,7 @@ import { deckShowing, postCommand } from "./deck/deck.ts";
 import { inUse } from "./deck/transcript.ts";
 import { displayName, openDescendants, projectName, type SessionState, sessionState, states } from "./derive.ts";
 import { checkBody, SwbError } from "./errors.ts";
+import { requestedGroup } from "./groups.ts";
 import { type Caller, launchFlags, presetLaunch } from "./harnesses.ts";
 import { snooze } from "./schedules.ts";
 import { archive, ensureSessionsServer, launch, unarchive, wake } from "./sessions.ts";
@@ -115,6 +116,8 @@ export type Launch = {
 	goal: string;
 	cwd: string | null;
 	title: string | null;
+	/** The Group it starts in, null for none; undefined keeps `from`'s Group when both are in one Project. */
+	group: string | null | undefined;
 	requestResponse: boolean;
 	model: string | null;
 	/** The schedule that launches it, and when that was due, which its goal's frame says. */
@@ -131,6 +134,7 @@ export async function launchSession(db: Db, l: Launch): Promise<ToolResult> {
 	// An Operator that names no directory would start another Operator in its own folder; starting one is the user's call.
 	if (l.from && dir === operatorDir() && sessionState(db, l.from).operator)
 		throw new SwbError("an Operator can't start another Operator; name a project's directory as cwd");
+	const group = launchGroup(db, l, dir);
 	const asked = l.harness !== null || l.model !== null || l.effort !== null || l.agent !== null;
 	const caller = !asked && l.from ? callerOf(db, l.from) : null;
 	const target = await presetLaunch({ harness: l.harness, model: l.model, effort: l.effort, agent: l.agent }, caller);
@@ -151,15 +155,18 @@ export async function launchSession(db: Db, l: Launch): Promise<ToolResult> {
 			})
 		: l.goal;
 	ensureSessionsServer();
-	const host = launch({
-		...launchFlags(target),
-		cwd: dir,
-		resume: null,
-		...(sessionId ? { sessionId } : {}),
-		prompt,
-		...(l.title && harness === "claude" ? { title: l.title } : {}),
-		...(l.from ? { parentId: l.from } : {}),
-	});
+	const host = db.tx(() =>
+		launch(db, {
+			...launchFlags(target),
+			cwd: dir,
+			resume: null,
+			...(sessionId ? { sessionId } : {}),
+			prompt,
+			...(l.title && harness === "claude" ? { title: l.title } : {}),
+			...(l.from ? { parentId: l.from } : {}),
+			group,
+		}),
+	);
 	const id = await registered(db, host, 60_000);
 	if (l.title && harness === "codex") await nameThread(host, id, l.title);
 	else if (l.title && harness === "pi") await titled(db, id, l.title);
@@ -170,8 +177,16 @@ export async function launchSession(db: Db, l: Launch): Promise<ToolResult> {
 	]
 		.filter(Boolean)
 		.join(", ");
-	const text = `Launched a ${harnessName(harness)} session${what ? ` (${what})` : ""} (session: ${id}) in ${dir}.${l.requestResponse ? " It will report back as a message; end your turn rather than waiting." : ""}`;
-	return { text, details: { id, harness, host, cwd: dir } };
+	const text = `Launched a ${harnessName(harness)} session${what ? ` (${what})` : ""} (session: ${id}) in ${dir}${group === null ? "" : `, in Group "${group}"`}.${l.requestResponse ? " It will report back as a message; end your turn rather than waiting." : ""}`;
+	return { text, details: { id, harness, host, cwd: dir, group } };
+}
+
+function launchGroup(db: Db, l: Launch, dir: string): string | null {
+	const group = requestedGroup(l.group, dir);
+	if (group !== undefined) return group;
+	if (!l.from) return null;
+	const parent = sessionState(db, l.from);
+	return parent.project === projectRoot(dir) ? parent.group : null;
 }
 
 /** What a session runs on now: Claude Code's as its line recorded its last request, pi's and Codex's from their transcripts. */
@@ -257,10 +272,7 @@ export async function update(db: Db, from: string, id: string, change: Update): 
 	const name = `"${displayName(target)}"`;
 	const trimmedTitle = title?.trim();
 	if (trimmedTitle === "") throw new SwbError("a title can't be empty");
-	const trimmedGroup = group === undefined ? undefined : (group?.trim() ?? null);
-	if (trimmedGroup === "") throw new SwbError("a Group needs a name; null takes the session out of its Group");
-	if (trimmedGroup !== undefined && target.operator)
-		throw new SwbError(`${name} is an Operator, which belongs to no Project, so it takes no Group`);
+	const trimmedGroup = requestedGroup(group, target.cwd);
 	const archiving = archived === true ? archivePlan(all, from, target, family ?? false, force ?? false) : null;
 
 	const done: string[] = [];

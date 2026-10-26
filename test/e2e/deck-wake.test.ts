@@ -1,8 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { SessionStateRow } from "../../packages/cli/src/deck/protocol.ts";
-import { cursorTo, entry, pickNew, reply, rowIndex, seed, sessionRows, state, waitState } from "./harness/deck.ts";
+import type { DeckState, SessionStateRow } from "../../packages/cli/src/deck/protocol.ts";
+import { type } from "./harness/agents.ts";
+import { cursorTo, entry, launched, pickNew, reply, rowIndex, seed, sessionRows, state, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -154,4 +155,43 @@ test("n and swb new show the new pi as a provisional row before any prompt; /new
 			.map((r) => r.id),
 	).toContain(third.staged.id as string);
 	s.save("n.txt", s.screen());
+});
+
+test("what a launch gives, its parent and Group, goes to the first session its process records, even after a /new, and not to one after", async () => {
+	s = scenario("phase2", "group-new");
+	const base = await launched(s, "reply base", { cwd: s.project, title: "base", group: "lab" });
+	s.swb("drive", "start");
+	await waitState(s, "the roster", (x) => x.ready && sessionRows(x).length === 1);
+	await cursorTo(s, base);
+	await pickNew(s);
+	const groupOfStaged = (x: DeckState) => sessionRows(x).find((r) => r.id === x.staged.id && r.provisional)?.group;
+	const first = await waitState(
+		s,
+		"n's pi in lab",
+		(x) => x.staged.kind === "live" && x.staged.id !== base && groupOfStaged(x) === "lab",
+		budgets.piReady,
+	);
+
+	// Nothing recorded yet, so the Group is still the launch's to give: the /new session takes it.
+	s.keys("-l", "/new", "Enter");
+	const second = await waitState(s, "the /new pi in lab", (x) => x.staged.id !== first.staged.id && groupOfStaged(x) === "lab");
+	await reply(s, "second");
+	await until(() => entry(s, second.staged.id as string)?.group === "lab", budgets.settle, "the second recorded in lab");
+	expect(s.query("SELECT 1 FROM sessions WHERE session_id = ?", first.staged.id)).toEqual([]);
+
+	// Once one has, a /new after it starts in no Group, and the roster shows it there before its first prompt.
+	s.keys("-l", "/new", "Enter");
+	await waitState(s, "the next /new pi in no Group", (x) => x.staged.id !== second.staged.id && groupOfStaged(x) === null);
+	s.save("group-new.txt", s.screen());
+
+	// Likewise a parent: a launched child's /new, after its first turn, is no one's child, in no Group.
+	const child = await launched(s, "reply child", { from: base, title: "child" });
+	expect(entry(s, child)).toMatchObject({ parentId: base, group: "lab" });
+	await waitState(s, "child nested under base", (x) => sessionRows(x).some((r) => r.id === child && r.level === 1));
+	type(s, child, "/new");
+	const fresh = await waitState(s, "the child's /new on the roster", (x) =>
+		sessionRows(x).some((r) => r.provisional && r.id !== x.staged.id && r.id !== child),
+	);
+	expect(sessionRows(fresh).find((r) => r.provisional && r.id !== fresh.staged.id)).toMatchObject({ group: null, level: 0, origin: null });
+	s.save("parent-new.txt", s.screen());
 });

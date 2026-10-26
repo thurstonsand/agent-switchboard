@@ -91,7 +91,7 @@ A git repository together with all of its worktrees; sessions outside any reposi
 A session whose working directory is swb's Operator folder. It coordinates the other sessions instead of working in a **Project**, belongs to none, and never goes **Inactive**.
 
 **Group**:
-A name I give a session, scoping it within its **Project**. A Group exists only while some session carries its name: the last one archived takes it away, and unarchiving one brings it back. A session another starts begins in its parent's Group, when both are in one **Project**; from then on, each one's Group is its own, and a session with none sits directly under its **Project**.
+A name I give a session, scoping it within its **Project**. A Group exists only while some session carries its name: the last one archived takes it away, and unarchiving one brings it back. A session another starts begins in its parent's Group, when both are in one **Project**, unless its launch names another Group or none; from then on, each one's Group is its own, and a session with none sits directly under its **Project**.
 
 **Family**:
 A session together with every session it started, and those they started, short of an **Operator**. The **Roster** nests a session under its parent while both sit in one Group or Project.

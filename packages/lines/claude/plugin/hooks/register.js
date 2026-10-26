@@ -10,7 +10,6 @@ const line = {
 	started: false,
 	bin: "",
 	host: "",
-	parent: "",
 	session: "",
 	cwd: "",
 	transcript: "",
@@ -32,7 +31,6 @@ const line = {
 async function env($, name) {
 	if (name === "SWB_BIN") return (await $.env.get("SWB_BIN")) ?? "";
 	if (name === "SWB_TMUX_SESSION") return (await $.env.get("SWB_TMUX_SESSION")) ?? "";
-	if (name === "SWB_PARENT") return (await $.env.get("SWB_PARENT")) ?? "";
 	return (await $.env.get("SWB_DB")) ?? "";
 }
 
@@ -145,6 +143,12 @@ async function drain($) {
 	}
 }
 
+/** A launch's Group as swb's flags take it: omitted, named, or none. */
+function groupFlags(prefix, group) {
+	if (group === undefined) return [];
+	return group === null ? [`${prefix}no-group`] : [`${prefix}group`, group];
+}
+
 async function useTool($, name, e) {
 	// The caller is whoever Claude Code says this session is now, never a value cached from an event that can be missed.
 	const self = await $.session.id();
@@ -173,6 +177,7 @@ async function useTool($, name, e) {
 					e.cwd ?? line.cwd,
 					"--title",
 					e.title,
+					...groupFlags("--", e.group),
 					...(e.requestResponse ? ["--request-response"] : []),
 				],
 				e.goal,
@@ -197,6 +202,7 @@ async function useTool($, name, e) {
 								e.launch.title,
 								"--launch-cwd",
 								e.launch.cwd ?? line.cwd,
+								...groupFlags("--launch-", e.launch.group),
 							]
 						: []),
 					...(e.requestResponse ? ["--request-response"] : []),
@@ -229,7 +235,6 @@ async function init($, start) {
 	if (!line.managed) {
 		line.bin = await env($, "SWB_BIN");
 		line.host = await env($, "SWB_TMUX_SESSION");
-		line.parent = await env($, "SWB_PARENT");
 		line.managed = Boolean(line.bin && line.host);
 		if (line.managed && !line.started) {
 			line.started = true;
@@ -326,10 +331,7 @@ export function register(on) {
 		if (line.managed && !e.agentId) {
 			line.busy = true;
 			line.turnId = e.turnId;
-			// The launcher is recorded with the first turn, which makes the session's row.
-			const parent = line.parent ? ["--parent", line.parent] : [];
-			line.parent = "";
-			void record($, ["turn", "--session", line.session, "--cwd", line.cwd, "--transcript", line.transcript, ...parent]);
+			void record($, ["turn", "--session", line.session, "--cwd", line.cwd, "--transcript", line.transcript]);
 		}
 		return next(e);
 	});

@@ -116,6 +116,14 @@ const MIGRATIONS: string[] = [
 	ALTER TABLE marks_v6 RENAME TO marks;
 	ALTER TABLE sessions ADD COLUMN model TEXT;
 	ALTER TABLE sessions ADD COLUMN effort TEXT;`,
+	// What a launch gives the process it starts in a tmux session, until that process's line records it.
+	`CREATE TABLE launches (
+		tmux_session TEXT PRIMARY KEY,
+		resume_id    TEXT,
+		parent_id    TEXT,
+		group_name   TEXT,
+		created_at   INTEGER NOT NULL
+	);`,
 ];
 
 if (MIGRATIONS.length !== SCHEMA_VERSION) throw new Error(`${MIGRATIONS.length} migrations for schema v${SCHEMA_VERSION}`);

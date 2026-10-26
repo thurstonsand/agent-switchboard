@@ -59,6 +59,8 @@ export async function launch(args: string[]): Promise<void> {
 			cwd: { type: "string" },
 			from: { type: "string" },
 			title: { type: "string" },
+			group: { type: "string" },
+			"no-group": { type: "boolean", default: false },
 			model: { type: "string" },
 			"request-response": { type: "boolean", default: false },
 		},
@@ -72,6 +74,7 @@ export async function launch(args: string[]): Promise<void> {
 			goal: await Bun.stdin.text(),
 			cwd: values.cwd ?? null,
 			title: values.title ?? null,
+			group: groupOf("", values.group, values["no-group"]),
 			requestResponse: values["request-response"],
 			model: values.model ?? null,
 			scheduled: null,
@@ -94,6 +97,8 @@ export async function schedule(args: string[]): Promise<void> {
 			"launch-agent": { type: "string" },
 			"launch-cwd": { type: "string" },
 			"launch-title": { type: "string" },
+			"launch-group": { type: "string" },
+			"launch-no-group": { type: "boolean", default: false },
 			"request-response": { type: "boolean", default: false },
 			snooze: { type: "boolean", default: false },
 			"request-id": { type: "string" },
@@ -101,7 +106,10 @@ export async function schedule(args: string[]): Promise<void> {
 	});
 	if (!values.from || values.label === undefined) throw new UsageError("schedule: --from and --label are required");
 	const launching = values["launch-title"] !== undefined;
-	const given = ["harness", "model", "effort", "agent", "cwd"].filter((k) => values[`launch-${k}` as keyof typeof values] !== undefined);
+	const given = ["harness", "model", "effort", "agent", "cwd", "group"].filter(
+		(k) => values[`launch-${k}` as keyof typeof values] !== undefined,
+	);
+	if (!launching && values["launch-no-group"]) given.push("no-group");
 	if (!launching && given.length > 0) throw new UsageError(`schedule: --launch-${given[0]} needs --launch-title`);
 	const result = await scheduleMessage(openStore(), {
 		from: values.from,
@@ -114,6 +122,7 @@ export async function schedule(args: string[]): Promise<void> {
 					agent: values["launch-agent"] ?? null,
 					cwd: values["launch-cwd"] ?? null,
 					title: values["launch-title"] as string,
+					group: groupOf("launch-", values["launch-group"], values["launch-no-group"]),
 				}
 			: null,
 		body: await Bun.stdin.text(),
@@ -127,6 +136,12 @@ export async function schedule(args: string[]): Promise<void> {
 	// Its clock is what fires it, which a reboot or swb quit may have left stopped.
 	ensureSessionsServer();
 	print(result);
+}
+
+/** A launch's Group: named, none (--no-group), or omitted to keep the launcher's. */
+function groupOf(prefix: string, name: string | undefined, none: boolean): string | null | undefined {
+	if (name !== undefined && none) throw new UsageError(`--${prefix}group and --${prefix}no-group conflict`);
+	return none ? null : name;
 }
 
 export function schedules(args: string[]): void {

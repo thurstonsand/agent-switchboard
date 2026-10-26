@@ -25,6 +25,7 @@ import { ConfigError, configPath, type Loaded, readConfig } from "../config.ts";
 import { type CutOff, displayName, openDescendants, projectName } from "../derive.ts";
 import { completions, expandHome, type Target, type TargetTree, targetName } from "../dirs.ts";
 import { SwbError, UsageError } from "../errors.ts";
+import { unnameable } from "../groups.ts";
 import { type Catalog, type Choice, defaultLaunch, fromDefault, type LaunchTarget, presetLabels, shortlist } from "../harnesses.ts";
 import { ensureOperatorDir } from "../operator.ts";
 import { presetUntil } from "../schedules.ts";
@@ -1505,7 +1506,13 @@ class Roster implements Component, Focusable {
 				const choice = choices[this.naming.choice];
 				if (choice) this.finishNaming(choice.name);
 			} else {
+				const before = this.name.getValue();
 				this.name.handleInput(data);
+				const refused = unnameable(this.name.getValue());
+				if (refused.length > 0) {
+					this.name.setValue(before);
+					toast(`a Group's name can't hold ${refused.map((char) => JSON.stringify(char)).join(" ")}`, "info");
+				}
 				if (this.naming) this.naming.choice = 0;
 			}
 			stage.keyAt = 0;

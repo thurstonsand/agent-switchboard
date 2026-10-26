@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 
 export { Db, type Param, type Row } from "./db.ts";
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export type Phase = "idle" | "working" | "blocked";
 /** The Stage's views of a session: its own agent, whichever harness runs it, its Editor, or both. */

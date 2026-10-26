@@ -1,4 +1,4 @@
-# Groups: m names a Group, and dragging a session moves it between them.
+# Groups: m names a Group, refusing what a name can't hold, and dragging a session moves it between them.
 Source common.tape
 
 Type "# m names a Group; drag moves a session into one" Sleep 1s Enter
@@ -10,7 +10,12 @@ Type "/alpha" Sleep 400ms Enter
 Sleep 800ms
 Type "m"
 Sleep 600ms
-Type "review" Sleep 600ms Enter
+Type "review" Sleep 600ms
+Type ";"
+Wait+Screen /can't hold/
+Sleep 1s
+Screenshot ../artifacts/phase6/videos/groups-name-refused.png
+Enter
 Sleep 800ms
 Escape
 Wait+Screen /review \(1\)/

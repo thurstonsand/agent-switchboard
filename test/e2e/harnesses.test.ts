@@ -192,6 +192,54 @@ test("session_launch with no preset carries the caller's harness and model forwa
 	expect(claudeModel(carried.id)).toContain("opus");
 });
 
+test("session_launch and a scheduled launch, from pi, Claude Code, or Codex, start their child in the launcher's Group, the Group named, or none", async () => {
+	s = scenario("harnesses", "launch-group", { packages: [], recorder: true, harnesses: ["claude", "codex"] });
+	const parents = await Promise.all(
+		(["pi", "claude", "codex"] as const).map((harness) => launched(s, harness, `reply ${harness} up`, undefined, ["--group", "base"])),
+	);
+	expect(parents.map((p) => p.group)).toEqual(["base", "base", "base"]);
+	const cases = [
+		["kept", undefined, "base"],
+		["named", "ops", "ops"],
+		["none", null, null],
+	] as const;
+	for (const parent of parents)
+		for (const [name, group, expected] of cases) {
+			const title = `${parent.harness} ${name}`;
+			const asked = group === undefined ? "" : `,"group":${JSON.stringify(group)}`;
+			type(s, parent.id, `call session_launch {"harness":"pi","goal":"reply ${title}","title":"${title}"${asked},"requestResponse":false}`);
+			const child = await until(
+				() => s.ls().find((e) => e.parentId === parent.id && e.title === title && e.activity === "idle"),
+				ready,
+				`${title} launched`,
+			);
+			expect(child.group).toBe(expected);
+			await until(() => entry(s, parent.id).activity === "idle", ready, `${parent.harness} done launching ${name}`);
+		}
+	for (const parent of parents) {
+		const title = `${parent.harness} scheduled`;
+		type(
+			s,
+			parent.id,
+			`call session_schedule {"message":"reply ${title}","at":"PT1S","label":"now","launch":{"harness":"pi","title":"${title}","group":"night shift"}}`,
+		);
+		await until(() => entry(s, parent.id).activity === "idle", ready, `${parent.harness} done scheduling`);
+	}
+	const fired = await until(
+		() => {
+			const children = s.ls().filter((e) => e.title?.endsWith(" scheduled") && e.activity === "idle");
+			return children.length === 3 && children;
+		},
+		ready,
+		"the scheduled launches",
+	);
+	expect(fired.map((e) => [e.title, e.group]).sort()).toEqual([
+		["claude scheduled", "night shift"],
+		["codex scheduled", "night shift"],
+		["pi scheduled", "night shift"],
+	]);
+});
+
 test("on a fresh install, swb new starts the automatic shortlist's default, Claude Code, once its models are listed", async () => {
 	s = scenario("harnesses", "first-new", { packages: [], recorder: true, harnesses: ["claude"] });
 	expect(existsSync(join(s.env.XDG_STATE_HOME as string, "agent-switchboard", "catalog.json"))).toBe(false);

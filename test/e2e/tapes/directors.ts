@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState } from "../../../packages/cli/src/deck/protocol.ts";
 import { config, launched, launchTry, seed } from "../harness/deck.ts";
-import { git, gitRepo, gitWorktree, type LsEntry, type PiPackage, release, type Scenario, until, which } from "../harness/index.ts";
+import { git, gitRepo, gitWorktree, type LsEntry, type PiPackage, release, repo, type Scenario, until, which } from "../harness/index.ts";
 
 export type Director = {
 	packages?: PiPackage[];
@@ -918,6 +918,8 @@ export const directors: Record<string, Director> = {
 				"Port lineage entry",
 				"E2E for nested rows",
 				"Draft lineage docs",
+				"Port lineage docs",
+				"Fix flaky fold test",
 			];
 			// Once the tape has shown the root alone in lab, the root starts a child, which begins there too.
 			const st = await waitDeck(s, "the root in lab", (x) =>
@@ -927,6 +929,10 @@ export const directors: Record<string, Director> = {
 			if (root?.kind !== "session") throw new Error("no root row");
 			await Bun.sleep(4000);
 			await launched(s, "reply drafted", { from: root.id, title: "Draft lineage docs" });
+			// A launch that names a Group carries lab into another Project; one that names none keeps its child out of lab.
+			await Bun.sleep(2500);
+			await launched(s, "reply ported", { from: root.id, cwd: join(s.root, "pi-sessions"), title: "Port lineage docs", group: "lab" });
+			await launched(s, "reply fixed", { from: root.id, title: "Fix flaky fold test", group: null });
 			await waitDeck(s, "the archive prompt", (x) => x.mode === "archive" && x.archive?.all === family.length);
 			await waitLs(s, "the family archived", (ls) => {
 				const members = ls.filter((e) => family.includes(e.title ?? ""));
@@ -938,6 +944,44 @@ export const directors: Record<string, Director> = {
 					.filter((e) => e.open)
 					.map((e) => e.title),
 			).toEqual(expect.arrayContaining(["Triage open issues", "Bump pi-tui to 0.9"]));
+		},
+	},
+
+	"launch-handoff": {
+		setup: async (s) => {
+			const db = join(s.env.XDG_STATE_HOME as string, "agent-switchboard/swb.db");
+			writeFileSync(join(s.bin, "swb-db"), `#!/bin/sh\nexec ${process.execPath} ${join(repo, "test/e2e/tapes/db-state.ts")} ${db}\n`, {
+				mode: 0o755,
+			});
+			const base = await launched(s, "reply base", { cwd: s.project, title: "base" });
+			// swb_update_session as a line calls it, which the build before this change has too.
+			const grouped = Bun.spawn([join(s.bin, "swb"), "update", "--from", base], { env: s.env, stdin: new Blob(['{"group":"lab"}']) });
+			expect(await grouped.exited).toBe(0);
+		},
+		run: async (s) => {
+			// Every change in the db the tape shows, timestamped, until base has been stopped, woken, and stopped again.
+			const timeline: string[] = [];
+			let last = "";
+			let stops = 0;
+			let wasLive = true;
+			const start = Date.now();
+			await until(
+				() => {
+					const shown = Bun.stripANSI(Bun.spawnSync([join(s.bin, "swb-db")], { env: s.env }).stdout.toString());
+					if (shown !== last) {
+						timeline.push(`--- +${((Date.now() - start) / 1000).toFixed(1)}s\n${shown}`);
+						last = shown;
+					}
+					const base = s.ls().find((e) => e.title === "base");
+					if (base && wasLive && !base.live) stops++;
+					wasLive = base?.live ?? false;
+					return stops === 2 && !/launches\n.*\n {2}\S+ +/.test(shown);
+				},
+				240_000,
+				"base stopped, woken, and stopped again, and no launch row left",
+			);
+			s.save("db-timeline.txt", timeline.join("\n"));
+			s.save("ls.json", JSON.stringify(s.ls(), null, 2));
 		},
 	},
 

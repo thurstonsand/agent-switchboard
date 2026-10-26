@@ -12,6 +12,12 @@ const session = Type.String({ description: "The target session's id, from sessio
 const requestResponse = Type.Boolean({ description: "Whether the recipient should reply to this session." });
 const cwd = Type.Optional(Type.String({ description: "Its working directory; defaults to this session's." }));
 const title = Type.String({ description: "A short title for the roster." });
+const group = Type.Optional(
+	Type.Union([Type.String(), Type.Null()], {
+		description:
+			"The Group to put the new session in. If omitted, it joins this session's Group when both are in the same Project, and no Group otherwise. Pass null to keep it out of any Group. To use this session's Group in another Project, pass its name.",
+	}),
+);
 /** A preset by its fields, as session_launch's description lists them. */
 const preset = {
 	harness: Type.Optional(
@@ -67,6 +73,7 @@ export const TOOLS = {
 			goal: Type.String({ description: "The self-contained briefing, delivered as its first message." }),
 			cwd,
 			title,
+			group,
 			requestResponse: Type.Boolean({ description: "Whether it should report back to this session when done." }),
 		}),
 		readOnly: false,
@@ -103,6 +110,7 @@ export const TOOLS = {
 						...preset,
 						cwd,
 						title,
+						group,
 					},
 					{
 						description:

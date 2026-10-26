@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { entry, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 import { host, launched, pane, ready, scheduled, snoozeOf, swbIn, type } from "./harness/schedules.ts";
@@ -93,6 +94,8 @@ test("a schedule launches a new session, refuses what can't work, unschedules, a
 	await until(() => s.signal("replied.launched") !== "", ready, "the launched session working on its goal");
 	await until(() => entry(s, child.id).title === "fresh one", budgets.settle, "titled");
 
+	const operatorDir = join(s.env.XDG_CONFIG_HOME as string, "agent-switchboard/operator");
+	mkdirSync(operatorDir, { recursive: true });
 	const refusals: [string[], string][] = [
 		[["--at", "PT1H", "--cron", "* * * * *"], "give at, to run once, or cron, to recur: one of them"],
 		[["--at", "fri 3pm"], 'at: "fri 3pm" is neither an ISO 8601 time nor a duration like "PT2H"'],
@@ -102,6 +105,17 @@ test("a schedule launches a new session, refuses what can't work, unschedules, a
 		[
 			["--at", "PT1H", "--snooze", "--launch-harness", "pi", "--launch-title", "x"],
 			"snooze needs an existing session; a launch has none to snooze",
+		],
+		[["--at", "PT1H", "--launch-title", "x", "--launch-group", " "], "a Group needs a name; null means no Group"],
+		[["--at", "PT1H", "--launch-title", "x", "--launch-group", "fix;"], "a Group's name takes only letters, digits, spaces, and - _ ."],
+		[
+			["--at", "PT1H", "--launch-title", "x", "--launch-cwd", operatorDir, "--launch-group", "lab"],
+			"an Operator belongs to no Project, so it takes no Group",
+		],
+		[["--at", "PT1H", "--launch-no-group"], "schedule: --launch-no-group needs --launch-title"],
+		[
+			["--at", "PT1H", "--launch-title", "x", "--launch-group", "lab", "--launch-no-group"],
+			"--launch-group and --launch-no-group conflict",
 		],
 	];
 	for (const [args, error] of refusals) {

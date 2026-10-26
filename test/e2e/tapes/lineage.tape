@@ -1,4 +1,4 @@
-# Sessions an agent started nest under it: the Peek says who started a session, p goes there, h folds a family, a child starts in its parent's Group, and a asks whether it goes too.
+# Sessions an agent started nest under it: the Peek says who started a session, p goes there, h folds a family, a child starts in its parent's Group or the one its launch names, and a asks whether it goes too.
 Source common.tape
 
 Type "# sessions an agent started nest under it; p goes to the parent, h folds, a asks about the family" Sleep 1s Enter
@@ -36,12 +36,15 @@ Screenshot ../artifacts/phase6/videos/lineage-group.png
 Wait+Screen /lab \(2\)/
 Sleep 2s
 Screenshot ../artifacts/phase6/videos/lineage-group-child.png
+Wait+Screen /Fix flaky fold test/
+Sleep 2s
+Screenshot ../artifacts/phase6/videos/lineage-launch-groups.png
 Type "a"
-Wait+Screen /A all 6/
+Wait+Screen /A all 8/
 Sleep 2s
 Screenshot ../artifacts/phase6/videos/lineage-archive-prompt.png
 Type "A"
-Wait+Screen /Archived \(6\)/
+Wait+Screen /Archived \(8\)/
 Sleep 2s
 Screenshot ../artifacts/phase6/videos/lineage-archived.png
 Sleep 1s

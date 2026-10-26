@@ -6,6 +6,7 @@ import type { ToolResult } from "@swb/shared/tools";
 import { Cron } from "croner";
 import { displayName, sessionState, states } from "./derive.ts";
 import { checkBody, SwbError } from "./errors.ts";
+import { requestedGroup } from "./groups.ts";
 import { presetLaunch } from "./harnesses.ts";
 import { randomHex } from "./sessions.ts";
 
@@ -77,6 +78,8 @@ export type Launch = {
 	agent: string | null;
 	cwd: string | null;
 	title: string;
+	/** As session_launch's: absent keeps the scheduling session's Group when in one Project, null is none. */
+	group?: string | null;
 };
 
 /** "a new Claude Code session", or with no harness chosen, "a new session". */
@@ -173,7 +176,8 @@ export async function schedule(db: Db, s: ScheduleSpec): Promise<ToolResult> {
 		if (s.launch) {
 			const cwd = s.launch.cwd ?? source.cwd;
 			if (!existsSync(cwd)) throw new SwbError(`no directory ${cwd}`);
-			launch = JSON.stringify({ ...s.launch, cwd: realpathSync(cwd) } satisfies Launch);
+			const dir = realpathSync(cwd);
+			launch = JSON.stringify({ ...s.launch, cwd: dir, group: requestedGroup(s.launch.group, dir) } satisfies Launch);
 		}
 		const nextAt = s.cron !== null ? nextRun(s.cron, now) : when(s.at as string, now, "at");
 		if (nextAt === null) throw new SwbError(`cron: "${s.cron}" never runs`);

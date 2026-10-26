@@ -30,8 +30,6 @@ type Process = {
 	failure?: string;
 	db?: Db;
 	attention: Set<string>;
-	/** The session that launched this process, until the first session it hosts has recorded it. */
-	parent?: string;
 	inbox?: NodeJS.Timeout;
 	doorbell?: FSWatcher;
 };
@@ -48,7 +46,6 @@ function claim(): Process | undefined {
 		store[KEY] = {
 			launch: Object.freeze({ db: env.SWB_DB, tmuxSession: env.SWB_TMUX_SESSION, bin: env.SWB_BIN ?? "" }),
 			attention: new Set(),
-			...(env.SWB_PARENT ? { parent: env.SWB_PARENT } : {}),
 			...(env.SWB_BIN ? {} : { failure: "started by an swb older than this line; upgrade swb" }),
 		};
 	}
@@ -57,8 +54,13 @@ function claim(): Process | undefined {
 	delete env.SWB_DB;
 	delete env.SWB_TMUX_SESSION;
 	delete env.SWB_BIN;
-	delete env.SWB_PARENT;
 	return store[KEY];
+}
+
+/** A launch's Group as swb's flags take it: omitted, named, or none. */
+function groupFlags(prefix: string, group: string | null | undefined): string[] {
+	if (group === undefined) return [];
+	return group === null ? [`${prefix}no-group`] : [`${prefix}group`, group];
 }
 
 /** Runs swb, feeding it stdin, and parses the tool result it prints; its stderr is the error. */
@@ -128,8 +130,6 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	let current: string | undefined;
-	/** The session that recorded its launcher, once its first turn makes its row. */
-	let launchedBy: { sessionId: string; parent: string } | undefined;
 
 	pi.on("session_before_switch", (event, ctx) => {
 		if (event.reason !== "resume" || !event.targetSessionFile || proc.failure) return;
@@ -202,13 +202,6 @@ export default function (pi: ExtensionAPI) {
 		seenVersion = -1;
 		if (event.reason !== "reload") restoreDraft(ctx, current);
 		proc.attention.clear();
-		if (proc.parent) {
-			// The launcher's lineage, in the transcript too, so pi-sessions sees it after the session leaves swb.
-			launchedBy = { sessionId: current, parent: proc.parent };
-			if (!ctx.sessionManager.getEntries().some((entry) => entry.type === "custom" && entry.customType === LINEAGE))
-				pi.appendEntry(LINEAGE, { parentSessionId: proc.parent });
-			delete proc.parent;
-		}
 		span("pi-line.start-hosting", () =>
 			writeFor(ctx, (db, id) => {
 				const transcript = ctx.sessionManager.getSessionFile();
@@ -243,8 +236,9 @@ export default function (pi: ExtensionAPI) {
 			const transcript = ctx.sessionManager.getSessionFile();
 			if (!transcript) throw new Error("pi is running without a session file");
 			const title = ctx.sessionManager.getSessionName() ?? null;
-			const parentId = launchedBy?.sessionId === id ? launchedBy.parent : null;
-			startTurn(db, { harness: "pi", sessionId: id, cwd: ctx.cwd, transcript, title, parentId });
+			const parentId = startTurn(db, { harness: "pi", host: proc.launch.tmuxSession, sessionId: id, cwd: ctx.cwd, transcript, title });
+			// The launcher's lineage, in the transcript too, so pi-sessions sees it after the session leaves swb.
+			if (parentId) pi.appendEntry(LINEAGE, { parentSessionId: parentId });
 		});
 	});
 
@@ -392,6 +386,7 @@ export default function (pi: ExtensionAPI) {
 				goal: string;
 				cwd?: string;
 				title: string;
+				group?: string | null;
 				requestResponse: boolean;
 			},
 			ctx,
@@ -407,6 +402,7 @@ export default function (pi: ExtensionAPI) {
 					args.cwd ?? ctx.cwd,
 					"--title",
 					args.title,
+					...groupFlags("--", args.group),
 					...(args.requestResponse ? ["--request-response"] : []),
 				],
 				args.goal,
@@ -425,7 +421,15 @@ export default function (pi: ExtensionAPI) {
 				cron?: string;
 				label: string;
 				session?: string;
-				launch?: { harness?: string; model?: string; effort?: string; agent?: string; cwd?: string; title: string };
+				launch?: {
+					harness?: string;
+					model?: string;
+					effort?: string;
+					agent?: string;
+					cwd?: string;
+					title: string;
+					group?: string | null;
+				};
 				requestResponse?: boolean;
 				snooze?: boolean;
 			},
@@ -454,6 +458,7 @@ export default function (pi: ExtensionAPI) {
 								args.launch.title,
 								"--launch-cwd",
 								args.launch.cwd ?? ctx.cwd,
+								...groupFlags("--launch-", args.launch.group),
 							]
 						: []),
 					...(args.requestResponse ? ["--request-response"] : []),

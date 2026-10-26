@@ -108,6 +108,7 @@ export async function clock(): Promise<void> {
 					goal: l.body,
 					cwd: l.launch.cwd,
 					title: l.launch.title,
+					group: l.launch.group,
 					requestResponse: l.requestResponse,
 					scheduled: { id: l.scheduleId, at: l.scheduledFor },
 				}).then(

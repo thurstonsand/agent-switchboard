@@ -110,8 +110,7 @@ export async function codexHost(args: string[]): Promise<void> {
 	if (!host) throw new UsageError("__codex: --host is required");
 	const codex = Bun.which("codex");
 	if (!codex) throw new SwbError("codex not found on PATH");
-	const parent = process.env.SWB_PARENT || null;
-	for (const name of ["SWB_MANAGED", "SWB_DB", "SWB_TMUX_SESSION", "SWB_BIN", "SWB_PARENT"]) delete process.env[name];
+	for (const name of ["SWB_MANAGED", "SWB_DB", "SWB_TMUX_SESSION", "SWB_BIN"]) delete process.env[name];
 
 	writeCodexLine(SWB);
 	// Both read config: the server for the model's instructions and tools, the TUI for its trust check.
@@ -178,7 +177,7 @@ export async function codexHost(args: string[]): Promise<void> {
 	process.on("SIGHUP", stopTui);
 	process.on("SIGTERM", stopTui);
 
-	const line = new CodexLine(db, client, host, parent, values.continue ? (values.resume ?? null) : null, stopTui);
+	const line = new CodexLine(db, client, host, values.continue ? (values.resume ?? null) : null, stopTui);
 	client.onNotification((note) => line.notify(note));
 	const timer = setInterval(() => void line.poll(), POLL_MS);
 	const doorbell = listen(db, (id) => {
@@ -218,8 +217,6 @@ class CodexLine {
 		readonly db: Db,
 		readonly client: CodexClient,
 		readonly host: string,
-		/** The launcher, recorded with the first turn. */
-		public parent: string | null,
 		/** A resumed thread whose cut-off turn picks back up once the TUI shows it. */
 		public continuing: string | null,
 		readonly stop: () => void,
@@ -287,9 +284,8 @@ class CodexLine {
 			cwd: thread.cwd,
 			transcript: thread.path ?? "",
 			title: thread.name,
-			parentId: this.parent,
+			host: this.host,
 		});
-		this.parent = null;
 	}
 
 	/** Recording failures show in the pane's title-less log; the session carries on. */

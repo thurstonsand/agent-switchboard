@@ -294,6 +294,8 @@ export type LaunchSpec = {
 	agent?: string;
 	/** The session that launched this one; an agent launch also skips pi's trust prompt. */
 	parentId?: string;
+	/** The Group its first session starts in. */
+	group?: string | null;
 };
 
 /** The harness's own command line for a launch, run by the user's login shell. */
@@ -350,11 +352,23 @@ function harnessCommand(spec: LaunchSpec, host: string): string[] {
 	}
 }
 
-/** Starts a managed session in the background and returns its tmux session; the harness comes up on its own time. */
-export function launch(spec: LaunchSpec): string {
+/**
+ * Starts a managed session in the background and returns its tmux session; the harness comes up on its own time. Its
+ * launch row, which its line takes when it records the first session, is written in the caller's db.tx, so gc, which
+ * prunes the rows of tmux sessions that are gone, can't land between the row and the session.
+ */
+export function launch(db: Db, spec: LaunchSpec): string {
 	const at = now();
 	const { cwd, resume } = spec;
 	const name = `${basename(projectRoot(cwd)).replaceAll(/[.:]/g, "_")}-${randomHex(2)}`;
+	db.run(
+		"INSERT OR REPLACE INTO launches (tmux_session, resume_id, parent_id, group_name, created_at) VALUES (?, ?, ?, ?, ?)",
+		name,
+		resume?.id ?? null,
+		spec.parentId ?? null,
+		spec.group ?? null,
+		Date.now(),
+	);
 	const shell = loginShell();
 	const command = `exec ${harnessCommand(spec, name).map(quote).join(" ")}`;
 	tmux(
@@ -383,7 +397,6 @@ export function launch(spec: LaunchSpec): string {
 		"PI_CLIPBOARD_OSC52=1",
 		// Claude Code's own scheduler dies with its process; swb's schedules are the ones that last.
 		...(spec.harness === "claude" ? ["-e", "CLAUDE_CODE_DISABLE_CRON=1"] : []),
-		...(spec.parentId ? ["-e", `SWB_PARENT=${spec.parentId}`] : []),
 		`exec env -u TMUX -u TMUX_PANE SHELL=${shell} ${shell} -lic ${quote(command)}`,
 		";",
 		"set",
@@ -406,9 +419,6 @@ export function launch(spec: LaunchSpec): string {
 		`=${name}:`,
 		"remain-on-exit-format",
 		"",
-		...(resume ? [";", "set", "-t", name, "@swb_launch_id", resume.id] : []),
-		// For the Deck, which nests the new session under its parent before its first turn records one.
-		...(spec.parentId ? [";", "set", "-t", name, "@swb_parent", spec.parentId] : []),
 	);
 	since(`launch.${spec.harness}`, at);
 	return name;
@@ -536,16 +546,17 @@ const CONTINUE = "Continue where you left off.";
 export function wake(db: Db, id: string, continueTurn: boolean): string {
 	ensureSessionsServer();
 	return db.tx(() => {
-		const listed = listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_launch_id}", "#{pane_dead}");
-		// A pi that died before it registered leaves a dead pane still tagged with its id.
-		for (const [name, kind, launchId, dead] of listed) {
-			if (kind === "pi" && launchId === id && dead === "1") tmuxTry(SESSIONS, "kill-session", "-t", `=${name}`);
+		const listed = listSessions(SESSIONS, "#{@swb_kind}", "#{pane_dead}");
+		const resuming = new Set(db.all("SELECT tmux_session FROM launches WHERE resume_id = ?", id).map((row) => row.tmux_session as string));
+		// A pi that died before it registered leaves a dead pane behind its launch.
+		for (const [name, kind, dead] of listed) {
+			if (kind === "pi" && resuming.has(name as string) && dead === "1") tmuxTry(SESSIONS, "kill-session", "-t", `=${name}`);
 		}
-		const hosts = listed.filter(([, , , dead]) => dead !== "1");
+		const hosts = listed.filter(([, , dead]) => dead !== "1");
 		const host = liveHost(db, id, new Set(hosts.map(([name]) => name as string)));
 		if (host) return host;
 		const recorded = new Set(db.all("SELECT tmux_session FROM runtimes").map((row) => row.tmux_session as string));
-		const inFlight = hosts.find(([name, kind, launchId]) => kind === "pi" && launchId === id && !recorded.has(name as string));
+		const inFlight = hosts.find(([name, kind]) => kind === "pi" && resuming.has(name as string) && !recorded.has(name as string));
 		if (inFlight) return inFlight[0] as string;
 		const session = db.get("SELECT cwd, project_root, harness, transcript, phase, effort FROM sessions WHERE session_id = ?", id);
 		if (!session) throw new SwbError(`no session ${id}`);
@@ -556,7 +567,7 @@ export function wake(db: Db, id: string, continueTurn: boolean): string {
 		const harness = session.harness as Harness;
 		// Claude Code resumes on its last model but its own default effort, so the effort its line last saw goes back in.
 		const effort = harness === "claude" ? (session.effort as Effort | null) : null;
-		return launch({
+		return launch(db, {
 			harness,
 			cwd,
 			resume: { id, transcript: session.transcript as string, continueTurn: continueTurn && cutOff },
@@ -630,9 +641,15 @@ export function unarchive(db: Db, id: string): void {
 	});
 }
 
-/** Kills each Editor and shell whose directory no open session uses any more. */
+/** Drops the launch rows of tmux sessions that are gone, and kills each Editor and shell no open session uses any more. */
 export function gc(db: Db): void {
-	const listed = listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_dir}");
+	const listed = db.tx(() => {
+		const listed = listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_dir}");
+		const names = new Set(listed.map(([name]) => name as string));
+		for (const row of db.all("SELECT tmux_session FROM launches"))
+			if (!names.has(row.tmux_session as string)) db.run("DELETE FROM launches WHERE tmux_session = ?", row.tmux_session as string);
+		return listed;
+	});
 	const owned = listed.filter(([, kind]) => kind === "editor" || kind === "shell");
 	if (owned.length === 0) return;
 	const hosts = new Set(listed.map(([name]) => name as string));
