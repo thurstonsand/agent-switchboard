@@ -13,6 +13,7 @@ Schema v7: update swb and the pi line together.
 
 ### Fixed
 
+- A session in a directory that never answers, such as a cloud drive's folder, or `~/Downloads` behind a macOS permission prompt nobody is there to answer, no longer hangs its harness as it starts, nor the Deck: swb gives git five seconds to find its repository, then treats the directory as none.
 - A Codex session you rewind to an earlier prompt keeps its card up to date. A rewind goes on in a new rollout file, and swb kept reading the old one. Its card, search, and `session_ask` now follow the rewind, and what it undid becomes an abandoned branch.
 
 ### Changed

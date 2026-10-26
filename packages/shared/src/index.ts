@@ -95,7 +95,9 @@ export function pidAlive(pid: number): boolean {
 
 function git(cwd: string, ...args: string[]): string | null {
 	try {
-		return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+		// A directory in a cloud drive (Google Drive's File Provider, say) can block git's first stat indefinitely; that
+		// answers as no repository rather than holding up a harness's startup or an import.
+		return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000 }).trim();
 	} catch {
 		return null;
 	}
