@@ -59,6 +59,8 @@ test("managed pi yields recall to swb, keeps subagents, and stays yielded after 
 	const starts = s.signal("session_start");
 	s.keys("-l", "/reload", "Enter");
 	await until(() => s.signal("session_start").length > starts.length, budgets.piReady, "reload session_start");
+	// pi drops what's typed until it says the reload is done.
+	await until(() => s.screen().includes("Reloaded keybindings"), budgets.piReady, "pi's reloaded notice");
 	const reloaded = await tools("reloaded");
 	expect([...reloaded].sort()).toEqual([...managed].sort());
 	expect(new Set(reloaded).size).toBe(reloaded.length);
