@@ -6,6 +6,6 @@ Type "swb new" Sleep 400ms Enter
 Wait+Screen /faux-1/
 Sleep 1s
 Type "attention deploy-approval" Sleep 400ms Enter
-Wait+Screen /blocked/
+Wait+Screen /◆/
 Wait+Screen /attention deploy-approval released/
 Sleep 3s

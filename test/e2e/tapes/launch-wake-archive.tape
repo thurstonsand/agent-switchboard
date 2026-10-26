@@ -13,7 +13,7 @@ Wait+Screen /Launched a Codex session/
 Sleep 2.5s
 Alt+a
 Type "h"
-Wait+Screen /● Write the v3 migration guide/
+Wait+Screen /● Write the v3 migration/
 Sleep 3.5s
 Type "/API worker" Sleep 300ms Enter
 Sleep 300ms

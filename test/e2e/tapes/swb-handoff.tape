@@ -11,11 +11,11 @@ Sleep 1.5s
 Screenshot ../artifacts/phase6/videos/swb-handoff-child-working.png
 Alt+a
 Type "h"
-Type "k"
+Type "j"
 Wait+Screen /child scout done/
 Wait+Screen /not running/
 Sleep 2.5s
-Type "j"
+Type "k"
 Sleep 1s
 Enter
 Sleep 800ms

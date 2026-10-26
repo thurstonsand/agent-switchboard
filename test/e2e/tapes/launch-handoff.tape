@@ -2,7 +2,7 @@
 Source common.tape
 
 Hide
-Type `tmux -L demo -f /dev/null new-session -s demo \; set -g status off \; split-window -v -l 19 'watch -t -c -n 0.4 swb-db' \; select-pane -t 0` Enter
+Type `tmux -L demo -f /dev/null new-session -s demo \; set -g status off \; split-window -v -l 19 'while :; do db="$(swb-db)"; clear; printf "%s" "$db"; sleep 0.4; done' \; select-pane -t 0` Enter
 Sleep 1s
 Type "env -u TMUX swb" Enter
 Show

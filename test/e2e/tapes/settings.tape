@@ -11,6 +11,8 @@ Sleep 1s
 Down
 Sleep 300ms
 Down
+Sleep 300ms
+Down
 Sleep 1.2s
 Screenshot ../artifacts/phase6/videos/settings-general.png
 Enter
@@ -63,6 +65,8 @@ Sleep 1s
 Tab
 Sleep 1.2s
 Screenshot ../artifacts/phase6/videos/settings-picker-presets.png
+Escape
+Sleep 600ms
 Escape
 Wait+Screen /config.toml:\d+: unknown key/
 Sleep 1.5s

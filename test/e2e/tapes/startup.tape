@@ -1,14 +1,17 @@
-# Startup: n on Operators starts an Operator, which can't start subagents; a new Deck comes back where the last one left off; swb -c lands in pi.
+# Startup: n and Enter on Operators start an Operator, which can't start subagents; a new Deck comes back where the last one left off; swb -c lands in pi.
 Source common.tape
 
-Type "# n on Operators starts an Operator" Sleep 1s Enter
+Type "# n and Enter on Operators start an Operator" Sleep 1s Enter
 Type "swb" Sleep 400ms Enter
 Wait+Screen /bravo/
 Sleep 1.5s
 Type "g"
 Sleep 600ms
 Type "n"
-Wait+Screen /faux-1/
+Wait+Screen /starts/
+Sleep 1.5s
+Enter
+Wait+Screen /(?s)Operators \(1\).*faux-1/
 Sleep 1s
 Type "reply on duty" Sleep 400ms Enter
 Sleep 2s
