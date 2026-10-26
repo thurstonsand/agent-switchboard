@@ -23,7 +23,7 @@ type Entry = {
 	gitBranch?: string;
 	sessionId?: string;
 	instructions?: unknown;
-	data?: { subagent?: unknown; bootstrapMode?: string; launch?: string };
+	data?: { subagent?: unknown };
 	payload?: { id?: string; cwd?: string; timestamp?: string; source?: string | { subagent?: unknown }; git?: { branch?: string } };
 };
 
@@ -34,7 +34,7 @@ type Adoptable = {
 	cwd: string;
 	transcript: string;
 	title: string | null;
-	/** The branch it ran on, as its transcript records it; null where it doesn't, and git says what's checked out now. */
+	/** The branch it ran on, as its transcript records it; pi's records none. */
 	branch: string | null;
 	createdAt: number;
 	lastAt: number;
@@ -122,10 +122,7 @@ function pi(transcript: string, entries: Entry[]): Adoptable | Skip {
 	const header = entries[0] as Entry;
 	if (!header.id || !header.cwd || !header.timestamp) throw new SwbError(`adopt: ${transcript} has no pi session header`);
 	const { id, cwd } = header;
-	// pi-sessions marks a subagent's bootstrap with `subagent`; for a few days in July 2026 it didn't, and an automatic
-	// bootstrap with no `launch` was one. A handoff is reviewed, or launched somewhere.
-	const bootstrap = entries.find((e) => e.customType === "pi-sessions.handoff-bootstrap")?.data;
-	if (bootstrap?.subagent || (bootstrap?.bootstrapMode === "automatic" && bootstrap.launch === undefined))
+	if (entries.some((e) => e.customType === "pi-sessions.handoff-bootstrap" && e.data?.subagent))
 		return { skip: "owned", why: `${id} is a pi-sessions subagent; its parent owns it` };
 	if (!hasTurn(readConversation(transcript, "pi"))) return { skip: "empty", why: `${id} has no turns yet` };
 	if (existsSync(cwd) && dirname(transcript) !== piSessionDir(cwd))
@@ -300,17 +297,10 @@ async function adoptAll(): Promise<void> {
 			adopted.push(s);
 		}
 	}
-	// Sessions in one directory share its project and branch; git answers once for each, and only when asked.
-	const memo = <T>(of: (cwd: string) => T) => {
-		const seen = new Map<string, T>();
-		return (cwd: string): T => {
-			if (!seen.has(cwd)) seen.set(cwd, of(cwd));
-			return seen.get(cwd) as T;
-		};
-	};
-	const root = memo(projectRoot);
-	const head = memo(branch);
-	const places = adopted.map((s): Place => ({ root: root(s.cwd), branch: s.branch ?? head(s.cwd) }));
+	// Sessions in one directory share its project; git answers once for each. What's checked out there now says
+	// nothing about where an old session ran, so one whose transcript doesn't say has no branch.
+	const roots = new Map([...new Set(adopted.map((s) => s.cwd))].map((cwd) => [cwd, projectRoot(cwd)]));
+	const places = adopted.map((s): Place => ({ root: roots.get(s.cwd) as string, branch: s.branch }));
 	db.tx(() => {
 		adopted.forEach((s, i) => {
 			track(db, s, true, places[i] as Place);

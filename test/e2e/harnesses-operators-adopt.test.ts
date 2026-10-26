@@ -162,8 +162,7 @@ test("swb adopt --all tracks every session pi, Claude Code, and Codex ran outsid
 		`call spawn_agent ${JSON.stringify({ message: task, task_name: "imported" })}`,
 	]);
 	git(s, s.project, "checkout", "-q", "-b", "later");
-	// pi-sessions subagents, today's and July 2026's, and sessions that never had a turn: none is one to track. A
-	// handoff's child is.
+	// A pi-sessions subagent, and sessions that never had a turn: neither is one to track. A handoff's child is.
 	const piDir = join(s.env.PI_CODING_AGENT_DIR as string, "sessions", `--${s.project.slice(1).replaceAll("/", "-")}--`);
 	const now = new Date().toISOString();
 	const pi = (id: string, ...entries: object[]) =>
@@ -180,7 +179,6 @@ test("swb adopt --all tracks every session pi, Claude Code, and Codex ran outsid
 		message: { role: "user", content: [{ type: "text", text }], timestamp: 0 },
 	});
 	pi("child-x", bootstrap({ subagent: { depth: 1 } }));
-	pi("july-x", bootstrap({ mode: "generate", bootstrapMode: "automatic", requestResponse: true }), typed("j1", "investigate"));
 	pi("handoff-x", bootstrap({ mode: "generate", bootstrapMode: "review", launch: "down" }), typed("h1", "SWB-import-handoff"));
 	// An extension's last entry can lead back to the start, leaving the turns on a branch.
 	pi("review-x", typed("r1", "SWB-import-review"), {
@@ -237,7 +235,7 @@ test("swb adopt --all tracks every session pi, Claude Code, and Codex ran outsid
 	expect(run.code).toBe(0);
 	expect(run.out).toContain("Adopted 6 sessions, archived and indexed: 4 pi, 1 Claude Code, 1 Codex.");
 	expect(run.out).toContain(
-		"Skipped 4 with no turns, 4 subagents and threads another session ran, 1 from a Codex too old for swb to read.",
+		"Skipped 4 with no turns, 3 subagents and threads another session ran, 1 from a Codex too old for swb to read.",
 	);
 	expect(run.out).not.toContain("Couldn't read");
 
@@ -250,9 +248,9 @@ test("swb adopt --all tracks every session pi, Claude Code, and Codex ran outsid
 		["pi", true],
 		["pi", true],
 	]);
-	// Claude Code and Codex say which branch they ran on; pi doesn't, so it's the one checked out now.
+	// Claude Code and Codex say which branch they ran on; pi doesn't, and what's checked out now isn't it.
 	expect(Object.fromEntries(adopted.filter((e) => e.cwd === s.project).map((e) => [e.harness, e.branch]))).toEqual({
-		pi: "later",
+		pi: null,
 		claude: "main",
 		codex: "main",
 	});
@@ -270,7 +268,7 @@ test("swb adopt --all tracks every session pi, Claude Code, and Codex ran outsid
 
 	// Again: nothing new.
 	expect(s.swbTry("adopt", "--all").out.trim()).toBe(
-		"No new sessions to adopt.\nSkipped 4 with no turns, 4 subagents and threads another session ran, 1 from a Codex too old for swb to read.",
+		"No new sessions to adopt.\nSkipped 4 with no turns, 3 subagents and threads another session ran, 1 from a Codex too old for swb to read.",
 	);
 	expect(s.ls()).toHaveLength(7);
 });
