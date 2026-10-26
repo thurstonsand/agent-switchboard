@@ -136,7 +136,12 @@ export function scenario(
 	writeFileSync(join(home, ".zshenv"), `${profile}export SWB_E2E_LOGIN_SHELL=1\n`);
 	// macOS's /etc/zprofile runs path_helper after .zshenv, which puts /usr/bin ahead of this PATH; .zprofile runs after it.
 	writeFileSync(join(home, ".zprofile"), profile);
-	writeFileSync(join(home, ".bash_profile"), `${profile}export SWB_E2E_LOGIN_SHELL=1\n`);
+	// One short prompt on every host. A shell's pane passes through narrow widths as the Deck rearranges, and the shell
+	// redraws its prompt at each: one wider than the narrowest, such as a CI runner's user@host:path, can overwrite the line above.
+	const prompt = "PS1='$ '\n";
+	writeFileSync(join(home, ".bash_profile"), `${profile}${prompt}export SWB_E2E_LOGIN_SHELL=1\n`);
+	// macOS's /etc/zshrc sets its own prompt after .zprofile.
+	writeFileSync(join(home, ".zshrc"), prompt);
 	writeFileSync(join(home, ".profile"), profile);
 	// pi 1.0.4 marks a freshly registered native provider usable at startup only if it has a stored
 	// credential; otherwise initial model selection races an async auth check and intermittently finds no model.
