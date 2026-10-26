@@ -1,7 +1,8 @@
 // Renders every tape in this directory (or the ones named on the command line) against a disposable scenario.
 // The tape is the human at the keyboard; its director, run alongside, plays the rest of the world (held turns
 // released, processes killed, the clock moved) and asserts on `swb deck state`. Either failing fails the render.
-import { mkdirSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { repo, type Scenario, scenario, which } from "../harness/index.ts";
 import { directors } from "./directors.ts";
@@ -10,7 +11,11 @@ const tapes = import.meta.dir;
 const videos = join(repo, "test/e2e/artifacts/phase6/videos");
 
 const vhs = which("vhs");
-const toolPath = [which("ttyd"), which("ffmpeg")].map((bin) => dirname(bin)).join(":");
+// VHS runs the ttyd it finds on PATH. On macOS, xterm.js in VHS's headless Chrome takes Option for a third-level shift and
+// sends Alt+a as a plain a; this ttyd has it send ESC first, as on every other platform.
+const ttydDir = mkdtempSync(join(tmpdir(), "swb-vhs-"));
+writeFileSync(join(ttydDir, "ttyd"), `#!/bin/sh\nexec ${which("ttyd")} -t macOptionIsMeta=true "$@"\n`, { mode: 0o755 });
+const toolPath = [ttydDir, dirname(which("ffmpeg"))].join(":");
 
 /** The Deck as text and ANSI, taken when the director finishes, while the tape still holds the Deck open. */
 function snapshot(s: Scenario): void {
@@ -84,4 +89,5 @@ for (const name of wanted.length > 0 ? wanted : all) {
 		console.log(`✗ ${name}: ${(error as Error).message}`);
 	}
 }
+rmSync(ttydDir, { recursive: true, force: true });
 if (failed > 0) process.exit(1);
