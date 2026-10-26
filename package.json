@@ -7,7 +7,7 @@
 		"packages/lines/*"
 	],
 	"devDependencies": {
-		"@anthropic-ai/claude-code": "^2.1.308",
+		"@anthropic-ai/claude-code": "^2.1.310",
 		"@earendil-works/pi-ai": "^1.4.0",
 		"@earendil-works/pi-coding-agent": "^1.4.0",
 		"@openai/codex": "^0.164.0",
