@@ -13,6 +13,8 @@ jobs:
       - uses: actions/checkout@v7
       # mise builds tmux 3.8 from source.
       - run: sudo apt-get install -y --no-install-recommends libevent-dev libncurses-dev bison
+      # Codex's sandbox runs commands in bwrap, which Ubuntu's AppArmor leaves no capabilities in a new user namespace.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - uses: jdx/mise-action@v5
       - run: bun install --frozen-lockfile
       # The e2e runs the harnesses from npm's global root, at the versions bun.lock resolves.
