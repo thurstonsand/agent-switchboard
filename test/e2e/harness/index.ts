@@ -357,7 +357,7 @@ function startFakes(root: string, home: string, harnesses: ("claude" | "codex")[
 			mkdirSync(join(home, ".claude"), { recursive: true });
 			writeFileSync(
 				join(home, ".claude/settings.json"),
-				JSON.stringify({ permissions: { allow: ["Bash", "mcp__swb"], defaultMode: "default" } }),
+				JSON.stringify({ permissions: { allow: ["Bash", "mcp__swb", "mcp__plugin_swb_swb"], defaultMode: "default" } }),
 			);
 		} else {
 			env.FAKE_OPENAI_KEY = "fake";

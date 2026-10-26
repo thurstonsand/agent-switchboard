@@ -326,7 +326,7 @@ function harnessCommand(spec: LaunchSpec, host: string): string[] {
 				...id,
 				...scheduler,
 				"--plugin-dir",
-				writeClaudeLine(),
+				writeClaudeLine(SWB),
 				...operator,
 				...name,
 				...agent,

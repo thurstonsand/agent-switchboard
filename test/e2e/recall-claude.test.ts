@@ -211,3 +211,27 @@ test("Esc during a reader stops it, leaves the caller usable, and adds no Sessio
 	expect(pane(s, caller.id)).not.toContain("Waiting for 1 background agent");
 	s.save("reader-after-cancel.json", JSON.stringify(readerRequests()));
 });
+
+test("two session_asks in one response run their readers at once", async () => {
+	s = scenario("recall-claude", "parallel", { packages: [], recorder: true, harnesses: ["claude"] });
+	const a = await launched(s, "claude", "reply SWB-parallel-a");
+	const b = await launched(s, "claude", "reply SWB-parallel-b");
+	const caller = await launched(s, "claude", "reply caller ready");
+	await until(
+		() => recalled(s, a.id).includes("SWB-parallel-a") && recalled(s, b.id).includes("SWB-parallel-b"),
+		15000,
+		"target transcripts on disk",
+	);
+	type(s, caller.id, `ask-both ${a.id} ${b.id} :: reader-hold 4000 What markers?`);
+	await until(() => /[●⏺] asked both/.test(pane(s, caller.id)), 30000, "both answers");
+	const starts = readerRequests()
+		.filter((r) => !r.toolResult)
+		.map((r) => Number(r.at));
+	s.save("latency.json", JSON.stringify({ starts }));
+	expect(starts).toHaveLength(2);
+	// Run one after the other, the second reader would start once the first's 4 s request returned.
+	expect(Math.abs((starts[1] as number) - (starts[0] as number))).toBeLessThan(1000);
+	const answers = s.requests("claude").find((r) => String(r.prompt).startsWith("ask-both") && r.toolResult)?.toolOutput;
+	expect(answers).toContain("reader found: SWB-parallel-a");
+	expect(answers).toContain("reader found: SWB-parallel-b");
+});

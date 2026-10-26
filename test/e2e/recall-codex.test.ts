@@ -144,7 +144,7 @@ test("Codex's reader reads with its own shell under a read-only sandbox, with no
 	const config = join(s.home, ".codex/config.toml");
 	writeFileSync(
 		config,
-		`${readFileSync(config, "utf8")}\n[mcp_servers.person]\ncommand = "${join(s.bin, "swb")}"\nargs = ["mcp"]\nomit_tools_from = ["deferred"]\n`,
+		`${readFileSync(config, "utf8")}\n[mcp_servers.person]\ncommand = "${join(s.bin, "swb")}"\nargs = ["mcp", "--harness", "codex"]\nomit_tools_from = ["deferred"]\n`,
 	);
 	const caller = await launched(s, "codex", "reply SWB-shell");
 	writeFileSync(join(s.project, "notes.txt"), "first\nSWB-file-line\nlast\n");
@@ -273,7 +273,7 @@ test("A reader whose swb mcp dies is stopped by the host once the caller's turn 
 			for (const [, pid, ppid] of procs) if (tree.has(ppid as string)) tree.add(pid as string);
 		}
 		const mcp = procs
-			.filter(([, pid, , args]) => tree.has(pid as string) && /\/swb mcp$/.test(args as string))
+			.filter(([, pid, , args]) => tree.has(pid as string) && /\/swb mcp --harness codex$/.test(args as string))
 			.map(([, pid]) => pid as string);
 		expect(mcp.length).toBeGreaterThan(0);
 		const killed = Date.now();

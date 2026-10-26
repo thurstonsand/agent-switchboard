@@ -22,7 +22,7 @@ test("Claude Code and Codex schedule and snooze through swb's tools, and Claude 
 	s = scenario("schedules", "harnesses", { packages: [], recorder: true, harnesses: ["claude", "codex"] });
 	const [claude, codex] = await Promise.all([launched(s, "claude", "reply claude up"), launched(s, "codex", "reply codex up")]);
 	const tools = s.requests("claude").flatMap((r) => r.tools as string[]);
-	expect(tools).toContain("mcp__swb__session_schedule");
+	expect(tools).toContain("mcp__plugin_swb_swb__session_schedule");
 	expect(tools.filter((name) => /^(CronCreate|CronList|CronDelete|ScheduleWakeup)$/.test(name))).toEqual([]);
 
 	for (const [id, marker] of [

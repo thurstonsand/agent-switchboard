@@ -1,22 +1,24 @@
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { type Db, describeTool, launchGuide } from "@swb/shared";
-import { parsed, READER_PROMPT, readerToolsAsJson, TOOLS, type ToolName, type ToolResult, toolsAsJson } from "@swb/shared/tools";
+import type { Db } from "@swb/shared";
+import { parsed, READER_PROMPT, readerToolsAsJson, type ToolName, type ToolResult } from "@swb/shared/tools";
 import { launchSession, reachable, send, show, update } from "../coordinate.ts";
 import { SwbError } from "../errors.ts";
 import { recallBegin, recallRead, recallSearch } from "../recall/read.ts";
 import { search } from "../recall/search.ts";
 import { listSchedules, schedule, unschedule } from "../schedules.ts";
 import { openStore } from "../store.ts";
-import { VERSION } from "../version.ts";
 import { CodexClient } from "./client.ts";
 import { codexSocket, READER_SOURCE } from "./host.ts";
 
-// `swb mcp`: the Codex line's tools, served over stdio to the app-server that swb's Codex host runs. Codex puts the
-// calling thread in every tools/call's _meta, so the sender is the caller's own session, never a tool argument.
+// The Codex line's tools, as `swb mcp` runs them for the app-server that swb's Codex host runs. Codex puts the calling
+// thread in every tools/call's _meta, so the sender is the caller's own session, never a tool argument.
 
-async function call(name: ToolName, args: unknown, from: string, callId: string | null, signal: AbortSignal): Promise<ToolResult> {
+export async function callTool(
+	name: ToolName,
+	args: unknown,
+	from: string,
+	callId: string | null,
+	signal: AbortSignal,
+): Promise<ToolResult> {
 	const db = openStore();
 	switch (name) {
 		case "session_reachable":
@@ -220,39 +222,4 @@ async function ask(db: Db, from: string, session: string, question: string, canc
 			client.close();
 		}
 	}
-}
-
-export async function mcp(): Promise<void> {
-	const server = new Server(
-		{ name: "swb", version: VERSION },
-		{
-			capabilities: { tools: {} },
-			instructions:
-				"Agent Switchboard: the other sessions the user runs, in pi, Claude Code, and Codex. Use these tools to reach them; messages from them arrive as user messages that start 'Message from session'.",
-		},
-	);
-	// Codex asks before every tool call unless the tool is read-only, or neither destructive nor open-world.
-	const annotations = (name: ToolName) =>
-		TOOLS[name].readOnly ? { readOnlyHint: true } : { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
-	server.setRequestHandler(ListToolsRequestSchema, () => ({
-		tools: toolsAsJson().map((tool) => ({
-			...tool,
-			description: describeTool(tool.name, tool.description, launchGuide()),
-			annotations: annotations(tool.name),
-		})),
-	}));
-	server.setRequestHandler(CallToolRequestSchema, async ({ params }, { signal }) => {
-		const meta = params._meta as { threadId?: unknown; callId?: unknown } | undefined;
-		if (typeof meta?.threadId !== "string")
-			return { content: [{ type: "text", text: "swb: the caller's thread is unknown" }], isError: true };
-		if (!Object.hasOwn(TOOLS, params.name)) return { content: [{ type: "text", text: `swb: no tool ${params.name}` }], isError: true };
-		try {
-			const callId = typeof meta.callId === "string" ? meta.callId : null;
-			const result = await call(params.name as ToolName, params.arguments ?? {}, meta.threadId, callId, signal);
-			return { content: [{ type: "text", text: result.text }], structuredContent: result.details };
-		} catch (error) {
-			return { content: [{ type: "text", text: (error as Error).message }], isError: true };
-		}
-	});
-	await server.connect(new StdioServerTransport());
 }

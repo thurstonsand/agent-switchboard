@@ -68,7 +68,8 @@ const USAGE = `swb: Agent Switchboard
   swb show ID --from ID [--view agent|editor|split]
                                switch the Deck showing the caller to a session, and start it
   swb update --from ID         swb_update_session as a line calls it; its arguments as JSON on stdin
-  swb mcp                      the MCP server a Codex session's app-server runs for swb's tools
+  swb mcp --harness claude|codex
+                               the MCP server a Claude Code or Codex session lists swb's tools from
   swb drive start [--size COLSxROWS] [--theme light|dark] [-- swb-args]
   swb drive keys [--delay MS] [-l TEXT]… [KEY…] | capture [--ansi] | theme light|dark | focus in|out
             | click X Y | move X Y | drag X1 Y1 X2 Y2 [--hold] | release X Y (0-based cells) | resize COLSxROWS | clipboard | stop
@@ -180,7 +181,7 @@ async function main(args: string[]): Promise<void> {
 			return;
 		case "mcp":
 			// The MCP SDK costs every other command 40 ms of startup; only `swb mcp` loads it.
-			return (await import("./codex/mcp.ts")).mcp();
+			return (await import("./mcp.ts")).mcp(rest);
 		case "__clock":
 			return clock();
 		case "__codex":

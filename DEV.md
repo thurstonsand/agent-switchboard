@@ -44,8 +44,8 @@ Some scenarios install pi-sessions and pi-wt from `node_modules`, at the version
 
 - `packages/cli`: the `swb` CLI and TUI (pi-tui), compiled with `bun build --compile` to one binary per release target (linux-x64, darwin-arm64). May take any dependency.
 - `packages/lines/pi`: the pi line, the pi extension that plugs a managed pi into swb. Use dependencies judiciously. Pi provides `@earendil-works/*` and `typebox` at runtime, so declare them as `"*"` peer dependencies and never bundle them.
-- `packages/lines/claude/plugin`: the Claude Code line, a plugin with a mod. `swb` embeds it and writes it to `${state}/lines/claude` at every Claude launch, with the tool contracts as `hooks/tools.js`. `claude plugin validate` must pass on that directory: it only accepts `$` passed to top-level functions.
-- `packages/cli/src/codex`: the Codex line, compiled into `swb`: `swb __codex` hosts a session on a private app-server, and `swb mcp` serves the tools through the MCP SDK. Codex loads it from a plugin swb writes into `$CODEX_HOME/plugins/cache/swb` and only its own app-servers enable.
+- `packages/lines/claude/plugin`: the Claude Code line, a plugin with a mod. `swb` embeds it and writes it to `${state}/lines/claude` at every Claude launch, with the tool contracts as `hooks/tools.js`. Its manifest runs `swb mcp --harness claude` to list the tools, so Claude runs read-only ones in parallel, and the mod answers every call. `claude plugin validate` must pass on that directory: it only accepts `$` passed to top-level functions.
+- `packages/cli/src/codex`: the Codex line, compiled into `swb`: `swb __codex` hosts a session on a private app-server, and its tools run in `swb mcp` (`packages/cli/src/mcp.ts`), the MCP server Claude Code's line lists them from too. Codex loads it from a plugin swb writes into `$CODEX_HOME/plugins/cache/swb` and only its own app-servers enable.
 - `packages/shared`: schema version, row types, db path, connection policy, anything that should be shared between packages.
 - The `pi` branch is generated. The tag-driven release workflow overwrites it wholesale with the bundled extension. Never edit it by hand.
 

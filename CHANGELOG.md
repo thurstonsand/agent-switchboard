@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- Claude Code runs several `session_ask` calls from one response at once, each with its own reader, as pi and Codex do. Its swb tools now come from the line's own `swb mcp` server, so they're named `mcp__plugin_swb_swb__…` instead of `mcp__swb__…`; a permission rule naming the old ones needs the new names.
+
 ### Fixed
 
 - swb started with no locale, as launchd, cron, or a bare shell start it, works as from your terminal. tmux printed a tab to such a client as `_`, so a Deck opened from one lost its roster, every swb command restarted the clock, and `swb quit` failed.

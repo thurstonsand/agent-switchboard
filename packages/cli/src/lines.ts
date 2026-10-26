@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { describeTool, launchGuide, stateDir } from "@swb/shared";
+import { stateDir } from "@swb/shared";
 // Macros inline the tool schemas as JSON at build time, rather than bundling their TypeBox objects here.
 import { readerToolsAsJson, toolsAsJson } from "@swb/shared/tools" with { type: "macro" };
 import { READER_PROMPT } from "@swb/shared/tools";
@@ -17,29 +17,28 @@ function write(path: string, text: string): void {
 	renameSync(`${path}.${process.pid}.tmp`, path);
 }
 
-/** The Claude line's plugin, written from the copy this swb carries, so a session always loads its own swb's line. */
-export function writeClaudeLine(): string {
+/**
+ * The Claude line's plugin, written from the copy this swb carries, so a session always loads its own swb's line. Its
+ * coordination tools come from the plugin's swb mcp server, which marks the read-only ones so Claude runs them in
+ * parallel; the mod still answers every call, since session_ask's reader is a Claude subagent only the mod can start.
+ */
+export function writeClaudeLine(swb: string): string {
 	const dir = join(stateDir(), "lines", "claude");
 	mkdirSync(join(dir, ".claude-plugin"), { recursive: true, mode: 0o700 });
 	mkdirSync(join(dir, "hooks"), { recursive: true });
-	write(join(dir, ".claude-plugin", "plugin.json"), `${JSON.stringify(manifest, null, "\t")}\n`);
+	const mcpServers = { swb: { command: swb, args: ["mcp", "--harness", "claude"] } };
+	write(join(dir, ".claude-plugin", "plugin.json"), `${JSON.stringify({ ...manifest, mcpServers }, null, "\t")}\n`);
 	write(join(dir, "hooks", "hooks.json"), `${JSON.stringify(hooks, null, "\t")}\n`);
 	write(join(dir, "hooks", "register.js"), register as string);
 	write(
 		join(dir, "hooks", "tools.js"),
 		`// Written by swb: the contracts and reader instructions every line shares.
-export const TOOLS = ${JSON.stringify(tools(), null, "\t")};
+export const TOOLS = ${JSON.stringify(toolsAsJson(), null, "\t")};
 export const READER_TOOLS = ${JSON.stringify(readerToolsAsJson(), null, "\t")};
 export const READER_PROMPT = ${JSON.stringify(READER_PROMPT)};
 `,
 	);
 	return dir;
-}
-
-/** The tool contracts, session_launch's carrying the shortlist as it stands at this launch. */
-function tools(): { name: string; description: string; inputSchema: unknown }[] {
-	const guide = launchGuide();
-	return toolsAsJson().map((tool) => ({ ...tool, description: describeTool(tool.name, tool.description, guide) }));
 }
 
 /** The id the Codex line's plugin has: the private app-server enables it with -c, so nothing enables it elsewhere. */
@@ -60,7 +59,7 @@ export function writeCodexLine(swb: string): void {
 		mcpServers: {
 			swb: {
 				command: swb,
-				args: ["mcp"],
+				args: ["mcp", "--harness", "codex"],
 				// Codex starts MCP servers with only a few of its variables; these say which db and tmux servers are swb's.
 				env_vars: [
 					"SWB_INSTANCE",

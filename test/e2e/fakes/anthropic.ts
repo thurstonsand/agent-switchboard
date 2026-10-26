@@ -4,7 +4,9 @@
 //   call <tool> <json>   call the tool whose name is <tool> or ends in __<tool> with <json>, then answer "tool done"
 //   run <command>        say so, run <command> through Bash, then answer "tool done"
 //   fail <text>          fail the request with a 400, which isn't retried
-// A message from another session (its text contains "Message from session") is answered "got <its last line>".
+//   ask-both <id> <id> :: <question>  session_ask both sessions the question in one response, then answer "asked both"
+// A message from another session (its text contains 'Message from session "', which swb mcp's instructions only name)
+// is answered "got <its last line>".
 // Requests without tools (titles) get a short reply, and prompt suggestions none. Every request is appended to $FAKE_LOG as one
 // JSON line: the latest prompt, whether it carried a tool result, the tools offered, every swb message marker seen, and
 // the conversation as sent, instructions included.
@@ -101,7 +103,18 @@ const server = Bun.serve({
 		const answered = messages.findLastIndex((m) => m.role === "assistant") > messages.findLastIndex((m) => typed(m) !== undefined);
 		let content: object[];
 		const step = tools.length > 0 && (toolResult || !answered) ? agentStep(lastTyped, toolResult ? toolOutput : null) : null;
-		if (step && "tool" in step) {
+		const both = /^ask-both (\S+) (\S+) :: (.+)$/s.exec(lastTyped.trim());
+		if (both && tools.length > 0 && !toolResult && !answered) {
+			const name = tools.find((candidate) => candidate.endsWith("__session_ask")) ?? "session_ask";
+			content = [both[1], both[2]].map((session, i) => ({
+				type: "tool_use",
+				id: `toolu_${requestN}_${i}`,
+				name,
+				input: { session, question: both[3] },
+			}));
+		} else if (both && toolResult) {
+			content = [{ type: "text", text: "asked both" }];
+		} else if (step && "tool" in step) {
 			const name = tools.find((candidate) => candidate.endsWith(`__${step.tool}`)) ?? step.tool;
 			content = [{ type: "tool_use", id: `toolu_${requestN}`, name, input: step.args }];
 		} else if (step) {
@@ -121,9 +134,10 @@ const server = Bun.serve({
 			const name = tools.find((candidate) => candidate === tool || candidate.endsWith(`__${tool}`)) ?? (tool as string);
 			content = [{ type: "tool_use", id: `toolu_${requestN}`, name, input: JSON.parse(json.join(" ") || "{}") }];
 		} else {
-			const inbound = lastText.includes("Message from session") ? lastText : lastTyped.includes("Message from session") ? lastTyped : "";
+			const header = 'Message from session "';
+			const inbound = lastText.includes(header) ? lastText : lastTyped.includes(header) ? lastTyped : "";
 			const text = inbound
-				? `got ${lastLine(inbound, "Message from session")}`
+				? `got ${lastLine(inbound, header)}`
 				: lastTyped.startsWith("[SUGGESTION MODE")
 					? ""
 					: tools.length === 0 && lastTyped.startsWith("<session>")

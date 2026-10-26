@@ -55,7 +55,7 @@ Research ([thread](https://ampcode.com/threads/T-01a13611-7076-75bb-b88f-f1d6a01
 
 ### Tools
 
-Every line registers the same five tools, from one contract in `@swb/shared`. Claude's names carry its prefix (`mcp__swb__session_send_message`), Codex's its namespace.
+Every line registers the same five tools, from one contract in `@swb/shared`. Claude's names carry its plugin server's prefix (`mcp__plugin_swb_swb__session_send_message`), Codex's its namespace.
 
 - `session_reachable {}`: every open Session except the caller: id, title, harness, cwd, project, live, activity.
 - `session_send_message { session, message, requestResponse? }`: delivers now if the target is live, otherwise wakes it and delivers when it starts. Refuses archived targets.

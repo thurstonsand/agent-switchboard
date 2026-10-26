@@ -342,21 +342,29 @@ async function begin($) {
 }
 
 /**
- * swb is the only thing that loads this plugin, so its coordination tools are offered; a call outside swb says so. All at
- * once: each registration reconnects the plugin's tool server and waits until its tool lists, which the first turn
- * waits for, and five in a row took 750 ms.
+ * The reader's tools, registered here and deferred, since only the reader needs their schemas. All at once: each
+ * registration reconnects the plugin's tool server and waits until its tool lists, which the first turn waits for.
  */
-async function registerTools($) {
-	await Promise.all([...TOOLS, ...READER_TOOLS].map((tool) => registerTool($, tool)));
+async function registerReaderTools($) {
+	await Promise.all(READER_TOOLS.map((tool) => registerTool($, tool)));
 }
 
 async function registerTool($, tool) {
 	try {
-		// Coordination is upfront; only the reader needs its tools' schemas.
-		await $.tool.register({ ...tool, isDeferred: READER_TOOLS.includes(tool) });
+		await $.tool.register({ ...tool, isDeferred: true });
 	} catch (error) {
 		$.ui.log(`swb: tool ${tool.name} not registered: ${error.message}`);
 	}
+}
+
+/**
+ * The coordination tools come from the plugin's swb mcp server rather than $.tool.register, which can't mark a tool
+ * read-only, and Claude runs only read-only MCP tools in parallel. Claude doesn't wait for a plugin's server before the
+ * first turn, so this does. swb is the only thing that loads this plugin; a call outside swb says so.
+ */
+async function connectTools($) {
+	const connected = await $.mcp.connect("swb");
+	if (!connected.isConnected) $.ui.toast(`swb: coordination tools unavailable: ${connected.message}`);
 }
 
 async function draftPath($, id) {
@@ -385,7 +393,7 @@ async function saveDraft($) {
 export function register(on) {
 	on("session.start", async ($, e, next) => {
 		const result = await next(e);
-		await registerTools($);
+		await Promise.all([registerReaderTools($), connectTools($)]);
 		await registerReader($);
 		await init($);
 		return result;
@@ -471,7 +479,7 @@ export function register(on) {
 	for (const tool of READER_TOOLS) on("tool.call", { tool: `mcp__swb__${tool.name}` }, ($, e) => readerTool($, tool, e));
 
 	on("tool.call", async ($, e, next) => {
-		const tool = TOOLS.find((t) => e.tool === `mcp__swb__${t.name}`);
+		const tool = TOOLS.find((t) => e.tool === `mcp__plugin_swb_swb__${t.name}`);
 		if (tool) {
 			await init($);
 			if (!line.managed) return { deny: "this Claude Code session isn't on the switchboard: swb didn't start it" };
