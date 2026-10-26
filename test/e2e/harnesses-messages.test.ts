@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { host, launched, pane, ready, send, type } from "./harness/agents.ts";
+import { host, launched, pane, ready, send, settled, type } from "./harness/agents.ts";
 import { entry } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 
@@ -107,6 +107,7 @@ test("agents use swb's tools across harnesses: list, message, launch, and cancel
 	expect(sent).toEqual([{ source_id: claude.id, delivered_at: expect.any(Number) }]);
 
 	// Codex runs swb's MCP server with only the variables it forwards; it must still see the others as live.
+	await settled(s, codex.id, "Codex done answering Claude");
 	type(s, codex.id, `call session_reachable {}`);
 	const fromCodex = await until(
 		() => s.requests("codex").find((r) => String(r.toolOutput).includes('{"sessions":')),
@@ -120,6 +121,7 @@ test("agents use swb's tools across harnesses: list, message, launch, and cancel
 		[pi.id, claude.id].sort().map((id) => ({ id, live: true })),
 	);
 
+	await settled(s, codex.id, "Codex done listing");
 	type(s, codex.id, `call session_send_message {"session":"${pi.id}","message":"reply SWB-codex-asks-pi","requestResponse":false}`);
 	await until(() => s.signal("replied.SWB-codex-asks-pi") !== "", ready, "pi answering Codex's tool call");
 	expect(s.query("select source_id from messages where body = 'reply SWB-codex-asks-pi'")).toEqual([{ source_id: codex.id }]);
@@ -138,6 +140,7 @@ test("agents use swb's tools across harnesses: list, message, launch, and cancel
 	await until(() => pane(s, child.id).includes("got SWB-launched do the thing"), ready, "the launched session working on its goal");
 
 	// Cancel from pi stops Codex's held turn.
+	await settled(s, codex.id, "Codex done messaging pi");
 	type(s, codex.id, "hold x2");
 	await until(() => s.signal("x2.entered") !== "", ready, "Codex holding");
 	type(s, pi.id, `call session_cancel {"session":"${codex.id}"}`);

@@ -33,14 +33,27 @@ export async function launched(
 		).stdout.text(),
 	) as { details: { id: string } };
 	const id = out.details.id;
-	const settled = await until(
-		() => s.ls().find((e) => e.id === id && e.activity === "idle"),
-		ready,
-		`the ${harness ?? "carried"} session's first turn to settle`,
-	);
-	// The app-server settles the turn before a loaded TUI does, which refuses /new and /compact until then.
-	if (settled.harness === "codex") await until(() => pane(s, id).includes("Worked for"), ready, "Codex's TUI done with the turn");
-	return settled;
+	await settled(s, id, `the ${harness ?? "carried"} session's first turn to settle`);
+	return entry(s, id);
+}
+
+/**
+ * Waits until a session's turn is over, for swb and for the harness's own TUI. Codex's app-server settles a turn before
+ * its TUI does, and until then the TUI refuses /new and /compact, and takes a prompt into the finishing turn, which can
+ * end without it. The TUI puts its own status after the thread id in its pane title.
+ */
+export async function settled(s: Scenario, id: string, what: string): Promise<void> {
+	const { harness } = await until(() => s.ls().find((e) => e.id === id && e.activity === "idle"), ready, what);
+	if (harness === "codex")
+		await until(
+			() =>
+				s
+					.tmux(s.servers.sessions, "display", "-p", "-t", `=${host(s, id)}:`, "#{pane_title}")
+					.trim()
+					.endsWith("Ready"),
+			ready,
+			`${what}, in Codex's TUI`,
+		);
 }
 
 /** Sends a message the way session_send_message does, from a session, and returns swb's receipt. */
