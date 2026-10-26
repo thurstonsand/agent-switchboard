@@ -274,6 +274,73 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"codex-rewind": {
+		harnesses: ["codex"],
+		setup: async (s) => {
+			files(s);
+			const codex = await launch(s, "codex", "Name the CLI release");
+			typeInto(s, codex, "reply Use semver for the CLI");
+			await until(() => recalled(s, codex).includes("Use semver for the CLI\n"), TAPE, "the second turn");
+			typeInto(s, codex, "reply Call it version 2.0");
+			await until(() => recalled(s, codex).includes("Call it version 2.0\n"), TAPE, "the third turn");
+			await waitLs(s, "Codex idle", (ls) => ls[0]?.activity === "idle");
+		},
+		run: async (s) => {
+			const codex = s.ls()[0]?.id as string;
+			// The tape's Esc Esc rewinds in Codex's own TUI; swb reads on in the rollout the revert started.
+			await until(
+				() => {
+					const read = recalled(s, codex);
+					return read.includes("Call it version 1.5\n") && !read.includes("version 2.0");
+				},
+				TAPE,
+				"the rewound turn on the active branch",
+			);
+		},
+	},
+
+	"codex-subagents": {
+		harnesses: ["codex"],
+		setup: async (s) => {
+			files(s);
+			const config = join(s.home, ".codex/config.toml");
+			writeFileSync(config, `${readFileSync(config, "utf8")}\n[features]\nmulti_agent_v2 = true\n`);
+			const parent = await launch(s, "codex", "Find the deploy beacon");
+			// The message is OpenAI's encrypted token, as a real model writes it; the fake reads it.
+			const token = `gAAAAA${Buffer.from("reply The beacon at src/main.ts:1 says hello").toString("base64url")}`;
+			typeInto(s, parent, `call spawn_agent ${JSON.stringify({ message: token, task_name: "find_beacon" })}`);
+			await until(
+				() => {
+					const map = Bun.spawnSync([`${s.bin}/swb`, "recall", "begin", parent], { env: s.env, stdin: Buffer.from('{"question":"?"}') });
+					return map.stdout.toString().includes("Its subagents");
+				},
+				TAPE,
+				"the subagent in its parent's map",
+			);
+			await waitLs(s, "the parent idle", (ls) => ls[0]?.activity === "idle");
+		},
+	},
+
+	"session-ask": {
+		harnesses: ["claude", "codex"],
+		setup: async (s) => {
+			files(s);
+			// One after another, so the roster lists them newest first.
+			const pi = await launch(s, "pi", "Planner");
+			const claude = await launch(s, "claude", "Fix the login redirect");
+			const codex = await launch(s, "codex", "Document the v3 endpoints");
+			typeInto(s, pi, "reply SWB-ships-friday: the fix ships Friday, after the docs");
+			typeInto(s, claude, "reply SWB-stale-cookie: clearing the session cookie on logout ends the redirect loop");
+			typeInto(s, codex, "reply SWB-v3-home: /login now redirects to /v3/home");
+			await until(
+				() => [pi, claude, codex].every((id) => recalled(s, id).includes("SWB-")),
+				TAPE,
+				"each session's marker in its transcript",
+			);
+			await waitLs(s, "all three idle", (ls) => ls.every((e) => e.activity === "idle"));
+		},
+	},
+
 	"session-search": {
 		harnesses: ["claude", "codex"],
 		setup: async (s) => {
