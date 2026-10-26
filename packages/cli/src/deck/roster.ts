@@ -608,8 +608,10 @@ function syncSide(): void {
 			if (want === null) {
 				if (!side) return;
 				const { pane } = side;
-				side = null;
-				await tmuxAsync(UI, "kill-pane", "-t", pane);
+				// Gone once tmux says so: until then, `deck state` still shows it.
+				await tmuxAsync(UI, "kill-pane", "-t", pane).finally(() => {
+					side = null;
+				});
 				if (focusedPane === pane) await tmuxAsync(UI, "select-pane", "-t", stagePane);
 				return;
 			}
@@ -673,10 +675,10 @@ let shellKeys = false;
 async function dropShellPane(): Promise<void> {
 	if (!shellPane) return;
 	const { pane, parent } = shellPane;
-	shellPane = null;
 	shellKeys ||= focusedPane === pane;
 	// Ctrl-D in the shell already closed it.
 	await tmuxAsync(UI, "kill-pane", "-t", pane).catch(() => {});
+	shellPane = null;
 	if (focusedPane === pane) await tmuxAsync(UI, "select-pane", "-t", parent).catch(() => {});
 }
 
