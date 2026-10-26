@@ -4,6 +4,10 @@
 //   launch <pi|claude|codex> <title>   start a session there with session_launch, whose goal is the title
 //   show <title>                       find the session with that title with session_reachable, then swb_show_session it
 //   update <title> <json>              find it the same way, then swb_update_session it with those arguments
+//   ask <title> :: <question>          find it the same way, then session_ask it the question; answers "asked: <result>"
+//   ask-id <id> :: <question>          session_ask that session directly, archived or not
+// session_ask's reader, whose prompt starts "Question about session <id>:", reads it with recall_read and answers
+// "reader found: <every SWB- marker in it>", or "reader found nothing".
 // Each call gets the prompt and the output of the tool it called last (null for a fresh turn), and answers the next
 // tool call, or the final text, or null when the prompt isn't one of these.
 
@@ -19,6 +23,11 @@ export function titleOf(prompt: string): string {
 
 export type Step = { tool: string; args: Record<string, unknown> } | { text: string } | null;
 
+/** Whether a tool's output is session_reachable's. */
+function isReachable(toolOutput: string): boolean {
+	return /\{"sessions":/.test(toolOutput) || toolOutput.startsWith("Open sessions") || toolOutput.startsWith("No other open sessions");
+}
+
 /** The session titled `title` in session_reachable's output, structured or as text; undefined in any other tool's. */
 function reachableId(toolOutput: string, title: string): string | undefined {
 	const listed = /\{"sessions":.*\}/.exec(toolOutput)?.[0];
@@ -29,6 +38,24 @@ function reachableId(toolOutput: string, title: string): string | undefined {
 }
 
 export function agentStep(prompt: string, toolOutput: string | null): Step {
+	const reading = /^Question about session (\S+):/.exec(prompt.trim());
+	if (reading) {
+		if (toolOutput === null) return { tool: "recall_read", args: { session: reading[1] } };
+		const markers = [...new Set([...toolOutput.matchAll(/SWB-[A-Za-z0-9-]+/g)].map((m) => m[0]))];
+		return { text: markers.length > 0 ? `reader found: ${markers.join(" ")}` : "reader found nothing" };
+	}
+	const asking = /^(ask|ask-id) (.+?) :: (.+)$/s.exec(prompt.trim());
+	if (asking) {
+		const [, verb, target, question] = asking as unknown as [string, string, string, string];
+		if (verb === "ask-id" || (toolOutput !== null && !isReachable(toolOutput))) {
+			if (toolOutput === null) return { tool: "session_ask", args: { session: target, question } };
+			return { text: `asked: ${toolOutput}` };
+		}
+		if (toolOutput === null) return { tool: "session_reachable", args: {} };
+		const id = reachableId(toolOutput, target);
+		if (!id) return { text: toolOutput };
+		return { tool: "session_ask", args: { session: id, question } };
+	}
 	const named = /^(show|update) (.+?)(?: (\{.*\}))?$/.exec(prompt.trim());
 	if (named) {
 		const [, verb, title, json] = named;

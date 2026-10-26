@@ -8,6 +8,7 @@ import {
 	update as updateSession,
 } from "../coordinate.ts";
 import { UsageError } from "../errors.ts";
+import { recallRead } from "../recall.ts";
 import { unschedule as cancelSchedule, listSchedules, schedule as scheduleMessage } from "../schedules.ts";
 import { ensureSessionsServer } from "../sessions.ts";
 import { openStore } from "../store.ts";
@@ -22,6 +23,13 @@ export function reachable(args: string[]): void {
 	const { values } = parseArgs({ args, options: { from: { type: "string" } } });
 	if (!values.from) throw new UsageError("reachable: --from is required");
 	print(listReachable(openStore(), values.from));
+}
+
+/** The reader's tools as every line's reader runs them: `swb recall read ID`. */
+export function recall(args: string[]): void {
+	const [op, id] = args;
+	if (op !== "read" || !id) throw new UsageError("recall: read ID");
+	print(recallRead(openStore(), id));
 }
 
 export async function send(args: string[]): Promise<void> {

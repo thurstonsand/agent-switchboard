@@ -3,7 +3,59 @@
 // other sessions: mid-turn as context on the next tool result, or as a new turn when idle.
 //
 // claude plugin validate only accepts `$` passed to top-level functions, so every call goes through one.
-import { TOOLS } from "./tools.js";
+import { READER_PROMPT, READER_TOOLS, readerPrompt, TOOLS } from "./tools.js";
+
+async function registerReader($) {
+	await $.agent.register({
+		name: "reader",
+		description: "Answer a question about a switchboard session's conversation.",
+		prompt: READER_PROMPT,
+		tools: ["mcp__swb__recall_read", "Read", "Grep", "Glob"],
+		model: "inherit",
+	});
+}
+
+// Readers session_ask started, by agentId: only they may read transcripts, and each one's turn.complete ends its wait.
+const readers = new Map();
+
+/**
+ * Starts a reader and returns its final answer. $.tool.call refuses the Agent tool, and $.agent.spawn resolves once the
+ * reader starts. A hook's 10s budget stops only while a $ call is in flight, so the hook waits on a child that writes
+ * nothing: the reader's turn.complete ends it, and Esc kills it.
+ *
+ * HACK: the idle child, and the timer that stops a reader after Esc, stand in for an API the mods SDK lacks: a way to
+ * await a spawned agent's answer and stop it from the hook that spawned it. Replace both once Claude Code offers one,
+ * such as $.agent.wait, or lets $.tool.call run the Agent tool.
+ */
+async function ask($, e) {
+	const { agentId, deny } = await $.agent.spawn({
+		subagentType: "swb:reader",
+		prompt: readerPrompt(e.session, e.question),
+		description: "Read session conversation",
+	});
+	if (deny) throw new Error(deny);
+	if (!agentId) throw new Error("Claude did not start a reader");
+	const reader = { answer: undefined, wait: $.process.spawn({ argv: ["tail", "-f", "/dev/null"] }) };
+	readers.set(agentId, reader);
+	try {
+		for await (const _ of reader.wait);
+	} finally {
+		readers.delete(agentId);
+		// Esc leaves a spawned agent running, and denies a tool call from the aborted hook; a timer's isn't the hook's.
+		if (reader.answer === undefined) $.clock.after(0, () => stopReader($, agentId));
+	}
+	if (reader.answer === undefined) throw new Error("session_ask's reader stopped waiting");
+	return reader.answer;
+}
+
+async function stopReader($, agentId) {
+	try {
+		const stopped = await $.tool.call({ tool: "TaskStop", task_id: agentId });
+		if (stopped.deny || stopped.isError) throw new Error(stopped.deny ?? stopped.text);
+	} catch (error) {
+		$.ui.log(`swb: session_ask's reader didn't stop: ${error.message}`);
+	}
+}
 
 const line = {
 	managed: false,
@@ -272,18 +324,18 @@ async function begin($) {
 }
 
 /**
- * swb is the only thing that loads this plugin, so its tools are always offered; a call outside swb says so. All at
+ * swb is the only thing that loads this plugin, so its coordination tools are offered; a call outside swb says so. All at
  * once: each registration reconnects the plugin's tool server and waits until its tool lists, which the first turn
  * waits for, and five in a row took 750 ms.
  */
 async function registerTools($) {
-	await Promise.all(TOOLS.map((tool) => registerTool($, tool)));
+	await Promise.all([...TOOLS, ...READER_TOOLS].map((tool) => registerTool($, tool)));
 }
 
 async function registerTool($, tool) {
 	try {
-		// Straight into the model's tool list, not behind tool search, so the agent sees them like its own.
-		await $.tool.register({ ...tool, isDeferred: false });
+		// Coordination is upfront; only the reader needs recall_read's schema.
+		await $.tool.register({ ...tool, isDeferred: tool.name === "recall_read" });
 	} catch (error) {
 		$.ui.log(`swb: tool ${tool.name} not registered: ${error.message}`);
 	}
@@ -316,9 +368,12 @@ export function register(on) {
 	on("session.start", async ($, e, next) => {
 		const result = await next(e);
 		await registerTools($);
+		await registerReader($);
 		await init($);
 		return result;
 	});
+
+	on("agent.offer", { agent: "swb:reader" }, () => ({ isOffered: false }));
 
 	// Fires at startup and again after /clear and /resume, which move this process to another session.
 	on("classic.SessionStart", async ($, e, next) => {
@@ -373,6 +428,11 @@ export function register(on) {
 
 	on("turn.complete", async ($, e, next) => {
 		const result = await next(e);
+		const reader = e.agentId && readers.get(e.agentId);
+		if (reader) {
+			reader.answer = e.answer ?? "The reader stopped without an answer.";
+			await reader.wait.return();
+		}
 		if (line.managed && !e.agentId) {
 			line.busy = false;
 			line.blocked = false;
@@ -389,12 +449,23 @@ export function register(on) {
 		return next(e);
 	});
 
+	// Separate from the spawning hook: Claude skips that hook in the nested agent to prevent re-entry.
+	on("tool.call", { tool: "mcp__swb__recall_read" }, async ($, e) => {
+		if (!readers.has(e.agentId)) return { deny: "recall_read is only available to session_ask's reader" };
+		try {
+			return { result: JSON.parse(await swb($, ["recall", "read", e.session])).text };
+		} catch (error) {
+			return { deny: error.message };
+		}
+	});
+
 	on("tool.call", async ($, e, next) => {
 		const tool = TOOLS.find((t) => e.tool === `mcp__swb__${t.name}`);
 		if (tool) {
 			await init($);
 			if (!line.managed) return { deny: "this Claude Code session isn't on the switchboard: swb didn't start it" };
 			try {
+				if (tool.name === "session_ask") return { result: await ask($, e) };
 				return { result: JSON.parse(await useTool($, tool.name, e)).text };
 			} catch (error) {
 				return { deny: error.message };

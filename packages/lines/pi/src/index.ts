@@ -20,7 +20,7 @@ import {
 	startTurn,
 	turnErrored,
 } from "@swb/shared/record";
-import { TOOLS, type ToolName, type ToolResult } from "@swb/shared/tools";
+import { READER_PROMPT, READER_TOOLS, readerPrompt, TOOLS, type ToolName, type ToolResult } from "@swb/shared/tools";
 import { mark, span } from "@swb/shared/trace";
 
 type Launch = { readonly db: string; readonly tmuxSession: string; readonly bin: string };
@@ -64,9 +64,9 @@ function groupFlags(prefix: string, group: string | null | undefined): string[] 
 }
 
 /** Runs swb, feeding it stdin, and parses the tool result it prints; its stderr is the error. */
-function swb(bin: string, args: string[], stdin = ""): Promise<ToolResult> {
+function swb(bin: string, args: string[], stdin = "", signal?: AbortSignal): Promise<ToolResult> {
 	return new Promise((resolve, reject) => {
-		const child = spawn(bin, args, { stdio: ["pipe", "pipe", "pipe"] });
+		const child = spawn(bin, args, { stdio: ["pipe", "pipe", "pipe"], signal });
 		let out = "";
 		let err = "";
 		child.stdout.on("data", (chunk) => {
@@ -96,8 +96,10 @@ export default function (pi: ExtensionAPI) {
 	let ui: Ui | undefined;
 	let ctxNow: ExtensionContext | undefined;
 
-	// swb owns coordination between sessions, so pi-sessions keeps only its subagent tools.
-	pi.events.on("pi-sessions:hosts", (request) => (request as { register(host: unknown): void }).register({ name: "swb", peers: true }));
+	// swb owns coordination between sessions and recall of them, so pi-sessions keeps only its subagent tools.
+	pi.events.on("pi-sessions:hosts", (request) =>
+		(request as { register(host: unknown): void }).register({ name: "swb", peers: true, recall: true }),
+	);
 
 	const showFailure = () => ui?.setStatus("swb", ui.theme.fg("error", `swb: not recording: ${proc.failure}`));
 
@@ -310,7 +312,7 @@ export default function (pi: ExtensionAPI) {
 		name: ToolName,
 		label: string,
 		target: (args: Record<string, unknown>) => string,
-		run: (args: never, ctx: ExtensionContext, toolCallId: string) => Promise<ToolResult>,
+		run: (args: never, ctx: ExtensionContext, toolCallId: string, signal?: AbortSignal) => Promise<ToolResult>,
 	) =>
 		pi.registerTool({
 			name,
@@ -327,9 +329,9 @@ export default function (pi: ExtensionAPI) {
 				const output = result.content.find((item) => item.type === "text")?.text ?? "";
 				return new Text(context.isError ? theme.fg("error", output) : theme.fg("dim", output), 0, 0);
 			},
-			async execute(toolCallId, params, _signal, _onUpdate, ctx) {
+			async execute(toolCallId, params, signal, _onUpdate, ctx) {
 				if (proc.failure) throw new Error(`swb: not recording: ${proc.failure}`);
-				const result = await run(params as never, ctx, toolCallId);
+				const result = await run(params as never, ctx, toolCallId, signal);
 				return { content: [{ type: "text", text: result.text }], details: result.details };
 			},
 		});
@@ -343,6 +345,77 @@ export default function (pi: ExtensionAPI) {
 		"Reachable sessions",
 		() => "",
 		(_args, ctx) => swb(proc.launch.bin, ["reachable", "--from", self(ctx)]),
+	);
+
+	tool(
+		"session_ask",
+		"Ask session",
+		(args) => titleOf(args.session),
+		async (args: { session: string; question: string }, ctx, _toolCallId, signal) => {
+			signal?.throwIfAborted();
+			if (!ctx.model) throw new Error("No active model is available for session_ask");
+			const { createAgentSession, DefaultResourceLoader, defineTool, getAgentDir, ModelRuntime, SessionManager } = await import(
+				"@earendil-works/pi-coding-agent"
+			);
+			// Pi exposes the registry facade, not its runtime (earendil-works/pi#8791).
+			const modelRuntime: unknown = Reflect.get(ctx.modelRegistry, "runtime");
+			if (!(modelRuntime instanceof ModelRuntime)) throw new Error("swb cannot reach Pi's model runtime through ModelRegistry.runtime");
+			const resourceLoader = new DefaultResourceLoader({
+				cwd: ctx.cwd,
+				agentDir: getAgentDir(),
+				noExtensions: true,
+				noSkills: true,
+				noPromptTemplates: true,
+				appendSystemPromptOverride: (base) => [...base, READER_PROMPT],
+			});
+			await resourceLoader.reload();
+			signal?.throwIfAborted();
+			const { session } = await createAgentSession({
+				cwd: ctx.cwd,
+				model: ctx.model,
+				modelRuntime,
+				thinkingLevel: pi.getThinkingLevel(),
+				resourceLoader,
+				sessionManager: SessionManager.inMemory(ctx.cwd),
+				tools: ["read", "grep", "find", "ls", "recall_read"],
+				customTools: [
+					defineTool({
+						name: "recall_read",
+						label: "Read session",
+						description: READER_TOOLS.recall_read.description,
+						parameters: READER_TOOLS.recall_read.parameters,
+						async execute(_id, params, signal) {
+							const result = await swb(proc.launch.bin, ["recall", "read", params.session], "", signal);
+							return { content: [{ type: "text", text: result.text }], details: result.details };
+						},
+					}),
+				],
+			});
+			let aborting: Promise<void> | undefined;
+			const abort = () => {
+				aborting ??= session.abort();
+			};
+			try {
+				signal?.addEventListener("abort", abort, { once: true });
+				if (signal?.aborted) abort();
+				signal?.throwIfAborted();
+				await session.prompt(readerPrompt(args.session, args.question));
+				signal?.throwIfAborted();
+				const last = session.messages.findLast((message) => message.role === "assistant");
+				if (last?.role !== "assistant") throw new Error("Reader returned no assistant message");
+				if (last.stopReason === "error") throw new Error(last.errorMessage || "Reader failed");
+				const answer = last.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
+				if (!answer.trim()) throw new Error("Reader returned no answer");
+				return { text: answer, details: { session: args.session } };
+			} finally {
+				signal?.removeEventListener("abort", abort);
+				try {
+					if (aborting) await aborting;
+				} finally {
+					session.dispose();
+				}
+			}
+		},
 	);
 
 	tool(

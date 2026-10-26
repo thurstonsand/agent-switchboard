@@ -201,10 +201,17 @@ export async function codexHost(args: string[]): Promise<void> {
 
 const UNREAD_GRACE_MS = 5000;
 
+/** The threadSource that marks a thread as session_ask's reader. */
+export const READER_SOURCE = "swb_reader";
+
 class CodexLine {
 	/** The thread the TUI shows. */
 	bound: Thread | null = null;
 	readonly statuses = new Map<string, Status>();
+	/** Threads that are never sessions, such as session_ask's readers. */
+	readonly ephemeral = new Set<string>();
+	/** session_ask's readers, and whether each is mid-turn. */
+	readonly readers = new Map<string, boolean>();
 	busy = false;
 	blocked = false;
 	stopping = false;
@@ -223,11 +230,28 @@ class CodexLine {
 	) {}
 
 	notify({ method, params }: Notification): void {
+		if (method === "thread/started") {
+			const thread = params.thread as Thread & { threadSource: string | null };
+			if (thread.ephemeral) this.ephemeral.add(thread.id);
+			if (thread.ephemeral && thread.threadSource === READER_SOURCE) this.readers.set(thread.id, false);
+		}
 		const threadId = params.threadId as string | undefined;
+		if (threadId && this.ephemeral.has(threadId)) {
+			if (method === "thread/closed") {
+				this.ephemeral.delete(threadId);
+				this.readers.delete(threadId);
+			}
+			if (method === "thread/status/changed" && this.readers.has(threadId)) {
+				this.readers.set(threadId, (params.status as Status).type === "active");
+				this.reap();
+			}
+			return;
+		}
 		const bound = this.bound?.id;
 		if (method === "thread/status/changed" && threadId) {
 			this.statuses.set(threadId, params.status as Status);
 			if (threadId === this.bound?.id) this.apply(params.status as Status);
+			this.reap();
 		} else if (method === "thread/name/updated" && this.bound && threadId === bound) {
 			// Codex's own title after the first turn, or a /rename; kept on the thread too, which settle records.
 			const thread = this.bound;
@@ -238,6 +262,23 @@ class CodexLine {
 			this.stopping = true;
 			this.guard(() => recordTx(this.db, () => markArchived(this.db, bound)));
 			this.stop();
+		}
+	}
+
+	/**
+	 * A reader only answers a call in some session's running turn. swb mcp stops its own, but if it died first the
+	 * reader would run on, so once no session here is mid-turn, any reader still running is interrupted.
+	 */
+	reap(): void {
+		if ([...this.statuses.values()].some((status) => status.type === "active")) return;
+		for (const [threadId, active] of this.readers) {
+			if (!active) continue;
+			this.readers.set(threadId, false);
+			// An empty turn id interrupts whatever turn is running.
+			void this.client
+				.request("turn/interrupt", { threadId, turnId: "" })
+				.then(() => this.client.request("thread/backgroundTerminals/clean", { threadId }))
+				.catch((error: Error) => console.error(`swb: reader ${threadId} not stopped: ${error.message}`));
 		}
 	}
 

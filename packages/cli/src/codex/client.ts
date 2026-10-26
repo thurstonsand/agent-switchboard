@@ -11,6 +11,7 @@ export class CodexClient {
 	readonly #pending = new Map<number, Pending>();
 	#listener: (note: Notification) => void = () => {};
 	#closed: () => void = () => {};
+	#request: ((request: Notification) => unknown | Promise<unknown>) | null = null;
 
 	private constructor(ws: UnixWebSocket) {
 		this.#ws = ws;
@@ -24,7 +25,15 @@ export class CodexClient {
 			};
 			if (msg.method && msg.id === undefined) this.#listener({ method: msg.method, params: msg.params ?? {} });
 			else if (msg.method) {
-				// A server request (an approval, a question) belongs to the person at the TUI; never answer it.
+				// By default approvals and questions belong to the person at the TUI. A reader opts in, and
+				// returns undefined for any request that isn't its own, leaving other clients' requests alone.
+				const id = msg.id;
+				void Promise.resolve()
+					.then(() => this.#request?.({ method: msg.method as string, params: msg.params ?? {} }))
+					.then((result) => {
+						if (result !== undefined) this.#ws.send(JSON.stringify({ jsonrpc: "2.0", id, result }));
+					})
+					.catch((error: Error) => console.error(`codex: server request failed: ${error.message}`));
 			} else if (msg.id !== undefined) {
 				const pending = this.#pending.get(msg.id);
 				this.#pending.delete(msg.id);
@@ -55,6 +64,10 @@ export class CodexClient {
 
 	onClose(listener: () => void): void {
 		this.#closed = listener;
+	}
+
+	onRequest(handler: (request: Notification) => unknown | Promise<unknown>): void {
+		this.#request = handler;
 	}
 
 	request<T = unknown>(method: string, params: unknown): Promise<T> {

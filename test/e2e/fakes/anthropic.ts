@@ -55,24 +55,27 @@ const server = Bun.serve({
 		if (url.pathname.endsWith("/count_tokens")) return Response.json({ input_tokens: 10 });
 		if (req.method !== "POST" || !url.pathname.endsWith("/v1/messages")) return Response.json({ data: [] });
 		const body = (await req.json()) as { messages: Msg[]; stream?: boolean; model: string; tools?: { name: string }[] };
-		const id = `msg_${++n}`;
+		const requestN = ++n;
+		const id = `msg_${requestN}`;
 		const messages = body.messages ?? [];
-		const last = messages.at(-1);
+		// Native subagents can append a system message after the tool result.
+		const last = messages.findLast((m) => m.role !== "system");
 		const tools = (body.tools ?? []).map((tool) => tool.name);
-		const toolResult = last ? blocks(last).some((b) => b.type === "tool_result") : false;
-		const lastTyped =
+		const interrupted = typed(last ?? { role: "system", content: "" })?.startsWith("[Request interrupted by user for tool use]");
+		const toolResult = last && !interrupted ? blocks(last).some((b) => b.type === "tool_result") : false;
+		const lastTyped = (
 			[...messages]
 				.reverse()
 				.map(typed)
-				.find((text) => text !== undefined) ?? "";
+				.find((text) => text !== undefined) ?? ""
+		).replace(/^\[Request interrupted by user for tool use\]\s*/, "");
 		const raw = JSON.stringify(messages);
 		const markers = [...new Set([...raw.matchAll(/SWB-[A-Za-z0-9-]+/g)].map((m) => m[0]))];
-		// Context a plugin added after a tool result rides in the same user message as that result.
-		const lastText = last
-			? blocks(last)
-					.flatMap((b) => (b.type === "text" ? [b.text ?? ""] : []))
-					.join("\n")
-			: "";
+		// Claude Code sends a hook's added context as a system message after the tool result, so read through to the end.
+		const lastText = messages
+			.slice(last ? messages.lastIndexOf(last) : messages.length)
+			.flatMap((m) => blocks(m).flatMap((b) => (b.type === "text" ? [b.text ?? ""] : [])))
+			.join("\n");
 		// What the tools answered in this request's last message, as the model reads it.
 		const toolOutput = last
 			? blocks(last)
@@ -82,8 +85,13 @@ const server = Bun.serve({
 			: "";
 		appendFileSync(
 			log,
-			`${JSON.stringify({ n, prompt: lastTyped.slice(0, 400), toolResult, toolOutput: toolOutput.slice(0, 4000), lastText: lastText.slice(0, 400), tools, markers, context: raw.slice(0, 200_000) })}\n`,
+			`${JSON.stringify({ n: requestN, at: Date.now(), model: body.model, prompt: lastTyped.slice(0, 400), toolResult, toolOutput: toolOutput.slice(0, 4000), lastText: lastText.slice(0, 400), tools, toolSpecs: body.tools, system: (body as { system?: unknown }).system, markers, context: raw.slice(0, 200_000) })}\n`,
 		);
+		// A slow model response keeps the native reader alive without giving it a write-capable holding tool.
+		if (lastTyped.startsWith("Question about session") && !toolResult && /reader-hold (\d+)/.test(lastTyped)) {
+			const ms = Number(/reader-hold (\d+)/.exec(lastTyped)?.[1]);
+			await Bun.sleep(ms);
+		}
 
 		const [verb, ...rest] = lastTyped.trim().split(" ");
 		// Claude Code joins a prompt that failed to the next one, so only the newest paragraph can fail again.
@@ -97,23 +105,23 @@ const server = Bun.serve({
 		const step = tools.length > 0 && (toolResult || !answered) ? agentStep(lastTyped, toolResult ? toolOutput : null) : null;
 		if (step && "tool" in step) {
 			const name = tools.find((candidate) => candidate.endsWith(`__${step.tool}`)) ?? step.tool;
-			content = [{ type: "tool_use", id: `toolu_${n}`, name, input: step.args }];
+			content = [{ type: "tool_use", id: `toolu_${requestN}`, name, input: step.args }];
 		} else if (step) {
 			content = [{ type: "text", text: step.text }];
 		} else if (tools.length > 0 && !toolResult && !answered && verb === "hold") {
 			const name = rest.join(" ");
 			const command = `echo entered > ${signals}/${name}.entered; until [ -e ${signals}/${name}.release ]; do sleep 0.1; done`;
-			content = [{ type: "tool_use", id: `toolu_${n}`, name: "Bash", input: { command, description: "Hold", timeout: 600000 } }];
+			content = [{ type: "tool_use", id: `toolu_${requestN}`, name: "Bash", input: { command, description: "Hold", timeout: 600000 } }];
 		} else if (tools.length > 0 && !toolResult && !answered && verb === "run") {
 			const command = rest.join(" ");
 			content = [
 				{ type: "text", text: `Running ${command}.` },
-				{ type: "tool_use", id: `toolu_${n}`, name: "Bash", input: { command, description: "Run", timeout: 600000 } },
+				{ type: "tool_use", id: `toolu_${requestN}`, name: "Bash", input: { command, description: "Run", timeout: 600000 } },
 			];
 		} else if (tools.length > 0 && !toolResult && !answered && verb === "call") {
 			const [tool, ...json] = rest;
 			const name = tools.find((candidate) => candidate === tool || candidate.endsWith(`__${tool}`)) ?? (tool as string);
-			content = [{ type: "tool_use", id: `toolu_${n}`, name, input: JSON.parse(json.join(" ") || "{}") }];
+			content = [{ type: "tool_use", id: `toolu_${requestN}`, name, input: JSON.parse(json.join(" ") || "{}") }];
 		} else {
 			const inbound = lastText.includes("Message from session") ? lastText : lastTyped.includes("Message from session") ? lastTyped : "";
 			const text = inbound

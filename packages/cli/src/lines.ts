@@ -2,8 +2,9 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { describeTool, launchGuide, stateDir } from "@swb/shared";
-// A macro: the contract is inlined as JSON at build time, so the CLI never loads TypeBox to start a session.
-import { toolsAsJson } from "@swb/shared/tools" with { type: "macro" };
+// Macros inline the tool schemas as JSON at build time, rather than bundling their TypeBox objects here.
+import { readerToolsAsJson, toolsAsJson } from "@swb/shared/tools" with { type: "macro" };
+import { READER_PROMPT, readerPrompt } from "@swb/shared/tools";
 import manifest from "../../lines/claude/plugin/.claude-plugin/plugin.json";
 import hooks from "../../lines/claude/plugin/hooks/hooks.json";
 // @ts-expect-error: the mod is embedded as text, never imported as a module.
@@ -26,7 +27,12 @@ export function writeClaudeLine(): string {
 	write(join(dir, "hooks", "register.js"), register as string);
 	write(
 		join(dir, "hooks", "tools.js"),
-		`// Written by swb: the coordination tools every line offers.\nexport const TOOLS = ${JSON.stringify(tools(), null, "\t")};\n`,
+		`// Written by swb: the contracts and reader instructions every line shares.
+export const TOOLS = ${JSON.stringify(tools(), null, "\t")};
+export const READER_TOOLS = ${JSON.stringify(readerToolsAsJson(), null, "\t")};
+export const READER_PROMPT = ${JSON.stringify(READER_PROMPT)};
+export const readerPrompt = ${readerPrompt.toString()};
+`,
 	);
 	return dir;
 }
@@ -67,6 +73,8 @@ export function writeCodexLine(swb: string): void {
 				],
 				// Straight into the model's tool list, not behind tool search, so the agent sees them like its own.
 				omit_tools_from: ["deferred"],
+				// session_ask waits as long as its reader works, which Codex's 300 s default would cut short.
+				tool_timeout_sec: 3600,
 			},
 		},
 	};

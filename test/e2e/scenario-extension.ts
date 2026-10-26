@@ -1,6 +1,14 @@
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall, Type } from "@earendil-works/pi-ai";
+import {
+	type FauxResponseFactory,
+	fauxAssistantMessage,
+	fauxProvider,
+	fauxText,
+	fauxToolCall,
+	getCurrentTools,
+	Type,
+} from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { agentStep } from "./fakes/agent.ts";
 
@@ -15,12 +23,12 @@ import { agentStep } from "./fakes/agent.ts";
 //   both <name>       inside a glimpse attention span, ask like confirm, signal <name>.answered, then hold the span
 //                     until <name>.release
 //   subagent <name>   launch a real pi-sessions subagent whose task is `reply child <name>`; the child holds like
-//                     `hold child.<name>` before answering
+//                     `hold child.<name>` before answering, signalling its active tools as `child.<name>.tools`
 //   handoff <name>    launch a new pi session through swb's session_launch, with the goal `reply child <name>`
 //   message <id> <n>  send session <id> a message with swb's session_send_message, which it answers like `reply <n>`
 //   reach <n>         find the first dormant session through session_reachable and message it like `message`
 //   call <tool> <json>  call any tool with those arguments, then answer "tool done call"
-//   tools             signal the active tool names as `tools`, and answer "tools listed"
+//   tools [name]      signal the active tool names as `tools` or `tools.<name>`, and answer "tools listed"
 //   tell <harness> <m>, launch <harness> <title>, show <title>, update <title> <json>   use swb's tools as fakes/agent.ts scripts them
 // A message from another session (it starts "Message from session") whose body is `reply <n>` is answered like it.
 //   archive <text>    call swb_update_session to archive itself, then answer "tool done <text>"
@@ -66,12 +74,34 @@ export default function (pi: ExtensionAPI) {
 		const sleeper = new Int32Array(new SharedArrayBuffer(4));
 		while (!existsSync(join(signals, "start.release"))) Atomics.wait(sleeper, 0, 0, 50);
 	}
-	const faux = fauxProvider({ tokensPerSecond: 10_000 });
+	const faux = fauxProvider({
+		tokensPerSecond: 10_000,
+		...(existsSync(join(signals, "recall.reasoning")) ? { models: [{ id: "faux-1", reasoning: true }] } : {}),
+	});
 
-	const script = async (context: { messages: Message[] }, options: { signal?: AbortSignal } | undefined) => {
+	const script: FauxResponseFactory = async (context, options, _state, model) => {
 		const last = context.messages.at(-1);
 		if (!last) throw new Error("scenario: empty context");
 		const typed = context.messages.findLast((message) => message.role === "user");
+		const promptText = typed ? text(typed).trim() : "";
+		if (/^(Question about session |ask(?:-id)? )/.test(promptText)) {
+			mkdirSync(signals, { recursive: true });
+			appendFileSync(
+				join(signals, "recall.jsonl"),
+				`${JSON.stringify({ at: Date.now(), pid: process.pid, prompt: promptText, role: last.role, tools: getCurrentTools(context.messages).map((tool) => tool.name), model: `${model.provider}/${model.id}`, thinking: options?.reasoning, text: text(last) })}\n`,
+			);
+			if (promptText.startsWith("Question about session ") && promptText.endsWith("hold-reader") && last.role === "user") {
+				signal("reader.entered");
+				try {
+					await released("reader", options?.signal);
+				} catch (error) {
+					if (options?.signal?.aborted) signal("reader.aborted");
+					throw error;
+				} finally {
+					signal("reader.exited");
+				}
+			}
+		}
 		const step = typed ? agentStep(text(typed).trim(), last.role === "toolResult" ? text(last) : null) : null;
 		if (step && "tool" in step) return fauxAssistantMessage(fauxToolCall(step.tool, step.args as never), { stopReason: "toolUse" });
 		if (step) return fauxAssistantMessage(step.text);
@@ -109,6 +139,7 @@ export default function (pi: ExtensionAPI) {
 		}
 		const child = /reply child (\S+)/.exec(prompt);
 		if (child && !prompt.startsWith("reply ")) {
+			writeFileSync(join(signals, `child.${child[1]}.tools`), JSON.stringify(pi.getActiveTools()));
 			signal(`child.${child[1]}.entered`);
 			await released(`child.${child[1]}`, options?.signal);
 			return fauxAssistantMessage(`child ${child[1]} done`);
@@ -157,8 +188,7 @@ export default function (pi: ExtensionAPI) {
 					stopReason: "toolUse",
 				});
 			case "tools":
-				signal("tools");
-				writeFileSync(join(signals, "tools"), JSON.stringify(pi.getActiveTools()));
+				writeFileSync(join(signals, arg ? `tools.${arg}` : "tools"), JSON.stringify(pi.getActiveTools()));
 				return fauxAssistantMessage("tools listed");
 			case "message":
 				return fauxAssistantMessage(
@@ -183,6 +213,13 @@ export default function (pi: ExtensionAPI) {
 	};
 	faux.setResponses(Array.from({ length: 1000 }, () => script as never));
 	pi.registerProvider(faux.provider);
+
+	const askTiming = (data: { type: string; toolName: string; toolCallId: string }) => {
+		if (data.toolName !== "session_ask") return;
+		appendFileSync(join(signals, "ask-timing.jsonl"), `${JSON.stringify({ event: data.type, at: Date.now(), id: data.toolCallId })}\n`);
+	};
+	pi.on("tool_execution_start", askTiming);
+	pi.on("tool_execution_end", askTiming);
 
 	pi.registerTool({
 		name: "e2e_attention",

@@ -5,7 +5,8 @@
 //   run <command>        run <command> through the shell, then answer "ran <command>"
 //   fail <text>          fail the request with a 400, which isn't retried
 //   hold-compact <name>  the next /compact signals <name>.entered and waits for <name>.release before it summarizes
-// A message from another session (it starts "Message from session") is answered "got <its last line>".
+// A message from another session (it starts "Message from session") is answered "got <its last line>", and
+// session_ask's reader follows readerStep.
 // Every request is appended to $FAKE_LOG as one JSON line: the user texts it saw, the tools it was offered, and its
 // whole input, instructions included.
 import { appendFileSync, existsSync, writeFileSync } from "node:fs";
@@ -52,6 +53,37 @@ function shell(names: string[], command: string): { name: string; args: object }
 	return { name: "shell", args: { command: ["bash", "-lc", command], timeout_ms: 600_000 } };
 }
 
+/**
+ * session_ask's reader, whose prompt is "Question about session <id>:" and one of:
+ *   reader-hold         signal reader-hold.entered, then run `true` through the shell once a second until reader-hold.release exists
+ *   reader-shell <file> read <file> through the shell, then answer with what it printed
+ *   reader-exec <path>  write <path> through the shell and through apply_patch, then answer with what each returned
+ */
+async function readerStep(
+	probe: string,
+	arg: string,
+	names: string[],
+	outputs: string[],
+	aborted: AbortSignal,
+): Promise<{ tool: string; args: object } | { text: string }> {
+	if (probe === "hold") {
+		if (existsSync(`${signals}/reader-hold.release`)) return { text: `reader hold: released after ${outputs.length} calls` };
+		writeFileSync(`${signals}/reader-hold.entered`, "entered\n");
+		for (let waited = 0; waited < 1000 && !aborted.aborted; waited += 50) await Bun.sleep(50);
+		const call = shell(names, "true");
+		return { tool: call.name, args: call.args };
+	}
+	const script =
+		probe === "shell"
+			? [shell(names, `grep -n SWB-file ${arg}`)]
+			: [
+					shell(names, `echo reader-wrote > ${arg}`),
+					{ name: "apply_patch", args: { input: `*** Begin Patch\n*** Add File: ${arg}\n+reader-patched\n*** End Patch\n` } },
+				];
+	const next = script[outputs.length];
+	return next ? { tool: next.name, args: next.args } : { text: `reader ${probe}: ${outputs.join(" | ")}` };
+}
+
 const server = Bun.serve({
 	port,
 	hostname: "127.0.0.1",
@@ -59,7 +91,7 @@ const server = Bun.serve({
 	async fetch(req) {
 		const url = new URL(req.url);
 		if (req.method !== "POST" || !url.pathname.endsWith("/responses")) return Response.json({ data: [], models: [] });
-		const body = (await req.json()) as { input?: Item[]; tools?: Tool[] };
+		const body = (await req.json()) as { input?: Item[]; tools?: Tool[]; model?: string };
 		const input = body.input ?? [];
 		const texts = userTexts(input);
 		const last = input.at(-1);
@@ -68,7 +100,7 @@ const server = Bun.serve({
 		const id = `resp_${++n}`;
 		appendFileSync(
 			log,
-			`${JSON.stringify({ n, texts, last: last?.type, tools: names, toolOutput: last?.type === "function_call_output" ? outputText(last).slice(0, 4000) : null, context: JSON.stringify(input).slice(0, 200_000) })}\n`,
+			`${JSON.stringify({ n, at: Date.now(), model: body.model, texts, last: last?.type, tools: names, toolOutput: last?.type === "function_call_output" ? outputText(last).slice(0, 4000) : null, context: JSON.stringify(input).slice(0, 200_000) })}\n`,
 		);
 		const prompt = (texts.at(-1) ?? "").trim();
 		const answering = last?.type === "message";
@@ -86,8 +118,23 @@ const server = Bun.serve({
 				{ error: { type: "invalid_request_error", code: null, param: null, message: `invalid request: ${rest.join(" ")}` } },
 				{ status: 400 },
 			);
-		const step = answering || last?.type === "function_call_output" ? agentStep(prompt, answering ? null : outputText(last)) : null;
-		if (step && "tool" in step) {
+		const readerProbe = /^Question about session \S+:\s+reader-(hold|shell|exec)(?: (.+))?$/.exec(prompt);
+		let toolOutput = answering ? null : outputText(last);
+		// Codex presents an MCP result's structured content under its timing wrapper; the shared script wants the answer text.
+		if (toolOutput && /^ask(?:-id)? /.test(prompt)) {
+			const answer = /\{"answer":("(?:[^"\\]|\\.)*")\}/.exec(toolOutput)?.[1];
+			if (answer) toolOutput = JSON.parse(answer) as string;
+		}
+		const step = answering || last?.type === "function_call_output" ? agentStep(prompt, toolOutput) : null;
+		if (readerProbe) {
+			const [, probe, arg = ""] = readerProbe as unknown as [string, string, string?];
+			const outputs = input.filter((item) => item.type === "function_call_output").map(outputText);
+			const move = await readerStep(probe, arg, names, outputs, req.signal);
+			output =
+				"tool" in move
+					? { type: "function_call", call_id: `call_${n}`, name: move.tool, arguments: JSON.stringify(move.args) }
+					: { type: "message", role: "assistant", id: `msg_${n}`, content: [{ type: "output_text", text: move.text }] };
+		} else if (step && "tool" in step) {
 			const found = tools.find((candidate) => candidate.name === step.tool) ?? { name: step.tool };
 			output = { type: "function_call", call_id: `call_${n}`, ...found, arguments: JSON.stringify(step.args) };
 		} else if (step) {
