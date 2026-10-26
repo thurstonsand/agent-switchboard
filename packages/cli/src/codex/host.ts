@@ -258,6 +258,26 @@ class CodexLine {
 			const thread = this.bound;
 			thread.name = (params.threadName as string | undefined) ?? null;
 			this.guard(() => setTitle(this.db, thread.id, thread.name));
+		} else if (method === "thread/reverted" && this.bound && threadId === bound) {
+			// A revert goes on in a new rollout, which the thread reads from now on.
+			const thread = this.bound;
+			void this.client.request<{ thread: { path: string | null } }>("thread/read", { threadId: thread.id }).then(
+				({ thread: { path } }) => {
+					thread.path = path;
+					this.guard(() =>
+						startHosting(this.db, {
+							host: this.host,
+							harness: "codex",
+							sessionId: thread.id,
+							cwd: thread.cwd,
+							transcript: path ?? "",
+							pid: process.pid,
+							idle: !this.busy,
+						}),
+					);
+				},
+				(error: Error) => console.error(`swb: not recording: ${error.message}`),
+			);
 		} else if (method === "thread/archived" && bound && threadId === bound) {
 			// Codex's own /archive: archived in swb too, and the TUI stops before it moves to another conversation.
 			this.stopping = true;

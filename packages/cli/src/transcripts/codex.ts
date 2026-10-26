@@ -1,4 +1,6 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { SwbError } from "../errors.ts";
 import { type Conversation, type Entry, lines, type Part, textOf } from "./conversation.ts";
 
 type CodexLine = {
@@ -15,7 +17,10 @@ type CodexLine = {
 		output?: unknown;
 		message?: string;
 		error?: { message?: string };
+		history_base?: { thread_id: string; end_ordinal_exclusive: number };
+		id?: string;
 	};
+	ordinal?: number;
 };
 
 /** Codex records a provider's error body as it came; its own message is inside. */
@@ -60,19 +65,109 @@ function entry({ type, payload: p }: CodexLine): Pick<Entry, "role" | "parts" | 
 	const body = textOf(p.content, p.role === "assistant" ? "output_text" : "input_text").trim();
 	const parts: Part[] = body === "" ? [] : [{ type: "text", text: body }];
 	if (p.role === "assistant") return { role: "agent", parts, ending: null };
-	// The context Codex injects as user text starts with a tag.
-	if (p.role === "user" && !body.startsWith("<")) return { role: "user", parts, ending: null };
+	// The context Codex injects as user text starts with a tag, or a heading for AGENTS.md.
+	if (p.role === "user" && !body.startsWith("<") && !body.startsWith("# AGENTS.md instructions"))
+		return { role: "user", parts, ending: null };
 	return { role: "context", parts, ending: null };
 }
 
-/** Codex rollouts: one line of items in order, each entry's ref its line number. */
+/** A Codex thread or rollout id is a UUIDv7, which says when Codex made it. */
+const created = (id: string) => Number.parseInt(id.replaceAll("-", "").slice(0, 12), 16);
+const DAY = 86_400_000;
+
+/**
+ * A thread's rollouts made between two times: its first, `…-<thread id>.jsonl`, and each revert's,
+ * `…-<thread id>_<rollout id>.jsonl`. Codex files a rollout under the local day it made it, a moment after its id,
+ * unless it has since archived it, and may have compressed it.
+ */
+function rolloutsOf(
+	near: string,
+	thread: string,
+	from: number,
+	to: number,
+	list: (dir: string) => string[],
+): { id: string; path: string }[] {
+	const home = /^(.*)\/(?:sessions\/\d{4}\/\d{2}\/\d{2}|archived_sessions)\/[^/]+$/.exec(near)?.[1];
+	if (!home) throw new SwbError(`${near}: not in a Codex home, so the rollouts it names aren't found`);
+	const day = (at: number) => {
+		const d = new Date(at);
+		return join(home, "sessions", String(d.getFullYear()), String(d.getMonth() + 1).padStart(2, "0"), String(d.getDate()).padStart(2, "0"));
+	};
+	const dirs = new Set<string>();
+	for (let at = from; at < to + DAY; at += DAY) dirs.add(day(Math.min(at, to + 60_000)));
+	dirs.add(join(home, "archived_sessions"));
+	const name = new RegExp(`-${thread}(?:_([0-9a-f-]{36}))?\\.jsonl(?:\\.zst)?$`);
+	return [...dirs].flatMap((dir) =>
+		list(dir).flatMap((file) => {
+			const match = name.exec(file);
+			if (!match) return [];
+			const id = match[1] ?? thread;
+			return created(id) >= from && created(id) <= to ? [{ id, path: join(dir, file) }] : [];
+		}),
+	);
+}
+
+/** A thread's rollout by its rollout id, its own id for its first. */
+function findRollout(near: string, thread: string, id: string, list: (dir: string) => string[]): string | null {
+	return rolloutsOf(near, thread, created(id), created(id), list).find((r) => r.id === id)?.path ?? null;
+}
+
+/**
+ * Codex rollouts: items in order, each entry's ref its line number. A revert leaves the rollout as it was and goes on
+ * in a new one, which starts from a point in it, or afresh when it undid every turn. A thread's conversation reads its
+ * rollouts oldest first, numbering lines on through them, and what each revert cut off becomes a branch.
+ */
 export function readCodex(path: string): Conversation {
 	const entries: Entry[] = [];
-	(lines(path) as CodexLine[]).forEach((line, i) => {
-		const read = entry(line);
-		if (read) entries.push({ ref: String(i + 1), parent: entries.at(-1)?.ref ?? null, at: line.timestamp ?? null, ...read });
-	});
-	return { entries, leaf: entries.at(-1)?.ref ?? null, subagents: [] };
+	let tip: string | null = null;
+	let ref = 0;
+	const histories = new Map<string, { ordinal: number; tip: string | null }[]>();
+	const listings = new Map<string, string[]>();
+	const list = (dir: string) => {
+		if (!listings.has(dir)) listings.set(dir, existsSync(dir) ? readdirSync(dir) : []);
+		return listings.get(dir) as string[];
+	};
+	/**
+	 * Reads one rollout after those before it, once, returning its history: the tip after each of its lines and those
+	 * it continues, by ordinal. A revert's rollout comes after the one the thread was in, which is all cut off; it
+	 * continues the part it keeps, from whichever rollout holds that, or starts afresh when it undid every turn.
+	 */
+	const read = (file: string): { ordinal: number; tip: string | null }[] => {
+		const done = histories.get(file);
+		if (done) return done;
+		const all = lines(file) as CodexLine[];
+		const meta = all[0]?.type === "session_meta" ? all[0].payload : undefined;
+		const thread = meta?.id as string;
+		const own = new RegExp(`-${thread}_([0-9a-f-]{36})\\.jsonl(?:\\.zst)?$`).exec(file)?.[1];
+		const before = own
+			? rolloutsOf(file, thread, created(thread), created(own) - 1, list)
+					.sort((a, b) => created(a.id) - created(b.id))
+					.at(-1)
+			: undefined;
+		if (before) read(before.path);
+		let history: { ordinal: number; tip: string | null }[] = [];
+		const base = meta?.history_base;
+		if (base) {
+			const from = findRollout(file, thread, base.thread_id, list);
+			if (!from) throw new SwbError(`${file}: the rollout it continues, ${base.thread_id}, is gone`);
+			history = read(from).filter((h) => h.ordinal < base.end_ordinal_exclusive);
+		}
+		tip = history.at(-1)?.tip ?? null;
+		all.forEach((line, i) => {
+			ref += 1;
+			const ordinal = line.ordinal ?? i;
+			const item = entry(line);
+			if (item) {
+				entries.push({ ref: String(ref), parent: tip, at: line.timestamp ?? null, ...item });
+				tip = String(ref);
+			}
+			history.push({ ordinal, tip });
+		});
+		histories.set(file, history);
+		return history;
+	};
+	read(path);
+	return { entries, leaf: tip, subagents: [] };
 }
 
 /**

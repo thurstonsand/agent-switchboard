@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { SwbError } from "../errors.ts";
 
 // A session's conversation as every harness's transcript reduces to it: entries with stable refs, each linked to the
-// one before it. pi and Claude Code branch, so several entries can share a parent; Codex is a single line.
+// one before it. Every harness branches, pi and Claude Code by tree and Codex by revert, so several entries can share a parent.
 
 /** How a turn ended without a reply: you stopped it, or its provider failed. */
 export type Ending = { kind: "stopped" } | { kind: "error"; message: string };

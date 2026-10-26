@@ -128,8 +128,11 @@ function syncSource(index: Db, session: Indexed, source: Source): Source[] {
 export function syncSessions(index: Db, sessions: Indexed[]): void {
 	span("recall.sync", () => {
 		for (const session of sessions) {
+			const main = locateTranscript(session.transcript, session.harness);
+			// A session's transcript can move on to another file, as a Codex revert does, and the old one still reads.
+			index.run("DELETE FROM sources WHERE session_id = ? AND subagent IS NULL AND path != ?", session.id, main);
 			const queue: Source[] = [
-				{ path: locateTranscript(session.transcript, session.harness), subagent: null, label: null },
+				{ path: main, subagent: null, label: null },
 				...index
 					.all("SELECT path, subagent, label FROM sources WHERE session_id = ?", session.id)
 					.map((row) => ({ path: row.path as string, subagent: row.subagent as string | null, label: row.label as string | null })),
