@@ -18,6 +18,12 @@
 			"minimumReleaseAge": null
 		},
 		{
+			"description": "Thurston's own packages, which swb moves in lockstep with: each takes its latest release as soon as it ships, like the harnesses.",
+			"matchDatasources": ["npm"],
+			"matchPackageNames": ["pi-sessions", "@thurstonsand/pi-wt"],
+			"minimumReleaseAge": null
+		},
+		{
 			"description": "A Pi update raises the package.json floors, not only bun.lock, so the declared range always names the Pi swb is tested against.",
 			"matchPackageNames": ["@earendil-works/**"],
 			"rangeStrategy": "bump"
