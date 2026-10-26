@@ -5,12 +5,15 @@
 // claude plugin validate only accepts `$` passed to top-level functions, so every call goes through one.
 import { READER_PROMPT, READER_TOOLS, TOOLS } from "./tools.js";
 
+// What Claude calls the tools of this plugin's swb mcp server, every swb tool among them.
+const PREFIX = "mcp__plugin_swb_swb__";
+
 async function registerReader($) {
 	await $.agent.register({
 		name: "reader",
 		description: "Answer a question about a switchboard session's conversation.",
 		prompt: READER_PROMPT,
-		tools: [...READER_TOOLS.map((tool) => `mcp__swb__${tool.name}`), "Read", "Grep", "Glob"],
+		tools: [...READER_TOOLS.map((tool) => `${PREFIX}${tool.name}`), "Read", "Grep", "Glob"],
 		model: "inherit",
 	});
 }
@@ -342,25 +345,10 @@ async function begin($) {
 }
 
 /**
- * The reader's tools, registered here and deferred, since only the reader needs their schemas. All at once: each
- * registration reconnects the plugin's tool server and waits until its tool lists, which the first turn waits for.
- */
-async function registerReaderTools($) {
-	await Promise.all(READER_TOOLS.map((tool) => registerTool($, tool)));
-}
-
-async function registerTool($, tool) {
-	try {
-		await $.tool.register({ ...tool, isDeferred: true });
-	} catch (error) {
-		$.ui.log(`swb: tool ${tool.name} not registered: ${error.message}`);
-	}
-}
-
-/**
- * The coordination tools come from the plugin's swb mcp server rather than $.tool.register, which can't mark a tool
- * read-only, and Claude runs only read-only MCP tools in parallel. Claude doesn't wait for a plugin's server before the
- * first turn, so this does. swb is the only thing that loads this plugin; a call outside swb says so.
+ * The tools come from the plugin's swb mcp server rather than $.tool.register, which can't mark a tool read-only, and
+ * Claude runs only read-only MCP tools in parallel; the reader's are deferred there, since only it needs their schemas.
+ * Claude doesn't wait for a plugin's server before the first turn, so this does. swb is the only thing that loads this
+ * plugin; a call outside swb says so.
  */
 async function connectTools($) {
 	const connected = await $.mcp.connect("swb");
@@ -393,7 +381,7 @@ async function saveDraft($) {
 export function register(on) {
 	on("session.start", async ($, e, next) => {
 		const result = await next(e);
-		await Promise.all([registerReaderTools($), connectTools($)]);
+		await connectTools($);
 		await registerReader($);
 		await init($);
 		return result;
@@ -476,10 +464,10 @@ export function register(on) {
 	});
 
 	// Separate from the spawning hook: Claude skips that hook in the nested agent to prevent re-entry.
-	for (const tool of READER_TOOLS) on("tool.call", { tool: `mcp__swb__${tool.name}` }, ($, e) => readerTool($, tool, e));
+	for (const tool of READER_TOOLS) on("tool.call", { tool: `${PREFIX}${tool.name}` }, ($, e) => readerTool($, tool, e));
 
 	on("tool.call", async ($, e, next) => {
-		const tool = TOOLS.find((t) => e.tool === `mcp__plugin_swb_swb__${t.name}`);
+		const tool = TOOLS.find((t) => e.tool === `${PREFIX}${t.name}`);
 		if (tool) {
 			await init($);
 			if (!line.managed) return { deny: "this Claude Code session isn't on the switchboard: swb didn't start it" };

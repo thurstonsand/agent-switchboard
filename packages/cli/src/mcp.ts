@@ -3,7 +3,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { describeTool, launchGuide } from "@swb/shared";
-import { TOOLS, type ToolName, toolsAsJson } from "@swb/shared/tools";
+import { readerToolsAsJson, TOOLS, type ToolName, toolsAsJson } from "@swb/shared/tools";
 import { callTool } from "./codex/tools.ts";
 import { UsageError } from "./errors.ts";
 import { VERSION } from "./version.ts";
@@ -23,13 +23,22 @@ function annotations(name: ToolName) {
 }
 
 function listing(harness: McpHarness) {
-	return toolsAsJson().map((tool) => ({
+	const tools = toolsAsJson().map((tool) => ({
 		...tool,
 		description: describeTool(tool.name, tool.description, launchGuide()),
 		annotations: annotations(tool.name),
 		// Upfront rather than behind Claude Code's tool search; Codex's line asks the same through omit_tools_from.
 		...(harness === "claude" ? { _meta: { "anthropic/alwaysLoad": true } } : {}),
 	}));
+	if (harness === "codex") return tools;
+	// Claude's reader takes its tools from here too, deferred, since only it needs their schemas. Codex's reader gets
+	// them as dynamic tools on its own thread.
+	const reader = readerToolsAsJson().map((tool) => ({
+		...tool,
+		annotations: { readOnlyHint: true },
+		_meta: { "anthropic/alwaysLoad": false },
+	}));
+	return [...tools, ...reader];
 }
 
 export async function mcp(args: string[]): Promise<void> {

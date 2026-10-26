@@ -125,11 +125,11 @@ test("Claude's native reader answers about live, archived, and pi conversations 
 	// Each reader searches, reads, then answers.
 	expect(readerRequests()).toHaveLength(9);
 	for (const r of readerRequests()) {
-		expect(r.tools).toEqual(["mcp__swb__recall_search", "mcp__swb__recall_read", "Read", "Grep", "Glob"]);
+		expect(r.tools).toEqual(["mcp__plugin_swb_swb__recall_search", "mcp__plugin_swb_swb__recall_read", "Read", "Grep", "Glob"]);
 		expect(r.model).toBe("claude-opus-5-5");
 	}
 	const main = s.requests("claude").find((r) => String(r.prompt).startsWith("ask "));
-	for (const tool of ["mcp__swb__recall_search", "mcp__swb__recall_read"]) expect(main?.tools).not.toContain(tool);
+	for (const tool of ["mcp__plugin_swb_swb__recall_search", "mcp__plugin_swb_swb__recall_read"]) expect(main?.tools).not.toContain(tool);
 	expect(main?.tools).toContain("DeferredToolPlaceholder");
 	expect(JSON.stringify(main?.toolSpecs)).not.toContain("swb:reader");
 	expect(String(main?.context)).not.toContain("swb:reader");
@@ -142,14 +142,14 @@ test("Claude's native reader answers about live, archived, and pi conversations 
 	expect(own).toContain("reader found: SWB-pi-target");
 	expect(own).not.toContain("Question about session");
 	await screenshot(caller.id);
-	type(s, caller.id, `call mcp__swb__recall_read {"ref":"1"}`);
+	type(s, caller.id, `call mcp__plugin_swb_swb__recall_read {"ref":"1"}`);
 	await until(
 		() =>
 			s
 				.requests("claude")
 				.some(
 					(r) =>
-						String(r.prompt).startsWith("call mcp__swb__recall_read") &&
+						String(r.prompt).startsWith("call mcp__plugin_swb_swb__recall_read") &&
 						String(r.toolOutput).includes("only available to session_ask's reader"),
 				),
 		10000,
@@ -159,7 +159,7 @@ test("Claude's native reader answers about live, archived, and pi conversations 
 	const subagent = {
 		description: "Read a session",
 		subagent_type: "general-purpose",
-		prompt: `call mcp__swb__recall_read {"ref":"1"}`,
+		prompt: `call mcp__plugin_swb_swb__recall_read {"ref":"1"}`,
 	};
 	type(s, caller.id, `call Agent ${JSON.stringify(subagent)}`);
 	await until(
