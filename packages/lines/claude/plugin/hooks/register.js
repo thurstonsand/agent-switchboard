@@ -132,7 +132,9 @@ async function ack($, ids) {
 }
 
 function receipt($, m, how) {
-	$.ui.log(`↘ ${m.title} (${how}): ${m.body.length > 200 ? `${m.body.slice(0, 200)}…` : m.body}`);
+	// Claude Code draws a log's trailing newline as �.
+	const body = m.body.trim();
+	$.ui.log(`↘ ${m.title} (${how}): ${body.length > 200 ? `${body.slice(0, 200)}…` : body}`);
 }
 
 /** The held messages for the session this process shows now; any others wait for theirs. */
