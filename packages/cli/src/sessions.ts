@@ -4,13 +4,13 @@ import { bootId, type Db, dbPath, type Harness, operatorDir, projectRoot, stateD
 import { isArchived, markArchived } from "@swb/shared/record";
 import { now, since } from "@swb/shared/trace";
 import { type Effort, HARNESS_EFFORTS } from "./config.ts";
-import { archivedInCodex } from "./deck/transcript.ts";
 import { type RuntimeRow, runtimeLive } from "./derive.ts";
 import { SwbError } from "./errors.ts";
 import { writeClaudeLine } from "./lines.ts";
 import { claudeOperatorSettings } from "./operator.ts";
 import { openStore } from "./store.ts";
 import { CLIENT_CWD, cleanEnv, killServer, listSessions, quote, SESSIONS, tmux, tmuxBin, tmuxTry } from "./tmux.ts";
+import { archivedInCodex } from "./transcripts/codex.ts";
 import { VERSION } from "./version.ts";
 
 export const SWB = process.execPath;

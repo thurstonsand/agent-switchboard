@@ -5,10 +5,10 @@ import { parseArgs } from "node:util";
 import { pidAlive } from "@swb/shared";
 import { frame, listen, markDelivered, markOffered, pendingFor, sender } from "@swb/shared/mailbox";
 import { endHosting, pendingTitle, recordTx, sawRequest, setPhase, settle, startHosting, startTurn, turnErrored } from "@swb/shared/record";
-import { claudeTitle } from "../deck/transcript.ts";
 import { UsageError } from "../errors.ts";
 import { openStore } from "../store.ts";
 import { SESSIONS, tmux, tmuxTry } from "../tmux.ts";
+import { claudeTitle } from "../transcripts/claude.ts";
 
 // The Claude line's half in swb. A mod can't open a database, so its hooks run these.
 

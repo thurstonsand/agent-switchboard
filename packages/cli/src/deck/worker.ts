@@ -10,9 +10,10 @@ import { type ScheduleView, schedulesBySession, snooze } from "../schedules.ts";
 import { archive, ensureEditor, ensureSessionsServer, ensureShell, launch, stop, unarchive, wake } from "../sessions.ts";
 import { loadLayout, markVisited, openStore, saveLayout, setGroup, setView } from "../store.ts";
 import { listSessions, SESSIONS, tmux, tmuxTry } from "../tmux.ts";
+import { locateTranscript } from "../transcripts/read.ts";
 import { ensurePlaceholder, ensureUiServer, placeholderName } from "./deck.ts";
 import type { Diff, Entry, FromWorker, NewSession, Snapshot, TerminalProfile, ToWorker, Transcript, Turn } from "./protocol.ts";
-import { locateTranscript, readTranscript } from "./transcript.ts";
+import { readTranscript } from "./transcript.ts";
 
 // The roster's worker owns the db and everything slow: a held writer lock or a 50 MB transcript stalls this
 // thread, never the roster's cursor.

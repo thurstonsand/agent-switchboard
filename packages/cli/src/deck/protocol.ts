@@ -5,6 +5,7 @@ import type { TargetTree } from "../dirs.ts";
 import type { Catalog, LaunchTarget } from "../harnesses.ts";
 import type { ScheduleView } from "../schedules.ts";
 import type { DeckLayout } from "../store.ts";
+import type { Ending } from "../transcripts/conversation.ts";
 
 /** One roster entry: a Session, or a live pi that has had no prompt yet (provisional, titled by its id). */
 export type Entry = SessionState & {
@@ -32,9 +33,6 @@ export type Snapshot = {
 };
 
 export type Turn = { who: "you" | "agent"; text: string };
-
-/** How a conversation's last turn ended, when it didn't end with a reply: you stopped it, or its provider failed. */
-export type Ending = { kind: "stopped" } | { kind: "error"; message: string };
 
 /** A conversation as a card shows it: its turns, the tool calls the last one made after its last text, and how it ended. */
 export type Transcript = { turns: Turn[]; tail: string[]; ending: Ending | null };

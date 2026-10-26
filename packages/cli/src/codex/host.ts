@@ -16,13 +16,14 @@ import {
 	turnErrored,
 } from "@swb/shared/record";
 import { mark, now, since } from "@swb/shared/trace";
-import { archivedInCodex, readTranscript } from "../deck/transcript.ts";
+import { readTranscript } from "../deck/transcript.ts";
 import { SwbError, UsageError } from "../errors.ts";
 import { CODEX_PLUGIN, writeCodexLine } from "../lines.ts";
 import { codexOperatorConfig } from "../operator.ts";
 import { SWB } from "../sessions.ts";
 import { openStore } from "../store.ts";
 import { SESSIONS, tmuxTry } from "../tmux.ts";
+import { archivedInCodex } from "../transcripts/codex.ts";
 import { CodexClient, type Notification } from "./client.ts";
 
 // A Codex session's host: the process in its tmux pane. It owns a private app-server, runs the real Codex TUI

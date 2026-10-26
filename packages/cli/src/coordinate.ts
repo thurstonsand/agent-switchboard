@@ -6,7 +6,6 @@ import type { ToolArgs, ToolResult } from "@swb/shared/tools";
 import { CodexClient } from "./codex/client.ts";
 import { codexSocket } from "./codex/host.ts";
 import { deckShowing, postCommand } from "./deck/deck.ts";
-import { inUse } from "./deck/transcript.ts";
 import { displayName, openDescendants, projectName, type SessionState, sessionState, states } from "./derive.ts";
 import { checkBody, SwbError } from "./errors.ts";
 import { requestedGroup } from "./groups.ts";
@@ -14,6 +13,7 @@ import { type Caller, launchFlags, presetLaunch } from "./harnesses.ts";
 import { snooze } from "./schedules.ts";
 import { archive, ensureSessionsServer, launch, unarchive, wake } from "./sessions.ts";
 import { rename, setGroup } from "./store.ts";
+import { inUse } from "./transcripts/read.ts";
 
 // The coordination every line's tools run. Each returns the text the model reads, so all three harnesses say the same
 // thing, and the facts a line may render. The sender is always the line's own session, never a tool argument.

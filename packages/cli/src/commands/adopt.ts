@@ -3,9 +3,10 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { branch, type Harness, projectRoot } from "@swb/shared";
 import { openDeck } from "../deck/deck.ts";
-import { claudeTitle, readTranscript } from "../deck/transcript.ts";
+import { readTranscript } from "../deck/transcript.ts";
 import { SwbError, UsageError } from "../errors.ts";
 import { markVisited, openStore } from "../store.ts";
+import { claudeTitle } from "../transcripts/claude.ts";
 
 type Entry = {
 	type: string;
