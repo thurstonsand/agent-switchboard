@@ -31,6 +31,8 @@ Schema v7: update swb and the pi line together.
 - A prefix key pressed just after moving to another pane acts on that pane: `M-a l` then `M-a v` could leave split for the Editor instead of the agent.
 - `swb deck state` shows a split's or a shell's pane gone once tmux has closed it, not just before.
 - A long message reaches a Codex session on macOS. swb wrote each request to Codex's app-server socket in one go, and what didn't fit in the socket's buffer, 8 KB on macOS, was lost, so a message much over that never arrived. The rest now waits until the socket takes it.
+- Several swb processes opening a new database at once, as the first sessions after an install or the first indexing after this update do, no longer fail with `database is locked`.
+- Waking a session in Inactive leaves its row there while it starts, instead of moving it to its Project and back.
 
 ## 0.7.0 — 2026-10-21
 
