@@ -3551,34 +3551,40 @@ function cleanup(): never {
 process.on("SIGHUP", cleanup);
 process.on("SIGTERM", cleanup);
 
+/**
+ * The keyboard's pane, read afresh. The hook that reports a move, and a prefix key pressed just after it, each run in
+ * the background and can land in either order.
+ */
+async function syncFocus(): Promise<void> {
+	focusReads = focusReads.then(async () => {
+		focusedPane = await tmuxAsync(UI, "display", "-p", "-t", deck, "#{pane_id}");
+	});
+	await focusReads;
+	const was = focus;
+	focus = focusedPane === rosterPane ? "roster" : "stage";
+	// Moving to another pane, by ctrl-hjkl or the prefix, leaves Settings.
+	if (focus === "stage" && roster.settings) closeSettings();
+	if (focus === "roster") for (const launch of launches) launch.keyboard = false;
+	// A drag released over another pane never reports its release here.
+	else roster.dragging = null;
+	// Moving onto a dormant session, by click or key, means to use it.
+	const onView = stage.staged === null ? undefined : entries.get(stage.staged);
+	if (was === "roster" && focus === "stage" && onView?.open && !onView.live) wake(onView.id, true);
+	// Going to the Stage, by click or key, puts the Peek away: the pointer may still rest on the row it came from.
+	if (was === "roster" && focus === "stage") {
+		peek.dismissed = peek.spot?.id ?? null;
+		peek.byKeys = false;
+		if (roster.choosing) roster.choosing.menu = null;
+	}
+	syncStatus();
+	apply();
+}
+
 async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 	switch (cmd) {
-		case "focus": {
-			// Hooks run in the background and can land out of order, so each one rereads which pane is active.
-			focusReads = focusReads.then(async () => {
-				focusedPane = await tmuxAsync(UI, "display", "-p", "-t", deck, "#{pane_id}");
-			});
-			await focusReads;
-			const was = focus;
-			focus = focusedPane === rosterPane ? "roster" : "stage";
-			// Moving to another pane, by ctrl-hjkl or the prefix, leaves Settings.
-			if (focus === "stage" && roster.settings) closeSettings();
-			if (focus === "roster") for (const launch of launches) launch.keyboard = false;
-			// A drag released over another pane never reports its release here.
-			else roster.dragging = null;
-			// Moving onto a dormant session, by click or key, means to use it.
-			const onView = stage.staged === null ? undefined : entries.get(stage.staged);
-			if (was === "roster" && focus === "stage" && onView?.open && !onView.live) wake(onView.id, true);
-			// Going to the Stage, by click or key, puts the Peek away: the pointer may still rest on the row it came from.
-			if (was === "roster" && focus === "stage") {
-				peek.dismissed = peek.spot?.id ?? null;
-				peek.byKeys = false;
-				if (roster.choosing) roster.choosing.menu = null;
-			}
-			syncStatus();
-			apply();
+		case "focus":
+			await syncFocus();
 			break;
-		}
 		case "terminal-focus": {
 			const focused = argv[0] === "in";
 			if (focused === terminalFocused) break;
@@ -3593,6 +3599,7 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 			break;
 		case "view-swap":
 		case "view-split":
+			await syncFocus();
 			if (!roster.settings) await changeView(cmd === "view-swap");
 			break;
 		case "roster":
@@ -3602,9 +3609,11 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 			await focusStage();
 			break;
 		case "shell":
+			await syncFocus();
 			if (!roster.settings) await toggleShell();
 			break;
 		case "key":
+			await syncFocus();
 			await prefixKey(argv[0] ?? "", argv[1]);
 			break;
 		// The UI server saw the pointer leave both the roster and its overlays, or a key typed elsewhere; it put away

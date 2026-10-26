@@ -28,6 +28,7 @@ Schema v7: update swb and the pi line together.
 - A launch's parent and Group go to the first session its process records, in every harness. In pi, `/new` before the first prompt in a session `n` started inside a Group keeps the new session in that Group, and the roster no longer nests a `/new` after a launched session's first turn under its launcher.
 - `Esc` goes back to the list for as long as a session on the Stage is starting, as its hint says. Once its harness's process was up, but not yet its screen, `Esc` went to the harness, which showed it as `^[`.
 - A sessions server killed under a Deck always comes back. A check that ran as the server shut down could stop the Deck's background worker, after which `w` and `⏎` did nothing, and the error saying so went with the next key. A check that fails now says so and the next one tries again, and a stopped worker's error stays.
+- A prefix key pressed just after moving to another pane acts on that pane: `M-a l` then `M-a v` could leave split for the Editor instead of the agent.
 
 ## 0.7.0 — 2026-10-21
 
