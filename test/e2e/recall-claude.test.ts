@@ -198,7 +198,8 @@ test("Esc during a reader stops it, leaves the caller usable, and adds no Sessio
 	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, caller.id)}:`, "Escape");
 	await until(() => s.ls().find((row) => row.id === caller.id)?.activity === "idle", 15000, "caller idle after Esc");
 	type(s, caller.id, "reply after cancel");
-	await until(() => pane(s, caller.id).includes("● after cancel"), 10000, "caller usable");
+	// Claude Code marks its reply ⏺ on macOS and ● elsewhere.
+	await until(() => /[●⏺] after cancel/.test(pane(s, caller.id)), 10000, "caller usable");
 	// Stay past the delayed response: a stopped reader makes no further request, so it neither recalls nor answers.
 	await Bun.sleep(16000);
 	expect(s.ls()).toHaveLength(2);

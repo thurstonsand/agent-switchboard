@@ -167,7 +167,8 @@ test("Codex's reader reads with its own shell under a read-only sandbox, with no
 		"the reader's refused writes",
 	);
 	s.save("refused.txt", String(refused.toolOutput));
-	expect(String(refused.toolOutput)).toContain("Read-only file system");
+	// Linux's sandbox mounts the project read-only; macOS's Seatbelt denies the write.
+	expect(String(refused.toolOutput)).toContain(process.platform === "darwin" ? "operation not permitted" : "Read-only file system");
 	expect(existsSync(path)).toBe(false);
 	s.save("shell.txt", pane(s, caller.id));
 	await until(() => entry(s, caller.id).activity === "idle", ready, "the caller idle");
