@@ -14,10 +14,10 @@ Enter
 Wait+Screen /Claude Code v/
 Sleep 1s
 Type "reply Mapping the API surface" Sleep 400ms Enter
-Wait+Screen /● Mapping the API surface/
+Wait+Screen /[●○] Mapping the API surface/
 Sleep 2s
-Alt+a
-Type "h"
+# ctrl-h, not M-a h: VHS on macOS sends Alt+a as a plain a.
+Ctrl+H
 Sleep 800ms
 Type "n"
 Wait+Screen /starts/
@@ -38,8 +38,7 @@ Sleep 1s
 Type "reply Drafting the v3 docs" Sleep 400ms Enter
 Wait+Screen /• Drafting the v3 docs/
 Sleep 2s
-Alt+a
-Type "h"
+Ctrl+H
 Sleep 1s
 Type "j"
 Sleep 1.5s
