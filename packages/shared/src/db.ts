@@ -1,4 +1,4 @@
-import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
+import { closeSync, existsSync, linkSync, mkdirSync, openSync, unlinkSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
 
@@ -23,12 +23,27 @@ function connect(path: string): Driver {
 	return new DatabaseSync(path);
 }
 
-const BUSY_TIMEOUT_MS = 5000;
-
-/** SQLITE_BUSY, as Bun's driver (errno) and Node's (errcode) report it. */
-function busy(error: unknown): boolean {
-	const { errno, errcode } = error as { errno?: number; errcode?: number };
-	return (errno ?? errcode) === 5;
+/**
+ * Makes the db at path, in WAL, unless it's there. Switching a db to WAL takes its write lock, and SQLite refuses a
+ * process that already reads it at once, ignoring busy_timeout, when waiting could deadlock. So no db anyone can open is
+ * ever switched: a new one is switched under a name only its maker knows, where its header keeps WAL for good, then
+ * appears at path whole. link fails when another process's appeared first, and that one is used.
+ */
+function make(path: string): void {
+	if (existsSync(path)) return;
+	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+	const made = `${path}.${process.pid}.new`;
+	closeSync(openSync(made, "w", 0o600));
+	try {
+		const driver = connect(made);
+		driver.exec("PRAGMA journal_mode = WAL");
+		driver.close();
+		linkSync(made, path);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+	} finally {
+		unlinkSync(made);
+	}
 }
 
 export class Db {
@@ -38,27 +53,10 @@ export class Db {
 		readonly path: string,
 		{ create }: { create: boolean },
 	) {
-		if (create) {
-			mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-			closeSync(openSync(path, "a", 0o600));
-		} else if (!existsSync(path)) {
-			throw new Error(`no db at ${path}`);
-		}
+		if (create) make(path);
+		else if (!existsSync(path)) throw new Error(`no db at ${path}`);
 		this.#driver = connect(path);
-		this.#driver.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
-		// Several processes opening a new db at once all switch it to WAL. SQLite refuses one of them at once, without
-		// waiting out the busy timeout, when waiting could deadlock, and expects it to try again.
-		const deadline = Date.now() + BUSY_TIMEOUT_MS;
-		for (;;) {
-			try {
-				this.#driver.exec("PRAGMA journal_mode = WAL");
-				break;
-			} catch (error) {
-				if (!busy(error) || Date.now() > deadline) throw error;
-				Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
-			}
-		}
-		this.#driver.exec("PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON;");
+		this.#driver.exec("PRAGMA busy_timeout = 5000; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON;");
 	}
 
 	get(sql: string, ...params: Param[]): Row | undefined {
