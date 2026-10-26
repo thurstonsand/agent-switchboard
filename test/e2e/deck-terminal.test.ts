@@ -86,7 +86,8 @@ test("a pi on the Stage repaints when the terminal flips, in copy mode too, whil
 	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host}:`, "-X", "cancel");
 	await until(() => userMessageBg(host) === "219;229;229", budgets.settle, "pi's light user message, after copy mode");
 	s.save("light.ansi", s.swb("drive", "capture", "--ansi"));
-	expect(s.screen()).not.toContain("997");
+	// A shell that got the report echoes it as 997;1n or 997;2n; a bare 997 could be part of a session id.
+	expect(s.screen()).not.toMatch(/997;[12]n/);
 });
 
 test("the roster and a live pi report the harness terminal's background, and both follow drive theme dark", async () => {

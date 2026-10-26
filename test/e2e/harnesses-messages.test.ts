@@ -157,8 +157,9 @@ test("a message over 100,000 characters is refused in every harness, and one at 
 	type(s, pi.id, "flood claude 100001");
 	type(s, codex.id, "flood pi 100001");
 	type(s, claude.id, "flood codex 100000");
-	await until(() => pane(s, pi.id).includes(refusal), budgets.settle, "pi told its message is too long");
-	await until(() => s.requests("codex").some((r) => String(r.toolOutput).includes(refusal)), budgets.settle, "Codex told the same");
+	// Each harness streams a 100,000-character tool call before it's refused: a whole turn, not a settle.
+	await until(() => pane(s, pi.id).includes(refusal), ready, "pi told its message is too long");
+	await until(() => s.requests("codex").some((r) => String(r.toolOutput).includes(refusal)), ready, "Codex told the same");
 	await until(
 		() => s.query("select 1 from messages where length(body) = 100000 and delivered_at is not null").length === 1,
 		ready,
