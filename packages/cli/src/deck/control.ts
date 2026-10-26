@@ -1,5 +1,5 @@
 import { ensureSessionsServer } from "../sessions.ts";
-import { CLIENT_CWD, cleanEnv, SESSIONS, tmuxBin } from "../tmux.ts";
+import { CLIENT_CWD, cleanEnv, SESSIONS, tmuxClient } from "../tmux.ts";
 
 type Pending = { resolve: (out: string) => void; reject: (error: Error) => void };
 
@@ -17,7 +17,7 @@ export class Control {
 
 	private spawn(): Bun.Subprocess<"pipe", "pipe", "ignore"> {
 		ensureSessionsServer();
-		const proc = Bun.spawn([tmuxBin(), "-L", SESSIONS, "-C", "attach", "-f", "ignore-size,no-output", "-t", "=swb-ctl"], {
+		const proc = Bun.spawn([...tmuxClient(SESSIONS), "-C", "attach", "-f", "ignore-size,no-output", "-t", "=swb-ctl"], {
 			cwd: CLIENT_CWD,
 			env: cleanEnv(),
 			stdin: "pipe",

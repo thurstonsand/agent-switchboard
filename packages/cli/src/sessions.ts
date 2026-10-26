@@ -9,7 +9,7 @@ import { SwbError } from "./errors.ts";
 import { writeClaudeLine } from "./lines.ts";
 import { claudeOperatorSettings } from "./operator.ts";
 import { openStore } from "./store.ts";
-import { CLIENT_CWD, cleanEnv, killServer, listSessions, quote, SESSIONS, tmux, tmuxBin, tmuxTry } from "./tmux.ts";
+import { CLIENT_CWD, cleanEnv, killServer, listSessions, quote, SESSIONS, tmux, tmuxClient, tmuxTry } from "./tmux.ts";
 import { archivedInCodex } from "./transcripts/codex.ts";
 import { VERSION } from "./version.ts";
 
@@ -163,7 +163,7 @@ export function startScrubbed(server: string, args: string[]): void {
 		'if command -v direnv >/dev/null 2>&1; then exec direnv exec / "$@"; fi',
 		'exec "$@"',
 	].join("\n");
-	const result = Bun.spawnSync(["/bin/sh", "-c", script, "sh", tmuxBin(), "-L", server, ...args], {
+	const result = Bun.spawnSync(["/bin/sh", "-c", script, "sh", ...tmuxClient(server), ...args], {
 		cwd: CLIENT_CWD,
 		env: cleanEnv(),
 		stdout: "pipe",

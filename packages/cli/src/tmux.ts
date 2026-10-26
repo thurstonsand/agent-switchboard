@@ -22,9 +22,17 @@ function resolveTmux(): string {
 }
 
 let resolved: string | undefined;
-export function tmuxBin(): string {
+function tmuxBin(): string {
 	resolved ??= resolveTmux();
 	return resolved;
+}
+
+/**
+ * The command for a tmux client on server. `-u` declares it UTF-8 whatever its locale: swb reads tab-separated formats
+ * and draws UTF-8, and a client with no UTF-8 locale, as launchd, cron, or a bare shell starts one, prints a tab as `_`.
+ */
+export function tmuxClient(server: string): string[] {
+	return [tmuxBin(), "-u", "-L", server];
 }
 
 /** Every client swb starts behaves the same inside or outside another tmux. */
@@ -41,7 +49,7 @@ export const CLIENT_CWD = "/";
 type Result = { ok: boolean; out: string; err: string };
 
 export function tmuxTry(server: string, ...args: string[]): Result {
-	const result = Bun.spawnSync([tmuxBin(), "-L", server, ...args], { cwd: CLIENT_CWD, env: cleanEnv(), stdout: "pipe", stderr: "pipe" });
+	const result = Bun.spawnSync([...tmuxClient(server), ...args], { cwd: CLIENT_CWD, env: cleanEnv(), stdout: "pipe", stderr: "pipe" });
 	return { ok: result.exitCode === 0, out: result.stdout.toString().replace(/\n$/, ""), err: result.stderr.toString().trim() };
 }
 
@@ -52,7 +60,7 @@ export function tmux(server: string, ...args: string[]): string {
 }
 
 export async function tmuxAsync(server: string, ...args: string[]): Promise<string> {
-	const proc = Bun.spawn([tmuxBin(), "-L", server, ...args], { cwd: CLIENT_CWD, env: cleanEnv(), stdout: "pipe", stderr: "pipe" });
+	const proc = Bun.spawn([...tmuxClient(server), ...args], { cwd: CLIENT_CWD, env: cleanEnv(), stdout: "pipe", stderr: "pipe" });
 	const [code, out, err] = await Promise.all([proc.exited, new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
 	if (code !== 0) throw new SwbError(`tmux -L ${server} ${args.join(" ")}: ${err.trim()}`);
 	return out.replace(/\n$/, "");

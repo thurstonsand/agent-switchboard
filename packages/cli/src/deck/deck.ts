@@ -7,7 +7,7 @@ import { SwbError } from "../errors.ts";
 import { ensureOperatorDir } from "../operator.ts";
 import { ensureServer, ensureSessionsServer, hook, notify, onlyControl, randomHex, SWB, startScrubbed } from "../sessions.ts";
 import { openStore } from "../store.ts";
-import { CLIENT_CWD, cleanEnv, listSessions, quote, SESSIONS, tmux, tmuxBin, tmuxTry, UI } from "../tmux.ts";
+import { CLIENT_CWD, cleanEnv, listSessions, quote, SESSIONS, tmux, tmuxClient, tmuxTry, UI } from "../tmux.ts";
 import type { Card, DeckPaths, DeckState } from "./protocol.ts";
 
 export const HELP_POPUP = ["-w", "72", "-h", "37", "-T", " swb keys ", `${SWB} __help`];
@@ -93,7 +93,7 @@ export function editorNav(k: string, editor: string): void {
 	if (k !== "h" && k !== "j" && k !== "k" && k !== "l") throw new SwbError(`__nav: no direction ${k}`);
 	const pane = deckShowing(editor)?.pane;
 	if (!pane) return;
-	const result = Bun.spawnSync([tmuxBin(), "-L", UI, "source-file", "-t", pane, "-"], {
+	const result = Bun.spawnSync([...tmuxClient(UI), "source-file", "-t", pane, "-"], {
 		cwd: CLIENT_CWD,
 		env: cleanEnv(),
 		stdin: Buffer.from(nav(k)),
@@ -298,8 +298,8 @@ export function deckEnv(): string[] {
  * to the Deck's current target, else the placeholder; a shell's pane instead closes with its shell.
  */
 export function stageScript(deck: string, targetPath: string, closes = false): string {
-	const ui = `${quote(tmuxBin())} -L ${quote(UI)}`;
-	const sessions = `${quote(tmuxBin())} -L ${quote(SESSIONS)}`;
+	const ui = tmuxClient(UI).map(quote).join(" ");
+	const sessions = tmuxClient(SESSIONS).map(quote).join(" ");
 	const wait = ["unset TMUX TMUX_PANE", `until ${ui} list-clients -t ${quote(`=${deck}`)} 2>/dev/null | grep -q .; do sleep 0.05; done`];
 	if (closes) return [...wait, `exec ${sessions} attach -t "=$(cat ${quote(targetPath)})" >/dev/null 2>&1`].join("\n");
 	return [
@@ -377,7 +377,7 @@ export async function openDeck(intent: DeckIntent): Promise<void> {
 	);
 	since("deck.panes", panes);
 
-	const attach = Bun.spawn([tmuxBin(), "-L", UI, "attach", "-t", `=${deck}`], {
+	const attach = Bun.spawn([...tmuxClient(UI), "attach", "-t", `=${deck}`], {
 		cwd: CLIENT_CWD,
 		env: cleanEnv(),
 		stdio: ["inherit", "inherit", "inherit"],

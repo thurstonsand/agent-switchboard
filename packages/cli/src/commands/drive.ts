@@ -5,7 +5,7 @@ import { stateDir } from "@swb/shared";
 import { fetchState } from "../deck/deck.ts";
 import { SwbError, UsageError } from "../errors.ts";
 import { SWB } from "../sessions.ts";
-import { cleanEnv, DRIVE, killServer, quote, tmux, tmuxBin, tmuxTry, UI } from "../tmux.ts";
+import { cleanEnv, DRIVE, killServer, quote, tmux, tmuxClient, tmuxTry, UI } from "../tmux.ts";
 import { HARNESS_CONF, theme, themeCommands } from "./drive-terminal.ts";
 
 const PANE = "=drive:";
@@ -90,9 +90,7 @@ export async function drive(args: string[]): Promise<void> {
 			// which would leave the caller's project env looking like a baseline the Deck's scrub can't remove.
 			const started = Bun.spawnSync(
 				[
-					tmuxBin(),
-					"-L",
-					DRIVE,
+					...tmuxClient(DRIVE),
 					"-f",
 					conf,
 					"new-session",

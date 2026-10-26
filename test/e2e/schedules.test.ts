@@ -152,7 +152,7 @@ test("a schedule launches a new session, refuses what can't work, unschedules, a
 	expect(await inNewYork(`${year}-12-15T09:00Z`)).toBe(Date.parse(`${year}-12-15T09:00:00Z`));
 });
 
-test("swb quit refuses a running turn, then stops everything, leaving sessions open; any swb restarts a dead clock", async () => {
+test("swb quit refuses a running turn, then stops everything, leaving sessions open; any swb restarts a dead clock, with or without a locale", async () => {
 	s = scenario("schedules", "quit");
 	const pi = await launched(s, "pi", "reply up");
 	s.swb("drive", "start");
@@ -165,6 +165,14 @@ test("swb quit refuses a running turn, then stops everything, leaving sessions o
 	await until(() => clockPid().startsWith("1"), budgets.settle, "the clock dead");
 	s.swb("wake", pi.id);
 	await until(() => clockPid().startsWith("0 ") && clockPid() !== before, budgets.settle, "the clock respawned");
+	// A swb started with no locale, as launchd, cron, or a bare shell start one, reads tmux's tab-separated answers: the
+	// clock is current, not respawned, and quit finds the servers to stop.
+	const { LANG: _, ...bare } = s.env;
+	const unlocalized = (...args: string[]) =>
+		Bun.spawnSync([`${s.bin}/swb`, ...args], { env: bare, cwd: s.project, stdout: "pipe", stderr: "pipe" });
+	const respawned = clockPid();
+	expect(unlocalized("wake", pi.id).exitCode).toBe(0);
+	expect(clockPid()).toBe(respawned);
 
 	type(s, pi.id, "hold q1");
 	await until(() => s.signal("q1.entered") !== "", budgets.settle, "the held turn");
@@ -173,7 +181,9 @@ test("swb quit refuses a running turn, then stops everything, leaving sessions o
 	expect(refused.err.trim()).toBe(`swb: turn running in "${entry(s, pi.id).title ?? pi.id}": wait for it to complete, or swb quit --force`);
 	release(s, "q1");
 	await until(() => entry(s, pi.id).activity === "idle", budgets.settle, "idle");
-	expect(s.swb("quit").trim()).toBe("Stopped 1 session, every Deck, and swb's clock. swb starts them again.");
+	const quit = unlocalized("quit");
+	expect(quit.stderr.toString()).toBe("");
+	expect(quit.stdout.toString().trim()).toBe("Stopped 1 session, every Deck, and swb's clock. swb starts them again.");
 	expect(() => s.tmux(s.servers.sessions, "has-session")).toThrow();
 	expect(() => s.tmux(s.servers.ui, "has-session")).toThrow();
 	expect(entry(s, pi.id)).toMatchObject({ open: true, live: false, cutOff: null });

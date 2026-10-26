@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- swb started with no locale, as launchd, cron, or a bare shell start it, works as from your terminal. tmux printed a tab to such a client as `_`, so a Deck opened from one lost its roster, every swb command restarted the clock, and `swb quit` failed.
+
 ## 0.8.0 — 2026-10-26
 
 Schema v7: update swb and the pi line together.
