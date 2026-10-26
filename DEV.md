@@ -28,7 +28,7 @@ mise run perf           # time what a person waits for, on real harnesses; `-- -
 mise run perf:compare   # two results files side by side
 ```
 
-`mise run e2e` runs test files in parallel, two workers per core, and each file's tests in order: a scenario mostly waits on its harnesses, and on a 4-core orb 8 workers was fastest, with more getting slower and flaky. A scenario shares nothing with another, so a new test file needs no setup to run beside the rest. Under `CI`, it runs them one at a time: GitHub's runners starve the harnesses at 8 workers, and timing tests fail there that pass alone.
+`mise run e2e` runs test files in parallel, two workers per core, and each file's tests in order: a scenario mostly waits on its harnesses, and on a 4-core orb 8 workers was fastest, with more getting slower and flaky. A scenario shares nothing with another, so a new test file needs no setup to run beside the rest. deck-latency's tests hold the roster to 100 ms a keystroke, which a loaded machine misses, so they run alone once the rest are done. Under `CI`, it runs them one at a time: GitHub's runners starve the harnesses at 8 workers, and timing tests fail there that pass alone.
 
 Some scenarios install pi-sessions and pi-wt from `node_modules`, at the versions bun.lock pins; point `SWB_E2E_PI_SESSIONS` or `SWB_E2E_PI_WT` at a checkout to test another. Scenarios for Claude Code and Codex run the host's npm-global installs against fake model servers in `test/e2e/fakes`, which log every request they answer.
 
