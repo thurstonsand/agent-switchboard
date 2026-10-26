@@ -68,7 +68,7 @@ test("with the db writer lock held and a 50 MB transcript being parsed, the curs
 		[
 			process.execPath,
 			"-e",
-			`const d = new (require("bun:sqlite").Database)(${JSON.stringify(db)}); d.run("BEGIN IMMEDIATE"); console.log("held"); await Bun.sleep(60000);`,
+			`const d = new (require("bun:sqlite").Database)(${JSON.stringify(db)}); d.run("PRAGMA busy_timeout = 5000"); d.run("BEGIN IMMEDIATE"); console.log("held"); await Bun.sleep(60000);`,
 		],
 		{
 			stdout: "pipe",
