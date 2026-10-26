@@ -2,6 +2,7 @@ import { expect } from "bun:test";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState } from "../../../packages/cli/src/deck/protocol.ts";
+import { recalled, subagentDone } from "../harness/agents.ts";
 import { config, launched, launchTry, seed } from "../harness/deck.ts";
 import { git, gitRepo, gitWorktree, type LsEntry, type PiPackage, release, repo, type Scenario, until, which } from "../harness/index.ts";
 
@@ -253,6 +254,23 @@ export const directors: Record<string, Director> = {
 				TAPE,
 				"the Operator's message delivered to Codex",
 			);
+		},
+	},
+
+	"reader-map": {
+		harnesses: ["claude"],
+		setup: async (s) => {
+			files(s);
+			const parent = await launch(s, "claude", "Parent ready");
+			typeInto(s, parent, "reply The deploy beacon lives in src/main.ts");
+			await until(() => /· agent ·[^\n]*\]\nThe deploy beacon/.test(recalled(s, parent)), TAPE, "the parent's second turn");
+			const subagent = {
+				description: "Find the beacon",
+				subagent_type: "general-purpose",
+				prompt: "reply The beacon at src/main.ts:1 says hello",
+			};
+			typeInto(s, parent, `call Agent ${JSON.stringify(subagent)}`);
+			await subagentDone(s, parent, subagent.description);
 		},
 	},
 

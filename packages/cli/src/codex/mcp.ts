@@ -2,19 +2,10 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { type Db, describeTool, launchGuide } from "@swb/shared";
-import {
-	parsed,
-	READER_PROMPT,
-	readerPrompt,
-	readerToolsAsJson,
-	TOOLS,
-	type ToolName,
-	type ToolResult,
-	toolsAsJson,
-} from "@swb/shared/tools";
+import { parsed, READER_PROMPT, readerToolsAsJson, TOOLS, type ToolName, type ToolResult, toolsAsJson } from "@swb/shared/tools";
 import { launchSession, reachable, send, show, update } from "../coordinate.ts";
 import { SwbError } from "../errors.ts";
-import { recallRead } from "../recall/read.ts";
+import { recallBegin, recallRead, recallSearch } from "../recall/read.ts";
 import { search } from "../recall/search.ts";
 import { listSchedules, schedule, unschedule } from "../schedules.ts";
 import { openStore } from "../store.ts";
@@ -152,10 +143,14 @@ async function ask(db: Db, from: string, session: string, question: string, canc
 	client.onRequest(({ method, params }) => {
 		if (method !== "item/tool/call" || params.threadId !== threadId) return undefined;
 		try {
-			if (params.tool !== "recall_read") throw new SwbError(`reader: unknown tool ${params.tool}`);
-			const args = parsed("recall_read", params.arguments);
-			if (args.session !== session) throw new SwbError("reader: only the question's target may be read");
-			return { contentItems: [{ type: "inputText", text: recallRead(db, args.session).text }], success: true };
+			const result =
+				params.tool === "recall_search"
+					? recallSearch(db, session, parsed("recall_search", params.arguments))
+					: params.tool === "recall_read"
+						? recallRead(db, session, parsed("recall_read", params.arguments))
+						: null;
+			if (!result) throw new SwbError(`reader: unknown tool ${params.tool}`);
+			return { contentItems: [{ type: "inputText", text: result.text }], success: true };
 		} catch (error) {
 			return { contentItems: [{ type: "inputText", text: (error as Error).message }], success: false };
 		}
@@ -204,7 +199,7 @@ async function ask(db: Db, from: string, session: string, question: string, canc
 		threadId = started.thread.id;
 		const { turn } = await request<{ turn: { id: string } }>("turn/start", {
 			threadId,
-			input: [{ type: "text", text: readerPrompt(session, question) }],
+			input: [{ type: "text", text: recallBegin(db, session, question).text }],
 		});
 		turnId = turn.id;
 		const text = await completed.promise;

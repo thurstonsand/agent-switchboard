@@ -7,7 +7,7 @@ Schema v7: update swb and the pi line together.
 ### Added
 
 - `session_launch`, and `session_schedule`'s `launch`, take a `group`: a name starts the new session in that Group, in any Project, and `null` starts it in none. Left out, it starts in its parent's Group as before when both are in one Project. `swb launch` takes `--group` and `--no-group`, and `swb schedule` takes `--launch-group` and `--launch-no-group`.
-- `session_search` and `session_ask`, in pi, Claude Code, and Codex. `session_search` searches every other session's conversation, open or archived, its subagents' included, with phrases, `OR`, `-word`, and filters for harness, project, file, and time. `session_ask` answers a question about another session's conversation with a reader in the asker's own harness, which works until it answers or you press Esc. swb indexes transcripts as they change, in `recall.db` beside its db. A managed pi needs pi-sessions 0.21 or later, which leaves both tools to swb.
+- `session_search` and `session_ask`, in pi, Claude Code, and Codex. `session_search` searches every other session's conversation, open or archived, its subagents' included, with phrases, `OR`, `-word`, and filters for harness, project, file, and time. `session_ask` answers a question about another session's conversation with a reader in the asker's own harness. The reader starts from a map of that session, its turns, compactions, abandoned branches, and subagents, then searches and reads it by ref, and works until it answers or you press Esc. swb indexes transcripts as they change, in `recall.db` beside its db. A managed pi needs pi-sessions 0.21 or later, which leaves both tools to swb.
 
 ### Changed
 

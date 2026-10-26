@@ -33,8 +33,8 @@ async function observer(id: string): Promise<CodexClient> {
 	return CodexClient.connect(join(s.env.XDG_STATE_HOME as string, "agent-switchboard/codex", `${host(s, id)}.sock`), "swb-evidence");
 }
 
-/** What a reader is offered: Codex's own tools, which the sandbox keeps read-only, and recall_read. */
-const READER_OFFERED = ["exec_command", "write_stdin", "apply_patch", "view_image", "recall_read"];
+/** What a reader is offered: Codex's own tools, which the sandbox keeps read-only, and swb's reader tools. */
+const READER_OFFERED = ["exec_command", "write_stdin", "apply_patch", "view_image", "recall_search", "recall_read"];
 
 const readerRequests = () => s.requests("codex").filter((r) => (r.texts as string[]).at(-1)?.startsWith("Question about session"));
 

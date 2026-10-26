@@ -7,8 +7,9 @@
 //   ask <title> :: <question>          find it the same way, then session_ask it the question; answers "asked: <result>"
 //   ask-id <id> :: <question>          session_ask that session directly, archived or not
 //   search <query>                     session_search the query; answers "searched"
-// session_ask's reader, whose prompt starts "Question about session <id>:", reads it with recall_read and answers
-// "reader found: <every SWB- marker in it>", or "reader found nothing".
+// session_ask's reader, whose first message is "Question about session <id>:", the question, then a map, searches the
+// session for SWB with recall_search, reads it with recall_read from before its first hit, and answers
+// "reader found: <every SWB- marker it read>", or "reader found nothing".
 // Each call gets the prompt and the output of the tool it called last (null for a fresh turn), and answers the next
 // tool call, or the final text, or null when the prompt isn't one of these.
 
@@ -38,10 +39,18 @@ function reachableId(toolOutput: string, title: string): string | undefined {
 	return /^- (\S+)/.exec(toolOutput.split("\n").find((line) => line.includes(` · "${title}" · `)) ?? "")?.[1];
 }
 
+/** The question in a reader's first message, between its header and the map; null in any other prompt. */
+export function readerQuestion(prompt: string): string | null {
+	return /^Question about session \S+:\n\n([\s\S]*?)\n\n---\n/.exec(prompt.trim())?.[1] ?? null;
+}
+
 export function agentStep(prompt: string, toolOutput: string | null): Step {
-	const reading = /^Question about session (\S+):/.exec(prompt.trim());
-	if (reading) {
-		if (toolOutput === null) return { tool: "recall_read", args: { session: reading[1] } };
+	if (readerQuestion(prompt) !== null) {
+		if (toolOutput === null) return { tool: "recall_search", args: { query: "SWB" } };
+		if (toolOutput.startsWith("Hits") || toolOutput.startsWith("Nothing matches")) {
+			const ref = /^- (\S+) · /m.exec(toolOutput)?.[1];
+			return { tool: "recall_read", args: ref ? { ref, before: 100 } : {} };
+		}
 		const markers = [...new Set([...toolOutput.matchAll(/SWB-[A-Za-z0-9-]+/g)].map((m) => m[0]))];
 		return { text: markers.length > 0 ? `reader found: ${markers.join(" ")}` : "reader found nothing" };
 	}

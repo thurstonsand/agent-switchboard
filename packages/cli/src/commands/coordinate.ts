@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util";
 import { harness, view as viewNamed } from "@swb/shared";
+import { parsed } from "@swb/shared/tools";
 import {
 	launchSession,
 	reachable as listReachable,
@@ -8,7 +9,7 @@ import {
 	update as updateSession,
 } from "../coordinate.ts";
 import { UsageError } from "../errors.ts";
-import { recallRead } from "../recall/read.ts";
+import { recallBegin, recallRead, recallSearch } from "../recall/read.ts";
 import { search as searchSessions, syncAll } from "../recall/search.ts";
 import { unschedule as cancelSchedule, listSchedules, schedule as scheduleMessage } from "../schedules.ts";
 import { ensureSessionsServer } from "../sessions.ts";
@@ -33,12 +34,27 @@ export async function search(args: string[]): Promise<void> {
 	print(searchSessions(openStore(), values.from, await Bun.stdin.text(), values.limit === undefined ? undefined : Number(values.limit)));
 }
 
-/** The reader's tools as every line's reader runs them, `swb recall read ID`, and the clock's `swb recall sync`. */
-export function recall(args: string[]): void {
-	const [op, id] = args;
-	if (op === "sync" && !id) syncAll(openStore());
-	else if (op === "read" && id) print(recallRead(openStore(), id));
-	else throw new UsageError("recall: read ID | sync");
+/**
+ * What every line's reader runs, bound to the session it was asked about: `swb recall begin ID` writes its first
+ * message from the question, and `search` and `read` are its tools, each taking its arguments as JSON on stdin. The
+ * clock's `swb recall sync` keeps the index warm.
+ */
+export async function recall(args: string[]): Promise<void> {
+	const [op, id, ...rest] = args;
+	if (op === "sync" && !id) {
+		syncAll(openStore());
+		return;
+	}
+	if (!id || rest.length > 0 || (op !== "begin" && op !== "search" && op !== "read"))
+		throw new UsageError("recall: begin|search|read ID | sync");
+	const input = JSON.parse((await Bun.stdin.text()) || "{}") as unknown;
+	const db = openStore();
+	if (op === "begin") {
+		const { question } = input as { question?: unknown };
+		if (typeof question !== "string") throw new UsageError('recall begin: {"question": "…"} on stdin');
+		print(recallBegin(db, id, question));
+	} else if (op === "search") print(recallSearch(db, id, parsed("recall_search", input)));
+	else print(recallRead(db, id, parsed("recall_read", input)));
 }
 
 export async function send(args: string[]): Promise<void> {

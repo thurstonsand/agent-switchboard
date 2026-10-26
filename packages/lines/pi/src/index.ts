@@ -20,7 +20,7 @@ import {
 	startTurn,
 	turnErrored,
 } from "@swb/shared/record";
-import { READER_PROMPT, READER_TOOLS, readerPrompt, TOOLS, type ToolName, type ToolResult } from "@swb/shared/tools";
+import { READER_PROMPT, READER_TOOLS, TOOLS, type ToolName, type ToolResult } from "@swb/shared/tools";
 import { mark, span } from "@swb/shared/trace";
 
 type Launch = { readonly db: string; readonly tmuxSession: string; readonly bin: string };
@@ -362,6 +362,7 @@ export default function (pi: ExtensionAPI) {
 		async (args: { session: string; question: string }, ctx, _toolCallId, signal) => {
 			signal?.throwIfAborted();
 			if (!ctx.model) throw new Error("No active model is available for session_ask");
+			const first = await swb(proc.launch.bin, ["recall", "begin", args.session], JSON.stringify({ question: args.question }), signal);
 			const { createAgentSession, DefaultResourceLoader, defineTool, getAgentDir, ModelRuntime, SessionManager } = await import(
 				"@earendil-works/pi-coding-agent"
 			);
@@ -385,15 +386,25 @@ export default function (pi: ExtensionAPI) {
 				thinkingLevel: pi.getThinkingLevel(),
 				resourceLoader,
 				sessionManager: SessionManager.inMemory(ctx.cwd),
-				tools: ["read", "grep", "find", "ls", "recall_read"],
+				tools: ["read", "grep", "find", "ls", "recall_search", "recall_read"],
 				customTools: [
+					defineTool({
+						name: "recall_search",
+						label: "Search session",
+						description: [READER_TOOLS.recall_search.description, ...READER_TOOLS.recall_search.guidelines].join("\n"),
+						parameters: READER_TOOLS.recall_search.parameters,
+						async execute(_id, params, signal) {
+							const result = await swb(proc.launch.bin, ["recall", "search", args.session], JSON.stringify(params), signal);
+							return { content: [{ type: "text", text: result.text }], details: result.details };
+						},
+					}),
 					defineTool({
 						name: "recall_read",
 						label: "Read session",
 						description: READER_TOOLS.recall_read.description,
 						parameters: READER_TOOLS.recall_read.parameters,
 						async execute(_id, params, signal) {
-							const result = await swb(proc.launch.bin, ["recall", "read", params.session], "", signal);
+							const result = await swb(proc.launch.bin, ["recall", "read", args.session], JSON.stringify(params), signal);
 							return { content: [{ type: "text", text: result.text }], details: result.details };
 						},
 					}),
@@ -407,7 +418,7 @@ export default function (pi: ExtensionAPI) {
 				signal?.addEventListener("abort", abort, { once: true });
 				if (signal?.aborted) abort();
 				signal?.throwIfAborted();
-				await session.prompt(readerPrompt(args.session, args.question));
+				await session.prompt(first.text);
 				signal?.throwIfAborted();
 				const last = session.messages.findLast((message) => message.role === "assistant");
 				if (last?.role !== "assistant") throw new Error("Reader returned no assistant message");

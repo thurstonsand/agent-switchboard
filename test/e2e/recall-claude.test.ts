@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { host, launched, pane, type } from "./harness/agents.ts";
+import { host, launched, pane, recalled, type } from "./harness/agents.ts";
 import { type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -91,7 +91,7 @@ test("Claude's native reader answers about live, archived, and pi conversations 
 	const pi = await launched(s, "pi", "reply SWB-pi-target");
 	const caller = await launched(s, "claude", "reply caller ready");
 	// Claude flushes its transcript asynchronously.
-	await until(() => s.swb("recall", "read", target.id).includes("SWB-target-secret"), 15000, "target transcript on disk");
+	await until(() => recalled(s, target.id).includes("SWB-target-secret"), 15000, "target transcript on disk");
 	const start = Date.now();
 	type(s, caller.id, `ask ${target.title} :: What markers did it mention?`);
 	await until(() => pane(s, caller.id).includes("asked: reader found: SWB-target-secret"), 30000, "reader answer in caller TUI");
@@ -120,14 +120,14 @@ test("Claude's native reader answers about live, archived, and pi conversations 
 			.sort(),
 	).toEqual([caller.id, pi.id, target.id].sort());
 	expect(s.query("select session_id from sessions")).toHaveLength(3);
-	// Each reader recalls once, then answers.
-	expect(readerRequests()).toHaveLength(6);
+	// Each reader searches, reads, then answers.
+	expect(readerRequests()).toHaveLength(9);
 	for (const r of readerRequests()) {
-		expect(r.tools).toEqual(["mcp__swb__recall_read", "Read", "Grep", "Glob"]);
+		expect(r.tools).toEqual(["mcp__swb__recall_search", "mcp__swb__recall_read", "Read", "Grep", "Glob"]);
 		expect(r.model).toBe("claude-opus-5-5");
 	}
 	const main = s.requests("claude").find((r) => String(r.prompt).startsWith("ask "));
-	expect(main?.tools).not.toContain("mcp__swb__recall_read");
+	for (const tool of ["mcp__swb__recall_search", "mcp__swb__recall_read"]) expect(main?.tools).not.toContain(tool);
 	expect(main?.tools).toContain("DeferredToolPlaceholder");
 	expect(JSON.stringify(main?.toolSpecs)).not.toContain("swb:reader");
 	expect(String(main?.context)).not.toContain("swb:reader");
@@ -140,7 +140,7 @@ test("Claude's native reader answers about live, archived, and pi conversations 
 	expect(own).toContain("reader found: SWB-pi-target");
 	expect(own).not.toContain("Question about session");
 	await screenshot(caller.id);
-	type(s, caller.id, `call mcp__swb__recall_read {"session":"${target.id}"}`);
+	type(s, caller.id, `call mcp__swb__recall_read {"ref":"1"}`);
 	await until(
 		() =>
 			s
@@ -157,7 +157,7 @@ test("Claude's native reader answers about live, archived, and pi conversations 
 	const subagent = {
 		description: "Read a session",
 		subagent_type: "general-purpose",
-		prompt: `call mcp__swb__recall_read {"session":"${pi.id}"}`,
+		prompt: `call mcp__swb__recall_read {"ref":"1"}`,
 	};
 	type(s, caller.id, `call Agent ${JSON.stringify(subagent)}`);
 	await until(

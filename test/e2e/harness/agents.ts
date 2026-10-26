@@ -178,3 +178,26 @@ export async function cardEndings(s: Scenario, harness: "pi" | "claude" | "codex
 	await until(() => prompted(failed.id) > errored && entry(s, failed.id).activity === "idle", ready, "a turn after the error");
 	expect(entry(s, failed.id).errored).toBe(false);
 }
+
+/** A session's conversation as session_ask's reader reads it: from its first entry, or as `args` say. */
+export function recalled(s: Scenario, id: string, args: Record<string, unknown> = {}): string {
+	const run = Bun.spawnSync([`${s.bin}/swb`, "recall", "read", id], {
+		env: s.env,
+		cwd: s.project,
+		stdin: Buffer.from(JSON.stringify(args)),
+	});
+	if (run.exitCode !== 0) throw new Error(`swb recall read ${id}: ${run.stderr.toString()}`);
+	return (JSON.parse(run.stdout.toString()) as { text: string }).text;
+}
+
+/**
+ * Waits for a Claude Code subagent to finish and its parent's turn after it to end. Claude Code runs an Agent call in
+ * the background: the call returns at once, and the subagent's end starts a turn of its own in the parent.
+ */
+export async function subagentDone(s: Scenario, parent: string, description: string): Promise<void> {
+	await until(
+		() => new RegExp(`Agent "${description}" finished[\\s\\S]*✻[^\\n]*done`).test(pane(s, parent)),
+		30_000,
+		`subagent "${description}" finished, and its parent's turn after it`,
+	);
+}

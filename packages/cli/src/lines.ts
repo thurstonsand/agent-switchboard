@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describeTool, launchGuide, stateDir } from "@swb/shared";
 // Macros inline the tool schemas as JSON at build time, rather than bundling their TypeBox objects here.
 import { readerToolsAsJson, toolsAsJson } from "@swb/shared/tools" with { type: "macro" };
-import { READER_PROMPT, readerPrompt } from "@swb/shared/tools";
+import { READER_PROMPT } from "@swb/shared/tools";
 import manifest from "../../lines/claude/plugin/.claude-plugin/plugin.json";
 import hooks from "../../lines/claude/plugin/hooks/hooks.json";
 // @ts-expect-error: the mod is embedded as text, never imported as a module.
@@ -31,7 +31,6 @@ export function writeClaudeLine(): string {
 export const TOOLS = ${JSON.stringify(tools(), null, "\t")};
 export const READER_TOOLS = ${JSON.stringify(readerToolsAsJson(), null, "\t")};
 export const READER_PROMPT = ${JSON.stringify(READER_PROMPT)};
-export const readerPrompt = ${readerPrompt.toString()};
 `,
 	);
 	return dir;

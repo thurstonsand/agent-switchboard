@@ -10,7 +10,7 @@ import {
 	Type,
 } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { agentStep } from "./fakes/agent.ts";
+import { agentStep, readerQuestion } from "./fakes/agent.ts";
 
 // Scripted turns for e2e scenarios. The user's prompt picks the script:
 //   reply <text>      answer with <text>
@@ -90,7 +90,7 @@ export default function (pi: ExtensionAPI) {
 				join(signals, "recall.jsonl"),
 				`${JSON.stringify({ at: Date.now(), pid: process.pid, prompt: promptText, role: last.role, tools: getCurrentTools(context.messages).map((tool) => tool.name), model: `${model.provider}/${model.id}`, thinking: options?.reasoning, text: text(last) })}\n`,
 			);
-			if (promptText.startsWith("Question about session ") && promptText.endsWith("hold-reader") && last.role === "user") {
+			if (readerQuestion(promptText) === "hold-reader" && last.role === "user") {
 				signal("reader.entered");
 				try {
 					await released("reader", options?.signal);

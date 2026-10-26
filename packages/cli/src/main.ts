@@ -52,7 +52,9 @@ const USAGE = `swb: Agent Switchboard
   swb reachable --from ID      every open session but the caller, as a line's tool reads it
   swb search --from ID [--limit N]
                                every session's conversation but the caller's, searched, as session_search reads it; the query on stdin
-  swb recall read ID           a session's conversation, as session_ask's reader reads it
+  swb recall begin|search|read ID
+                               session_ask's reader, bound to a session: its first message from {"question"}, then its tools,
+                               each taking its arguments as JSON on stdin
   swb recall sync              bring the search index up to date with every session's transcripts
   swb schedule --from ID [--to ID | --launch-title T [--launch-harness H] [--launch-model M] [--launch-effort E]
                [--launch-agent A] [--launch-cwd DIR] [--launch-group NAME | --launch-no-group]] (--at WHEN | --cron EXPR)

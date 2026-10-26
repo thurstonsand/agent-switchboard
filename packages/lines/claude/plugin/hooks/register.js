@@ -3,19 +3,20 @@
 // other sessions: mid-turn as context on the next tool result, or as a new turn when idle.
 //
 // claude plugin validate only accepts `$` passed to top-level functions, so every call goes through one.
-import { READER_PROMPT, READER_TOOLS, readerPrompt, TOOLS } from "./tools.js";
+import { READER_PROMPT, READER_TOOLS, TOOLS } from "./tools.js";
 
 async function registerReader($) {
 	await $.agent.register({
 		name: "reader",
 		description: "Answer a question about a switchboard session's conversation.",
 		prompt: READER_PROMPT,
-		tools: ["mcp__swb__recall_read", "Read", "Grep", "Glob"],
+		tools: [...READER_TOOLS.map((tool) => `mcp__swb__${tool.name}`), "Read", "Grep", "Glob"],
 		model: "inherit",
 	});
 }
 
-// Readers session_ask started, by agentId: only they may read transcripts, and each one's turn.complete ends its wait.
+// Readers session_ask started, by agentId, each with the session it reads: only they may read transcripts, and each
+// one's turn.complete ends its wait.
 const readers = new Map();
 
 /**
@@ -28,14 +29,15 @@ const readers = new Map();
  * such as $.agent.wait, or lets $.tool.call run the Agent tool.
  */
 async function ask($, e) {
+	const first = JSON.parse(await swb($, ["recall", "begin", e.session], JSON.stringify({ question: e.question })));
 	const { agentId, deny } = await $.agent.spawn({
 		subagentType: "swb:reader",
-		prompt: readerPrompt(e.session, e.question),
+		prompt: first.text,
 		description: "Read session conversation",
 	});
 	if (deny) throw new Error(deny);
 	if (!agentId) throw new Error("Claude did not start a reader");
-	const reader = { answer: undefined, wait: $.process.spawn({ argv: ["tail", "-f", "/dev/null"] }) };
+	const reader = { session: e.session, answer: undefined, wait: $.process.spawn({ argv: ["tail", "-f", "/dev/null"] }) };
 	readers.set(agentId, reader);
 	try {
 		for await (const _ of reader.wait);
@@ -46,6 +48,18 @@ async function ask($, e) {
 	}
 	if (reader.answer === undefined) throw new Error("session_ask's reader stopped waiting");
 	return reader.answer;
+}
+
+/** A reader's tool, on the session it reads, with the arguments its schema names. */
+async function readerTool($, tool, e) {
+	const reader = readers.get(e.agentId);
+	if (!reader) return { deny: `${tool.name} is only available to session_ask's reader` };
+	const args = Object.fromEntries(Object.keys(tool.inputSchema.properties).flatMap((key) => (e[key] === undefined ? [] : [[key, e[key]]])));
+	try {
+		return { result: JSON.parse(await swb($, ["recall", tool.name.replace("recall_", ""), reader.session], JSON.stringify(args))).text };
+	} catch (error) {
+		return { deny: error.message };
+	}
 }
 
 async function stopReader($, agentId) {
@@ -336,8 +350,8 @@ async function registerTools($) {
 
 async function registerTool($, tool) {
 	try {
-		// Coordination is upfront; only the reader needs recall_read's schema.
-		await $.tool.register({ ...tool, isDeferred: tool.name === "recall_read" });
+		// Coordination is upfront; only the reader needs its tools' schemas.
+		await $.tool.register({ ...tool, isDeferred: READER_TOOLS.includes(tool) });
 	} catch (error) {
 		$.ui.log(`swb: tool ${tool.name} not registered: ${error.message}`);
 	}
@@ -452,14 +466,7 @@ export function register(on) {
 	});
 
 	// Separate from the spawning hook: Claude skips that hook in the nested agent to prevent re-entry.
-	on("tool.call", { tool: "mcp__swb__recall_read" }, async ($, e) => {
-		if (!readers.has(e.agentId)) return { deny: "recall_read is only available to session_ask's reader" };
-		try {
-			return { result: JSON.parse(await swb($, ["recall", "read", e.session])).text };
-		} catch (error) {
-			return { deny: error.message };
-		}
-	});
+	for (const tool of READER_TOOLS) on("tool.call", { tool: `mcp__swb__${tool.name}` }, ($, e) => readerTool($, tool, e));
 
 	on("tool.call", async ($, e, next) => {
 		const tool = TOOLS.find((t) => e.tool === `mcp__swb__${t.name}`);

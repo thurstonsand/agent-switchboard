@@ -10,7 +10,7 @@
 // Every request is appended to $FAKE_LOG as one JSON line: the user texts it saw, the tools it was offered, and its
 // whole input, instructions included.
 import { appendFileSync, existsSync, writeFileSync } from "node:fs";
-import { agentStep, titleOf } from "./agent.ts";
+import { agentStep, readerQuestion, titleOf } from "./agent.ts";
 
 const port = Number(process.env.FAKE_PORT ?? 0);
 const log = process.env.FAKE_LOG ?? "/dev/null";
@@ -118,7 +118,7 @@ const server = Bun.serve({
 				{ error: { type: "invalid_request_error", code: null, param: null, message: `invalid request: ${rest.join(" ")}` } },
 				{ status: 400 },
 			);
-		const readerProbe = /^Question about session \S+:\s+reader-(hold|shell|exec)(?: (.+))?$/.exec(prompt);
+		const readerProbe = /^reader-(hold|shell|exec)(?: (.+))?$/.exec(readerQuestion(prompt) ?? "");
 		let toolOutput = answering ? null : outputText(last);
 		// Codex presents an MCP result's structured content under its timing wrapper; the shared script wants the answer text.
 		if (toolOutput && /^ask(?:-id)? /.test(prompt)) {

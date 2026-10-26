@@ -9,7 +9,7 @@
 // JSON line: the latest prompt, whether it carried a tool result, the tools offered, every swb message marker seen, and
 // the conversation as sent, instructions included.
 import { appendFileSync } from "node:fs";
-import { agentStep, titleOf } from "./agent.ts";
+import { agentStep, readerQuestion, titleOf } from "./agent.ts";
 
 const port = Number(process.env.FAKE_PORT ?? 0);
 const log = process.env.FAKE_LOG ?? "/dev/null";
@@ -88,10 +88,8 @@ const server = Bun.serve({
 			`${JSON.stringify({ n: requestN, at: Date.now(), model: body.model, prompt: lastTyped.slice(0, 400), toolResult, toolOutput: toolOutput.slice(0, 4000), lastText: lastText.slice(0, 400), tools, toolSpecs: body.tools, system: (body as { system?: unknown }).system, markers, context: raw.slice(0, 200_000) })}\n`,
 		);
 		// A slow model response keeps the native reader alive without giving it a write-capable holding tool.
-		if (lastTyped.startsWith("Question about session") && !toolResult && /reader-hold (\d+)/.test(lastTyped)) {
-			const ms = Number(/reader-hold (\d+)/.exec(lastTyped)?.[1]);
-			await Bun.sleep(ms);
-		}
+		const hold = /^reader-hold (\d+)/.exec(readerQuestion(lastTyped) ?? "");
+		if (hold && !toolResult) await Bun.sleep(Number(hold[1]));
 
 		const [verb, ...rest] = lastTyped.trim().split(" ");
 		// Claude Code joins a prompt that failed to the next one, so only the newest paragraph can fail again.

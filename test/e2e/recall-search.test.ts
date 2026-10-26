@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { launched, pane, type } from "./harness/agents.ts";
+import { launched, pane, subagentDone, type } from "./harness/agents.ts";
 import { entry } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
@@ -134,7 +134,7 @@ test("a Claude Code subagent's transcript is its parent's evidence, and session_
 	const searcher = { ...(await launched(s, "pi", "reply searcher ready")), harness: "pi" as const };
 	const subagent = { description: "Find the beacon", subagent_type: "general-purpose", prompt: "reply SWB-subagent-beacon" };
 	type(s, parent.id, `call Agent ${JSON.stringify(subagent)}`);
-	await until(() => entry(s, parent.id).activity === "idle", budgets.piReady, "the subagent's turn");
+	await subagentDone(s, parent.id, subagent.description);
 	type(s, parent.id, `ask-id ${target.id} :: Which marker?`);
 	await until(() => pane(s, parent.id).includes("asked: reader found: SWB-subagent-target"), budgets.piReady, "the reader's answer");
 	await until(() => entry(s, parent.id).activity === "idle", budgets.settle, "parent idle");

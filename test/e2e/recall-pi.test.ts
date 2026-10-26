@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { host, launched, pane, ready, type } from "./harness/agents.ts";
+import { host, launched, pane, ready, recalled, type } from "./harness/agents.ts";
 import { entry } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
@@ -61,14 +61,15 @@ test("pi session_ask reads a live and archived pi conversation in an isolated re
 	const before = snapshot();
 	await ask(caller.id, "ask Pi history :: What marker did the session record?", "reader found: SWB-pi-history");
 	expect(snapshot()).toEqual(before);
-	expect(s.swb("recall", "read", caller.id)).not.toContain("reply SWB-pi-history");
+	expect(recalled(s, caller.id)).not.toContain("reply SWB-pi-history");
 	const log = requests();
 	const parent = log[0];
 	if (!parent) throw new Error("No faux requests recorded");
 	const reader = log.filter((request) => request.prompt.startsWith("Question about session "));
-	expect(reader).toHaveLength(2);
+	// It searches, reads, then answers.
+	expect(reader).toHaveLength(3);
 	for (const request of reader) {
-		expect(request.tools.sort()).toEqual(["find", "grep", "ls", "read", "recall_read"]);
+		expect(request.tools.sort()).toEqual(["find", "grep", "ls", "read", "recall_read", "recall_search"]);
 		expect(request.model).toBe("faux/faux-1");
 		expect(request.thinking).toBe("high");
 		expect(request.pid).toBe(parent.pid);
@@ -95,7 +96,7 @@ test("pi session_ask reads a Claude Code conversation across harnesses", async (
 	const target = await launched(s, "claude", "reply SWB-claude-history", undefined, ["--title", "Claude history"]);
 	const caller = await launched(s, "pi", "reply caller");
 	// Claude flushes its transcript behind the idle event.
-	await until(() => s.swb("recall", "read", target.id).includes("SWB-claude-history"), ready, "Claude transcript flushed");
+	await until(() => recalled(s, target.id).includes("SWB-claude-history"), ready, "Claude transcript flushed");
 	const before = snapshot();
 	await ask(caller.id, "ask Claude history :: What marker did Claude record?", "reader found: SWB-claude-history");
 	expect(snapshot()).toEqual(before);
@@ -115,10 +116,10 @@ test("Esc aborts pi's in-process reader and leaves a stopped caller with no new 
 	await until(() => s.signal("reader.aborted") !== "" && s.signal("reader.exited") !== "", ready, "reader's abort signal and exit");
 	await until(() => entry(s, caller.id).activity === "idle", budgets.settle, "caller stopped");
 	expect(entry(s, caller.id)).toMatchObject({ live: true, cutOff: null, errored: false });
-	expect(s.swb("recall", "read", caller.id)).toContain("[the last turn was stopped]");
+	expect(recalled(s, caller.id)).toContain("[the turn was stopped]");
 	expect(snapshot()).toEqual(before);
 	console.log(
-		`Esc: entered=${s.signal("reader.entered")} aborted=${s.signal("reader.aborted")} exited=${s.signal("reader.exited")}; caller live=true idle cutOff=null errored=false; transcript: [the last turn was stopped]`,
+		`Esc: entered=${s.signal("reader.entered")} aborted=${s.signal("reader.aborted")} exited=${s.signal("reader.exited")}; caller live=true idle cutOff=null errored=false; transcript: [the turn was stopped]`,
 	);
 	type(s, caller.id, "reply SWB-after-abort");
 	await until(
