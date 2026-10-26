@@ -178,6 +178,8 @@ let terminalFocused = true;
 /** A wide Deck's roster, broken out of the Stage's window so the Stage fills the terminal. */
 let rosterHidden = false;
 let narrow = false;
+/** `narrow` as the screen shows it, once a layout has put the zoom in place; what `deck state` reports. */
+let shownNarrow = false;
 let deckWidth = 0;
 let deckHeight = 0;
 /** A cell's height in widths, as the terminal reports its pixels; most fonts are near 2. */
@@ -3483,6 +3485,11 @@ function layout(): Promise<void> {
 		deckHeight = height;
 		if (cellWidth > 0 && cellHeight > 0) cellRatio = Math.round(cellHeight / cellWidth);
 		const wasNarrow = narrow;
+		// The prefix keys read @swb_narrow, so it changes before `deck state` can say the Deck did.
+		if (deckWidth < NARROW_BELOW !== wasNarrow) {
+			if (wasNarrow) await tmuxAsync(UI, "set", "-u", "-t", deck, "@swb_narrow");
+			else await tmuxAsync(UI, "set", "-t", deck, "@swb_narrow", "1");
+		}
 		narrow = deckWidth < NARROW_BELOW;
 		apply();
 		await stageOps;
@@ -3491,8 +3498,6 @@ function layout(): Promise<void> {
 		if (narrow !== wasNarrow) {
 			// What floats over the Stage goes before a zoom: the roster draws a narrow Deck's overlays itself.
 			if (narrow) overlays.closeAll();
-			if (narrow) await tmuxAsync(UI, "set", "-t", deck, "@swb_narrow", "1");
-			else await tmuxAsync(UI, "set", "-u", "-t", deck, "@swb_narrow");
 			if (narrow && zoomFlag !== "1") await tmuxAsync(UI, "resize-pane", "-Z", "-t", active === "1" ? stagePane : rosterPane);
 			if (!narrow && zoomFlag === "1") await tmuxAsync(UI, "resize-pane", "-Z", "-t", rosterPane);
 		}
@@ -3504,6 +3509,7 @@ function layout(): Promise<void> {
 		}
 		syncStatus();
 		if (narrow !== wasNarrow) writeStageCard(desired());
+		shownNarrow = narrow;
 	});
 }
 
@@ -3951,7 +3957,7 @@ function viewState(): DeckState {
 		},
 		layout: {
 			width: deckWidth,
-			rosterOnly: narrow,
+			rosterOnly: shownNarrow,
 			split: side !== null,
 			shell: applied.shell?.at === "replace" ? "replace" : (shellPane?.at ?? null),
 			rosterHidden,

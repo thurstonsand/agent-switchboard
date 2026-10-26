@@ -30,6 +30,7 @@ Schema v7: update swb and the pi line together.
 - A sessions server killed under a Deck always comes back. A check that ran as the server shut down could stop the Deck's background worker, after which `w` and `⏎` did nothing, and the error saying so went with the next key. A check that fails now says so and the next one tries again, and a stopped worker's error stays.
 - A prefix key pressed just after moving to another pane acts on that pane: `M-a l` then `M-a v` could leave split for the Editor instead of the agent.
 - `swb deck state` shows a split's or a shell's pane gone once tmux has closed it, not just before.
+- Widening a narrow Deck, `M-a z` hides the roster as soon as `swb deck state` says the Deck is wide. It used to report the Deck wide while it was still laying itself out, when `M-a z` still acted as on a narrow Deck.
 - A long message reaches a Codex session on macOS. swb wrote each request to Codex's app-server socket in one go, and what didn't fit in the socket's buffer, 8 KB on macOS, was lost, so a message much over that never arrived. The rest now waits until the socket takes it.
 - Several swb processes opening a new database at once, as the first sessions after an install or the first indexing after this update do, no longer fail with `database is locked`.
 - Waking a session in Inactive leaves its row there while it starts, instead of moving it to its Project and back.
