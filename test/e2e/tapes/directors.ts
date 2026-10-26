@@ -274,6 +274,33 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"adopt-all": {
+		harnesses: ["claude", "codex"],
+		setup: async (s) => {
+			files(s);
+			const outside = (argv: string[], cwd = s.project) => {
+				const proc = Bun.spawnSync(argv, { cwd, env: s.env, stdout: "pipe", stderr: "pipe" });
+				if (proc.exitCode !== 0) throw new Error(`${argv[0]} exited ${proc.exitCode}: ${proc.stderr.toString().slice(-1500)}`);
+			};
+			const config = join(s.home, ".codex/config.toml");
+			writeFileSync(config, `${readFileSync(config, "utf8")}\n[features]\nmulti_agent_v2 = true\n`);
+			outside([join(s.bin, "pi"), "-p", "reply The deploy script lives in the scripts folder"]);
+			// A worktree since deleted: its session still comes in, and still searches.
+			const gone = join(s.root, "old-worktree");
+			mkdirSync(gone);
+			outside([join(s.bin, "pi"), "-p", "reply Spiked a retry queue for the API key rotation"], gone);
+			rmSync(gone, { recursive: true });
+			outside([join(s.bin, "claude"), "-p", "reply Rotate the API key every 90 days"]);
+			const task = `gAAAAA${Buffer.from("reply The API key lives in the prod vault").toString("base64url")}`;
+			outside([
+				join(s.bin, "codex"),
+				"exec",
+				"--skip-git-repo-check",
+				`call spawn_agent ${JSON.stringify({ message: task, task_name: "find_key" })}`,
+			]);
+		},
+	},
+
 	"codex-rewind": {
 		harnesses: ["codex"],
 		setup: async (s) => {

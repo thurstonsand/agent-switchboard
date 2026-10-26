@@ -222,6 +222,26 @@ export function readCodex(path: string, subagent = false): Conversation {
 	return { entries, leaf: tip, subagents };
 }
 
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const ROLLOUT = new RegExp(`-(${UUID})(?:_(${UUID}))?\\.jsonl(?:\\.zst)?$`);
+
+/** Each Codex thread on disk, by its id, and the rollout it's in now: its newest, after any revert. */
+export function codexThreads(home: string): Map<string, string> {
+	const newest = new Map<string, { at: number; path: string }>();
+	for (const dir of ["sessions", "archived_sessions"]) {
+		const root = join(home, dir);
+		if (!existsSync(root)) continue;
+		for (const file of new Bun.Glob("**/rollout-*.jsonl*").scanSync(root)) {
+			const [, thread, rollout] = ROLLOUT.exec(file) ?? [];
+			if (!thread) continue;
+			const at = created(rollout ?? thread);
+			const was = newest.get(thread);
+			if (!was || at > was.at) newest.set(thread, { at, path: join(root, file) });
+		}
+	}
+	return new Map([...newest].map(([thread, { path }]) => [thread, path]));
+}
+
 /**
  * Where a rollout is now. Codex moves an archived thread's rollout to archived_sessions/ and back on unarchive, and
  * compresses week-old ones, so its recorded path may have moved.

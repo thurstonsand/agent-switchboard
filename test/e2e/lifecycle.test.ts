@@ -114,7 +114,7 @@ test("swb adopt tracks a session pi ran outside swb, wakes it managed, and refus
 	const stray = join(s.root, "stray_y.jsonl");
 	writeFileSync(
 		stray,
-		`${JSON.stringify({ type: "session", version: 3, id: "stray-y", timestamp: new Date().toISOString(), cwd: s.project })}\n${JSON.stringify({ type: "message", timestamp: new Date().toISOString() })}\n`,
+		`${JSON.stringify({ type: "session", version: 3, id: "stray-y", timestamp: new Date().toISOString(), cwd: s.project })}\n${JSON.stringify({ type: "message", id: "u1", parentId: null, timestamp: new Date().toISOString(), message: { role: "user", content: [{ type: "text", text: "hi" }], timestamp: 0 } })}\n`,
 	);
 	expect(s.swbTry("adopt", stray).err.trim()).toBe(
 		`swb: adopt: pi won't find stray-y from ${s.project}; move it to ${dirname(transcript as string)}`,
