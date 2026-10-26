@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 — 2026-10-26
 
 Schema v7: update swb and the pi line together.
 
@@ -11,13 +11,10 @@ Schema v7: update swb and the pi line together.
 - `swb adopt --all` brings in every session pi, Claude Code, and Codex ran outside swb, archived as of its last turn and indexed, so `session_search` and `session_ask` reach your history from before swb. Sessions whose directory is gone come too. Run again, it adds only what's new.
 - Codex's own subagents, from either multi-agent version, are their parent session's conversation the way Claude Code's are: `session_search` finds what they said under their parent, and `session_ask`'s reader lists them in its map and reads them. A subagent that starts with a copy of its parent's conversation is read from where its own work begins.
 
-### Fixed
-
-- A session in a directory that never answers, such as a cloud drive's folder, or `~/Downloads` behind a macOS permission prompt nobody is there to answer, no longer hangs its harness as it starts, nor the Deck: swb gives git five seconds to find its repository, then treats the directory as none.
-- A Codex session you rewind to an earlier prompt keeps its card up to date. A rewind goes on in a new rollout file, and swb kept reading the old one. Its card, search, and `session_ask` now follow the rewind, and what it undid becomes an abandoned branch.
-
 ### Changed
 
+- `M-a s` opens the shell beside an agent's pane that's wider than it is tall and below one that isn't, keeps its side through resizes while it fits, and replaces the agent in its pane when it fits neither way, as on a narrow Deck. The new `shell_position` setting fixes it below or beside. `swb deck state` reports `layout.shell`.
+- Entering split, by `M-a v`, the split tab, or `swb_show_session`, puts the keyboard on the Editor.
 - swb needs tmux 3.8: a Peek, and `n`'s launch card and its menu, are floating panes over the Stage instead of a popup, so more than one shows at a time.
 - `n`'s picker says what a new session starts on, its harness as well as its model and effort, on a card on the Stage, with the preset's note. `Tab` drops the shortlist under it, a harness at a time and numbered: a number picks one, typing narrows it, and `Esc` keeps the one you had. With no room on the Stage, as on a narrow Deck, the roster draws the card.
 - A message, launch goal, or scheduled message over 100,000 characters is refused when it's sent, in pi, Claude Code, and Codex, telling the agent to put the detail in a file and send its path. One Codex refused for its length used to stop every message queued behind it.
@@ -25,6 +22,8 @@ Schema v7: update swb and the pi line together.
 
 ### Fixed
 
+- A session in a directory that never answers, such as a cloud drive's folder, or `~/Downloads` behind a macOS permission prompt nobody is there to answer, no longer hangs its harness as it starts, nor the Deck: swb gives git five seconds to find its repository, then treats the directory as none.
+- A Codex session you rewind to an earlier prompt keeps its card up to date. A rewind goes on in a new rollout file, and swb kept reading the old one. Its card, search, and `session_ask` now follow the rewind, and what it undid becomes an abandoned branch.
 - A launch's parent and Group go to the first session its process records, in every harness. In pi, `/new` before the first prompt in a session `n` started inside a Group keeps the new session in that Group, and the roster no longer nests a `/new` after a launched session's first turn under its launcher.
 - `Esc` goes back to the list for as long as a session on the Stage is starting, as its hint says. Once its harness's process was up, but not yet its screen, `Esc` went to the harness, which showed it as `^[`.
 - A sessions server killed under a Deck always comes back. A check that ran as the server shut down could stop the Deck's background worker, after which `w` and `⏎` did nothing, and the error saying so went with the next key. A check that fails now says so and the next one tries again, and a stopped worker's error stays.
@@ -32,6 +31,7 @@ Schema v7: update swb and the pi line together.
 - `swb deck state` shows a split's or a shell's pane gone once tmux has closed it, not just before.
 - Widening a narrow Deck, `M-a z` hides the roster as soon as `swb deck state` says the Deck is wide. It used to report the Deck wide while it was still laying itself out, when `M-a z` still acted as on a narrow Deck.
 - A long message reaches a Codex session on macOS. swb wrote each request to Codex's app-server socket in one go, and what didn't fit in the socket's buffer, 8 KB on macOS, was lost, so a message much over that never arrived. The rest now waits until the socket takes it.
+- A message's receipt in Claude Code no longer ends in a stray `�`.
 - Several swb processes opening a new database at once, as the first sessions after an install or the first indexing after this update do, no longer fail with `database is locked`.
 - Waking a session in Inactive leaves its row there while it starts, instead of moving it to its Project and back.
 
