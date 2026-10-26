@@ -134,6 +134,8 @@ export function scenario(
 	const profile = `export PATH=${path}\n`;
 	// Only the user's real login shell sets the marker; /bin/sh reads just .profile.
 	writeFileSync(join(home, ".zshenv"), `${profile}export SWB_E2E_LOGIN_SHELL=1\n`);
+	// macOS's /etc/zprofile runs path_helper after .zshenv, which puts /usr/bin ahead of this PATH; .zprofile runs after it.
+	writeFileSync(join(home, ".zprofile"), profile);
 	writeFileSync(join(home, ".bash_profile"), `${profile}export SWB_E2E_LOGIN_SHELL=1\n`);
 	writeFileSync(join(home, ".profile"), profile);
 	// pi 1.0.4 marks a freshly registered native provider usable at startup only if it has a stored
@@ -163,8 +165,8 @@ export function scenario(
 		SHELL: "/bin/sh",
 		TERM: "xterm-256color",
 		LANG: "C.UTF-8",
-		// swb and the test read local time alike: both from /etc/localtime, or both from this.
-		...(process.env.TZ ? { TZ: process.env.TZ } : {}),
+		// swb reads local time in the test's zone: bun test runs in UTC whatever the machine's zone is.
+		TZ: Intl.DateTimeFormat().resolvedOptions().timeZone,
 		XDG_CONFIG_HOME: join(home, ".config"),
 		XDG_STATE_HOME: join(home, ".local/state"),
 		XDG_CACHE_HOME: join(home, ".cache"),
