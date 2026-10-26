@@ -12,7 +12,7 @@
 		"@earendil-works/pi-coding-agent": "^1.4.0",
 		"@openai/codex": "^0.164.0",
 		"@thurstonsand/pi-wt": "^1.16.0",
-		"@types/bun": "1.4.3",
+		"@types/bun": "1.4.4",
 		"pi-sessions": "^0.22.0",
 		"typescript": "7.0.2"
 	}
