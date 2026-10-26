@@ -74,6 +74,8 @@ export function writeCodexLine(swb: string): void {
 				omit_tools_from: ["deferred"],
 				// session_ask waits as long as its reader works, which Codex's 300 s default would cut short.
 				tool_timeout_sec: 3600,
+				// swb mcp answers each call independently, so several session_ask readers can work at once.
+				supports_parallel_tool_calls: true,
 			},
 		},
 	};
