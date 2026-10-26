@@ -240,7 +240,10 @@ export function scenario(
 		requests: (harness) => {
 			const log = join(root, `${harness}-requests.jsonl`);
 			if (!existsSync(log)) return [];
-			return readFileSync(log, "utf8")
+			// The fake server may be partway through appending a line: only whole lines are requests yet.
+			const text = readFileSync(log, "utf8");
+			return text
+				.slice(0, text.lastIndexOf("\n") + 1)
 				.split("\n")
 				.filter(Boolean)
 				.map((line) => JSON.parse(line) as Record<string, unknown>);
