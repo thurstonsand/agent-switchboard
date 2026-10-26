@@ -14,7 +14,7 @@ Sessions run headless in a dedicated tmux server. `swb` opens a Deck: a roster o
    mise use -g github:thurstonsand/agent-switchboard
    ```
 
-2. The pi line, swb's pi extension, from npm, or from this repo's generated `pi` branch where an npm mirror lags. With pi-sessions, it needs pi-sessions 0.19.0 or later:
+2. The pi line, swb's pi extension, from npm, or from this repo's generated `pi` branch where an npm mirror lags. With pi-sessions, it needs pi-sessions 0.22.0 or later:
 
    ```sh
    pi install npm:@thurstonsand/pi-agent-switchboard

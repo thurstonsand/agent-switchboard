@@ -11,7 +11,7 @@
         "@openai/codex": "^0.164.0",
         "@thurstonsand/pi-wt": "^1.16.0",
         "@types/bun": "1.4.3",
-        "pi-sessions": "^0.21.0",
+        "pi-sessions": "^0.22.0",
         "typescript": "7.0.2",
       },
     },
@@ -450,7 +450,7 @@
 
     "path-to-regexp": ["path-to-regexp@8.4.2", "", {}, "sha512-qRcuIdP69NPm4qbACK+aDogI5CBDMi1jKe0ry5rSQJz8JVLsC7jV8XpiJjGRLLol3N+R5ihGYcrPLTno6pAdBA=="],
 
-    "pi-sessions": ["pi-sessions@0.21.0", "", { "peerDependencies": { "@earendil-works/pi-agent-core": "*", "@earendil-works/pi-ai": "*", "@earendil-works/pi-coding-agent": "*", "@earendil-works/pi-tui": "*", "typebox": "*" } }, "sha512-prvznH+7ohdd7AWNq9fjTbWpwwLVMD4a91an9oUFoQSAghzCNF+uuofPMXfMTUQ9cp4eDYB0V4uc3vr6DOl4hw=="],
+    "pi-sessions": ["pi-sessions@0.22.0", "", { "peerDependencies": { "@earendil-works/pi-agent-core": "*", "@earendil-works/pi-ai": "*", "@earendil-works/pi-coding-agent": "*", "@earendil-works/pi-tui": "*", "typebox": "*" } }, "sha512-k4cVEnLScYfezTYMdhIkDmXL0sMsrcmzLRidGkNScUKT9JYQ/kuBvdf/eIsH022WWSgFjWLG3gUYFHXr72oVvg=="],
 
     "pkce-challenge": ["pkce-challenge@5.0.1", "", {}, "sha512-wQ0b/W4Fr01qtpHlqSqspcj3EhBvimsdh0KlHhH8HRZnMsEa0ea2fTULOXOS9ccQr3om+GcGRk4e+isrZWV8qQ=="],
 

@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { entry, reply, state, waitState } from "./harness/deck.ts";
-import { budgets, release, repo, type Scenario, scenario, until } from "./harness/index.ts";
+import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
 afterEach(async () => {
@@ -36,7 +36,6 @@ function history(): string {
 }
 
 test("managed pi yields recall to swb, keeps subagents, and stays yielded after /reload; its unmanaged child retains recall", async () => {
-	if (!process.env.SWB_E2E_PI_SESSIONS) throw new Error("Run with SWB_E2E_PI_SESSIONS pointing at the recall-capable checkout");
 	s = scenario("recall", "pi-sessions", { packages: ["pi-sessions"], recorder: true });
 	enableRecall();
 	s.swb("drive", "start", "--", "new");
@@ -90,47 +89,4 @@ test("managed pi yields recall to swb, keeps subagents, and stays yielded after 
 	);
 	s.save("subagent-search.json", found);
 	expect(JSON.parse(found).details.sessions.map((x: { id: string }) => x.id)).toEqual([parent]);
-});
-
-test("the pinned, older pi-sessions keeps a managed pi from starting, naming the tool both register", async () => {
-	// Explicitly use the pinned package even when the checkout override is set for the positive test.
-	const override = process.env.SWB_E2E_PI_SESSIONS;
-	delete process.env.SWB_E2E_PI_SESSIONS;
-	try {
-		s = scenario("recall", "pi-sessions-old", { packages: ["pi-sessions"], recorder: true });
-	} finally {
-		if (override) process.env.SWB_E2E_PI_SESSIONS = override;
-	}
-	enableRecall();
-	const launch = Bun.spawn([`${s.bin}/swb`, "launch", "--harness", "pi", "--cwd", s.project], {
-		env: s.env,
-		cwd: s.project,
-		stdin: new Blob(["reply never"]),
-		stdout: "pipe",
-		stderr: "pipe",
-	});
-	// Nothing to read until swb starts its sessions server.
-	const panes = () => {
-		try {
-			return s
-				.tmux(s.servers.sessions, "list-panes", "-a", "-F", "#{pane_id}")
-				.split("\n")
-				.filter(Boolean)
-				.map((pane) => s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-S", "-80", "-t", pane))
-				.join("\n");
-		} catch {
-			return "";
-		}
-	};
-	const refusal = await until(
-		() => /Tool "session_ask" conflicts with \S*pi-sessions/.exec(panes())?.[0],
-		budgets.piReady,
-		"pi's refusal to load both extensions",
-	);
-	launch.kill();
-	s.save("old-refusal.txt", panes());
-	console.log(
-		`old pi-sessions ${JSON.parse(readFileSync(join(repo, "node_modules/pi-sessions/package.json"), "utf8")).version}: ${refusal}`,
-	);
-	expect(s.ls()).toEqual([]);
 });
