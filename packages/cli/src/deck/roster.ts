@@ -10,6 +10,7 @@ import {
 	matchesKey,
 	ProcessTerminal,
 	type RgbColor,
+	sliceByColumn,
 	TuiAltScreen,
 	type TuiMouseEvent,
 	type TuiMouseEventResult,
@@ -20,7 +21,6 @@ import {
 import { harness as asHarness, configDir, type Harness, operatorDir, projectRoot, type SnoozePreset, VIEWS, type View } from "@swb/shared";
 import { harnessName } from "@swb/shared/mailbox";
 import { mark, span } from "@swb/shared/trace";
-import type { Subprocess } from "bun";
 import { ConfigError, configPath, type Loaded, readConfig } from "../config.ts";
 import { type CutOff, displayName, openDescendants, projectName } from "../derive.ts";
 import { completions, expandHome, type Target, type TargetTree, targetName } from "../dirs.ts";
@@ -29,9 +29,9 @@ import { unnameable } from "../groups.ts";
 import { type Catalog, type Choice, defaultLaunch, fromDefault, type LaunchTarget, presetLabels, shortlist } from "../harnesses.ts";
 import { ensureOperatorDir } from "../operator.ts";
 import { presetUntil } from "../schedules.ts";
-import { loginShell, newer, nvimEditor, SWB } from "../sessions.ts";
+import { loginShell, newer, nvimEditor } from "../sessions.ts";
 import type { DeckLayout } from "../store.ts";
-import { CLIENT_CWD, cleanEnv, quote, SESSIONS, tmux, tmuxAsync, tmuxBin, tmuxTry, UI } from "../tmux.ts";
+import { quote, SESSIONS, tmux, tmuxAsync, tmuxTry, UI } from "../tmux.ts";
 import { VERSION } from "../version.ts";
 import { writeConfig } from "../write-config.ts";
 import { Control } from "./control.ts";
@@ -48,13 +48,13 @@ import {
 	writeAtomic,
 	writeCard,
 } from "./deck.ts";
+import { type Overlay, type OverlayButton, Overlays, type OverlayView } from "./overlay.ts";
 import type {
 	Card,
 	DeckState,
 	Entry,
 	FromWorker,
 	PeekInfo,
-	PeekView,
 	PickerState,
 	ShellAt,
 	Snapshot,
@@ -741,9 +741,7 @@ function apply(): void {
 		}
 	}
 	tui.requestRender();
-	// A pane coming or going moves the Stage's panes out from under the Peek; render puts it back.
 	const shellMoved = d.shell?.target !== prev.shell?.target || d.shell?.at !== prev.shell?.at;
-	if (d.side !== prev.side || shellMoved) closePeek();
 	// Split's pane is cut from the whole Stage, and leaving split gives its columns back to the Editor's pane, so a shell's pane
 	// beside or below either goes first; syncShell puts it back where it now belongs.
 	if ((d.side === null) !== (prev.side === null)) stageOps = stageOps.then(dropShellPane);
@@ -1261,6 +1259,8 @@ class Roster implements Component, Focusable {
 	settings: SettingsPane | null = null;
 	search = new Input({ prompt: "/ " });
 	pickerTop = 0;
+	/** The picker's first list row, under its title, a narrow Deck's launch card, its input, and a rule. */
+	pickerListY = 0;
 	completed: { typed: string; rows: string[] } | null = null;
 	path = new Input({ prompt: "" });
 	/** A session being dragged by the mouse; `moved` once the pointer has left its row. */
@@ -1269,8 +1269,10 @@ class Roster implements Component, Focusable {
 	hover: string | null = null;
 	/** Where the pointer rests, which lights the control under it; null after a key or once it leaves. */
 	pointer: { x: number; y: number } | null = null;
-	/** A narrow Deck's Peek, as the last render drew it. */
-	inline: InlinePeek | null = null;
+	/** The launch card as the picker drew it in the roster, when the Stage has no room for it. */
+	card: string[] | null = null;
+	/** The overlays over the roster's own lines, as the last render drew them. */
+	over: Overlay[] = [];
 	listTop = 0;
 	listHeight = 0;
 	/** What a click does, by row and column range, as of the last render. */
@@ -1573,6 +1575,7 @@ class Roster implements Component, Focusable {
 		let relit = false;
 		if (this.settings) return this.settings.handleMouse(event);
 		if (event.type === "move") {
+			overlays.pointerAway();
 			const before = this.targetAt(this.pointer);
 			this.pointer = { x: event.x, y: event.y };
 			relit = this.targetAt(this.pointer) !== before;
@@ -1590,9 +1593,9 @@ class Roster implements Component, Focusable {
 			return { handled: true, render: true };
 		}
 		if (this.choosing) {
-			const listRow = this.pickerTop + event.y - PICKER_TOP;
+			const listRow = this.pickerTop + event.y - this.pickerListY;
 			if (event.type === "move") {
-				if (this.choosing.confirm || event.y < PICKER_TOP || event.y >= PICKER_TOP + this.listHeight)
+				if (this.choosing.confirm || this.choosing.menu || event.y < this.pickerListY || event.y >= this.pickerListY + this.listHeight)
 					return { handled: true, render: relit };
 				const count = this.choosing.mode === "pick" ? this.pickRows().length : this.addRows().length;
 				if (listRow < count && listRow !== this.choosing.choice) {
@@ -1607,16 +1610,19 @@ class Roster implements Component, Focusable {
 			else if (event.button === "left" && event.type === "click") {
 				const target = this.pressed;
 				this.pressed = null;
-				target?.act();
+				if (target) target.act();
+				else if (this.choosing.menu) this.choosing.menu = null;
 			}
 			return { handled: true, render: true };
 		}
 		if (event.type === "move") {
-			const inline = this.inline;
-			// On a narrow Deck's Peek, the pointer is still on the Peek's row.
-			const onPeek = inline && event.x >= inline.left && event.y >= inline.top && event.y < inline.top + inline.view.lines.length;
+			const on = this.over.find((o) => event.x >= o.x && event.x < o.x + o.width && event.y >= o.y && event.y < o.y + o.view.lines.length);
+			if (on) {
+				on.pointer?.();
+				return { handled: true, render: relit };
+			}
 			const row = this.rowAt(event.y);
-			const hover = onPeek ? inline.id : row?.kind === "session" ? row.key : null;
+			const hover = row?.kind === "session" ? row.key : null;
 			if (hover === this.hover) return { handled: true, render: relit };
 			this.hover = hover;
 			return { handled: true, render: true };
@@ -1697,27 +1703,32 @@ class Roster implements Component, Focusable {
 		return peek.byKeys && focus === "roster" ? spot(index, "cursor") : null;
 	}
 
+	/** Puts these overlays on screen: the roster draws those over its own lines, and the rest float over the Stage. */
+	place(lines: string[], want: Overlay[], width: number): void {
+		this.over = want.filter((o) => o.x + o.width <= width);
+		for (const o of this.over) this.drawOver(lines, o, width);
+		syncWatch(this.pointer !== null || peek.spot !== null || want.some((o) => o.leaves));
+		overlays.sync(want.filter((o) => !this.over.includes(o)));
+	}
+
 	/**
-	 * A narrow Deck's Peek, drawn over the roster's own lines at the right edge, as out of the way as it can be. Its
-	 * buttons are click targets ahead of everything beneath it, and the rest of it swallows clicks.
+	 * An overlay over the roster's own lines, drawn into them rather than floated: a float made or killed in a zoomed
+	 * window, as a narrow Deck's is, has tmux resize the zoomed pane twice. Its buttons are click targets ahead of
+	 * everything beneath it, and the rest of it swallows clicks.
 	 */
-	drawPeek(lines: string[], rows: Row[], spot: PeekSpot, width: number, height: number): InlinePeek | null {
-		const row = rows.find((r) => r.key === spot.id);
-		if (row?.kind !== "session" || width < PEEK_MIN_COLS) return null;
-		const w = Math.max(PEEK_MIN_COLS, Math.min(PEEK_COLS, width - 16));
-		const view = peekView(row, w, height, "right");
-		const top = Math.max(0, Math.min(spot.y - 1, height - view.lines.length));
-		const left = width - w;
+	drawOver(lines: string[], o: Overlay, width: number): void {
 		const p = this.pointer;
-		const hot = view.buttons.find((b) => p?.y === top + b.y && p.x >= left + b.from && p.x < left + b.to);
-		view.lines.forEach((line, i) => {
-			lines[top + i] = `${truncateToWidth(lines[top + i] ?? "", left, "", true)}\x1b[0m${hot && hot.y === i ? hot.hot : line}`;
+		const hot = o.view.buttons.find((b) => p?.y === o.y + b.y && p.x >= o.x + b.from && p.x < o.x + b.to);
+		while (lines.length < o.y + o.view.lines.length) lines.push("");
+		o.view.lines.forEach((line, i) => {
+			const under = lines[o.y + i] as string;
+			lines[o.y + i] =
+				`${truncateToWidth(under, o.x, "", true)}\x1b[0m${hot?.y === i ? hot.hot : line}\x1b[0m${sliceByColumn(under, o.x + o.width, width - o.x - o.width)}`;
 		});
 		this.targets.unshift(
-			...view.buttons.map((b) => ({ y: top + b.y, from: left + b.from, to: left + b.to, act: () => void prefixKey(b.key, b.id) })),
-			...view.lines.map((_, i) => ({ y: top + i, from: left, to: width, act: () => {} })),
+			...o.view.buttons.map((b) => ({ y: o.y + b.y, from: o.x + b.from, to: o.x + b.to, act: b.act })),
+			...o.view.lines.map((_, i) => ({ y: o.y + i, from: o.x, to: o.x + o.width, act: () => {} })),
 		);
-		return { ...spot, view, top, left };
 	}
 
 	rowAt(y: number): Row | undefined {
@@ -2045,6 +2056,7 @@ class Roster implements Component, Focusable {
 			pin: from,
 			confirm: null,
 			preset: 0,
+			menu: null,
 		};
 		// The last list shows at once; the worker's fresh one replaces it when its scan lands.
 		post({ type: "dirs" });
@@ -2162,12 +2174,56 @@ class Roster implements Component, Focusable {
 		this.choosing = null;
 	}
 
+	/** Opens the launch card's menu on the chosen preset, or closes it keeping that one. */
+	toggleMenu(): void {
+		const choosing = this.choosing as Choosing;
+		if (choosing.menu) choosing.menu = null;
+		else if (pickerPresets().length > 0) choosing.menu = { query: "", cursor: Math.max(0, menuPresets("").indexOf(choosing.preset)) };
+	}
+
+	choosePreset(index: number): void {
+		const choosing = this.choosing as Choosing;
+		choosing.preset = index;
+		choosing.menu = null;
+	}
+
+	/**
+	 * The menu's keys: a number picks what it shows by its place until something's typed, when it narrows the menu like any
+	 * other key, since model names have numbers in them; the arrows and Enter pick the highlighted one.
+	 */
+	menuInput(data: string): void {
+		const choosing = this.choosing as Choosing;
+		const menu = choosing.menu as Menu;
+		const shown = menuPresets(menu.query);
+		const k = decodeKittyPrintable(data) ?? data;
+		if (matchesKey(data, "escape") || matchesKey(data, "tab") || matchesKey(data, "shift+tab")) choosing.menu = null;
+		else if (matchesKey(data, "up") || matchesKey(data, "down"))
+			menu.cursor = Math.max(0, Math.min(shown.length - 1, menu.cursor + (matchesKey(data, "up") ? -1 : 1)));
+		else if (matchesKey(data, "enter")) {
+			const index = shown[menu.cursor];
+			if (index !== undefined) this.choosePreset(index);
+		} else if (menu.query === "" && /^[1-9]$/.test(k)) {
+			const index = shown[Number(k) - 1];
+			if (index !== undefined) this.choosePreset(index);
+		} else if (matchesKey(data, "backspace")) {
+			menu.query = menu.query.slice(0, -1);
+			menu.cursor = 0;
+		} else if (k.length === 1 && k >= " ") {
+			menu.query += k;
+			menu.cursor = 0;
+		}
+	}
+
 	pickerInput(data: string): void {
 		const choosing = this.choosing as Choosing;
 		if (choosing.confirm) {
 			const k = decodeKittyPrintable(data) ?? data;
 			if (k === "y" || matchesKey(data, "enter")) this.finishRemove(true);
 			else if (k === "n" || matchesKey(data, "escape")) this.finishRemove(false);
+			return;
+		}
+		if (choosing.menu) {
+			this.menuInput(data);
 			return;
 		}
 		const first = choosing.mode === "pick" ? 0 : -1;
@@ -2180,10 +2236,8 @@ class Roster implements Component, Focusable {
 		} else if (matchesKey(data, "up") || matchesKey(data, "down")) {
 			choosing.choice = Math.max(first, Math.min(count - 1, choosing.choice + (matchesKey(data, "up") ? -1 : 1)));
 		} else if (choosing.mode === "pick" && (matchesKey(data, "tab") || matchesKey(data, "shift+tab"))) {
-			// Tab picks what runs the new session; in add mode it completes the path instead.
-			const step = matchesKey(data, "shift+tab") ? -1 : 1;
-			const count = pickerPresets().length;
-			if (count > 0) choosing.preset = (((choosing.preset + step) % count) + count) % count;
+			// Tab opens the menu of what runs the new session; in add mode it completes the path instead.
+			this.toggleMenu();
 		} else if (choosing.mode === "add" && matchesKey(data, "tab")) {
 			const match = this.addRows()[Math.max(0, choosing.choice)];
 			if (match) {
@@ -2235,14 +2289,21 @@ class Roster implements Component, Focusable {
 		const input = adding
 			? `${prompt}${this.path.render(Math.max(10, width - 2 - visibleWidth(prompt)))[0] ?? ""}`
 			: (this.search.render(Math.max(10, width - 2))[0] ?? "");
-		// The picker's detail is its path and two blank lines.
-		const bodyHeight = Math.max(1, height - 10);
+		// The launch card goes on the Stage; with no room there, as on a narrow Deck, the roster draws it under its title.
+		const card = launchOnStage(width) ? null : launchCard(choosing, width, "right");
+		for (const b of card?.buttons ?? []) this.targets.push({ y: 1 + b.y, from: b.from, to: b.to, act: b.act });
+		this.card = card ? card.lines.map((line) => Bun.stripANSI(line)) : null;
+		// While the menu is open, the rest of the picker waits behind it.
+		const muted = (line: string) => (choosing.menu ? gray(Bun.stripANSI(line)) : line);
 		const lines = [
-			` ${bold(adding ? "add a directory" : "new session in")}`,
-			this.presetRow(1, width),
-			` ${input}`,
+			muted(` ${bold(adding ? "add a directory" : "new session in")}`),
+			...(card?.lines ?? []),
+			muted(` ${input}`),
 			gray("─".repeat(width)),
 		];
+		this.pickerListY = lines.length;
+		// The picker's detail is its path and two blank lines.
+		const bodyHeight = Math.max(1, height - lines.length - 6);
 		let body: [string, (() => void) | null][];
 		let detail: string;
 		if (!adding) {
@@ -2280,9 +2341,9 @@ class Roster implements Component, Focusable {
 		this.listHeight = bodyHeight;
 		const shown = body.slice(top, top + bodyHeight);
 		shown.forEach(([, act], i) => {
-			// The remove prompt is modal: only its own answers are buttons.
-			if (!act || choosing.confirm) return;
-			const y = PICKER_TOP + i;
+			// The remove prompt is modal: only its own answers are buttons; and so is the menu, which a click elsewhere closes.
+			if (!act || choosing.confirm || choosing.menu) return;
+			const y = this.pickerListY + i;
 			// The cursor row's ✕, at its right edge, removes it.
 			if (!adding && top + i === choosing.choice && this.pickRows()[choosing.choice]?.kind === "target")
 				this.targets.push({ y, from: width - 3, to: width, act: () => this.askRemove() });
@@ -2290,22 +2351,30 @@ class Roster implements Component, Focusable {
 		});
 		const out = shown.map(([line]) => line);
 		while (out.length < bodyHeight) out.push("");
-		if (choosing.confirm) overlayConfirm(out, width, choosing.confirm, (yes) => this.finishRemove(yes), this.targets);
-		lines.push(...out, gray("─".repeat(width)), detail, "", "", this.messageLine(Date.now()));
+		if (choosing.confirm) overlayConfirm(out, width, choosing.confirm, this.pickerListY, (yes) => this.finishRemove(yes), this.targets);
+		lines.push(...out.map(muted), gray("─".repeat(width)), muted(detail), "", "", this.messageLine(Date.now()));
+		const presets = pickerPresets();
 		// The remove prompt carries its own keys.
 		const hints: Hint[] = choosing.confirm
 			? []
-			: adding
+			: choosing.menu
 				? [
-						["⇥", "complete", () => this.pickerInput("\t")],
-						["⏎", "start", () => this.pickerInput("\r")],
-						["esc", choosing.opened === "pick" ? "back" : "cancel", () => this.pickerInput("\x1b")],
+						...(choosing.menu.query === "" ? ([[`1–${Math.min(9, presets.length)}`, "pick", () => {}]] as Hint[]) : []),
+						["⏎", "choose", () => this.pickerInput("\r")],
+						["esc", "keep", () => this.pickerInput("\x1b")],
 					]
-				: [
-						["⏎", "start", () => this.pickerInput("\r")],
-						[`${config.prefix} d`, "remove", () => this.askRemove()],
-						["esc", "cancel", () => this.pickerInput("\x1b")],
-					];
+				: adding
+					? [
+							["⇥", "complete", () => this.pickerInput("\t")],
+							["⏎", "start", () => this.pickerInput("\r")],
+							["esc", choosing.opened === "pick" ? "back" : "cancel", () => this.pickerInput("\x1b")],
+						]
+					: [
+							["⏎", "start", () => this.pickerInput("\r")],
+							...(presets.length > 0 ? ([["⇥", "preset", () => this.toggleMenu()]] as Hint[]) : []),
+							[`${config.prefix} d`, "remove", () => this.askRemove()],
+							["esc", "cancel", () => this.pickerInput("\x1b")],
+						];
 		lines.push(
 			this.clickable(
 				lines.length,
@@ -2323,13 +2392,15 @@ class Roster implements Component, Focusable {
 		const height = tui.terminal.rows;
 		if (this.settings) {
 			syncPeek(wantPeek(null));
-			this.inline = null;
-			return this.settings.render(width, height);
+			const lines = this.settings.render(width, height);
+			this.place(lines, [], width);
+			return lines;
 		}
 		if (this.choosing) {
 			syncPeek(wantPeek(null));
-			this.inline = null;
-			return this.renderPicker(width, height);
+			const lines = this.renderPicker(width, height);
+			this.place(lines, launchOverlays(this.choosing, width, height), width);
+			return lines;
 		}
 		const now = Date.now();
 		const rows = this.rows();
@@ -2349,10 +2420,8 @@ class Roster implements Component, Focusable {
 			this.messageLine(now, this.listTop + bodyHeight + 1 + detailLines),
 			this.hints(this.listTop + bodyHeight + 1 + detailLines + 1),
 		);
-		// A wide Deck's Peek is a popup over the Stage; a narrow Deck has no Stage beside the roster, so the roster draws it.
-		const spot = wantPeek(this.peekSpot(rows, index));
-		syncPeek(narrow ? null : spot);
-		this.inline = narrow && spot ? this.drawPeek(lines, rows, spot, width, height) : null;
+		syncPeek(wantPeek(this.peekSpot(rows, index)));
+		this.place(lines, peekOverlays(rows, width, height), width);
 		const out = lines.map((line) => truncateToWidth(line, width, "…", true));
 		if (perf.render.n === 0) mark("roster.first-frame");
 		perf.render.add(performance.now() - t0);
@@ -2566,60 +2635,6 @@ class Roster implements Component, Focusable {
 		);
 	}
 
-	/** n's presets, in a row of their own: the current one bright, the rest dim, scrolled to keep it in view. Each is a button. */
-	presetRow(y: number, width: number): string {
-		const choosing = this.choosing as Choosing;
-		const presets = pickerPresets();
-		if (presets.length === 0) {
-			const target = pickerTarget(choosing);
-			const text =
-				target === null
-					? gray("finding harnesses…")
-					: typeof target === "string"
-						? red(target)
-						: `${cyan(target.harness)} ${gray("· its own defaults")}`;
-			return truncateToWidth(` ${text}`, width, "…");
-		}
-		const labels = presetLabels(presets.map((c) => c.preset));
-		const at = Math.min(choosing.preset, labels.length - 1);
-		const sep = gray(" · ");
-		// Room left by the ‹ before and the › ⇥ after.
-		const room = width - 6;
-		// The widest run of labels around the current one that fits.
-		let from = at;
-		let to = at + 1;
-		const runWidth = () => labels.slice(from, to).reduce((n, l) => n + visibleWidth(l), 0) + (to - from - 1) * 3;
-		for (let grew = true; grew; ) {
-			grew = false;
-			if (to < labels.length) {
-				to++;
-				if (runWidth() > room) to--;
-				else grew = true;
-			}
-			if (from > 0) {
-				from--;
-				if (runWidth() > room) from++;
-				else grew = true;
-			}
-		}
-		const step = (by: number) => () => {
-			choosing.preset = (((at + by) % labels.length) + labels.length) % labels.length;
-		};
-		const parts: [string, (() => void) | null][] = [from > 0 ? [gray("‹"), step(-1)] : [" ", null]];
-		labels.slice(from, to).forEach((label, i) => {
-			const index = from + i;
-			if (i > 0) parts.push([sep, null]);
-			parts.push([
-				index === at ? bold(cyan(label)) : gray(label),
-				() => {
-					choosing.preset = index;
-				},
-			]);
-		});
-		parts.push(to < labels.length ? [gray(" ›"), step(1)] : ["  ", null], [gray(" ⇥"), step(1)]);
-		return truncateToWidth(this.clickable(y, parts), width, "…");
-	}
-
 	invalidate(): void {}
 }
 
@@ -2641,13 +2656,29 @@ type Choosing = {
 	confirm: { name: string; worktrees: number; path: string; covers: string[] } | null;
 	/** What the new session runs in: an index into pickerPresets. */
 	preset: number;
+	menu: Menu | null;
 };
 
-const PICKER_TOP = 4;
+/** The launch card's menu, while it's open: what's typed to narrow it, and its highlight, an index into what it shows. */
+type Menu = { query: string; cursor: number };
 
-/** What n's Tab steps through: every preset that can start, from the default. */
+/** Every preset that can start, from the default. */
 function pickerPresets(): Choice[] {
 	return fromDefault(shortlist(config, catalog) ?? []).filter((c) => c.reason === null);
+}
+
+/** What the menu shows, as indexes into pickerPresets: a harness at a time, in the order they first appear, narrowed by `query`. */
+function menuPresets(query: string): number[] {
+	const presets = pickerPresets();
+	const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+	const matches = (c: Choice) => {
+		const p = c.preset;
+		const text = `${p.harness} ${harnessName(p.harness)} ${p.provider ?? ""} ${p.model ?? ""} ${p.effort ?? ""} ${p.agent ?? ""} ${c.note}`;
+		return words.every((w) => text.toLowerCase().includes(w));
+	};
+	return [...new Set(presets.map((c) => c.preset.harness))].flatMap((h) =>
+		presets.flatMap((c, i) => (c.preset.harness === h && matches(c) ? [i] : [])),
+	);
 }
 
 /**
@@ -2706,6 +2737,7 @@ function overlayConfirm(
 	out: string[],
 	width: number,
 	confirm: { name: string; worktrees: number },
+	listY: number,
 	answer: (yes: boolean) => void,
 	targets: ClickTarget[],
 ): void {
@@ -2725,7 +2757,7 @@ function overlayConfirm(
 	lines.forEach((line, i) => {
 		out[top + i] = line;
 	});
-	const y = PICKER_TOP + top + 5;
+	const y = listY + top + 5;
 	targets.unshift(
 		{ y, from: left + 2, to: left + 10, act: () => answer(true) },
 		{ y, from: left + 12, to: left + 18, act: () => answer(false) },
@@ -2819,9 +2851,9 @@ function foldedTally(hidden: Entry[]): string {
 
 // ── Peek ────────────────────────────────────────────────────────────────
 
-// A Peek is a session's particulars and keys in a popup beside its row: a tmux popup on the Stage's own nested client,
-// so it never covers the roster and never takes the roster's keyboard. The UI server's bindings close it when the
-// pointer leaves (see deck.ts); `swb __peek` draws it from paths.peek and posts its buttons back as keys.
+// A Peek is a session's particulars and keys in an overlay beside its row (see overlay.ts): on the Stage, so it never
+// covers the roster, or on a narrow Deck, which has no Stage beside the roster, over the roster's right edge. The UI
+// server puts it away when the pointer leaves (see deck.ts).
 
 const PEEK_COLS = 48;
 /** Narrower than this, as the roster is for a moment while tmux zooms a pane over it, there is no Peek. */
@@ -2838,11 +2870,10 @@ const PEEK_INFO_MS = 2000;
 const PEEK_FOLD_ROWS = 8;
 
 type PeekSpot = { id: string; source: "pointer" | "cursor"; y: number };
-type InlinePeek = PeekSpot & { view: PeekView; top: number; left: number };
-type ShownPeek = PeekSpot & { proc: Subprocess; tty: string; width: number; maxHeight: number; json: string; view: PeekView };
 
 const peek = {
-	shown: null as ShownPeek | null,
+	/** Where the Peek is, once the pointer rested there and what it shows came in or stopped being waited for. */
+	settled: null as PeekSpot | null,
 	pending: null as { spot: PeekSpot; timer: Timer } | null,
 	/** Where the last render wanted the Peek. */
 	spot: null as PeekSpot | null,
@@ -2855,7 +2886,6 @@ const peek = {
 	info: new Map<string, { info: PeekInfo; at: number }>(),
 	asked: new Set<string>(),
 	infoWaits: new Map<string, () => void>(),
-	ops: Promise.resolve(),
 };
 
 const spotKey = (spot: PeekSpot | null | undefined) => (spot ? `${spot.id}@${spot.y}` : null);
@@ -2865,44 +2895,47 @@ function cancelPendingPeek(): void {
 	peek.pending = null;
 }
 
-/** Where render wants a Peek, unless it was put away; asks for what it shows, and for word of the pointer leaving. */
+/** Where render wants a Peek, unless it was put away; asks for what it shows. */
 function wantPeek(want: PeekSpot | null): PeekSpot | null {
 	let spot = want;
 	if (spot?.id !== peek.dismissed) peek.dismissed = null;
 	else spot = null;
 	peek.spot = spot;
-	// Anything the pointer lights, a row, a control, or the Peek, goes out when the pointer leaves the roster.
-	syncWatch(roster.pointer !== null || spot !== null);
 	if (spot) askPeekInfo(spot.id);
 	return spot;
 }
 
-/** Brings the popup Peek to `spot`: at once to close, after the pointer rests to open or move. */
+/** Settles the Peek on `spot`: at once to close, after the pointer rests, and what it shows comes in, to open or move. */
 function syncPeek(spot: PeekSpot | null): void {
-	const shown = peek.shown;
-	if (shown && spot && spotKey(shown) === spotKey(spot)) {
-		shown.source = spot.source;
+	if (spotKey(peek.settled) === spotKey(spot)) {
+		peek.settled = spot;
 		cancelPendingPeek();
-		refreshPeek(shown);
 		return;
 	}
 	if (peek.pending && spotKey(peek.pending.spot) === spotKey(spot)) return;
 	cancelPendingPeek();
 	if (!spot) {
-		closePeek();
+		peek.settled = null;
 		return;
 	}
-	const target = spot;
-	const timer = setTimeout(
-		() => {
-			peek.pending = null;
-			openPeek(target);
-		},
-		shown ? PEEK_SWITCH_MS : PEEK_OPEN_MS,
-	);
-	peek.pending = { spot: target, timer };
+	const pending = {
+		spot,
+		timer: setTimeout(
+			async () => {
+				if (!peek.info.has(spot.id))
+					await Promise.race([new Promise<void>((resolve) => peek.infoWaits.set(spot.id, resolve)), Bun.sleep(PEEK_INFO_WAIT_MS)]);
+				if (peek.pending !== pending) return;
+				peek.pending = null;
+				peek.settled = spot;
+				tui.requestRender();
+			},
+			peek.settled ? PEEK_SWITCH_MS : PEEK_OPEN_MS,
+		),
+	};
+	peek.pending = pending;
 }
 
+/** Whether the UI server reports the pointer leaving: while something under it is lit, or something leaves with it. */
 function syncWatch(want: boolean): void {
 	if (want === peek.watching) return;
 	peek.watching = want;
@@ -2927,111 +2960,90 @@ function onPeekInfo(id: string, info: PeekInfo): void {
 	tui.requestRender();
 }
 
-/** Opens the Peek at `spot`, closing the one shown in the same tmux command; a later render may have moved on already. */
-function openPeek(spot: PeekSpot): void {
-	peek.ops = peek.ops.then(async () => {
-		try {
-			if (spotKey(peek.spot) !== spotKey(spot)) return;
-			if (!peek.info.has(spot.id))
-				await Promise.race([new Promise<void>((resolve) => peek.infoWaits.set(spot.id, resolve)), Bun.sleep(PEEK_INFO_WAIT_MS)]);
-			const panes = (
-				await tmuxAsync(
-					UI,
-					"list-panes",
-					"-t",
-					stagePane,
-					"-F",
-					"#{pane_id}\t#{pane_left}\t#{pane_top}\t#{pane_width}\t#{pane_height}\t#{pane_tty}",
-				)
-			)
-				.split("\n")
-				.map((line) => {
-					const [id, left, top, width, height, tty] = line.split("\t") as [string, string, string, string, string, string];
-					return { id, left: Number(left), top: Number(top), width: Number(width), height: Number(height), tty };
-				});
-			// The spot is a roster row; the panes' tops are the window's, below each pane's label. A roster hidden since has no Peek.
-			const rosterTop = panes.find((pane) => pane.id === rosterPane)?.top;
-			if (rosterTop === undefined) return;
-			const y = spot.y + rosterTop;
-			const stagePanes = panes.filter((pane) => pane.id !== rosterPane);
-			// The Stage's panes against the roster's edge: pi's, and the shell's under it.
-			const edge = Math.min(...stagePanes.map((pane) => pane.left));
-			const host = stagePanes.find((pane) => pane.left === edge && y >= pane.top && y < pane.top + pane.height);
-			const row = roster.rows().find((r) => r.key === spot.id);
-			if (!host || host.width < PEEK_MIN_COLS || row?.kind !== "session" || spotKey(peek.spot) !== spotKey(spot)) return;
-			const width = Math.min(PEEK_COLS, host.width);
-			const view = peekView(row, width, host.height, "left");
-			const height = view.lines.length;
-			// Its title, under the top edge, level with the row.
-			const top = Math.max(0, Math.min(y - host.top - 1, host.height - height));
-			const json = JSON.stringify(view);
-			writeAtomic(paths.peek, json);
-			const close = `${quote(tmuxBin())} -L ${quote(SESSIONS)} display-popup -C -c ${quote(host.tty)} >/dev/null 2>&1`;
-			const set = (name: string, value: string | number) => ["set", "-t", deck, name, String(value)];
-			await tmuxAsync(
-				UI,
-				...[set("@swb_peek_pane", host.id), set("@swb_peek_t", top), set("@swb_peek_b", top + height), set("@swb_peek_r", width)].flatMap(
-					(command) => [...command, ";"],
-				),
-				...set("@swb_peek_close", close),
-			);
-			const old = peek.shown;
-			// display-popup waits for its popup to close; -y is the popup's bottom edge.
-			const proc = Bun.spawn(
-				[
-					tmuxBin(),
-					"-L",
-					SESSIONS,
-					...(old ? ["display-popup", "-C", "-c", old.tty, ";"] : []),
-					...["display-popup", "-B", "-c", host.tty, "-x", "0", "-y", String(top + height), "-w", String(width), "-h", String(height)],
-					`exec ${[SWB, "__peek", "--file", paths.peek, "--sock", paths.sock].map(quote).join(" ")}`,
-				],
-				{ cwd: CLIENT_CWD, env: cleanEnv(), stdout: "ignore", stderr: "pipe" },
-			);
-			const shown: ShownPeek = { ...spot, proc, tty: host.tty, width, maxHeight: host.height, json, view };
-			peek.shown = shown;
-			// A popup closed by -C ends its display-popup with status 1; only something said on stderr is a failure.
-			void proc.exited.then(async () => {
-				const error = (await new Response(proc.stderr).text()).trim();
-				if (error) toast(`peek: ${error}`, "error");
-				if (peek.shown !== shown) return;
-				peek.shown = null;
-				tui.requestRender();
-			});
-		} catch (error) {
-			toast(`peek: ${(error as Error).message}`, "error");
-		}
+/** The pointer or the keyboard went elsewhere, as the UI server saw it, and took the Peek with it. */
+function pointerOut(): void {
+	roster.hover = null;
+	roster.pointer = null;
+	peek.byKeys = false;
+	peek.watching = false;
+}
+
+/**
+ * The settled Peek, beside its row: on the Stage, opening onto the roster's border, or on a narrow Deck, which has no
+ * Stage beside the roster, over the roster's right edge, leaving each row's glyph and the start of its title showing.
+ * While the pointer is on it, it holds as if on its row.
+ */
+function peekOverlays(rows: Row[], width: number, height: number): Overlay[] {
+	const spot = peek.settled;
+	const row = spot && rows.find((r) => r.key === spot.id);
+	if (!spot || row?.kind !== "session") return [];
+	const w = narrow ? Math.max(PEEK_MIN_COLS, Math.min(PEEK_COLS, width - 16)) : Math.min(PEEK_COLS, deckWidth - width - 1);
+	if (w < PEEK_MIN_COLS || width < PEEK_MIN_COLS) return [];
+	const view = peekView(row, w, height, narrow ? "right" : "left");
+	const pointer = () => {
+		cancelPendingPeek();
+		if (roster.hover === spot.id) return;
+		roster.hover = spot.id;
 		tui.requestRender();
-	});
+	};
+	return [
+		{
+			id: "peek",
+			about: spot.id,
+			x: narrow ? width - w : width + 1,
+			y: Math.max(0, Math.min(spot.y - 1, height - view.lines.length)),
+			width: w,
+			view,
+			leaves: true,
+			pointer,
+		},
+	];
 }
 
-/** Rewrites what an open Peek shows; one that changed height reopens in its place. */
-function refreshPeek(shown: ShownPeek): void {
-	const row = roster.rows().find((r) => r.key === shown.id);
-	if (row?.kind !== "session") return;
-	const view = peekView(row, shown.width, shown.maxHeight, "left");
-	const json = JSON.stringify(view);
-	if (json === shown.json) return;
-	const resized = view.lines.length !== shown.view.lines.length;
-	shown.json = json;
-	shown.view = view;
-	if (resized) openPeek(shown);
-	else writeAtomic(paths.peek, json);
+/** The launch card is as wide as this, or the Stage, whichever is narrower. */
+const LAUNCH_COLS = 56;
+/** The launch card's menu, no wider than this. */
+const MENU_COLS = 52;
+
+/** Whether the launch card goes on the Stage, which a narrow Deck doesn't have beside the roster. */
+function launchOnStage(width: number): boolean {
+	return !narrow && Math.min(LAUNCH_COLS, deckWidth - width - 1) >= PEEK_MIN_COLS;
 }
 
-function closePeek(): void {
-	const shown = peek.shown;
-	cancelPendingPeek();
-	if (!shown) return;
-	peek.shown = null;
-	peek.ops = peek.ops.then(async () => {
-		try {
-			await tmuxAsync(UI, "set", "-u", "-t", deck, "@swb_peek_pane");
-			await tmuxAsync(SESSIONS, "display-popup", "-C", "-c", shown.tty);
-		} catch (error) {
-			toast(`peek: ${(error as Error).message}`, "error");
-		}
-	});
+/**
+ * The launch card, on the Stage atop the roster's top row unless the roster draws it, and its menu hung from its field.
+ * Both stay while the roster has the keyboard.
+ */
+function launchOverlays(choosing: Choosing, width: number, height: number): Overlay[] {
+	if (focus !== "roster") return [];
+	const want: Overlay[] = [];
+	const onStage = launchOnStage(width);
+	if (onStage) {
+		const w = Math.min(LAUNCH_COLS, deckWidth - width - 1);
+		want.push({
+			id: "launch",
+			about: "launch",
+			x: width + 1,
+			y: 0,
+			width: w,
+			view: launchCard(choosing, w, "left"),
+			leaves: false,
+			pointer: null,
+		});
+	}
+	if (choosing.menu) {
+		const field = onStage ? { x: width + 1, y: 1 } : { x: 0, y: 2 };
+		const w = Math.min(MENU_COLS, (onStage ? deckWidth : width) - field.x - 4);
+		const y = field.y + 1;
+		const view = launchMenu(choosing, w, height - y);
+		want.push({ id: "menu", about: "launch", x: field.x + 2, y, width: w, view, leaves: false, pointer: null });
+	}
+	return want;
+}
+
+/** A key a Peek's button runs, on its session. */
+function peekKey(k: string, id: string): () => void {
+	return () => void prefixKey(k, id).catch((error: Error) => toast(error.message, "error"));
 }
 
 /** A path too long for the Peek keeps its end, where the directories that tell sessions apart are. */
@@ -3044,12 +3056,122 @@ function ago(at: number, now: number): string {
 	return a === "now" ? "just now" : `${a} ago`;
 }
 
+/** A line of a Peek, or of the launch card, on its three framed sides: open to the left beside the roster, to the right in it. */
+function peekFrame(open: "left" | "right", inner: number): (content: string) => string {
+	return (content) =>
+		open === "left"
+			? ` ${truncateToWidth(content, inner, "…", true)} ${gray("│")}`
+			: `${gray("│")} ${truncateToWidth(content, inner, "…", true)} `;
+}
+
+/** What a session from the picker starts on, as the launch card's field says it. */
+function presetField(c: Choice): string {
+	const p = c.preset;
+	const what = p.agent ? `${p.agent} ${gray("agent")}` : `${p.model} ${gray(p.effort ?? "default")}`;
+	return `${cyan(harnessName(p.harness))}  ${what}${p.provider ? gray(` · ${p.provider}`) : ""}`;
+}
+
+/**
+ * The launch card: what a session from the picker starts on, its harness first, and the preset's note; its field opens
+ * the menu. On the Stage it opens to the left, onto the roster's border; in a narrow Deck's roster, to the right.
+ */
+function launchCard(choosing: Choosing, width: number, open: "left" | "right"): OverlayView {
+	const inner = width - 3;
+	const presets = pickerPresets();
+	const chosen = presets[Math.min(choosing.preset, presets.length - 1)];
+	const menu = choosing.menu;
+	let value: string;
+	if (menu && menu.query !== "") value = `${menu.query}▌`;
+	else if (chosen) value = presetField(chosen);
+	else {
+		const target = pickerTarget(choosing);
+		value =
+			target === null
+				? gray("finding harnesses…")
+				: typeof target === "string"
+					? red(target)
+					: `${cyan(harnessName(target.harness))} ${gray("· its own defaults")}`;
+	}
+	const arrow = presets.length === 0 ? " " : menu ? "▴" : "▾";
+	const field = `${truncateToWidth(value, inner - 2, "…", true)} ${gray(arrow)}`;
+	const frame = peekFrame(open, inner);
+	const edge = `─ starts ${"─".repeat(Math.max(0, width - 10))}`;
+	const lines = [
+		gray(open === "left" ? `${edge}╮` : `╭${edge}`),
+		frame(field),
+		// The open menu says the highlighted preset's note, and covers all but the edge of this one.
+		frame(gray(menu ? "" : (chosen?.note ?? ""))),
+		gray(open === "left" ? `${"─".repeat(width - 1)}╯` : `╰${"─".repeat(width - 1)}`),
+	];
+	const margin = open === "left" ? 1 : 2;
+	return {
+		lines,
+		buttons:
+			presets.length === 0
+				? []
+				: [{ y: 1, from: margin, to: margin + inner, act: () => roster.toggleMenu(), hot: frame(cursorLine(field, true)) }],
+	};
+}
+
+/**
+ * The launch card's menu, hung from its field: every preset, a harness at a time, numbered for one key to pick until
+ * something's typed, and the highlighted one's note. Too long for the room it has, it scrolls to keep its highlight in view.
+ */
+function launchMenu(choosing: Choosing, width: number, maxHeight: number): OverlayView {
+	const menu = choosing.menu as Menu;
+	const inner = width - 4;
+	const presets = pickerPresets();
+	const shown = menuPresets(menu.query);
+	const items: string[] = [];
+	const itemAt: number[] = [];
+	let harness: Harness | null = null;
+	shown.forEach((index, n) => {
+		const p = (presets[index] as Choice).preset;
+		if (p.harness !== harness) {
+			harness = p.harness;
+			items.push(cyan(harnessName(harness)));
+		}
+		const name = p.agent ?? p.model ?? "";
+		const pad = " ".repeat(Math.max(1, 21 - visibleWidth(name)));
+		const effort = (p.agent ? "agent" : (p.effort ?? "default")).padEnd(8);
+		itemAt.push(items.length);
+		items.push(
+			`${menu.query === "" && n < 9 ? cyan(String(n + 1)) : " "} ${p.default ? "★" : " "} ${index === choosing.preset ? cyan(name) : name}${pad}${gray(effort)}${gray(p.provider ?? "")}`,
+		);
+	});
+	if (shown.length === 0) items.push(gray("nothing matches"));
+	// Its frame, and the rule and note under the list.
+	const room = Math.max(1, maxHeight - 4);
+	const from = Math.min(Math.max(0, (itemAt[menu.cursor] ?? 0) - room + 1), Math.max(0, items.length - room));
+	let to = Math.min(items.length, from + room);
+	// A harness's name at the foot of the window, with none of its presets under it, says nothing.
+	if (to < items.length && !itemAt.includes(to - 1)) to--;
+	const row = (content: string) => `${gray("│")} ${truncateToWidth(content, inner, "…", true)} ${gray("│")}`;
+	const lines = [gray(`┌${"─".repeat(width - 2)}┐`)];
+	const buttons: OverlayButton[] = [];
+	items.slice(from, to).forEach((line, i) => {
+		const n = itemAt.indexOf(from + i);
+		const content = truncateToWidth(line, inner, "…", true);
+		if (n !== -1) {
+			const index = shown[n] as number;
+			buttons.push({ y: lines.length, from: 2, to: 2 + inner, act: () => roster.choosePreset(index), hot: row(hoverLine(content)) });
+		}
+		lines.push(row(n === menu.cursor ? cursorLine(content, true) : content));
+	});
+	lines.push(
+		gray(`├${"─".repeat(width - 2)}┤`),
+		row(gray(presets[shown[menu.cursor] ?? -1]?.note ?? "")),
+		gray(`└${"─".repeat(width - 2)}┘`),
+	);
+	return { lines, buttons };
+}
+
 /**
  * What a Peek shows, framed on three sides. Beside the roster it opens to the left, onto the roster's border; drawn by
  * the roster itself, at the terminal's right edge, it opens to the right. A Peek too short for everything loses the last
  * turn first.
  */
-function peekView(row: SessionRow, width: number, maxHeight: number, open: "left" | "right"): PeekView {
+function peekView(row: SessionRow, width: number, maxHeight: number, open: "left" | "right"): OverlayView {
 	const e = row.entry;
 	const now = Date.now();
 	const inner = width - 3;
@@ -3074,11 +3196,11 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	const group = groupOf(e);
 	if (group !== null) head.push(`${gray("Group")} ${group}`);
 	// Lines that are buttons: who started it, and on a fold, each session it hides.
-	const links: { at: number; key: string; id: string }[] = [];
+	const links: { at: number; act: () => void }[] = [];
 	const parent = parentOf(e);
 	if (parent) {
 		const label = `${gray("started by")} ${originMark(origin(e))} `;
-		links.push({ at: head.length, key: "p", id: e.id });
+		links.push({ at: head.length, act: peekKey("p", e.id) });
 		head.push(`${label}${truncateToWidth(displayName(parent), inner - visibleWidth(label) - 2, "…", true)} ${dim("p")}`);
 		if (parent.project !== e.project && !parent.operator)
 			head.push(gray(`${" ".repeat(visibleWidth(label))}in ${projectName(parent.project)}`));
@@ -3087,12 +3209,12 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 		head.push(rule, `${gray("folded")} ${foldedTally(row.family.map((p) => p.entry))}`);
 		for (const { entry, nest } of row.family.slice(0, PEEK_FOLD_ROWS)) {
 			const guides = `${nest.continues.map((on) => (on ? "│  " : "   ")).join("")}${nest.last ? "└─ " : "├─ "}`;
-			links.push({ at: head.length, key: "open", id: entry.id });
+			links.push({ at: head.length, act: () => reveal(entry.id) });
 			head.push(`${gray(guides)}${glyph(stateOf(entry), now)} ${displayName(entry)}`);
 		}
 		const rest = row.family[PEEK_FOLD_ROWS];
 		if (rest) {
-			links.push({ at: head.length, key: "open", id: rest.entry.id });
+			links.push({ at: head.length, act: () => reveal(rest.entry.id) });
 			head.push(gray(`… ${row.family.length - PEEK_FOLD_ROWS} more`));
 		}
 	}
@@ -3144,10 +3266,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	const body = [...head, ...(head.length + turn.length + 1 + buttonLines.length + 2 <= maxHeight ? turn : []), rule];
 	const buttonsAt = body.length;
 	body.push(...buttonLines);
-	const frame = (content: string) =>
-		open === "left"
-			? ` ${truncateToWidth(content, inner, "…", true)} ${gray("│")}`
-			: `${gray("│")} ${truncateToWidth(content, inner, "…", true)} `;
+	const frame = peekFrame(open, inner);
 	const edge = "─".repeat(width - 1);
 	const lines = [
 		gray(open === "left" ? `${edge}╮` : `╭${edge}`),
@@ -3156,7 +3275,6 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	];
 	const margin = open === "left" ? 1 : 2;
 	return {
-		id: e.id,
 		lines,
 		buttons: [
 			...links
@@ -3165,8 +3283,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 					y: 1 + link.at,
 					from: margin,
 					to: margin + inner,
-					key: link.key,
-					id: link.id,
+					act: link.act,
 					hot: frame(cursorLine(truncateToWidth(body[link.at] as string, inner, "…", true), true)),
 				})),
 			...buttons
@@ -3175,7 +3292,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 					const y = 1 + buttonsAt + b.y;
 					// The line again with this one button lit, for the pointer resting on it.
 					const lit = (buttonLines[b.y] as string).replace(b.text, cursorLine(b.text, true));
-					return { y, from: margin + b.from, to: margin + b.to, key: b.key, id: e.id, hot: frame(lit) };
+					return { y, from: margin + b.from, to: margin + b.to, act: peekKey(b.key, e.id), hot: frame(lit) };
 				}),
 		],
 	};
@@ -3269,11 +3386,6 @@ function syncRoster(toRoster: boolean): Promise<void> {
  * session, from a Peek's buttons, the key acts on that session's row instead of the cursor's.
  */
 async function prefixKey(k: string, id: string | undefined): Promise<void> {
-	// A Peek lists the family a fold hides; one of them, chosen there, has no row of its own yet.
-	if (k === "open" && id !== undefined) {
-		reveal(id);
-		return;
-	}
 	const row = id === undefined ? roster.selected() : roster.rows().find((r) => r.key === id);
 	if (id !== undefined && !row) throw new Error(`no session ${id} in the roster`);
 	if (k === ",") {
@@ -3345,7 +3457,6 @@ function peekButtons(row: Row): [label: string, key: string][] {
 
 /** Below NARROW_BELOW columns the roster stands alone, and focus moves zoom along. */
 function layout(): Promise<void> {
-	closePeek();
 	return sizingRoster(async () => {
 		const size = await tmuxAsync(
 			UI,
@@ -3366,6 +3477,8 @@ function layout(): Promise<void> {
 		const [zoomFlag, active] = (await tmuxAsync(UI, "display", "-p", "-t", stagePane, "#{window_zoomed_flag}\t#{pane_active}")).split("\t");
 		if (narrow) await syncRoster(false);
 		if (narrow !== wasNarrow) {
+			// What floats over the Stage goes before a zoom: the roster draws a narrow Deck's overlays itself.
+			if (narrow) overlays.closeAll();
 			if (narrow) await tmuxAsync(UI, "set", "-t", deck, "@swb_narrow", "1");
 			else await tmuxAsync(UI, "set", "-u", "-t", deck, "@swb_narrow");
 			if (narrow && zoomFlag !== "1") await tmuxAsync(UI, "resize-pane", "-Z", "-t", active === "1" ? stagePane : rosterPane);
@@ -3418,6 +3531,7 @@ function stopDiscovery(): void {
 
 function cleanup(): never {
 	roster.settings?.saveProse();
+	overlays.closeAll();
 	stopDiscovery();
 	tmuxTry(SESSIONS, "kill-session", "-t", `=${placeholder}`);
 	removeDeckFiles(deck);
@@ -3449,6 +3563,7 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 			if (was === "roster" && focus === "stage") {
 				peek.dismissed = peek.spot?.id ?? null;
 				peek.byKeys = false;
+				if (roster.choosing) roster.choosing.menu = null;
 			}
 			syncStatus();
 			apply();
@@ -3482,20 +3597,10 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 		case "key":
 			await prefixKey(argv[0] ?? "", argv[1]);
 			break;
-		// The UI server saw the pointer leave both the roster and the Peek, or a key typed elsewhere; it closed the
-		// Peek, and stopped watching, on its way here.
+		// The UI server saw the pointer leave both the roster and its overlays, or a key typed elsewhere; it put away
+		// what leaves with them, and stopped watching, on its way here.
 		case "pointer-out":
-			roster.hover = null;
-			roster.pointer = null;
-			peek.byKeys = false;
-			peek.watching = false;
-			break;
-		// The pointer came into the Peek: it holds the Peek where it is, as if it were still on the Peek's row.
-		case "peek-in":
-			if (argv[0] !== undefined && peek.shown?.id === argv[0]) {
-				cancelPendingPeek();
-				roster.hover = argv[0];
-			}
+			pointerOut();
 			break;
 		case "esc":
 			for (const launch of launches) launch.keyboard = false;
@@ -3685,7 +3790,6 @@ function openSettings(): void {
 	roster.naming = null;
 	roster.filtering = false;
 	roster.dragging = null;
-	closePeek();
 	if (stage.highlightTimer) clearTimeout(stage.highlightTimer);
 	stage.highlightTimer = null;
 	roster.settings = new SettingsPane(settingsHost);
@@ -3708,6 +3812,7 @@ function zoomRoster(on: boolean): void {
 		sizingRoster(async () => {
 			if (narrow || rosterHidden) return;
 			const zoomed = (await tmuxAsync(UI, "display", "-p", "-t", rosterPane, "#{window_zoomed_flag}")) === "1";
+			if (on && !zoomed) overlays.closeAll();
 			if (on !== zoomed) await tmuxAsync(UI, "resize-pane", "-Z", "-t", rosterPane);
 			// Back beside the Stage, at whatever width Settings left it.
 			if (!on) await tmuxAsync(UI, "resize-pane", "-t", rosterPane, "-x", String(rosterWidth()));
@@ -3744,13 +3849,21 @@ function pickerState(): PickerState | null {
 			const labels = presetLabels(presets.map((c) => c.preset));
 			const target = pickerTarget(choosing);
 			const at = Math.min(choosing.preset, labels.length - 1);
+			const menu = choosing.menu;
 			return {
 				preset: labels[at] ?? null,
 				harness: target !== null && typeof target !== "string" ? target.harness : null,
-				presets: labels,
+				presets: menuPresets("").map((i) => labels[i] as string),
+				menu: menu && { query: menu.query, cursor: menu.cursor, shown: menuPresets(menu.query).map((i) => labels[i] as string) },
 			};
 		})(),
 	};
+}
+
+/** An overlay as it's on screen, without its color: over the roster's lines, or floating. */
+function overlayShown(id: string): { about: string; lines: string[] } | null {
+	const o = roster.over.find((o) => o.id === id);
+	return o ? { about: o.about, lines: o.view.lines.map((line) => Bun.stripANSI(line)) } : overlays.painted(id);
 }
 
 function viewState(): DeckState {
@@ -3793,9 +3906,13 @@ function viewState(): DeckState {
 		filter: roster.query(),
 		hover: roster.hover,
 		peek: (() => {
-			const shown = peek.shown ?? roster.inline;
-			return shown ? { id: shown.id, source: shown.source, lines: shown.view.lines.map((line) => Bun.stripANSI(line)) } : null;
+			const shown = overlayShown("peek");
+			return shown && peek.settled ? { id: shown.about, source: peek.settled.source, lines: shown.lines } : null;
 		})(),
+		launch: roster.choosing && {
+			card: overlayShown("launch")?.lines ?? roster.card,
+			menu: overlayShown("menu")?.lines ?? null,
+		},
 		focus:
 			focus === "roster"
 				? "roster"
@@ -3860,6 +3977,16 @@ let frameKeyAt = 0;
 const tui = new TuiAltScreen(new ProcessTerminal(), true, undefined, { mouse: true });
 const roster = new Roster();
 tui.setLayoutRoot(roster);
+const overlays = new Overlays({
+	pane: rosterPane,
+	deck,
+	failed: (message) => toast(message, "error"),
+	left: () => {
+		pointerOut();
+		tui.requestRender();
+	},
+	changed: () => tui.requestRender(),
+});
 tui.setFocus(roster);
 tui.start();
 // Inside tmux pi-tui asks only for motion with a button down. The roster wants every motion, for the hover, the Peek,
@@ -3902,27 +4029,7 @@ tui.setTerminalColorSchemeNotifications(true);
 void queryColors(null);
 
 main.tty = stageTty;
-tmux(
-	UI,
-	"set",
-	"-t",
-	deck,
-	"@swb_roster",
-	rosterPane,
-	";",
-	"set",
-	"-t",
-	deck,
-	"@swb_peek_close",
-	"true",
-	";",
-	"set",
-	"-p",
-	"-t",
-	rosterPane,
-	"@swb_label",
-	"swb",
-);
+tmux(UI, "set", "-t", deck, "@swb_roster", rosterPane, ";", "set", "-p", "-t", rosterPane, "@swb_label", "swb");
 focusedPane = rosterPane;
 rmSync(paths.sock, { force: true });
 Bun.serve({

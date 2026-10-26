@@ -47,17 +47,20 @@ function probes(harness: Harness): Probe<Ctx>[] {
 	return [
 		{
 			name: `session.new.${harness}`,
-			feels: `n, ${harness === "pi" ? "" : "Tab to it, "}Enter: until a new ${name} has the keyboard and the screen is still.`,
+			feels: `n, ${harness === "pi" ? "" : "its preset from the menu, "}Enter: until a new ${name} has the keyboard and the screen is still.`,
 			primary: "settled",
 			runs: 4,
 			sample: async ({ s }, { t }) => {
 				await focusRoster(t);
 				await t.press("n");
 				await t.waitState("the picker", (x) => x.picker !== null && x.picker.rows.length > 0);
-				for (let tabs = 0; (await t.state())?.picker?.harness !== harness; tabs++) {
-					if (tabs > 3) throw new Error(`the picker never offered ${harness}`);
+				if ((await t.state())?.picker?.harness !== harness) {
 					await t.press("Tab");
-					await Bun.sleep(100);
+					await t.waitState("the preset menu", (x) => x.picker?.menu != null);
+					await t.type(harness);
+					await t.waitState(`the menu narrowed to ${name}`, (x) => x.picker?.menu?.query === harness);
+					await t.press("Enter");
+					await t.waitState(`${name} chosen`, (x) => x.picker?.harness === harness && x.picker.menu === null);
 				}
 				await t.waitState("the picker on a directory", (x) => x.picker?.rows[x.picker.choice]?.path != null);
 				await Bun.sleep(300);

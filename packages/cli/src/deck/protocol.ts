@@ -45,12 +45,6 @@ export type Diff = { files: number; add: number; del: number };
 /** What a Peek shows that the snapshot doesn't carry: the last turn, or why it won't read, and its directory's uncommitted changes. */
 export type PeekInfo = { last: Turn | null; diff: Diff | null; error: string | null };
 
-/** The Peek as `swb __peek` draws it, written whole to a file it watches. */
-export type PeekView = { id: string; lines: string[]; buttons: PeekButton[] };
-
-/** A Peek's button: where it is on its line, the roster key it runs and the session it runs on, and its line with it lit. */
-export type PeekButton = { y: number; from: number; to: number; key: string; id: string; hot: string };
-
 /** What the Stage shows when it shows no live session; the placeholder renders it. */
 export type Card = {
 	/** Title, state, and path, only while the roster is off-screen; its detail bar owns them otherwise. */
@@ -104,8 +98,10 @@ export type PickerState = {
 	/** What a session started from it runs in: its preset's label and harness, null until the harnesses are found. */
 	preset: string | null;
 	harness: Harness | null;
-	/** Every preset Tab steps through, from the default. */
+	/** Every preset the launch card's menu offers, in its order: a harness at a time, the default's first. */
 	presets: string[];
+	/** The menu, while Tab has it open: what's typed, its highlight, and the presets it shows. */
+	menu: { query: string; cursor: number; shown: string[] } | null;
 };
 
 /** One row of Settings' list as a driver sees it. */
@@ -160,6 +156,8 @@ export type DeckState = {
 	hover: string | null;
 	/** The Peek beside a row: whose, why, and what it says, its lines stripped of color. */
 	peek: { id: string; source: "pointer" | "cursor"; lines: string[] } | null;
+	/** In the picker, the launch card and its open menu as they're shown, stripped of color. */
+	launch: { card: string[] | null; menu: string[] | null } | null;
 	focus: "roster" | "stage" | "editor" | "shell";
 	staged: {
 		id: string | null;
@@ -179,8 +177,8 @@ export type DeckState = {
 /** Where the shell sits against the pane holding the agent, or that it replaces the agent in its pane, when neither half would have room. */
 export type ShellAt = "below" | "beside" | "replace";
 
-/** `side` is the target file of the Stage's second pane, which exists only while split is showing; `peek` is the Peek's. */
-export type DeckPaths = { sock: string; card: string; target: string; side: string; shell: string; peek: string };
+/** `side` is the target file of the Stage's second pane, which exists only while split is showing. */
+export type DeckPaths = { sock: string; card: string; target: string; side: string; shell: string };
 
 /** A Deck's terminal as its programs see it, in hex; `palette` is null when the terminal didn't report all 16. */
 export type TerminalProfile = { foreground: string; background: string; palette: string[] | null; scheme: "light" | "dark" };

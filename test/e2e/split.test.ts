@@ -25,7 +25,16 @@ type Box = { id: string; left: number; top: number; width: number; height: numbe
 
 function boxes(s: Scenario, st: DeckState): Box[] {
 	return s
-		.tmux(s.servers.ui, "list-panes", "-t", `=${st.deck}:`, "-F", "#{pane_id} #{pane_left} #{pane_top} #{pane_width} #{pane_height}")
+		.tmux(
+			s.servers.ui,
+			"list-panes",
+			"-t",
+			`=${st.deck}:`,
+			"-f",
+			"#{!:#{pane_floating_flag}}",
+			"-F",
+			"#{pane_id} #{pane_left} #{pane_top} #{pane_width} #{pane_height}",
+		)
 		.split("\n")
 		.map((line) => line.split(" "))
 		.map(([id, ...n]) => {

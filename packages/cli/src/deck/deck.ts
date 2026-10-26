@@ -33,7 +33,6 @@ export function deckPaths(deck: string): DeckPaths {
 		target: join(dir, `${deck}.target`),
 		side: join(dir, `${deck}.side`),
 		shell: join(dir, `${deck}.shell`),
-		peek: join(dir, `${deck}.peek.json`),
 	};
 }
 
@@ -104,17 +103,16 @@ export function editorNav(k: string, editor: string): void {
 }
 
 /**
- * The Peek is a popup on the Stage's own client, so the roster keeps the keyboard; but a popup owns its client, and
- * while one is up pi gets no clicks and no keys. So the UI server looks at every event first: the pointer leaving
- * both the roster and the Peek, or a key typed outside the roster, closes the Peek before the event goes on, and tells
- * the roster. The roster sets @swb_roster to its pane, @swb_watch while it wants to hear of the pointer leaving, and
- * the @swb_peek_* options to where its Peek is and how to close it.
+ * Overlays, the Peek among them, are floating panes the roster paints (see overlay.ts), and the roster keeps the
+ * keyboard. The UI server looks at every event first: the pointer leaving both the roster and every overlay, or a key
+ * typed outside the roster, puts away the overlays that go with it, @swb_leave's kill-panes, before the event goes on,
+ * and tells the roster. The roster sets @swb_roster to its pane, and @swb_watch while it wants to hear of it. In a mouse
+ * binding the pane formats are the pane under the pointer.
  */
-const OVER_PEEK =
-	"#{&&:#{==:#{mouse_pane},#{@swb_peek_pane}},#{&&:#{e|<:#{mouse_x},#{@swb_peek_r}},#{&&:#{e|>=:#{mouse_y},#{@swb_peek_t}},#{e|<:#{mouse_y},#{@swb_peek_b}}}}}";
-const POINTER_AWAY = `#{&&:#{@swb_watch},#{&&:#{!=:#{mouse_pane},#{@swb_roster}},#{!:${OVER_PEEK}}}}`;
+const OVER_OVERLAY = "#{pane_floating_flag}";
+const POINTER_AWAY = `#{&&:#{@swb_watch},#{&&:#{!=:#{mouse_pane},#{@swb_roster}},#{!:${OVER_OVERLAY}}}}`;
 const KEY_AWAY = "#{&&:#{@swb_watch},#{!=:#{pane_id},#{@swb_roster}}}";
-const LEAVE = `set -u @swb_watch ; run-shell '#{@swb_peek_close}' ; ${deckCmd("pointer-out")}`;
+const LEAVE = `set -u @swb_watch ; if -F '#{@swb_leave}' { run-shell -C '#{@swb_leave}' ; set -u @swb_leave } ; ${deckCmd("pointer-out")}`;
 
 const IN_ROSTER = "#{==:#{pane_id},#{@swb_roster}}";
 
@@ -143,9 +141,9 @@ const PANE_LABEL = [
 	"#[fg=brightblack] #{@swb_label} #[default]},}",
 ].join("");
 
-/** A mouse binding whose event stays with the Peek while the pointer is over it, and closes the Peek first otherwise. */
-function peekAware(key: string, otherwise: string): string {
-	return `bind -n ${key} if -F '${OVER_PEEK}' { send-keys -M } { if -F '${POINTER_AWAY}' { ${LEAVE} } ; ${otherwise} }`;
+/** A mouse binding that hands an overlay its event, never selecting it, and otherwise puts away what leaves first. */
+function overlayAware(key: string, otherwise: string): string {
+	return `bind -n ${key} if -F '${OVER_OVERLAY}' { send-keys -M } { if -F '${POINTER_AWAY}' { ${LEAVE} } ; ${otherwise} }`;
 }
 
 /** The whole config of the UI server. Prefix bindings and hooks report to the Deck's roster through its socket. */
@@ -171,13 +169,21 @@ function uiConf(config: Config): string {
 		`bind -n MouseDown1Status if -F '#{==:#{mouse_status_range},roster}' { if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { set -u @swb_hidden ; ${roster("focus")} } }`,
 		"set -g mouse on",
 		`bind -n Any if -F '#{mouse_pane}' { if -F '${POINTER_AWAY}' { ${LEAVE} } ; send-keys -M } { if -F '${KEY_AWAY}' { ${LEAVE} } ; send-keys }`,
-		// tmux's own defaults, but for the Peek; a right click on a pane that takes no mouse no longer opens tmux's menu.
-		peekAware("MouseDown1Pane", "select-pane -t= ; send-keys -M"),
-		peekAware("MouseDown2Pane", "select-pane -t= ; if -F '#{||:#{pane_in_mode},#{mouse_any_flag}}' { send-keys -M } { paste-buffer -p }"),
-		peekAware("MouseDown3Pane", "if -F '#{mouse_any_flag}' { select-pane -t= ; send-keys -M }"),
-		peekAware("WheelUpPane", "if -F '#{||:#{alternate_on},#{||:#{pane_in_mode},#{mouse_any_flag}}}' { send-keys -M } { copy-mode -e }"),
-		peekAware("DoubleClick1Pane", "select-pane -t= ; if -F '#{||:#{pane_in_mode},#{mouse_any_flag}}' { send-keys -M }"),
-		peekAware("TripleClick1Pane", "select-pane -t= ; if -F '#{||:#{pane_in_mode},#{mouse_any_flag}}' { send-keys -M }"),
+		// tmux's own defaults, but for overlays; a right click on a pane that takes no mouse no longer opens tmux's menu.
+		overlayAware("MouseDown1Pane", "select-pane -t= ; send-keys -M"),
+		overlayAware(
+			"MouseDown2Pane",
+			"select-pane -t= ; if -F '#{||:#{pane_in_mode},#{mouse_any_flag}}' { send-keys -M } { paste-buffer -p }",
+		),
+		overlayAware("MouseDown3Pane", "if -F '#{mouse_any_flag}' { select-pane -t= ; send-keys -M }"),
+		overlayAware("WheelUpPane", "if -F '#{||:#{alternate_on},#{||:#{pane_in_mode},#{mouse_any_flag}}}' { send-keys -M } { copy-mode -e }"),
+		overlayAware("DoubleClick1Pane", "select-pane -t= ; if -F '#{||:#{pane_in_mode},#{mouse_any_flag}}' { send-keys -M }"),
+		overlayAware("TripleClick1Pane", "select-pane -t= ; if -F '#{||:#{pane_in_mode},#{mouse_any_flag}}' { send-keys -M }"),
+		// tmux's floating panes are the roster's to make and place: ctrl-drag would make one, alt-drag move one.
+		"unbind -n C-MouseDrag1Pane",
+		"unbind -n C-MouseDrag1Empty",
+		"unbind -n M-MouseDrag1Pane",
+		"unbind -n M-MouseDrag1Border",
 		"set -g history-limit 0",
 		"set -g destroy-unattached off",
 		"set -g detach-on-destroy on",
@@ -195,9 +201,9 @@ function uiConf(config: Config): string {
 		`set -g prefix ${prefix}`,
 		"set -g prefix2 None",
 		"unbind -aq -T prefix",
-		// The roster is pane 0 while it shows; the Stage's panes follow. A narrow Deck shows one pane at a time and never
-		// splits, so its moves carry the zoom along. @swb_hidden is the wide Deck's roster state; the roster makes it so.
-		`bind Tab if -F '#{@swb_narrow}' { select-pane -Z -t :.+ } { if -F '#{@swb_hidden}' { set -u @swb_hidden ; ${roster("focus")} } { if -F '#{pane_index}' { select-pane -t :.0 } { ${backToStage} } } }`,
+		// The roster is pane 0 while it shows; the Stage's panes follow, and overlays after them. A narrow Deck shows one pane
+		// at a time and never splits, so its moves carry the zoom along. @swb_hidden is the wide Deck's roster state; the roster makes it so.
+		`bind Tab if -F '#{@swb_narrow}' { if -F '#{pane_index}' { select-pane -Z -t :.0 } { select-pane -Z -t :.1 } } { if -F '#{@swb_hidden}' { set -u @swb_hidden ; ${roster("focus")} } { if -F '#{pane_index}' { select-pane -t :.0 } { ${backToStage} } } }`,
 		`bind h ${nav("h")}`,
 		// j and k move between panes on the Stage; the roster has none above or below, so there they move between sessions.
 		`bind j if -F '${IN_ROSTER}' { ${notify("__deck #{session_name} key J")} } { ${nav("j")} }`,
@@ -403,7 +409,7 @@ export function liveDecks(): string[] {
 
 export function removeDeckFiles(deck: string): void {
 	const paths = deckPaths(deck);
-	for (const path of [paths.sock, paths.card, paths.target, paths.side, paths.shell, paths.peek]) rmSync(path, { force: true });
+	for (const path of [paths.sock, paths.card, paths.target, paths.side, paths.shell]) rmSync(path, { force: true });
 }
 
 export async function fetchState(deck: string): Promise<DeckState> {

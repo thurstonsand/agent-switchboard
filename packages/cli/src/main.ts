@@ -167,9 +167,6 @@ async function main(args: string[]): Promise<void> {
 		case "__placeholder":
 			await import("./deck/placeholder.ts");
 			return;
-		case "__peek":
-			await import("./deck/peek.ts");
-			return;
 		case "mcp":
 			// The MCP SDK costs every other command 40 ms of startup; only `swb mcp` loads it.
 			return (await import("./codex/mcp.ts")).mcp();

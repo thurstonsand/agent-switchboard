@@ -6,7 +6,16 @@ type Pane = { index: number; width: number; active: boolean };
 
 function panes(s: Scenario, st: DeckState): Pane[] {
 	return s
-		.tmux(s.servers.ui, "list-panes", "-t", `=${st.deck}:`, "-F", "#{pane_index} #{pane_width} #{pane_active}")
+		.tmux(
+			s.servers.ui,
+			"list-panes",
+			"-t",
+			`=${st.deck}:`,
+			"-f",
+			"#{!:#{pane_floating_flag}}",
+			"-F",
+			"#{pane_index} #{pane_width} #{pane_active}",
+		)
 		.split("\n")
 		.map((line) => line.split(" ").map(Number) as [number, number, number])
 		.map(([index, width, active]) => ({ index, width, active: active === 1 }));

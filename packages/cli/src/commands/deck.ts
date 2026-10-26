@@ -55,7 +55,7 @@ function keys(prefix: string): [string, string][] {
 		["space", "toggle a header or a fold"],
 		["w", "wake without focusing"],
 		["x", "stop a running session; it stays open"],
-		["n", "new session: pick a directory, and a preset with ⇥"],
+		["n", "new session: pick a directory, and with ⇥ a preset"],
 		["N", "new session in a directory to add"],
 		["a", "archive, asking about what it started; unarchive"],
 		["p", "the session that started this one"],

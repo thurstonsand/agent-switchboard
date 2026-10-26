@@ -10,6 +10,8 @@ Schema v7: update swb and the pi line together.
 
 ### Changed
 
+- swb needs tmux 3.8: a Peek, and `n`'s launch card and its menu, are floating panes over the Stage instead of a popup, so more than one shows at a time.
+- `n`'s picker says what a new session starts on, its harness as well as its model and effort, on a card on the Stage, with the preset's note. `Tab` drops the shortlist under it, a harness at a time and numbered: a number picks one, typing narrows it, and `Esc` keeps the one you had. With no room on the Stage, as on a narrow Deck, the roster draws the card.
 - A message, launch goal, or scheduled message over 100,000 characters is refused when it's sent, in pi, Claude Code, and Codex, telling the agent to put the detail in a file and send its path. One Codex refused for its length used to stop every message queued behind it.
 - A Group's name takes only letters, digits, spaces, and `-` `_` `.`: `m` in the roster won't type anything else, and the tools and CLI refuse it. Groups already named otherwise keep their names.
 

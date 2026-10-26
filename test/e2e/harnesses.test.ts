@@ -81,6 +81,29 @@ test("the Deck's n opens on the default preset, puts its real TUI on the Stage, 
 	// With no shortlist written, the automatic one starts with Claude Code's own default.
 	const opened = await waitState(s, "the picker on the default", (x) => x.picker?.harness === "claude");
 	expect(opened.picker?.presets[0]).toBe("opus");
+	// The launch card on the Stage says what runs: the harness, then the model.
+	const card = await waitState(s, "the launch card", (x) => (x.launch?.card ?? null) !== null);
+	expect(card.launch?.card?.[1]).toMatch(/Claude Code {2}opus/);
+	// Tab drops the menu, a harness at a time; a number moves the card to Codex, and Esc in a reopened menu keeps it.
+	s.keys("Tab");
+	const menu = await waitState(s, "the menu", (x) => x.launch?.menu?.some((l) => l.includes("Codex")) ?? false);
+	// The automatic shortlist takes turns, Claude Code's then Codex's; the menu gathers each harness's together.
+	const shown = menu.picker?.menu?.shown ?? [];
+	const gpts = shown.filter((label) => label.startsWith("gpt"));
+	const codex = shown.indexOf(gpts[0] as string);
+	expect(codex).toBeGreaterThan(0);
+	expect(shown.slice(codex, codex + gpts.length)).toEqual(gpts);
+	s.keys(String(codex + 1));
+	await waitState(s, "Codex chosen", (x) => x.picker?.harness === "codex" && x.picker.menu === null);
+	s.keys("Tab");
+	await waitState(s, "the menu again", (x) => x.picker?.menu !== null);
+	s.keys("Escape");
+	const kept = await waitState(s, "the menu closed", (x) => x.picker?.menu === null && x.launch?.card?.[1]?.includes("Codex") === true);
+	expect(kept.picker?.harness).toBe("codex");
+	s.keys("Tab");
+	await waitState(s, "the menu once more", (x) => x.picker?.menu !== null);
+	s.keys("1");
+	await waitState(s, "back on the default", (x) => x.picker?.harness === "claude" && x.picker.menu === null);
 	s.save("picker.txt", s.screen());
 	s.keys("Enter");
 	const st = await waitState(s, "Claude on the Stage", (x) => x.staged.kind === "live" && x.focus === "stage", ready);

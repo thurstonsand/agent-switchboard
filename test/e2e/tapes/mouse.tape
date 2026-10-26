@@ -1,5 +1,5 @@
 # The Deck by mouse alone: the hidden roster's way back, the shell tab, help closed by a click, and a narrow Deck's
-# Peek, drawn by the roster itself. The drive harness plays the terminal, and the director clicks in it; the tape watches.
+# Peek, over the roster's edge. The drive harness plays the terminal, and the director clicks in it; the tape watches.
 Source common.tape
 
 Type "# by mouse alone: ◂ brings a hidden roster back; shell is a tab; a narrow Deck draws its Peek over the roster" Sleep 1s Enter

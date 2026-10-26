@@ -38,13 +38,13 @@ async function waitDeck(s: Scenario, what: string, probe: (st: DeckState) => boo
 	);
 }
 
-async function waitLs(s: Scenario, what: string, probe: (ls: LsEntry[]) => boolean): Promise<LsEntry[]> {
+async function waitLs(s: Scenario, what: string, probe: (ls: LsEntry[]) => boolean, timeout = TAPE): Promise<LsEntry[]> {
 	return until(
 		() => {
 			const ls = s.ls();
 			return probe(ls) && ls;
 		},
-		TAPE,
+		timeout,
 		what,
 	);
 }
@@ -178,8 +178,12 @@ export const directors: Record<string, Director> = {
 			await seed(s, { turns: ["plan the v3 migration"], title: "Plan the v3 migration" });
 		},
 		run: async (s) => {
-			const ls = await waitLs(s, "a Claude Code and a Codex session", (ls) =>
-				["claude", "codex"].every((h) => ls.some((e) => e.harness === h && e.activity === "idle")),
+			// The tape stops on the launch card and its menu for screenshots before it starts Codex.
+			const ls = await waitLs(
+				s,
+				"a Claude Code and a Codex session",
+				(ls) => ["claude", "codex"].every((h) => ls.some((e) => e.harness === h && e.activity === "idle")),
+				2 * TAPE,
 			);
 			expect(ls.map((e) => e.harness).sort()).toEqual(["claude", "codex", "pi"]);
 			await Bun.sleep(4000);

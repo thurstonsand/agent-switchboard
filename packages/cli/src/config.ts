@@ -249,7 +249,7 @@ export const SETTINGS: Setting[] = [
 		section: "Harnesses",
 		label: "Shortlist",
 		description:
-			"What n offers and agents choose from when they start a session. The ★ is the default: n opens on it, and Tab steps through the list in order from there.",
+			"What n offers and agents choose from when they start a session. The ★ is the default: n opens on it, and Tab drops the whole list, a harness at a time, to pick another.",
 		synonyms: ["presets", "models", "effort", "default", "launch"],
 		control: { kind: "presets" },
 		fallback: fixed(null),

@@ -81,6 +81,9 @@ The text editor for one directory, shared by every session whose working directo
 **Peek**:
 A session's particulars and keys, shown beside its Roster row over the **Stage** while the pointer rests on the row or the cursor has just moved onto it. It never covers the Roster.
 
+**Overlay**:
+A box the Deck shows over its panes without moving them or taking the keyboard: a **Peek**, the picker's launch card, its menu. Internal term (not in UI).
+
 **View**:
 What the **Stage** shows for a session: its **agent**, its **Editor**, or a **split** of both. Each session remembers its own.
 

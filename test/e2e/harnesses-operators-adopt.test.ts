@@ -37,10 +37,10 @@ test("an Operator in Claude Code or Codex reads the Operator AGENTS.md, not the 
 	s.swb("drive", "start", "--size", "160x40");
 	await waitState(s, "ready", (x) => x.ready);
 
-	// n opens on the default preset, Claude Code's; Tab steps to Codex's.
-	for (const [harness, tabs] of [
-		["claude", 0],
-		["codex", 1],
+	// n opens on the default preset, Claude Code's; Tab opens the menu, and typing codex narrows it to Codex's.
+	for (const [harness, query] of [
+		["claude", null],
+		["codex", "codex"],
 	] as const) {
 		s.keys("M-a", "h");
 		await waitState(s, "the roster focused", (x) => x.focus === "roster");
@@ -48,7 +48,16 @@ test("an Operator in Claude Code or Codex reads the Operator AGENTS.md, not the 
 		await waitState(s, "cursor on the Operators section", (x) => x.cursorRow === 0);
 		s.keys("n");
 		await waitState(s, "the picker", (x) => x.picker !== null);
-		for (let i = 0; i < tabs; i++) s.keys("Tab");
+		if (query !== null) {
+			s.keys("Tab");
+			await waitState(s, "the menu open", (x) => x.picker?.menu !== null);
+			s.keys("-l", query);
+			const st = await waitState(s, "the menu narrowed", (x) => x.picker?.menu?.query === query);
+			expect(st.picker?.menu?.shown.length).toBeGreaterThan(0);
+			expect(st.picker?.menu?.shown.length).toBeLessThan(st.picker?.presets.length ?? 0);
+			s.keys("Enter");
+			await waitState(s, "the menu closed", (x) => x.picker?.menu === null);
+		}
 		await waitState(s, `${harness} picked`, (x) => x.picker?.harness === harness);
 		s.keys("Enter");
 		const st = await waitState(s, `the ${harness} Operator live`, (x) => x.staged.kind === "live" && x.focus === "stage", ready);

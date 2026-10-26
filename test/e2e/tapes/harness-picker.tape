@@ -1,13 +1,15 @@
-# n starts a session on a preset: it opens on the default, Claude Code's opus, and Tab steps to Codex's.
+# n starts a session on a preset: the launch card on the Stage says what runs, Claude Code's opus by default, and Tab
+# drops its menu, where typing codex narrows it to Codex's.
 Source common.tape
 
-Type "# n opens on the default preset; Tab steps through the shortlist" Sleep 1s Enter
+Type "# n opens a launch card on the Stage; Tab drops its menu of presets" Sleep 1s Enter
 Type "swb" Sleep 400ms Enter
 Wait+Screen /Plan the v3 migration/
 Sleep 1.5s
 Type "n"
-Wait+Screen /gpt-6/
+Wait+Screen /starts/
 Sleep 2s
+Screenshot ../artifacts/phase6/videos/harness-picker-card.png
 Enter
 Wait+Screen /Claude Code v/
 Sleep 1s
@@ -18,10 +20,18 @@ Alt+a
 Type "h"
 Sleep 800ms
 Type "n"
-Wait+Screen /gpt-6/
+Wait+Screen /starts/
 Sleep 1s
 Tab
+Wait+Screen /Codex/
 Sleep 1.5s
+Screenshot ../artifacts/phase6/videos/harness-picker-menu.png
+Type "codex"
+Sleep 1.5s
+Screenshot ../artifacts/phase6/videos/harness-picker-narrowed.png
+Enter
+Sleep 1.5s
+Screenshot ../artifacts/phase6/videos/harness-picker-chosen.png
 Enter
 Wait+Screen /OpenAI Codex/
 Sleep 1s

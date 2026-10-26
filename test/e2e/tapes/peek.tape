@@ -19,7 +19,7 @@ Screenshot ../artifacts/phase6/videos/peek-tab-hover.png
 Wait+Screen /pi  notes drafted/
 Sleep 1s
 Screenshot ../artifacts/phase6/videos/peek-cursor.png
-Wait+Screen /(?s)Netrw.*stable now/
+Wait+Screen /(?s)── editor.*stable now/
 Sleep 1.5s
 Screenshot ../artifacts/phase6/videos/peek-split.png
 Sleep 4s
