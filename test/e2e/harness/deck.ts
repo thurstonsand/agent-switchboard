@@ -96,6 +96,9 @@ export async function seed(s: Scenario, ...conversations: { turns: string[]; tit
 		ids.push(id);
 	}
 	s.swb("drive", "stop");
+	// Each seeding Deck saved its cursor for the next Deck in the Project, whichever settled last: the scenario's first
+	// Deck starts where a fresh one would, on the newest session.
+	s.query("DELETE FROM deck_layouts");
 	return ids;
 }
 

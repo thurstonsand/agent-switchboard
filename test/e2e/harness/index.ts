@@ -206,6 +206,8 @@ export function scenario(
 	const query = <T>(sql: string, ...params: (string | number | null)[]): T[] => {
 		const conn = db();
 		try {
+			// A write waits out swb's, as swb's own connections do.
+			conn.exec("PRAGMA busy_timeout = 5000");
 			return conn.prepare(sql).all(...params) as T[];
 		} finally {
 			conn.close();
