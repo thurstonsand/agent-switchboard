@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { host, launched, pane, recalled, type } from "./harness/agents.ts";
+import { host, launched, pane, ready, recalled, type } from "./harness/agents.ts";
 import { type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -87,7 +87,9 @@ const readerRequests = () => s.requests("claude").filter((r) => String(r.prompt)
 
 test("Claude's native reader answers about live, archived, and pi conversations without adding a Session", async () => {
 	s = scenario("recall-claude", "answers", { packages: [], recorder: true, harnesses: ["claude"] });
-	const target = await launched(s, "claude", "reply SWB-target-secret");
+	const { id: targetId } = await launched(s, "claude", "reply SWB-target-secret");
+	// Claude Code titles a session with a request of its own, which can land after its first turn settles; the ask names it by title.
+	const target = await until(() => s.ls().find((e) => e.id === targetId && e.title !== null), ready, "the target's title");
 	const pi = await launched(s, "pi", "reply SWB-pi-target");
 	const caller = await launched(s, "claude", "reply caller ready");
 	// Claude flushes its transcript asynchronously.

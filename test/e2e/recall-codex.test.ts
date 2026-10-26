@@ -48,7 +48,9 @@ function codexScenario(name: string): Scenario {
 
 test("Codex asks live Codex, pi, and archived sessions without a rollout, roster row, or TUI switch", async () => {
 	s = codexScenario("codex");
-	const target = await launched(s, "codex", "reply SWB-codex-secret");
+	const { id: targetId } = await launched(s, "codex", "reply SWB-codex-secret");
+	// Codex titles a session with a request of its own, which can land after its first turn settles; the ask names it by title.
+	const target = await until(() => s.ls().find((e) => e.id === targetId && e.title !== null), ready, "the target's title");
 	const pi = await launched(s, "pi", "reply SWB-pi-secret", undefined, ["--title", "pi target"]);
 	const caller = await launched(s, "codex", "reply caller-up");
 	const before = rollouts();
