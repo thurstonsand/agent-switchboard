@@ -17,16 +17,26 @@ afterEach(async () => {
 /** The OSC 11 or OSC 4 reply a pi gets from its terminal, asked by `/e2e-bg` typed into its tmux session on the sessions server. */
 async function piColor(host: string, osc: "11" | "4;9"): Promise<string> {
 	const log = join(s.home, "e2e-signals/input.log");
-	writeFileSync(log, "");
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host}:`, "-l", "/e2e-bg");
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host}:`, "Enter");
+	let asked = 0;
+	const ask = () => {
+		writeFileSync(log, "");
+		s.tmux(s.servers.sessions, "send-keys", "-t", `=${host}:`, "-l", "/e2e-bg");
+		s.tmux(s.servers.sessions, "send-keys", "-t", `=${host}:`, "Enter");
+		asked = Date.now();
+	};
+	ask();
+	// pi-tui keeps every color reply for itself while its own query is out, as when it starts or hears the theme change;
+	// one asked then never reaches the extension, so it asks again.
 	return until(
 		() => {
 			const lines = readFileSync(log, "utf8")
 				.split("\n")
 				.filter(Boolean)
 				.map((line) => JSON.parse(line) as string);
-			return lines.find((line) => line.startsWith(`\x1b]${osc};`)) ?? false;
+			const reply = lines.find((line) => line.startsWith(`\x1b]${osc};`));
+			if (reply) return reply;
+			if (Date.now() - asked > 1000) ask();
+			return false;
 		},
 		budgets.settle,
 		`${host}'s OSC ${osc} reply`,
