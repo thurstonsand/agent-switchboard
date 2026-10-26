@@ -64,11 +64,12 @@ test("with the db writer lock held and a 50 MB transcript being parsed, the curs
 	expect(statSync(transcript).size).toBeGreaterThan(50_000_000);
 
 	const db = s.dbFile;
+	// The close after the sleep keeps the connection reachable: one collected mid-sleep closes, and its lock goes with it.
 	const holder = Bun.spawn(
 		[
 			process.execPath,
 			"-e",
-			`const d = new (require("bun:sqlite").Database)(${JSON.stringify(db)}); d.run("PRAGMA busy_timeout = 5000"); d.run("BEGIN IMMEDIATE"); console.log("held"); await Bun.sleep(60000);`,
+			`const d = new (require("bun:sqlite").Database)(${JSON.stringify(db)}); d.run("PRAGMA busy_timeout = 5000"); d.run("BEGIN IMMEDIATE"); console.log("held"); await Bun.sleep(60000); d.close();`,
 		],
 		{
 			stdout: "pipe",
