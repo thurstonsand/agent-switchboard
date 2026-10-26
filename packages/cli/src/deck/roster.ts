@@ -708,14 +708,22 @@ function syncLabels(): void {
 	});
 }
 
-/** Ctrl-hjkl reach an nvim Editor in the pane showing it; nvim hands moves off its own edge back through `swb __nav`. */
-function tagEditor(on: boolean): void {
+/**
+ * What the UI server's keys do on the Stage's pane: ctrl-hjkl reach an nvim Editor in it, which hands moves off its own edge
+ * back through `swb __nav`; Esc goes back to the list from a harness that's starting there, as it does from a card.
+ */
+function tagStage(option: "@swb_editor" | "@swb_starting", on: boolean): void {
 	stageOps = stageOps.then(() =>
-		tmuxAsync(UI, "set", "-p", "-t", stagePane, ...(on ? ["@swb_editor", "1"] : ["-u", "@swb_editor"])).then(
+		tmuxAsync(UI, "set", "-p", "-t", stagePane, ...(on ? [option, "1"] : ["-u", option])).then(
 			() => {},
-			(error: Error) => toast(`editor: ${error.message}`, "error"),
+			(error: Error) => toast(`${option}: ${error.message}`, "error"),
 		),
 	);
+}
+
+/** A harness on the Stage's pane before it's up, which shows its terminal's echo, not its own screen. */
+function harnessStarting(a: Applied): boolean {
+	return a.kind === "loading" && a.target !== placeholder;
 }
 
 function writeStageCard(d: Applied): void {
@@ -752,7 +760,8 @@ function apply(): void {
 		const where = d.shell.at === "replace" ? `in ${e ? harnessName(e.harness) : "the agent"}'s place` : d.shell.at;
 		toast(`a shell ${config.shellPosition} needs ${room}; showing it ${where}`, "info");
 	}
-	if (nvimEditor(config.editor) && editorShown(d) !== editorShown(prev)) tagEditor(editorShown(d));
+	if (nvimEditor(config.editor) && editorShown(d) !== editorShown(prev)) tagStage("@swb_editor", editorShown(d));
+	if (harnessStarting(d) !== harnessStarting(prev)) tagStage("@swb_starting", harnessStarting(d));
 	syncLabels();
 	if (d.target === prev.target) return;
 	writeAtomic(paths.target, d.target);
@@ -2595,7 +2604,7 @@ class Roster implements Component, Focusable {
 		const enter = (label: string): Hint => ["⏎", label, () => this.activate(true)];
 		const row = this.selected();
 		let hints: Hint[];
-		if (focus === "stage" && stage.applied.target === placeholder)
+		if (focus === "stage" && (stage.applied.target === placeholder || harnessStarting(stage.applied)))
 			hints = [
 				["esc", "list", () => void focusRoster()],
 				[`${config.prefix} ?`, "keys", help[2]],

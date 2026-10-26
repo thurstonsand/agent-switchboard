@@ -26,6 +26,7 @@ Schema v7: update swb and the pi line together.
 ### Fixed
 
 - A launch's parent and Group go to the first session its process records, in every harness. In pi, `/new` before the first prompt in a session `n` started inside a Group keeps the new session in that Group, and the roster no longer nests a `/new` after a launched session's first turn under its launcher.
+- `Esc` goes back to the list for as long as a session on the Stage is starting, as its hint says. Once its harness's process was up, but not yet its screen, `Esc` went to the harness, which showed it as `^[`.
 
 ## 0.7.0 — 2026-10-21
 

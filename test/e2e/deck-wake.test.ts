@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState, SessionStateRow } from "../../packages/cli/src/deck/protocol.ts";
 import { type } from "./harness/agents.ts";
@@ -39,7 +39,7 @@ test("w wakes a dormant session to live while the keyboard stays in the roster",
 	expect(entry(s, id)).toMatchObject({ open: true, cutOff: null });
 });
 
-test("Enter on a dormant row puts the keyboard on its pi as it comes up; Enter then M-a h backs out while pi still starts", async () => {
+test("Enter on a dormant row puts the keyboard on its pi as it comes up; Enter then Esc backs out while pi still starts", async () => {
 	s = scenario("phase2", "enter-wake");
 	const [a, b] = (await seed(s, { turns: ["alpha"] }, { turns: ["beta"] })) as [string, string];
 	s.swb("drive", "start");
@@ -56,15 +56,21 @@ test("Enter on a dormant row puts the keyboard on its pi as it comes up; Enter t
 	s.keys("M-a", "h");
 	await waitState(s, "roster focus", (x) => x.focus === "roster");
 	await cursorTo(s, b);
+	mkdirSync(join(s.home, "e2e-signals"), { recursive: true });
+	writeFileSync(join(s.home, "e2e-signals", "start.hold"), "");
 	s.keys("Enter");
-	await waitState(s, "keyboard on b's starting pi", (x) => x.staged.id === b && x.focus === "stage");
-	await Bun.sleep(100);
-	s.keys("M-a", "h");
+	await until(() => s.signal("start.entered"), budgets.piReady, "b's pi held mid-start");
+	// Past its card, the Stage shows b's pi itself, which isn't up to hear Esc.
+	await waitState(s, "keyboard on b's starting pi", (x) => x.staged.id === b && x.staged.kind === "loading" && x.focus === "stage");
+	await until(() => s.screen().includes("esc list"), budgets.settle, "esc list while b's pi starts");
+	s.keys("Escape");
 	const back = await waitState(s, "back in the roster", (x) => x.focus === "roster");
 	expect(back.waking.every((w) => !w.keyboardWaiting)).toBe(true);
+	release(s, "start");
 	await until(() => entry(s, b).live, budgets.piReady, "b live after backing out");
 	await waitState(s, "b live on the Stage", (x) => x.staged.id === b && x.staged.kind === "live", budgets.piReady);
 	expect(state(s).focus).toBe("roster");
+	expect(readFileSync(join(s.home, "e2e-signals/input.log"), "utf8").split("\n")).not.toContain(JSON.stringify("\x1b"));
 	s.save("esc-live.txt", s.screen());
 
 	s.keys("Enter");
