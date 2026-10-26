@@ -23,6 +23,14 @@ function connect(path: string): Driver {
 	return new DatabaseSync(path);
 }
 
+const BUSY_TIMEOUT_MS = 5000;
+
+/** SQLITE_BUSY, as Bun's driver (errno) and Node's (errcode) report it. */
+function busy(error: unknown): boolean {
+	const { errno, errcode } = error as { errno?: number; errcode?: number };
+	return (errno ?? errcode) === 5;
+}
+
 export class Db {
 	readonly #driver: Driver;
 
@@ -37,8 +45,20 @@ export class Db {
 			throw new Error(`no db at ${path}`);
 		}
 		this.#driver = connect(path);
-		// The timeout first: several processes opening a new db at once all switch it to WAL, which takes the write lock.
-		this.#driver.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON;");
+		this.#driver.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
+		// Several processes opening a new db at once all switch it to WAL. SQLite refuses one of them at once, without
+		// waiting out the busy timeout, when waiting could deadlock, and expects it to try again.
+		const deadline = Date.now() + BUSY_TIMEOUT_MS;
+		for (;;) {
+			try {
+				this.#driver.exec("PRAGMA journal_mode = WAL");
+				break;
+			} catch (error) {
+				if (!busy(error) || Date.now() > deadline) throw error;
+				Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+			}
+		}
+		this.#driver.exec("PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON;");
 	}
 
 	get(sql: string, ...params: Param[]): Row | undefined {
