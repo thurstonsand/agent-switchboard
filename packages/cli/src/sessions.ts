@@ -116,12 +116,12 @@ export function ensureServer(server: string, conf: string, start: (confPath: str
 	}
 }
 
-/** Up, and either on this config or owned by a newer swb. */
+/** Up, and either on this config or owned by a newer swb. A server shutting down can answer one read and not the next. */
 function current(server: string, version: string): boolean {
 	const conf = tmuxTry(server, "show", "-gqv", "@swb_conf_version");
-	if (!conf.ok) return false;
-	const running = tmux(server, "show", "-gqv", "@swb_version");
-	return newer(running, VERSION) || (running === VERSION && conf.out === version);
+	const running = tmuxTry(server, "show", "-gqv", "@swb_version");
+	if (!conf.ok || !running.ok) return false;
+	return newer(running.out, VERSION) || (running.out === VERSION && conf.out === version);
 }
 
 /** An upgrade ends every idle session, so the next wake runs the new swb. Their shutdown writes the db, so this runs outside its lock. */

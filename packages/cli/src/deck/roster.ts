@@ -1477,7 +1477,8 @@ class Roster implements Component, Focusable {
 		this.pointer = null;
 		stage.keyAt = performance.now();
 		frameKeyAt = stage.keyAt;
-		toasts = [];
+		// A key puts the toasts away, all but a stopped worker's: the Deck can't go on without it.
+		toasts = toasts.filter((t) => t.until === Number.POSITIVE_INFINITY);
 		if (this.settings) {
 			this.settings.handleInput(data);
 			stage.keyAt = 0;

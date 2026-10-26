@@ -409,7 +409,14 @@ function handle(message: ToWorker): void {
 			db = openStore();
 			layoutRoot = projectRoot(message.here);
 			post({ type: "restore", layout: loadLayout(db, layoutRoot) });
-			setInterval(() => span("worker.tick", tick), TICK_MS);
+			// As with a message, a tick that fails says so, and the next one tries again.
+			setInterval(() => {
+				try {
+					span("worker.tick", tick);
+				} catch (error) {
+					post({ type: "error", text: (error as Error).message });
+				}
+			}, TICK_MS);
 			if (catalog) post({ type: "catalog", catalog });
 			refresh(false);
 			break;
