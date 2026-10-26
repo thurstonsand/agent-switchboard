@@ -7,16 +7,16 @@ export const UI = instanced("swb-ui");
 export const DRIVE = instanced("swb-drive");
 
 const MIN_MAJOR = 3;
-const MIN_MINOR = 7;
+const MIN_MINOR = 8;
 
 function resolveTmux(): string {
 	const bin = Bun.which("tmux");
-	if (!bin) throw new SwbError("tmux not found on PATH: swb needs tmux 3.7 or newer");
+	if (!bin) throw new SwbError("tmux not found on PATH: swb needs tmux 3.8 or newer");
 	const out = Bun.spawnSync([bin, "-V"]).stdout.toString().trim();
 	const match = /(\d+)\.(\d+)/.exec(out);
 	const [major, minor] = match ? [Number(match[1]), Number(match[2])] : [0, 0];
 	if (major < MIN_MAJOR || (major === MIN_MAJOR && minor < MIN_MINOR)) {
-		throw new SwbError(`${bin} is ${out || "an unknown version"}: swb needs tmux 3.7 or newer`);
+		throw new SwbError(`${bin} is ${out || "an unknown version"}: swb needs tmux 3.8 or newer`);
 	}
 	return bin;
 }

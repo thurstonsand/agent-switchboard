@@ -6,6 +6,13 @@
 mise trust && mise bootstrap
 ```
 
+mise builds tmux 3.8 from source until tmux-builds publishes it, which needs libevent, ncurses, and bison. On macOS that build fails, so link Homebrew's tmux into mise first instead:
+
+```sh
+brew install tmux
+mise link asdf:mise-plugins/mise-tmux@3.8 "$(brew --prefix tmux)"
+```
+
 ## Commands
 
 Always prefer mise tasks over running tools directly.

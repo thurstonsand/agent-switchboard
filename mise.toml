@@ -2,7 +2,8 @@
 bun = "1.4.3"
 node = "24"
 "aqua:biomejs/biome" = "2.6.3"
-"aqua:tmux/tmux-builds" = "3.7c"
+# tmux-builds has no 3.8 yet; this builds it from its release tarball, with libevent and ncurses headers.
+"asdf:mise-plugins/mise-tmux" = "3.8"
 "aqua:charmbracelet/vhs" = "0.12.1"
 "conda:ttyd" = "1.7.7"
 "conda:ffmpeg" = "9.0.2"

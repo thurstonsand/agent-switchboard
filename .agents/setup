@@ -20,9 +20,10 @@ export MISE_YES=1
 # pi downloads fd on its first run when the system has none, and Codex warns without bubblewrap.
 # grim screenshots the orb Desktop, for evidence that lives outside the terminal grid, like the Deck's title.
 install_packages() {
-  dpkg -s fd-find bubblewrap grim >/dev/null 2>&1 && return
+  dpkg -s fd-find bubblewrap grim libevent-dev libncurses-dev bison >/dev/null 2>&1 && return
   sudo apt-get update -qq
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fd-find bubblewrap grim
+  # libevent, ncurses, and bison: mise builds tmux 3.8 from source.
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fd-find bubblewrap grim libevent-dev libncurses-dev bison
 }
 
 install_mise() {
@@ -48,8 +49,8 @@ install_tools() {
   mise install
   # Harnesses are npm globals behind node shims, and swb starts them in any project directory.
   mise use -g --quiet "node@$(mise current node)"
-  # swb needs tmux 3.7 outside this repo too; the system's 3.3a is too old.
-  mise use -g --quiet "aqua:tmux/tmux-builds@$(mise current aqua:tmux/tmux-builds)"
+  # swb needs tmux 3.8 outside this repo too; the system's 3.3a is too old.
+  mise use -g --quiet "asdf:mise-plugins/mise-tmux@$(mise current asdf:mise-plugins/mise-tmux)"
 }
 
 # Mirrors CI: pi itself, plus the two host packages the e2e scenarios load.

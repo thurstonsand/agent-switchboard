@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # mise builds tmux 3.8 from source.
+      - run: sudo apt-get install -y --no-install-recommends libevent-dev libncurses-dev bison
       - uses: jdx/mise-action@v5
       - run: bun install --frozen-lockfile
       # The e2e runs the harnesses from npm's global root, at the versions bun.lock resolves.

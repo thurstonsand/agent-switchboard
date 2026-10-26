@@ -161,7 +161,8 @@ test("swb quit refuses a running turn, then stops everything, leaving sessions o
 	const before = clockPid();
 	expect(before).toMatch(/^0 \d+$/);
 	s.tmux(s.servers.sessions, "run-shell", `kill ${before.split(" ")[1]}`);
-	await until(() => clockPid().startsWith("1 "), budgets.settle, "the clock dead");
+	// A dead pane has no pid since tmux 3.8.
+	await until(() => clockPid().startsWith("1"), budgets.settle, "the clock dead");
 	s.swb("wake", pi.id);
 	await until(() => clockPid().startsWith("0 ") && clockPid() !== before, budgets.settle, "the clock respawned");
 
