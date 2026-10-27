@@ -62,8 +62,16 @@ test("pi reloading itself restarts when its turn ends and carries on with the AG
 	await until(() => !entry(s, pi.id).live, budgets.settle, "pi dormant");
 	expect(s.swb("reload", pi.id, "--idle")).toContain("isn't running");
 	rmSync(join(s.home, "e2e-signals", "reloaded.system"));
+	// A pi just started records idle before its carry-on turn starts, so idle alone can come before that turn.
+	const prompted = () =>
+		(s.query<{ at: number }>("select last_prompt_at as at from sessions where session_id = ?", pi.id)[0] as { at: number }).at;
+	const before = prompted();
 	expect(s.swb("reload", pi.id)).toContain("Started");
-	await until(() => s.signal("reloaded.system") !== "" && entry(s, pi.id).activity === "idle", ready, "the dormant pi started to carry on");
+	await until(
+		() => s.signal("reloaded.system") !== "" && prompted() > before && entry(s, pi.id).activity === "idle",
+		ready,
+		"the dormant pi's carry-on turn done",
+	);
 	s.swb("archive", pi.id);
 	expect(s.swbTry("reload", pi.id)).toMatchObject({ code: 1, err: expect.stringContaining("archived") });
 });
