@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 — 2026-10-27
 
 Schema v8: update swb and the pi line together.
 
