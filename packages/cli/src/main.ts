@@ -16,6 +16,7 @@ import { models } from "./commands/models.ts";
 import { newSession } from "./commands/new.ts";
 import { open } from "./commands/open.ts";
 import { quit } from "./commands/quit.ts";
+import { reload } from "./commands/reload.ts";
 import { snooze } from "./commands/snooze.ts";
 import { unarchive } from "./commands/unarchive.ts";
 import { visit } from "./commands/visit.ts";
@@ -43,6 +44,8 @@ const USAGE = `swb: Agent Switchboard
                                hide a session in Snoozed until then, or its next message; TIME is ISO 8601, local unless it has an offset
   swb quit [--force]           stop every session, Deck, and the clock; sessions stay open, dormant
   swb wake ID                  start a dormant session in the background
+  swb reload ID [--idle]       restart a session's agent on fresh config and have it carry on; --idle waits for its turn to end
+                               and leaves it waiting for a prompt
   swb launch [--harness H] [--model M] [--effort E] [--agent A] [--cwd DIR] [--from ID] [--title T]
              [--group NAME | --no-group] [--request-response]
                                start a new session in the background on the shortlist's preset matching those; naming none, the
@@ -94,6 +97,7 @@ const CHECKS_CONFIG = new Set([
 	"send",
 	"reachable",
 	"wake",
+	"reload",
 ]);
 
 async function main(args: string[]): Promise<void> {
@@ -159,6 +163,8 @@ async function main(args: string[]): Promise<void> {
 			return recall(rest);
 		case "wake":
 			return wake(rest);
+		case "reload":
+			return reload(rest);
 		case "deck":
 			return deckCommand(rest);
 		case "migrate":

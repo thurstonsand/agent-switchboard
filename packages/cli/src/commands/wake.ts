@@ -13,5 +13,5 @@ export function wake(args: string[]): void {
 	);
 	if (archived) throw new SwbError(`wake: ${id} is archived; swb unarchive ${id}`);
 	// pi-sessions wakes a session to deliver it a message, which is its next turn.
-	console.log(start(db, id, false));
+	console.log(start(db, id, "idle"));
 }

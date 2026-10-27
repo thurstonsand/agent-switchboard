@@ -450,7 +450,7 @@ export function register(on) {
 		if (line.managed && !e.agentId) {
 			line.busy = false;
 			line.blocked = false;
-			// swb stops this session after recording, when it was archived during the turn.
+			// swb stops this session after recording, when it was archived during the turn or is reloading.
 			void record($, ["settled", "--session", line.session, "--cwd", line.cwd, "--transcript", line.transcript]);
 			void submitPending($);
 		}

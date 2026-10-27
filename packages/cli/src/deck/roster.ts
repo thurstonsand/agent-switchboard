@@ -304,7 +304,7 @@ function glyph(state: State, now: number): string {
 
 /** The one place a session's state is named; the row's glyph is where it's scanned, and its section says snoozed. */
 function status(e: Entry): string {
-	const base = phaseStatus(e);
+	const base = `${phaseStatus(e)}${e.reload && e.live ? gray(" · reloads when this turn ends") : ""}`;
 	if (!e.snoozed) return base;
 	return `${base}${gray(` · snoozed until ${e.snoozedUntil === null ? "a message" : wakeAt(e.snoozedUntil, Date.now())}`)}`;
 }
@@ -851,6 +851,15 @@ function wake(id: string, keyboard: boolean): void {
 	apply();
 }
 
+/** Restarts a session's harness, live or not, to carry on; the Stage shows it starting, as a wake does, until it's back. */
+function reload(id: string): void {
+	if (stage.ended?.id === id) stage.ended = null;
+	if (launchFor(id)) return;
+	launches.push({ id, host: null, since: Date.now(), keyboard: focus === "stage" });
+	post({ type: "reload", id });
+	apply();
+}
+
 /** A new session on `target`; with none, the worker picks `harness`'s first preset, or the default, once it knows what can start. */
 function newSession(cwd: string, group: string | null, target: LaunchTarget | null, harness: Harness | null = null): void {
 	if (newLaunch()) {
@@ -893,6 +902,11 @@ function settleLaunches(): void {
 
 /** Whatever the Stage's host now runs is what's selected: `/new` or `/resume` inside pi moves the selection with it. */
 function followHost(): void {
+	// A session that quit while watched and is back, woken by a message or restarted by its reload, shows live again.
+	if (stage.ended && !stage.ended.failed && entries.get(stage.ended.id)?.live) {
+		stage.ended = null;
+		return;
+	}
 	const { id, host } = stage.applied;
 	if (id === null || host === null) return;
 	const e = entries.get(id);
@@ -904,6 +918,8 @@ function followHost(): void {
 		stage.stagedAt = Date.now();
 		return;
 	}
+	// A reload stops it on purpose; its new host takes over the Stage.
+	if (launchFor(id)) return;
 	stage.ended = { id, failed: false, lines: [] };
 	if (focus === "stage") void focusRoster();
 }
@@ -1563,6 +1579,7 @@ class Roster implements Component, Focusable {
 		else if (matchesKey(data, "escape")) this.filter.setValue("");
 		else if (k === "w") this.wake();
 		else if (k === "x") this.stop();
+		else if (k === "R") this.reload();
 		else if (k === "a") this.toggleArchived();
 		else if (k === "s") this.toggleSnooze();
 		else if (k === "p") this.toParent();
@@ -1809,6 +1826,15 @@ class Roster implements Component, Focusable {
 		if (!e) return;
 		if (e.live) toast("already running", "info");
 		else wake(e.id, false);
+	}
+
+	/** R: restarts its harness on the same conversation, so it reads its configuration afresh, and has it carry on. */
+	reload(row = this.selected()): void {
+		const e = row?.kind === "session" ? row.entry : null;
+		if (!e) return;
+		if (!e.open) toast("archived: unarchive it first", "info");
+		else if (e.provisional) toast("nothing to reload before the first prompt", "info");
+		else reload(e.id);
 	}
 
 	/** x: the counterpart to w. Frees the process and keeps the session open; any unsent prompt is saved as a draft. */
@@ -3425,6 +3451,7 @@ async function prefixKey(k: string, id: string | undefined): Promise<void> {
 	} else if (k === "d") roster.askRemove();
 	else if (k === "w") roster.wake(row);
 	else if (k === "x") roster.stop(row);
+	else if (k === "R") roster.reload(row);
 	else if (k === "a") {
 		// Asking whether the family goes too needs the keyboard where the question is.
 		if (row?.kind === "session" && row.entry.open && openDescendants(entries.values(), row.entry.id).length > 0) await focusRoster();
@@ -3461,6 +3488,7 @@ function peekButtons(row: Row): [label: string, key: string][] {
 	if (!e.open) items.push(["Unarchive", "a"]);
 	else {
 		items.push(e.live ? ["Stop", "x"] : ["Wake", "w"]);
+		if (!e.provisional) items.push(["Reload", "R"]);
 		if (!e.provisional) items.push(e.snoozed ? ["Unsnooze", "s"] : ["Snooze…", "s"], ["Archive", "a"]);
 		if (!e.operator) items.push(["Group…", "m"]);
 		items.push([e.operator ? "New Operator" : "New session here", "n"]);

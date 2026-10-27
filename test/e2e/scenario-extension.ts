@@ -33,6 +33,8 @@ import { agentStep, readerQuestion } from "./fakes/agent.ts";
 // A message from another session (it starts "Message from session") whose body is `reply <n>` is answered like it.
 //   archive <text>    call swb_update_session to archive itself, then answer "tool done <text>"
 // "Continue where you left off.", which waking a cut-off session sends, is answered "continued".
+// The prompt a reload to carry on sends a session that wasn't cut off is answered "reloaded", its system prompt saved as
+// reloaded.system before the turn starts.
 // A pi that starts while start.hold exists signals start.entered and blocks until start.release.
 // A turn that starts while turn.hold exists signals turn.entered and waits for turn.release before agent_start.
 // A pi that shuts down while shutdown.hold exists signals shutdown.entered and waits for shutdown.release.
@@ -68,6 +70,12 @@ function text(message: Message): string {
 }
 
 export default function (pi: ExtensionAPI) {
+	pi.on("before_agent_start", (event) => {
+		if ("prompt" in event && event.prompt.startsWith("This session was restarted to reload")) {
+			mkdirSync(signals, { recursive: true });
+			writeFileSync(join(signals, "reloaded.system"), event.systemPrompt);
+		}
+	});
 	if (process.env.SWB_E2E_LOGIN_SHELL) signal("login-shell");
 	if (existsSync(join(signals, "start.hold"))) {
 		signal("start.entered");
@@ -127,6 +135,7 @@ export default function (pi: ExtensionAPI) {
 		}
 		const prompt = text(last).trim();
 		if (prompt === "Continue where you left off.") return fauxAssistantMessage("continued");
+		if (prompt.startsWith("This session was restarted to reload")) return fauxAssistantMessage("reloaded");
 		if (prompt.includes("<handoff-goal>")) {
 			return fauxAssistantMessage(fauxToolCall("create_handoff_context", { summary: "e2e", relevantFiles: [] }), {
 				stopReason: "toolUse",

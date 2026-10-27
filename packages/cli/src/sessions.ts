@@ -1,14 +1,14 @@
 import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { bootId, type Db, dbPath, type Harness, operatorDir, projectRoot, stateDir } from "@swb/shared";
-import { isArchived, markArchived } from "@swb/shared/record";
+import { isArchived, markArchived, recordTx } from "@swb/shared/record";
 import { now, since } from "@swb/shared/trace";
 import { type Effort, HARNESS_EFFORTS } from "./config.ts";
 import { type RuntimeRow, runtimeLive } from "./derive.ts";
 import { SwbError } from "./errors.ts";
 import { writeClaudeLine } from "./lines.ts";
 import { claudeOperatorSettings } from "./operator.ts";
-import { openStore } from "./store.ts";
+import { openStore, setReload } from "./store.ts";
 import { CLIENT_CWD, cleanEnv, killServer, listSessions, quote, SESSIONS, tmux, tmuxClient, tmuxTry } from "./tmux.ts";
 import { archivedInCodex } from "./transcripts/codex.ts";
 import { VERSION } from "./version.ts";
@@ -538,12 +538,18 @@ end })
  */
 const CONTINUE = "Continue where you left off.";
 
+/** What a session reloaded to carry on is told when it wasn't cut off mid-turn, which CONTINUE picks back up instead. */
+const RELOADED = "This session was restarted to reload its configuration; continue where you left off.";
+
 /**
- * Starts a dormant session, unless something already hosts it, and returns its tmux session. `continueTurn` is for a
- * person's wake: an open session cut off mid-turn picks that turn back up. A wake to deliver a message leaves it
- * idle, since the message is its next turn.
+ * What a woken session does first. `idle`, a wake to deliver a message, does nothing, since the message is its next
+ * turn. `resume`, a person's wake, has an open session cut off mid-turn pick that turn back up. `continue`, a reload's,
+ * does that too, and has one that wasn't carry on anyway.
  */
-export function wake(db: Db, id: string, continueTurn: boolean): string {
+export type Wake = "idle" | "resume" | "continue";
+
+/** Starts a dormant session, unless something already hosts it, and returns its tmux session. */
+export function wake(db: Db, id: string, then: Wake): string {
 	ensureSessionsServer();
 	return db.tx(() => {
 		const listed = listSessions(SESSIONS, "#{@swb_kind}", "#{pane_dead}");
@@ -567,13 +573,29 @@ export function wake(db: Db, id: string, continueTurn: boolean): string {
 		const harness = session.harness as Harness;
 		// Claude Code resumes on its last model but its own default effort, so the effort its line last saw goes back in.
 		const effort = harness === "claude" ? (session.effort as Effort | null) : null;
+		// Any start reads its configuration afresh, so it takes the place of a reload waiting for one.
+		setReload(db, id, null);
 		return launch(db, {
 			harness,
 			cwd,
-			resume: { id, transcript: session.transcript as string, continueTurn: continueTurn && cutOff },
+			resume: { id, transcript: session.transcript as string, continueTurn: then !== "idle" && cutOff },
+			...(then === "continue" && !cutOff ? { prompt: RELOADED } : {}),
 			...(effort && HARNESS_EFFORTS.claude.includes(effort) ? { effort } : {}),
 		});
 	});
+}
+
+/**
+ * Restarts a session's harness on its conversation now, stopping it first if it runs, mid-turn or not, and returns its
+ * new tmux session. A reload waiting for its turn to end is taken over by this one.
+ */
+export function restart(db: Db, id: string, then: Wake): string {
+	if (isArchived(db, id)) throw new SwbError("archived: unarchive it first");
+	// Taken now, so the clock doesn't start it on the old reload's terms once it stops.
+	recordTx(db, () => setReload(db, id, null));
+	const runtime = liveRuntime(db, id, new Set(listSessions(SESSIONS).map(([name]) => name as string)));
+	if (runtime) stopPis([runtime]);
+	return wake(db, id, then);
 }
 
 /** The tmux session a live pi hosts this session in, if any. */

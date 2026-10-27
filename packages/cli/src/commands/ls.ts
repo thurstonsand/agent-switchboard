@@ -26,6 +26,7 @@ Lists every Session, open and archived, with its derived state.
   inactive     open, not an Operator, not snoozed, and its whole Family has had no activity within inactive_after, none of it blocked or unseen
   snoozed      open and snoozed, neither blocked, cut off, nor errored
   snoozedUntil epoch ms a snoozed session's snooze ends, or null when it waits for a message
+  reload       "continue" or "idle" while a reload waits for its turn to end, or for its restart; else null
   createdAt    epoch ms of its first prompt
   activityAt   epoch ms of the last prompt or settle
   visitedAt    epoch ms of my last Visit, or null

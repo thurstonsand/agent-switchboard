@@ -272,14 +272,14 @@ export default function (pi: ExtensionAPI) {
 		proc.attention.clear();
 		writeFor(ctx, (db, id) => {
 			if (stopReason === "error" && !event.aborted) turnErrored(db, id);
-			const { archived } = settle(db, {
+			const { quit } = settle(db, {
 				host: proc.launch.tmuxSession,
 				sessionId: id,
 				cwd: ctx.cwd,
 				title: ctx.sessionManager.getSessionName() ?? null,
 			});
-			// Archived during its own turn, by swb_update_session or `swb archive` from a shell: it quits now.
-			if (archived) ctx.shutdown();
+			// Archived during its own turn, by swb_update_session or `swb archive` from a shell, or reloading: it quits now.
+			if (quit) ctx.shutdown();
 		});
 	});
 
@@ -595,12 +595,13 @@ export default function (pi: ExtensionAPI) {
 				args.snooze !== undefined ? `snooze ${snoozeText(args.snooze as Snooze)}` : "",
 				args.group === null ? "ungroup" : args.group !== undefined ? `group ${args.group}` : "",
 				args.title !== undefined ? `retitle as "${args.title}"` : "",
+				args.reload !== undefined ? `reload · ${args.reload}` : "",
 			].filter(Boolean);
 			// Rendered after the call, when a retitled target already carries its new title.
 			if (args.title !== undefined) return parts.join(" · ");
 			return `${parts.join(" · ")} ${args.session ? titleOf(args.session) : "this session"}`;
 		},
-		// Archived during its own turn, pi quits once the turn settles.
+		// Archived or reloaded during its own turn, pi quits once the turn settles.
 		(args: Record<string, unknown>, ctx) => swb(proc.launch.bin, ["update", "--from", self(ctx)], JSON.stringify(args)),
 	);
 

@@ -132,8 +132,11 @@ export function setPhase(db: Db, sessionId: string, phase: "working" | "blocked"
 
 export type Settle = { host: string; sessionId: string; cwd: string; title: string | null };
 
-/** The turn finished with nothing queued. Reports whether the session was archived during it, so its line can quit. */
-export function settle(db: Db, s: Settle): { archived: boolean } {
+/**
+ * The turn finished with nothing queued. Reports whether its line should quit now: the session was archived during it,
+ * or a reload waits for it, which the clock starts again.
+ */
+export function settle(db: Db, s: Settle): { quit: boolean } {
 	return recordTx(db, () => {
 		harnessTitled(db, s.sessionId, s.title);
 		db.run(
@@ -146,7 +149,8 @@ export function settle(db: Db, s: Settle): { archived: boolean } {
 			s.sessionId,
 		);
 		db.run("UPDATE runtimes SET cwd = ?, project_root = ? WHERE tmux_session = ?", s.cwd, projectRoot(s.cwd), s.host);
-		return { archived: isArchived(db, s.sessionId) };
+		const reloading = db.get("SELECT 1 FROM marks WHERE session_id = ? AND reload IS NOT NULL", s.sessionId);
+		return { quit: isArchived(db, s.sessionId) || Boolean(reloading) };
 	});
 }
 
@@ -194,9 +198,15 @@ export function titleOf(db: Db, sessionId: string): string | null {
 	return (row?.title as string | null | undefined) ?? null;
 }
 
-/** The process quit: its runtime row goes, and the phase stays, so a quit mid-turn reads as cut off. */
+/**
+ * The process quit: its runtime row goes, and the phase stays, so a quit mid-turn reads as cut off. Its launch row goes
+ * too, so a wake while its pane is still closing doesn't take that pane for a launch in flight.
+ */
 export function endHosting(db: Db, host: string): void {
-	recordTx(db, () => db.run("DELETE FROM runtimes WHERE tmux_session = ?", host));
+	recordTx(db, () => {
+		db.run("DELETE FROM runtimes WHERE tmux_session = ?", host);
+		db.run("DELETE FROM launches WHERE tmux_session = ?", host);
+	});
 }
 
 export function isArchived(db: Db, sessionId: string): boolean {
@@ -209,15 +219,15 @@ export function isArchived(db: Db, sessionId: string): boolean {
 }
 
 /**
- * Marks a session archived and cancels what it hasn't received, schedules aimed at it included, and its snooze; false
- * before its first turn, when there is nothing to archive.
+ * Marks a session archived and cancels what it hasn't received, schedules aimed at it included, its snooze, and a
+ * reload waiting for it; false before its first turn, when there is nothing to archive.
  */
 export function markArchived(db: Db, sessionId: string): boolean {
 	if (!db.get("SELECT 1 FROM sessions WHERE session_id = ?", sessionId)) return false;
 	const now = Date.now();
 	db.run(
 		`INSERT INTO marks (session_id, archived_at) VALUES (?, ?)
-		 ON CONFLICT (session_id) DO UPDATE SET archived_at = excluded.archived_at, snoozed_at = NULL, snoozed_until = NULL`,
+		 ON CONFLICT (session_id) DO UPDATE SET archived_at = excluded.archived_at, snoozed_at = NULL, snoozed_until = NULL, reload = NULL`,
 		sessionId,
 		now,
 	);

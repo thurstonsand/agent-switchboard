@@ -1,6 +1,6 @@
 import { type Static, type TSchema, Type } from "typebox";
 import { Value } from "typebox/value";
-import { HARNESSES, SNOOZE_PRESETS, VIEWS } from "./index.ts";
+import { HARNESSES, RELOAD_MODES, SNOOZE_PRESETS, VIEWS } from "./index.ts";
 
 // The coordination tools every line gives its agent, defined once. pi takes these schemas as they are; Claude Code
 // and Codex take them as JSON Schema. Each tool runs an swb command and returns its text to the model unchanged.
@@ -146,6 +146,9 @@ export const TOOLS = {
 			"Snooze or unsnooze only when the user asks.",
 			"Group sessions when the user asks, or to keep sessions you started for one piece of work together. Reuse a Group session_reachable lists in that Project rather than inventing a near-duplicate.",
 			"Retitle a session when the user asks, or when its title no longer says what it is working on.",
+			"Reload a session when the user asks, or when you changed something it reads only at startup (its AGENTS.md or CLAUDE.md, settings, extensions, plugins, skills, or MCP servers) and it needs the change now.",
+			"Reloading this session restarts it when this turn ends: call it last, then end with a brief final message. With continue, it starts a turn on its own once it's back; with idle, it waits for the user.",
+			"Reloading another session with continue restarts it at once, cutting off a running turn, its tools, and its background work, then picks that turn back up; an idle or dormant one starts a turn.",
 		],
 		parameters: Type.Object({
 			session: Type.Optional(session),
@@ -168,6 +171,15 @@ export const TOOLS = {
 				Type.Union([...[...SNOOZE_PRESETS, "off"].map((preset) => Type.Literal(preset)), Type.Object({ until: Type.String() })], {
 					description: 'How long to snooze it, off to unsnooze, or {"until":"2026-11-05T09:00:00-08:00"} for a set time.',
 				}),
+			),
+			reload: Type.Optional(
+				Type.Union(
+					RELOAD_MODES.map((mode) => Type.Literal(mode)),
+					{
+						description:
+							"Restart the session's agent process on the same conversation, so it reads its instructions and configuration afresh. continue: it carries on working afterward. idle: it waits for its next prompt.",
+					},
+				),
 			),
 		}),
 		readOnly: false,

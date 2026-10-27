@@ -3,7 +3,7 @@ import { launchSession } from "../coordinate.ts";
 import { states } from "../derive.ts";
 import { type Fired, fire, newSessionName, nextDue } from "../schedules.ts";
 import { SWB, wake } from "../sessions.ts";
-import { openStore } from "../store.ts";
+import { openStore, setReload } from "../store.ts";
 import { SESSIONS, tmuxTry } from "../tmux.ts";
 
 // `swb __clock`: the sessions server's control pane, which lives as long as the server does. It fires schedules on
@@ -44,29 +44,43 @@ export async function clock(): Promise<void> {
 		}
 	};
 
-	/** Every open session with an undelivered message and no process gets one, unless it's waiting out a failed start. */
+	/**
+	 * Every open session with no process and an undelivered message, or a reload whose line has quit for it, gets one,
+	 * unless it's waiting out a failed start. A reload that waited for idle leaves a session cut off meanwhile as it is.
+	 */
 	const wakeWaiting = (now: number) => {
 		reconciled = now;
 		const waiting = new Set(
 			db
-				.all("SELECT DISTINCT target_id FROM messages WHERE delivered_at IS NULL AND cancelled_at IS NULL AND kind = 'message'")
-				.map((row) => row.target_id as string),
+				.all(
+					`SELECT DISTINCT target_id AS id FROM messages WHERE delivered_at IS NULL AND cancelled_at IS NULL AND kind = 'message'
+					 UNION SELECT session_id FROM marks WHERE reload IS NOT NULL`,
+				)
+				.map((row) => row.id as string),
 		);
 		for (const id of retries.keys()) if (!waiting.has(id)) retries.delete(id);
 		if (waiting.size === 0) return;
 		for (const s of states(db)) {
 			if (!waiting.has(s.id) || !s.open || s.live) continue;
+			if (s.reload === "idle" && s.cutOff) {
+				recordTx(db, () => setReload(db, s.id, null));
+				continue;
+			}
 			const retry = retries.get(s.id);
 			if (retry && now < retry.at) continue;
 			const wait = retry ? Math.min(retry.wait * 2, WAKE_RETRY_MAX_MS) : WAKE_RETRY_MS;
 			retries.set(s.id, { at: now + wait, wait });
 			try {
-				log(`waking ${s.id} for its mail: ${wake(db, s.id, false)}`);
+				const host = wake(db, s.id, s.reload ?? "idle");
+				log(`waking ${s.id} for its ${s.reload ? "reload" : "mail"}: ${host}`);
 			} catch (error) {
 				log(`waking ${s.id} failed: ${(error as Error).message}`);
 			}
 		}
 	};
+
+	/** Whether a reload waits for a session its line has quit, which a data_version change is the first sign of. */
+	const reloadWaiting = () => db.get("SELECT 1 FROM marks WHERE reload IS NOT NULL") !== undefined;
 
 	/** A launch that failed is news for the session that scheduled it, in its own harness. */
 	const launchFailed = (l: Fired["launches"][number], error: Error) => {
@@ -109,6 +123,7 @@ export async function clock(): Promise<void> {
 			stale = true;
 			due = nextDue(db);
 			settleHosts();
+			if (reloadWaiting()) wakeWaiting(now);
 		}
 		if (due !== null && due <= now) {
 			const fired = fire(db, now);

@@ -87,11 +87,11 @@ export function record(args: string[]): void {
 			return;
 		}
 		case "settled": {
-			const { archived } = settle(db, { host, sessionId: need("session"), cwd: need("cwd"), title: title(transcript()) });
-			// Archived during its turn: stop it now the turn is over, in the background, since Claude Code waits on this.
-			// Quiet, since a failed run-shell draws its status over some other session's harness.
-			if (archived) tmuxTry(SESSIONS, "run-shell", "-b", `kill -TERM ${panePid(host)} 2>/dev/null || :`);
-			console.log(JSON.stringify({ archived }));
+			const { quit } = settle(db, { host, sessionId: need("session"), cwd: need("cwd"), title: title(transcript()) });
+			// Archived or reloading during its turn: stop it now the turn is over, in the background, since Claude Code
+			// waits on this. Quiet, since a failed run-shell draws its status over some other session's harness.
+			if (quit) tmuxTry(SESSIONS, "run-shell", "-b", `kill -TERM ${panePid(host)} 2>/dev/null || :`);
+			console.log(JSON.stringify({ quit }));
 			return;
 		}
 		case "request": {

@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { bootId, type Db, type Harness, operatorDir, type Phase, pidAlive, type View } from "@swb/shared";
+import { bootId, type Db, type Harness, operatorDir, type Phase, pidAlive, type ReloadMode, type View } from "@swb/shared";
 import { loadConfig } from "./config.ts";
 import { SwbError } from "./errors.ts";
 import { listSessions, SESSIONS } from "./tmux.ts";
@@ -33,6 +33,8 @@ export type SessionState = {
 	snoozed: boolean;
 	/** When a snoozed session's snooze ends; null while it waits for a message, or isn't snoozed. */
 	snoozedUntil: number | null;
+	/** A reload waiting for its turn to end, or for the clock to start it again, and how it comes back. */
+	reload: ReloadMode | null;
 	createdAt: number;
 	activityAt: number;
 	visitedAt: number | null;
@@ -74,6 +76,7 @@ export type SessionRow = {
 	group_name: string | null;
 	snoozed_at: number | null;
 	snoozed_until: number | null;
+	reload: ReloadMode | null;
 	/** The last message sent to it, delivered or not; one after a next_message snooze ends it. */
 	last_message_at: number | null;
 	runtime: RuntimeRow | null;
@@ -83,7 +86,7 @@ export function sessionRows(db: Db): SessionRow[] {
 	return db
 		.all(
 			`SELECT s.session_id, s.harness, s.parent_id, coalesce(m.title, s.title) AS title, s.project_root, s.cwd, s.branch, s.transcript, s.phase, s.created_at, s.last_prompt_at, s.last_settled_at, s.errored_at,
-		        m.archived_at, m.visited_at, m.view, m.group_name, m.snoozed_at, m.snoozed_until, r.tmux_session, r.boot_id, r.pid,
+		        m.archived_at, m.visited_at, m.view, m.group_name, m.snoozed_at, m.snoozed_until, m.reload, r.tmux_session, r.boot_id, r.pid,
 		        (SELECT max(created_at) FROM messages WHERE target_id = s.session_id AND kind = 'message') AS last_message_at
 		 FROM sessions s LEFT JOIN marks m USING (session_id) LEFT JOIN runtimes r USING (session_id)`,
 		)
@@ -107,6 +110,7 @@ export function sessionRows(db: Db): SessionRow[] {
 			group_name: r.group_name as string | null,
 			snoozed_at: r.snoozed_at as number | null,
 			snoozed_until: r.snoozed_until as number | null,
+			reload: r.reload as ReloadMode | null,
 			last_message_at: r.last_message_at as number | null,
 			runtime:
 				r.tmux_session === null ? null : { tmux_session: r.tmux_session as string, boot_id: r.boot_id as string, pid: r.pid as number },
@@ -197,6 +201,7 @@ function derive(row: SessionRow, w: World): SessionState {
 		inactive: open && !operator && !snoozed && activityAt < w.now - w.inactiveAfterMs && activity !== "blocked" && !unseen,
 		snoozed,
 		snoozedUntil: snoozed ? row.snoozed_until : null,
+		reload: open ? row.reload : null,
 		createdAt: row.created_at,
 		activityAt,
 		visitedAt: row.visited_at,

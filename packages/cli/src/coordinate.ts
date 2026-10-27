@@ -1,5 +1,5 @@
 import { existsSync, realpathSync } from "node:fs";
-import { type Db, type Harness, operatorDir, projectRoot, type View } from "@swb/shared";
+import { type Db, type Harness, operatorDir, projectRoot, type ReloadMode, type View } from "@swb/shared";
 import { frame, harnessName, type MessageKind, ring } from "@swb/shared/mailbox";
 import { markArchived, recordTx, titleOf } from "@swb/shared/record";
 import type { ToolArgs, ToolResult } from "@swb/shared/tools";
@@ -11,8 +11,8 @@ import { checkBody, SwbError } from "./errors.ts";
 import { requestedGroup } from "./groups.ts";
 import { type Caller, launchFlags, presetLaunch } from "./harnesses.ts";
 import { snooze } from "./schedules.ts";
-import { archive, ensureSessionsServer, launch, unarchive, wake } from "./sessions.ts";
-import { rename, setGroup } from "./store.ts";
+import { archive, ensureSessionsServer, launch, restart, unarchive, wake } from "./sessions.ts";
+import { rename, setGroup, setReload } from "./store.ts";
 import { inUse } from "./transcripts/read.ts";
 
 // The coordination every line's tools run. Each returns the text the model reads, so all three harnesses say the same
@@ -82,7 +82,7 @@ export async function send(db: Db, m: Send): Promise<ToolResult> {
 	});
 	ring(db, m.to);
 	const woke = !target.live;
-	if (woke) wake(db, m.to, false);
+	if (woke) wake(db, m.to, "idle");
 	const delivered = await deliveredWithin(db, id, woke ? 60_000 : 15_000);
 	const name = `"${displayName(target)}"`;
 	const text =
@@ -252,17 +252,19 @@ export async function show(db: Db, from: string, id: string, view: View | null):
 export type Update = Omit<ToolArgs<"swb_update_session">, "session">;
 
 /**
- * Applies any combination of changes to a session: unarchiving first, archiving last. Every change is checked before any
- * is made, so a refused archive leaves the rest undone too.
+ * Applies any combination of changes to a session: unarchiving first, reloading and then archiving last. Every change
+ * is checked before any is made, so a refused archive leaves the rest undone too.
  */
 export async function update(db: Db, from: string, id: string, change: Update): Promise<ToolResult> {
-	const { archived, family, force, snooze: snoozing, group, title } = change;
-	if ([archived, snoozing, group, title].every((value) => value === undefined))
-		throw new SwbError("nothing to change: give archived, snooze, group, or title");
+	const { archived, family, force, snooze: snoozing, group, title, reload: reloading } = change;
+	if ([archived, snoozing, group, title, reloading].every((value) => value === undefined))
+		throw new SwbError("nothing to change: give archived, snooze, group, title, or reload");
 	if ((family !== undefined || force !== undefined) && archived !== true)
 		throw new SwbError("family and force go only with archived: true");
 	if (archived === true && snoozing !== undefined)
 		throw new SwbError("an archived session can't be snoozed; give one of archived or snooze");
+	if (archived === true && reloading !== undefined)
+		throw new SwbError("an archived session can't be reloaded; give one of archived or reload");
 	const all = states(db);
 	const target = all.find((s) => s.id === id);
 	if (!target)
@@ -295,11 +297,47 @@ export async function update(db: Db, from: string, id: string, change: Update): 
 		);
 	}
 	if (snoozing !== undefined) done.push(snooze(db, from, id, snoozing).text);
+	if (reloading !== undefined) done.push(reload(db, from, id, reloading));
 	if (archiving) done.push(await archiveRun(db, from, archiving));
 	return {
 		text: done.join(" "),
-		details: { id, archived, group: trimmedGroup, title: trimmedTitle, snooze: snoozing, ids: archiving?.members.map((s) => s.id) },
+		details: {
+			id,
+			archived,
+			group: trimmedGroup,
+			title: trimmedTitle,
+			snooze: snoozing,
+			reload: reloading,
+			ids: archiving?.members.map((s) => s.id),
+		},
 	};
+}
+
+/**
+ * Restarts a session's harness on its conversation, so it reads its configuration afresh. This session, or another
+ * asked to wait, goes when its turn ends: its line quits, and the clock starts it again. Another told to continue goes
+ * at once, a running turn and all, which it then picks back up. `from` is null for a person.
+ */
+export function reload(db: Db, from: string | null, id: string, mode: ReloadMode): string {
+	const target = sessionState(db, id);
+	const name = from === id ? "This session" : `"${displayName(target)}"`;
+	if (!target.open) throw new SwbError(`${name} is archived; unarchive it first`);
+	if (!target.live && mode === "idle") return `${name} isn't running; it starts on its configuration as it is then.`;
+	// Read with the write, so a turn settling meanwhile either sees the reload and quits for it, or is over and restarts now.
+	const waits =
+		target.live &&
+		recordTx(db, () => {
+			const phase = db.get("SELECT phase FROM sessions WHERE session_id = ?", id)?.phase;
+			if (from !== id && (mode === "continue" || phase === "idle")) return false;
+			// A reload waiting to carry on still does when asked again to come back idle.
+			const pending = db.get("SELECT reload FROM marks WHERE session_id = ?", id)?.reload;
+			if (pending !== "continue") setReload(db, id, mode);
+			return true;
+		});
+	if (waits) return `${name} restarts when ${from === id ? "this" : "its"} turn ends${mode === "continue" ? ", then carries on" : ""}.`;
+	restart(db, id, mode);
+	const how = target.live ? "Restarted" : "Started";
+	return mode === "continue" ? `${how} ${name}; it carries on where it left off.` : `${how} ${name}.`;
 }
 
 /** What keeps a session from going quietly: a turn still running or waiting on the user, or one that never finished. */

@@ -56,6 +56,7 @@ export type LsEntry = {
 	cutOff: "shutdown" | "killed" | "restart" | null;
 	errored: boolean;
 	inactive: boolean;
+	reload: "continue" | "idle" | null;
 	activityAt: number;
 	archivedAt: number | null;
 };

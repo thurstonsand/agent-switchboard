@@ -7,7 +7,7 @@ import { deriveSessions, type RuntimeRecord, runtimeLive, runtimeRecords, type S
 import { addDir, removeDir, targets } from "../dirs.ts";
 import { type Catalog, discover, launchFlags, readCatalog, resolveLaunch, shortlist, writeGuide } from "../harnesses.ts";
 import { type ScheduleView, schedulesBySession, snooze } from "../schedules.ts";
-import { archive, ensureEditor, ensureSessionsServer, ensureShell, launch, stop, unarchive, wake } from "../sessions.ts";
+import { archive, ensureEditor, ensureSessionsServer, ensureShell, launch, restart, stop, unarchive, wake } from "../sessions.ts";
 import { loadLayout, markVisited, openStore, saveLayout, setGroup, setView } from "../store.ts";
 import { listSessions, SESSIONS, tmux, tmuxTry } from "../tmux.ts";
 import { locateTranscript } from "../transcripts/read.ts";
@@ -219,6 +219,7 @@ function snapshot(): Polled {
 			inactive: false,
 			snoozed: false,
 			snoozedUntil: null,
+			reload: null,
 			createdAt: runtime.started_at,
 			activityAt: runtime.started_at,
 			visitedAt: null,
@@ -436,7 +437,16 @@ function handle(message: ToWorker): void {
 			return;
 		case "wake":
 			try {
-				const host = wake(db, message.id, true);
+				const host = wake(db, message.id, "resume");
+				launched.add(host);
+				post({ type: "woke", id: message.id, host });
+			} catch (error) {
+				post({ type: "launchFailed", id: message.id, text: (error as Error).message });
+			}
+			break;
+		case "reload":
+			try {
+				const host = restart(db, message.id, "continue");
 				launched.add(host);
 				post({ type: "woke", id: message.id, host });
 			} catch (error) {

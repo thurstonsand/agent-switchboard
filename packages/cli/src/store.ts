@@ -1,4 +1,4 @@
-import { Db, dbPath, SCHEMA_VERSION, type View } from "@swb/shared";
+import { Db, dbPath, type ReloadMode, SCHEMA_VERSION, type View } from "@swb/shared";
 import { SwbError } from "./errors.ts";
 
 const MIGRATIONS: string[] = [
@@ -124,6 +124,8 @@ const MIGRATIONS: string[] = [
 		group_name   TEXT,
 		created_at   INTEGER NOT NULL
 	);`,
+	// A reload waiting for the session's turn to end, and how it should come back.
+	"ALTER TABLE marks ADD COLUMN reload TEXT CHECK (reload IN ('continue','idle'))",
 ];
 
 if (MIGRATIONS.length !== SCHEMA_VERSION) throw new Error(`${MIGRATIONS.length} migrations for schema v${SCHEMA_VERSION}`);
@@ -143,6 +145,11 @@ export function setView(db: Db, id: string, view: View): void {
 /** A title for the session's harness to take, or (null) none pending. */
 export function rename(db: Db, id: string, title: string | null): void {
 	db.run("INSERT INTO marks (session_id, title) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET title = excluded.title", id, title);
+}
+
+/** A reload for the session's line to quit for when its turn ends, and the clock to start it again from; null for none. */
+export function setReload(db: Db, id: string, mode: ReloadMode | null): void {
+	db.run("INSERT INTO marks (session_id, reload) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET reload = excluded.reload", id, mode);
 }
 
 /** Moves sessions into a Group, or out of any when `name` is null. */

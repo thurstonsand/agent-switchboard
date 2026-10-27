@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+Schema v8: update swb and the pi line together.
+
+### Added
+
+- Reload: a session restarts its harness on the same conversation, so it reads its instructions, settings, extensions, plugins, skills, and MCP servers afresh. `swb_update_session` takes `reload`, `continue` or `idle`: an agent reloading itself restarts when its turn ends; another session told to continue restarts at once, picking a running turn back up and starting one when idle or dormant; told to wait, it restarts once its turn ends and waits for its next prompt. `R` in the Deck reloads to continue, and `swb reload ID [--idle]` does either from a shell.
+
 ### Changed
 
 - Claude Code runs several `session_ask` calls from one response at once, each with its own reader, as pi and Codex do. Its swb tools now come from the line's own `swb mcp` server, so they're named `mcp__plugin_swb_swb__…` instead of `mcp__swb__…`; a permission rule naming the old ones needs the new names.

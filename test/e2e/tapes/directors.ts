@@ -851,6 +851,21 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	reload: {
+		run: async (s) => {
+			await entered(s, "build");
+			const [{ id }] = (await waitLs(s, "working", (ls) => ls[0]?.activity === "working")) as [LsEntry];
+			const pid = () => s.query<{ pid: number }>("select pid from runtimes where session_id = ?", id)[0]?.pid;
+			const before = pid();
+			await waitLs(
+				s,
+				"restarted and its turn picked back up",
+				(ls) => ls[0]?.live === true && ls[0].activity === "idle" && pid() !== before,
+			);
+			await waitDeck(s, "the Stage on the restarted pi", (x) => x.staged.id === id && x.staged.kind === "live");
+		},
+	},
+
 	"agent-archive": {
 		run: async (s) => {
 			await waitLs(s, "a session", (ls) => ls[0]?.open === true);

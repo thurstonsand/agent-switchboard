@@ -321,8 +321,8 @@ class CodexLine {
 			this.busy = false;
 			this.blocked = false;
 			this.guard(() => {
-				const { archived } = settle(this.db, { host: this.host, sessionId: thread.id, cwd: thread.cwd, title: thread.name });
-				if (archived) {
+				const { quit } = settle(this.db, { host: this.host, sessionId: thread.id, cwd: thread.cwd, title: thread.name });
+				if (quit) {
 					this.stopping = true;
 					this.stop();
 				}

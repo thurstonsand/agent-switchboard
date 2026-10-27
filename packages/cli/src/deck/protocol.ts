@@ -196,6 +196,7 @@ export type ToWorker =
 	| { type: "unarchive"; id: string }
 	| { type: "snooze"; id: string; snooze: Snooze }
 	| { type: "stop"; id: string }
+	| { type: "reload"; id: string }
 	| { type: "transcript"; id: string; path: string; harness: Harness }
 	| { type: "peek"; id: string; cwd: string; transcript: string | null; harness: Harness }
 	| { type: "colors"; colors: TerminalProfile }
