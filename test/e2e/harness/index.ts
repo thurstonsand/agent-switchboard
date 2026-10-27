@@ -1,5 +1,16 @@
 import { Database } from "bun:sqlite";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 
 export const repo = resolve(import.meta.dir, "../../..");
@@ -269,6 +280,12 @@ export function scenario(
 				Bun.spawnSync([tools.tmux, "-L", server, "kill-server"], { env });
 				await until(() => pids.every((pid) => !alive(pid)), 5000, `${server}: pids ${pids.join(",")} to die`);
 			}
+			// A harness killed mid-tool leaves its held command running, and a test that failed before releasing it would
+			// leave it waiting forever on a directory that's about to go.
+			const signals = join(home, "e2e-signals");
+			for (const held of existsSync(signals) ? readdirSync(signals).filter((f) => f.endsWith(".entered")) : [])
+				writeFileSync(join(signals, held.replace(/\.entered$/, ".release")), "");
+			await until(() => !Bun.spawnSync(["ps", "-eo", "args="]).stdout.toString().includes(signals), 5000, "the held commands to finish");
 			for (const fake of fakes) fake.kill();
 			rmSync(root, { recursive: true, force: true });
 		},
