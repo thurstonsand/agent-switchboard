@@ -18,13 +18,13 @@ function title(transcript: string): string | null {
 }
 
 /**
- * Where Claude Code keeps a session's transcript, for a line that wasn't told: classic.SessionStart names it, and
- * another mod can keep that event from the line. Claude names a project's folder after its path, every other
- * character a dash; a session moved since keeps its file where it started, so an existing one wins.
+ * Where Claude Code keeps a session's transcript, which no mod event names. Claude names a project's folder after its
+ * path, every other character a dash; a session moved since keeps its file where it started, so an existing one wins.
+ * A fresh Claude home has no projects folder until its first transcript.
  */
 function claudeTranscript(id: string, cwd: string): string {
 	const projects = join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), "projects");
-	const [found] = new Bun.Glob(`*/${id}.jsonl`).scanSync({ cwd: projects, absolute: true });
+	const [found] = existsSync(projects) ? new Bun.Glob(`*/${id}.jsonl`).scanSync({ cwd: projects, absolute: true }) : [];
 	return found ?? join(projects, cwd.replaceAll(/[^A-Za-z0-9]/g, "-"), `${id}.jsonl`);
 }
 
@@ -41,7 +41,6 @@ export function record(args: string[]): void {
 			host: { type: "string" },
 			session: { type: "string" },
 			cwd: { type: "string" },
-			transcript: { type: "string" },
 			model: { type: "string" },
 			effort: { type: "string" },
 		},
@@ -54,8 +53,12 @@ export function record(args: string[]): void {
 		if (!value) throw new UsageError(`__record ${event}: --${name} is required`);
 		return value;
 	};
-	const transcript = (): string => values.transcript || claudeTranscript(need("session"), need("cwd"));
 	const db = openStore();
+	// Claude keeps a session's file where it started, so its row's path holds once that file exists.
+	const transcript = (): string => {
+		const stored = db.get("SELECT transcript FROM sessions WHERE session_id = ?", need("session"))?.transcript as string | undefined;
+		return stored && existsSync(stored) ? stored : claudeTranscript(need("session"), need("cwd"));
+	};
 	switch (event) {
 		case "start":
 			startHosting(db, {

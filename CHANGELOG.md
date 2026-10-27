@@ -14,6 +14,7 @@ Schema v8: update swb and the pi line together.
 
 ### Fixed
 
+- Claude Code on a machine with managed settings shows when it's blocked on a permission prompt or errored, and follows `/clear` and `/resume`. Its built-in `cc-plugin-sec-default` mod skips every plugin's settings hooks, which the line used for those, and Claude Code posted a notice for each. A title set through swb still uses one, so on such a machine Claude Code doesn't take it, and says so.
 - swb started with no locale, as launchd, cron, or a bare shell start it, works as from your terminal. tmux printed a tab to such a client as `_`, so a Deck opened from one lost its roster, every swb command restarted the clock, and `swb quit` failed.
 
 ## 0.8.0 — 2026-10-26

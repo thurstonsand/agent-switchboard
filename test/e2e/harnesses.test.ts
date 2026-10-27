@@ -71,6 +71,22 @@ test("Codex's /new moves its host to the new thread: that one is recorded, and t
 	);
 });
 
+test("Claude Code's /clear moves its host to the new session before its first prompt, and the old one goes dormant", async () => {
+	s = scenario("harnesses", "claude-clear", { packages: [], recorder: true, harnesses: ["claude"] });
+	const first = await launched(s, "claude", "reply first session");
+	const hostName = host(s, first.id);
+	type(s, first.id, "/clear");
+	await until(
+		() =>
+			s
+				.query<{ session_id: string }>("select session_id from runtimes where tmux_session = ?", hostName)
+				.find((r) => r.session_id !== first.id),
+		budgets.settle,
+		"the host's new session",
+	);
+	expect(entry(s, first.id)).toMatchObject({ live: false, open: true });
+});
+
 test("the Deck's n opens on the default preset, puts its real TUI on the Stage, and shows its dormant conversation", async () => {
 	s = scenario("harnesses", "deck", { packages: [], recorder: true, harnesses: ["claude", "codex"] });
 	const [first] = (await seed(s, { turns: ["first"] })) as [string];

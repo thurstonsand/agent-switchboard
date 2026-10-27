@@ -171,11 +171,12 @@ swb mcp (spawned by the server per thread)
 ### The Claude line
 
 ```text
-session.start          register tools; spawn swb __inbox --host $SWB_TMUX_SESSION
-classic.SessionStart   swb __record start   (session id, transcript, cwd)   also after /clear and /resume
+session.start          register tools; spawn swb __inbox --host $SWB_TMUX_SESSION; swb __record start   (session id, cwd)
+session.end            /clear or /resume → swb __record start for the session it moves to
 turn.start (main)      swb __record turn
-classic.PermissionRequest → blocked; turn.step → working again
-turn.complete (main)   swb __record settled   archived meanwhile → swb stops the pane
+tool.check → ask with no host deciding → blocked; turn.step → working again
+turn.complete (main)   reason error → swb __record errored; swb __record settled   archived meanwhile → swb stops the pane
+classic.UserPromptSubmit   a title set through swb, as sessionTitle; the one classic hook, since no other event titles
 prompt.edit            remember the draft; session.end writes it to drafts/<id>
 ```
 
@@ -208,7 +209,7 @@ pi renders them as custom messages, Claude logs a transcript row (the injected c
 - **Native Codex `/archive`** moves the TUI to another thread; the host stops it first, so a pane never rebinds to a conversation swb doesn't track.
 - **Codex `/new` before any prompt** shows a title with no id for a moment; the binding keeps the previous thread until a real id appears.
 - **A Codex thread archived in Codex** can't be resumed; `swb unarchive` unarchives it in Codex too.
-- **Claude permission prompts**: `PermissionRequest` marks blocked; the next model step marks working.
+- **Claude permission prompts**: an ask from `tool.check` that no host decides marks blocked; the next model step marks working.
 - **Two harnesses with the same id format**: ids are UUIDs everywhere; the harness column disambiguates resume.
 
 ## Implementation Plan

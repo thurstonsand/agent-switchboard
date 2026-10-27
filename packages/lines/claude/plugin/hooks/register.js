@@ -81,7 +81,6 @@ const line = {
 	host: "",
 	session: "",
 	cwd: "",
-	transcript: "",
 	/** The session whose start swb has recorded, so a late environment records it once. */
 	recorded: "",
 	busy: false,
@@ -302,9 +301,9 @@ async function useTool($, name, e) {
 
 /**
  * Reads swb's launch environment and the session this process shows, and records that session's start once. Every
- * hook asks, since none is sure to arrive: another mod can answer classic.SessionStart without passing it on.
+ * hook asks: session.start fires once per process, before /clear or /resume moves it to another session.
  */
-async function init($, start) {
+async function init($) {
 	if (!line.managed) {
 		line.bin = await env($, "SWB_BIN");
 		line.host = await env($, "SWB_TMUX_SESSION");
@@ -315,31 +314,28 @@ async function init($, start) {
 		}
 	}
 	if (!line.managed) return;
-	await follow($, start);
+	await follow($);
 	await begin($);
 }
 
-/** Moves to the session Claude Code shows now; /clear and /resume change it. classic.SessionStart also names its transcript. */
-async function follow($, start) {
-	const id = start?.session_id ?? (await $.session.id());
-	if (id !== line.session) {
-		// Messages held for a session this process left stay undelivered, for when that session runs again.
-		line.pending = line.pending.filter((m) => m.target === id);
-		line.session = id;
-		line.cwd = start?.cwd ?? (await $.session.cwd());
-		line.transcript = "";
-		line.busy = false;
-		line.blocked = false;
-		line.request = "";
-	}
-	if (start?.transcript_path) line.transcript = start.transcript_path;
+/** Moves to the session Claude Code shows now; /clear and /resume change it. */
+async function follow($) {
+	const id = await $.session.id();
+	if (id === line.session) return;
+	// Messages held for a session this process left stay undelivered, for when that session runs again.
+	line.pending = line.pending.filter((m) => m.target === id);
+	line.session = id;
+	line.cwd = await $.session.cwd();
+	line.busy = false;
+	line.blocked = false;
+	line.request = "";
 }
 
 /** Records the start of the session this process shows, once. */
 async function begin($) {
 	if (line.recorded === line.session) return;
 	line.recorded = line.session;
-	await record($, ["start", "--session", line.session, "--cwd", line.cwd, "--transcript", line.transcript]);
+	await record($, ["start", "--session", line.session, "--cwd", line.cwd]);
 	await restoreDraft($);
 	void submitPending($);
 }
@@ -389,23 +385,18 @@ export function register(on) {
 
 	on("agent.offer", { agent: "swb:reader" }, () => ({ isOffered: false }));
 
-	// Fires at startup and again after /clear and /resume, which move this process to another session.
-	on("classic.SessionStart", async ($, e, next) => {
-		await init($, e);
-		return next(e);
-	});
-
 	on("turn.start", async ($, e, next) => {
 		await init($);
 		if (line.managed && !e.agentId) {
 			line.busy = true;
 			line.turnId = e.turnId;
-			void record($, ["turn", "--session", line.session, "--cwd", line.cwd, "--transcript", line.transcript]);
+			void record($, ["turn", "--session", line.session, "--cwd", line.cwd]);
 		}
 		return next(e);
 	});
 
-	// Claude Code names a session from a prompt hook's sessionTitle, and writes it as its own custom title.
+	// Claude Code names a session from a prompt hook's sessionTitle, and writes it as its own custom title. No other
+	// event can, so this stays a classic hook, which an organization's cc-plugin-sec-default sends on past the line.
 	on("classic.UserPromptSubmit", async (_, e, next) => {
 		const result = await next(e);
 		const pending = line.title;
@@ -414,12 +405,15 @@ export function register(on) {
 		return { ...result, sessionTitle: pending.title };
 	});
 
-	on("classic.PermissionRequest", async ($, e, next) => {
-		if (line.managed && line.busy && !line.blocked) {
+	// A call's ask opens the permission dialog, unless a host answers it elsewhere. Auto mode's classifier settles some
+	// asks first, which reads as blocked until its model request.
+	on("tool.check", async ($, e, next) => {
+		const verdict = await next(e);
+		if (line.managed && line.busy && !line.blocked && e.tool_use_id && verdict.decision === "ask" && verdict.decider !== "host") {
 			line.blocked = true;
 			void record($, ["phase", "blocked", "--session", line.session]);
 		}
-		return next(e);
+		return verdict;
 	});
 
 	// A model request means the permission prompt was answered.
@@ -450,17 +444,12 @@ export function register(on) {
 		if (line.managed && !e.agentId) {
 			line.busy = false;
 			line.blocked = false;
+			if (e.reason === "error") void record($, ["errored", "--session", line.session]);
 			// swb stops this session after recording, when it was archived during the turn or is reloading.
-			void record($, ["settled", "--session", line.session, "--cwd", line.cwd, "--transcript", line.transcript]);
+			void record($, ["settled", "--session", line.session, "--cwd", line.cwd]);
 			void submitPending($);
 		}
 		return result;
-	});
-
-	// The turn ended on an API error; turn.complete still settles it.
-	on("classic.StopFailure", async ($, e, next) => {
-		if (line.managed && !e.agent_id) void record($, ["errored", "--session", line.session]);
-		return next(e);
 	});
 
 	// Separate from the spawning hook: Claude skips that hook in the nested agent to prevent re-entry.
@@ -496,10 +485,14 @@ export function register(on) {
 	on("prompt.change", trackDraft);
 
 	on("session.end", async ($, e, next) => {
-		if (line.managed && e.reason !== "clear" && e.reason !== "resume") {
-			await saveDraft($);
-			await record($, ["end"]);
+		if (!line.managed) return next(e);
+		// /clear and /resume carry this process on under another session, which it shows once the end is done.
+		if (e.reason === "clear" || e.reason === "resume") {
+			$.clock.after(0, () => init($));
+			return next(e);
 		}
+		await saveDraft($);
+		await record($, ["end"]);
 		return next(e);
 	});
 }
