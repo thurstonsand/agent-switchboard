@@ -28,7 +28,10 @@ test("closing the Deck's terminal destroys the Deck, its roster, its placeholder
 		budgets.settle,
 		"the Deck session gone",
 	);
-	await until(() => !existsSync(sock), budgets.settle, "the socket gone");
+	// Flaky in CI only. Whether the roster outlived it tells a cleanup that never ran from one that died partway.
+	await until(() => !existsSync(sock), budgets.settle, "the socket gone").catch((error: Error) => {
+		throw new Error(`${error.message}; the roster ${alive(rosterPid) ? "is still running" : "has exited"}`);
+	});
 	await until(
 		() => !s.tmux(s.servers.sessions, "list-sessions", "-F", "#{session_name}").includes(deck),
 		budgets.settle,
