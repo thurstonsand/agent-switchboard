@@ -3586,6 +3586,12 @@ function cleanup(): never {
 }
 process.on("SIGHUP", cleanup);
 process.on("SIGTERM", cleanup);
+// The pane gone, its terminal also reads as closed, or fails with EIO, and either can come before the SIGHUP.
+process.stdin.on("close", cleanup);
+process.stdin.on("error", (error: NodeJS.ErrnoException) => {
+	if (error.code !== "EIO") throw error;
+	cleanup();
+});
 
 /**
  * The keyboard's pane, read afresh. The hook that reports a move, and a prefix key pressed just after it, each run in
