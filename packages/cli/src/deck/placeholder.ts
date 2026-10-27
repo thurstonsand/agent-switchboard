@@ -19,12 +19,17 @@ let typedAt = 0;
 const TYPED_MS = 1500;
 let frame = "";
 
+/**
+ * The Deck writes the card before it starts the placeholder and replaces it by renaming over it, so a missing card
+ * means the Deck is gone. The Deck's worker can start a placeholder again just after the Deck's exit killed it; that one
+ * exits here, on its first read.
+ */
 function load(): boolean {
 	let next: string;
 	try {
 		next = readFileSync(cardPath, "utf8");
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") process.exit(0);
 		throw error;
 	}
 	if (next === raw) return false;
