@@ -99,8 +99,17 @@ test("n picks a directory, ranked as typed; M-a d removes a repository with its 
 	s.keys("y");
 	st = await waitState(s, "alpha gone", (x) => picker(x).confirm === null && !names(x).includes("alpha"));
 	expect(names(st)).toEqual(["kino", "notes", "pin-notes", "+ add a directory…"]);
-	// A session in its worktree doesn't bring it back.
-	expect(dirs(s).map((d) => d.path)).toEqual(["kino", "notes", "pin-notes"].map((n) => join(code, n)));
+	// A session in its worktree doesn't bring it back. The worker writes the removal just behind the roster.
+	const kept = ["kino", "notes", "pin-notes"].map((n) => join(code, n));
+	await until(
+		() =>
+			Bun.deepEquals(
+				dirs(s).map((d) => d.path),
+				kept,
+			),
+		budgets.settle,
+		"alpha gone from swb dirs",
+	);
 
 	// Adding: listed directories are dimmed; Enter on one that isn't adds it and starts a session there.
 	s.keys("Escape");
