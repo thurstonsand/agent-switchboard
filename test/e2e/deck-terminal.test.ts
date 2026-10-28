@@ -57,7 +57,13 @@ function userMessageBg(host: string): string {
 	return [...ansi.slice(0, ansi.lastIndexOf("reply ")).matchAll(/48;2;(\d+;\d+;\d+)/g)].at(-1)?.[1] ?? "none";
 }
 
-test("a pi on the Stage repaints when the terminal flips, in copy mode too, while the shell beside it gets no report", async () => {
+/** The same message after the Deck renders it to the outer terminal, including inactive-pane dimming. */
+function renderedMessageBg(): string {
+	const ansi = s.swb("drive", "capture", "--ansi");
+	return [...ansi.slice(0, ansi.lastIndexOf("reply ")).matchAll(/48;2;(\d+;\d+;\d+)/g)].at(-1)?.[1] ?? "none";
+}
+
+test("a pi follows theme changes even in copy mode, and dims only on the Deck when another pane has the keyboard", async () => {
 	s = scenario("phase2", "theme-repaint");
 	s.swb("drive", "start", "--", "new");
 	const st = await waitState(
@@ -69,12 +75,17 @@ test("a pi on the Stage repaints when the terminal flips, in copy mode too, whil
 	const host = st.staged.host as string;
 	await reply(s, "one");
 	await until(() => userMessageBg(host) === "219;229;229", budgets.settle, "pi's light user message");
+	await until(() => renderedMessageBg() === "219;229;229", budgets.settle, "focused pi at full brightness");
 	s.keys("M-a", "s");
 	await waitState(s, "the shell, with the keyboard", (x) => x.layout.shell !== null && x.focus === "shell");
+	await until(() => renderedMessageBg() === "186;194;194", budgets.settle, "inactive pi dimmed 15% in light mode");
+	expect(s.swb("drive", "capture", "--ansi")).toMatch(/\[39m(?:.\[49m)? ▾ Operators /);
 
 	// tmux 3.8 tells pi before the sessions server mirrors the terminal, so pi's own query would see the old colors.
 	s.swb("drive", "theme", "dark");
 	await until(() => userMessageBg(host) === "35;54;54", budgets.settle, "pi's dark user message");
+	await until(() => renderedMessageBg() === "22;35;35", budgets.settle, "inactive pi dimmed 35% in dark mode");
+	expect(s.swb("drive", "capture", "--ansi")).toMatch(/\[39m(?:.\[49m)? ▾ Operators /);
 	s.save("dark.ansi", s.swb("drive", "capture", "--ansi"));
 
 	// tmux 3.7c tells pi only once copy mode ends; swb, on 3.8, while it's still up.
@@ -85,9 +96,21 @@ test("a pi on the Stage repaints when the terminal flips, in copy mode too, whil
 	expect(s.tmux(s.servers.sessions, "display", "-p", "-t", `=${host}:`, "#{pane_in_mode}")).toBe("1");
 	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host}:`, "-X", "cancel");
 	await until(() => userMessageBg(host) === "219;229;229", budgets.settle, "pi's light user message, after copy mode");
+	await until(() => renderedMessageBg() === "186;194;194", budgets.settle, "the live theme flip restores 15% dimming");
 	s.save("light.ansi", s.swb("drive", "capture", "--ansi"));
 	// A shell that got the report echoes it as 997;1n or 997;2n; a bare 997 could be part of a session id.
 	expect(s.screen()).not.toMatch(/997;[12]n/);
+	s.keys("M-a", "Tab");
+	await waitState(s, "the roster, with the keyboard", (x) => x.focus === "roster");
+	await until(() => renderedMessageBg() === "186;194;194", budgets.settle, "pi stays dim with the roster focused");
+	s.keys("Enter");
+	await waitState(s, "pi, with the keyboard again", (x) => x.focus === "stage");
+	await until(() => renderedMessageBg() === "219;229;229", budgets.settle, "refocused pi returns to full brightness");
+	s.keys("M-a", "z");
+	await waitState(s, "the roster hidden", (x) => x.layout.rosterHidden);
+	s.keys("M-a", "h");
+	await waitState(s, "the roster shown and focused", (x) => !x.layout.rosterHidden && x.focus === "roster");
+	await until(() => renderedMessageBg() === "186;194;194", budgets.settle, "15% dimming survives hiding and showing the roster");
 });
 
 test("the roster and a live pi report the harness terminal's background, and both follow drive theme dark", async () => {

@@ -158,6 +158,10 @@ function uiConf(config: Config): string {
 		"set -g allow-passthrough all",
 		"set -s escape-time 0",
 		"set -s focus-events on",
+		// Dim rendered colors, including a harness's painted cursor, without changing its own terminal or theme.
+		// Pane styles have no session context: identify the roster by its pane-local label, not @swb_roster.
+		`set -g window-style 'dim=#{?#{||:#{==:#{@swb_label},swb},${OVER_OVERLAY}},0,#{?#{==:#{@swb_scheme},light},15,35}}'`,
+		"set -g window-active-style dim=0",
 		// Its default, external, drops the sessions server's OSC 52 here.
 		"set -s set-clipboard on",
 		"set -s exit-empty off",

@@ -9,7 +9,7 @@ import { type Catalog, discover, launchFlags, readCatalog, resolveLaunch, shortl
 import { type ScheduleView, schedulesBySession, snooze } from "../schedules.ts";
 import { archive, ensureEditor, ensureSessionsServer, ensureShell, launch, restart, stop, unarchive, wake } from "../sessions.ts";
 import { loadLayout, markVisited, openStore, saveLayout, setGroup, setView } from "../store.ts";
-import { listSessions, SESSIONS, tmux, tmuxTry } from "../tmux.ts";
+import { listSessions, SESSIONS, tmux, tmuxTry, UI } from "../tmux.ts";
 import { locateTranscript } from "../transcripts/read.ts";
 import { ensurePlaceholder, ensureUiServer, placeholderName } from "./deck.ts";
 import type { Diff, Entry, FromWorker, NewSession, Snapshot, TerminalProfile, ToWorker, Transcript, Turn } from "./protocol.ts";
@@ -501,6 +501,7 @@ function handle(message: ToWorker): void {
 			return;
 		case "colors":
 			profile = message.colors;
+			tmux(UI, "set", "-w", "-t", `=${deck}:`, "@swb_scheme", profile.scheme);
 			mirroredServer = "";
 			break;
 		case "view":

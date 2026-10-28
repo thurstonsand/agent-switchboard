@@ -3399,6 +3399,7 @@ function syncRoster(toRoster: boolean): Promise<void> {
 						const size = await tmuxAsync(UI, "display", "-p", "-t", shellPane.pane, beside ? "#{pane_width}" : "#{pane_height}");
 						join.push(";", "join-pane", beside ? "-h" : "-v", "-d", "-l", size, "-s", shellPane.pane, "-t", shellPane.parent);
 					}
+					if (profile) join.push(";", "set", "-w", "-t", rosterPane, "@swb_scheme", profile.scheme);
 					// The roster's window began empty when it broke away, so it has no last pane: the Stage pane goes first, for
 					// l and Tab to return to.
 					const back = toRoster ? [";", "select-pane", "-t", rosterPane] : [];
