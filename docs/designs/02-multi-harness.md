@@ -43,15 +43,15 @@ Research ([thread](https://ampcode.com/threads/T-01a13611-7076-75bb-b88f-f1d6a01
 
 ### Lines
 
-| | pi | Claude Code | Codex |
-| --- | --- | --- | --- |
-| Lives in | `packages/lines/pi`, the pi package `@thurstonsand/pi-agent-switchboard` (was `packages/pi`) | `packages/lines/claude`, a plugin with a mod, written by `swb` into `${state}/lines/claude` at launch and loaded with `--plugin-dir` | `packages/lines/codex`, compiled into `swb`: a host process per session plus `swb mcp` |
-| Managed by | the consumed `SWB_*` env token | being launched with `--plugin-dir`, plus the `SWB_*` env | being launched by `swb __codex` |
-| Records through | `@swb/shared`'s recorder, in process | `swb __record`, from mod hooks | the host process, from app-server notifications and the pane title |
-| Tools reach `swb` by | running `swb` | `$.process.run` of `swb` | MCP, served by `swb mcp` |
-| Incoming messages | the line polls the mailbox | `swb __inbox`, spawned by the mod, streams them | the host process polls the mailbox |
-| Mid-turn delivery | steer | at the next tool result | `turn/start` steers |
-| Draft kept on stop | yes | yes, the last `prompt.edit` | no: Codex sessions stop like the others and lose an unsent prompt |
+|                      | pi                                                                                           | Claude Code                                                                                                                          | Codex                                                                                  |
+| -------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| Lives in             | `packages/lines/pi`, the pi package `@thurstonsand/pi-agent-switchboard` (was `packages/pi`) | `packages/lines/claude`, a plugin with a mod, written by `swb` into `${state}/lines/claude` at launch and loaded with `--plugin-dir` | `packages/lines/codex`, compiled into `swb`: a host process per session plus `swb mcp` |
+| Managed by           | the consumed `SWB_*` env token                                                               | being launched with `--plugin-dir`, plus the `SWB_*` env                                                                             | being launched by `swb __codex`                                                        |
+| Records through      | `@swb/shared`'s recorder, in process                                                         | `swb __record`, from mod hooks                                                                                                       | the host process, from app-server notifications and the pane title                     |
+| Tools reach `swb` by | running `swb`                                                                                | `$.process.run` of `swb`                                                                                                             | MCP, served by `swb mcp`                                                               |
+| Incoming messages    | the line polls the mailbox                                                                   | `swb __inbox`, spawned by the mod, streams them                                                                                      | the host process polls the mailbox                                                     |
+| Mid-turn delivery    | steer                                                                                        | at the next tool result                                                                                                              | `turn/start` steers                                                                    |
+| Draft kept on stop   | yes                                                                                          | yes, the last `prompt.edit`                                                                                                          | no: Codex sessions stop like the others and lose an unsent prompt                      |
 
 ### Tools
 
@@ -207,7 +207,7 @@ pi renders them as custom messages, Claude logs a transcript row (the injected c
 - **A send to a session whose line is broken** waits the full timeout and reports `delivered: false`; the message stays queued.
 - **Archive with messages pending**: archiving cancels them, and a later send refuses.
 - **Native Codex `/archive`** moves the TUI to another thread; the host stops it first, so a pane never rebinds to a conversation swb doesn't track.
-- **Codex `/new` before any prompt** shows a title with no id for a moment; the binding keeps the previous thread until a real id appears.
+- **Codex`/new` before any prompt** shows a title with no id for a moment; the binding keeps the previous thread until a real id appears.
 - **A Codex thread archived in Codex** can't be resumed; `swb unarchive` unarchives it in Codex too.
 - **Claude permission prompts**: an ask from `tool.check` that no host decides marks blocked; the next model step marks working.
 - **Two harnesses with the same id format**: ids are UUIDs everywhere; the harness column disambiguates resume.

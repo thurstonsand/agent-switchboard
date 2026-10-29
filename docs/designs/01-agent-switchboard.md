@@ -316,15 +316,15 @@ At load, the recorder reads `SWB_MANAGED`, `SWB_DB`, and `SWB_TMUX_SESSION` into
 
 Events and the writes they make. Each write is synchronous and one transaction.
 
-| Event | Write |
-| --- | --- |
-| `session_start` (any reason) | upsert `runtimes` by `tmux_session` with the current `session_id`, `cwd`, `project_root`, and pid; if a `sessions` row exists, reconcile `phase='idle'`. No `sessions` row is created: rows begin at the first turn |
-| `agent_start` | create the row if missing (with `project_root` and `created_at`), set `phase='working'`, and set `last_prompt_at` only when the turn starts from idle: pi re-emits `agent_start` for retries, compaction, and queued messages inside one turn. Every turn counts, not only user messages: a pi-sessions handoff child's first turn starts with a custom message |
-| `glimpseui:attention:request` / `:resolve` | an id set: non-empty means `blocked`, empty means back to `working` |
-| `agent_settled` | `phase='idle'`, `last_settled_at`, plus `cwd`, `branch` (read HEAD), and `title` when changed |
-| `session_info_changed` | `title`, at once, so a rename while idle shows up |
-| `session_shutdown`, reason `quit` | delete the runtime row; never touch `phase` |
-| `session_shutdown`, any other reason | nothing: the `session_start` that follows rewrites the same runtime row, so a Deck never sees the process vanish |
+| Event                                      | Write                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `session_start` (any reason)               | upsert `runtimes` by `tmux_session` with the current `session_id`, `cwd`, `project_root`, and pid; if a `sessions` row exists, reconcile `phase='idle'`. No `sessions` row is created: rows begin at the first turn                                                                                                                                             |
+| `agent_start`                              | create the row if missing (with `project_root` and `created_at`), set `phase='working'`, and set `last_prompt_at` only when the turn starts from idle: pi re-emits `agent_start` for retries, compaction, and queued messages inside one turn. Every turn counts, not only user messages: a pi-sessions handoff child's first turn starts with a custom message |
+| `glimpseui:attention:request` / `:resolve` | an id set: non-empty means `blocked`, empty means back to `working`                                                                                                                                                                                                                                                                                             |
+| `agent_settled`                            | `phase='idle'`, `last_settled_at`, plus `cwd`, `branch` (read HEAD), and `title` when changed                                                                                                                                                                                                                                                                   |
+| `session_info_changed`                     | `title`, at once, so a rename while idle shows up                                                                                                                                                                                                                                                                                                               |
+| `session_shutdown`, reason `quit`          | delete the runtime row; never touch `phase`                                                                                                                                                                                                                                                                                                                     |
+| `session_shutdown`, any other reason       | nothing: the `session_start` that follows rewrites the same runtime row, so a Deck never sees the process vanish                                                                                                                                                                                                                                                |
 
 Failure: the recorder shows a persistent red footer status (`swb: not recording: <reason>`) and an error notify, then stays failed for the rest of that process. A `user_version` mismatch is a failure.
 
@@ -352,18 +352,22 @@ The Deck state, which `swb deck state --json` prints. Field names and types are 
 
 ```json
 {
-  "deck": "deck-3fa9c1", "ready": true, "terminalFocused": true,
-  "cursor": "01a1127b-…", "mode": "roster", "filter": "",
-  "focus": "stage",
-  "staged": { "id": "01a1127b-…", "host": "agent-switchboard-7f3a", "kind": "live", "view": "split", "savedView": "split" },
-  "layout": { "width": 180, "rosterOnly": false, "split": true, "zoomed": false },
-  "waking": [{ "id": "01a10cd1-…", "keyboardWaiting": true }],
-  "rows": [
-    { "kind": "header", "project": "agent-switchboard", "expanded": true },
-    { "kind": "session", "id": "01a1127b-…", "title": "Deck mock round 3", "glyph": "◐", "provisional": false }
-  ],
-  "colors": { "background": "#f9f5d7", "scheme": "light" },
-  "toasts": [{ "text": "turn running: wait for it to complete", "level": "error" }]
+	"deck": "deck-3fa9c1",
+	"ready": true,
+	"terminalFocused": true,
+	"cursor": "01a1127b-…",
+	"mode": "roster",
+	"filter": "",
+	"focus": "stage",
+	"staged": { "id": "01a1127b-…", "host": "agent-switchboard-7f3a", "kind": "live", "view": "split", "savedView": "split" },
+	"layout": { "width": 180, "rosterOnly": false, "split": true, "zoomed": false },
+	"waking": [{ "id": "01a10cd1-…", "keyboardWaiting": true }],
+	"rows": [
+		{ "kind": "header", "project": "agent-switchboard", "expanded": true },
+		{ "kind": "session", "id": "01a1127b-…", "title": "Deck mock round 3", "glyph": "◐", "provisional": false }
+	],
+	"colors": { "background": "#f9f5d7", "scheme": "light" },
+	"toasts": [{ "text": "turn running: wait for it to complete", "level": "error" }]
 }
 ```
 
@@ -372,10 +376,23 @@ The Deck state, which `swb deck state --json` prints. Field names and types are 
 `swb ls --json` prints an array, one object per Session, with these fields and the derived states:
 
 ```json
-[{ "id": "01a1127b-…", "title": "Deck mock round 3", "project": "/Users/me/code/agent-switchboard",
-   "cwd": "/Users/me/code/agent-switchboard", "branch": "main",
-   "open": true, "live": true, "activity": "working", "unseen": false, "interrupted": false, "inactive": false,
-   "activityAt": 1791313272416, "archivedAt": null }]
+[
+	{
+		"id": "01a1127b-…",
+		"title": "Deck mock round 3",
+		"project": "/Users/me/code/agent-switchboard",
+		"cwd": "/Users/me/code/agent-switchboard",
+		"branch": "main",
+		"open": true,
+		"live": true,
+		"activity": "working",
+		"unseen": false,
+		"interrupted": false,
+		"inactive": false,
+		"activityAt": 1791313272416,
+		"archivedAt": null
+	}
+]
 ```
 
 ## Call Stacks and Data Flow
@@ -796,11 +813,13 @@ Two settings exist so tests needn't mock anything. Both are real user-facing key
 
     Real-Ghostty capture, if wanted, uses `screencapture -v -R` once Screen Recording access is approved.
   - VHS, ttyd, and ffmpeg are repo-local dev tools in agent-switchboard's `mise.toml`, so `mise install` sets them up:
+
     ```toml
     vhs = "latest"           # aqua:charmbracelet/vhs
     "conda:ttyd" = "latest"  # aqua's ttyd has no darwin/arm64 build
     ffmpeg = "latest"        # conda:ffmpeg
     ```
+
     Proven on the work Mac on 2026-10-06: a tape rendered a GIF and a PNG. Videos are the primary evidence; `drive capture` text and ANSI artifacts back them up.
   - Validation: `mise run evidence` renders every tape and exits non-zero if any harness assertion fails.
 
