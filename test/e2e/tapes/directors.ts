@@ -2,7 +2,7 @@ import { expect } from "bun:test";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState } from "../../../packages/cli/src/deck/protocol.ts";
-import { recalled, subagentDone } from "../harness/agents.ts";
+import { claudeAutoMode, recalled, subagentDone } from "../harness/agents.ts";
 import { config, launched, launchTry, seed } from "../harness/deck.ts";
 import { git, gitRepo, gitWorktree, type LsEntry, type PiPackage, release, repo, type Scenario, until, which } from "../harness/index.ts";
 
@@ -502,6 +502,22 @@ export const directors: Record<string, Director> = {
 			await Bun.sleep(4000);
 			release(s, "deploy-approval");
 			await waitLs(s, "idle after the approval", (ls) => ls[0]?.activity === "idle");
+		},
+	},
+
+	"claude-auto": {
+		harnesses: ["claude"],
+		setup: async (s) => {
+			claudeAutoMode(s);
+			await launch(s, "claude", "Auto worker");
+		},
+		run: async (s) => {
+			await entered(s, "deploy");
+			await Bun.sleep(4000);
+			expect(s.ls()[0]?.activity).toBe("working");
+			release(s, "deploy");
+			await waitDeck(s, "the row blocked on the question", (x) => x.rows.some((r) => r.kind === "session" && r.state === "blocked"));
+			await waitLs(s, "idle once answered", (ls) => ls[0]?.activity === "idle");
 		},
 	},
 

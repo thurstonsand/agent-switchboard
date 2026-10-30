@@ -8,7 +8,7 @@ import { endHosting, pendingTitle, recordTx, sawRequest, setPhase, settle, start
 import { UsageError } from "../errors.ts";
 import { openStore } from "../store.ts";
 import { SESSIONS, tmux, tmuxTry } from "../tmux.ts";
-import { claudeTitle } from "../transcripts/claude.ts";
+import { claudePermissionMode, claudeTitle } from "../transcripts/claude.ts";
 
 // The Claude line's half in swb. A mod can't open a database, so its hooks run these.
 
@@ -43,6 +43,7 @@ export function record(args: string[]): void {
 			cwd: { type: "string" },
 			model: { type: "string" },
 			effort: { type: "string" },
+			"asks-person": { type: "boolean" },
 		},
 		allowPositionals: true,
 	});
@@ -86,6 +87,8 @@ export function record(args: string[]): void {
 		case "phase": {
 			const phase = positionals[0];
 			if (phase !== "blocked" && phase !== "working") throw new UsageError("__record phase: blocked or working");
+			// In auto mode the classifier answers an ask, not the person, and a missed prompt costs less than a false one.
+			if (phase === "blocked" && !values["asks-person"] && claudePermissionMode(transcript()) === "auto") return;
 			setPhase(db, need("session"), phase);
 			return;
 		}

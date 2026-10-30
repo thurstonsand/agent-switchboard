@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
-import { host, launched, pane, ready, type } from "./harness/agents.ts";
+import { claudeAutoMode, host, launched, pane, ready, type } from "./harness/agents.ts";
 import { config, cursorTo, entry, seed, waitState } from "./harness/deck.ts";
-import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
+import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 
 // Claude Code and Codex, as swb hosts them: the real TUIs in the sessions server, scripted by fake model servers.
 
@@ -55,6 +55,42 @@ test("Claude Code waiting on a permission prompt reads as blocked, and an upgrad
 	s.swb("drive", "start");
 	await until(() => !entry(s, claude.id).live, budgets.settle, "Claude stopped again");
 	expect(readFileSync(`${s.env.XDG_STATE_HOME}/agent-switchboard/drafts/${claude.id}`, "utf8")).toBe("");
+});
+
+test("Claude Code in auto mode reads working while its classifier answers an ask, and blocked on a question for the person", async () => {
+	s = scenario("harnesses", "claude-auto", { packages: [], recorder: true, harnesses: ["claude"] });
+	claudeAutoMode(s);
+	const claude = await launched(s, "claude", "reply claude up");
+
+	// The held command writes a file, so the classifier allows it before it runs.
+	type(s, claude.id, "hold auto");
+	await until(() => existsSync(`${s.home}/e2e-signals/auto.entered`), budgets.settle, "the held command running");
+	expect(s.requests("claude").some((r) => String(r.prompt).startsWith("<transcript>"))).toBe(true);
+	const seen = new Set<string>();
+	for (const end = Date.now() + 1500; Date.now() < end; Bun.sleepSync(50)) seen.add(entry(s, claude.id).activity);
+	expect([...seen]).toEqual(["working"]);
+	release(s, "auto");
+	await until(() => entry(s, claude.id).activity === "idle", budgets.settle, "the held turn done");
+
+	type(
+		s,
+		claude.id,
+		`call AskUserQuestion ${JSON.stringify({
+			questions: [
+				{
+					question: "Which?",
+					header: "Pick",
+					options: [
+						{ label: "Red", description: "r" },
+						{ label: "Blue", description: "b" },
+					],
+					multiSelect: false,
+				},
+			],
+		})}`,
+	);
+	await until(() => entry(s, claude.id).activity === "blocked", budgets.settle, "Claude blocked on its question");
+	s.save("question.txt", pane(s, claude.id));
 });
 
 test("an idle Codex session nobody is viewing is reaped after reap_after, as pi and Claude Code are", async () => {

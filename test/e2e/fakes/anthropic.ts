@@ -7,7 +7,7 @@
 //   ask-both <id> <id> :: <question>  session_ask both sessions the question in one response, then answer "asked both"
 // A message from another session (its text contains 'Message from session "', which swb mcp's instructions only name)
 // is answered "got <its last line>".
-// Requests without tools (titles) get a short reply, and prompt suggestions none. Every request is appended to $FAKE_LOG as one
+// Requests without tools (titles) get a short reply, auto mode's classifier allows every action, and prompt suggestions none. Every request is appended to $FAKE_LOG as one
 // JSON line: the latest prompt, whether it carried a tool result, the tools offered, every swb message marker seen, and
 // the conversation as sent, instructions included.
 import { appendFileSync } from "node:fs";
@@ -142,15 +142,17 @@ const server = Bun.serve({
 					? ""
 					: tools.length === 0 && lastTyped.startsWith("<session>")
 						? JSON.stringify({ title: title(lastTyped) })
-						: tools.length === 0
-							? "ok"
-							: verb === "hold"
-								? `released ${rest.join(" ")}`
-								: verb === "reply"
-									? rest.join(" ")
-									: toolResult
-										? "tool done"
-										: `ack ${lastTyped.slice(0, 60)}`;
+						: tools.length === 0 && lastTyped.startsWith("<transcript>")
+							? "<severity>10</severity>"
+							: tools.length === 0
+								? "ok"
+								: verb === "hold"
+									? `released ${rest.join(" ")}`
+									: verb === "reply"
+										? rest.join(" ")
+										: toolResult
+											? "tool done"
+											: `ack ${lastTyped.slice(0, 60)}`;
 			content = [{ type: "text", text }];
 		}
 		const stop = content.some((c) => (c as { type: string }).type === "tool_use") ? "tool_use" : "end_turn";

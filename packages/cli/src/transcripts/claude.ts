@@ -78,6 +78,19 @@ function subagents(path: string): Subagent[] {
 	});
 }
 
+/**
+ * The permission mode the transcript last recorded (`default`, `auto`, ...), which no mod event names. Claude Code
+ * records it with each prompt, and now and then on a line of its own.
+ */
+export function claudePermissionMode(path: string): string | null {
+	for (const line of readFileSync(path, "utf8").split("\n").reverse()) {
+		if (!line.includes('"permissionMode"')) continue;
+		const mode = (JSON.parse(line) as { permissionMode?: string }).permissionMode;
+		if (mode) return mode;
+	}
+	return null;
+}
+
 /** The session's latest given name (`--name`, `/rename`), else the latest title Claude Code generated for it. */
 export function claudeTitle(path: string): string | null {
 	let custom: string | null = null;

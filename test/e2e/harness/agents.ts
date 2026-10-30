@@ -1,8 +1,26 @@
 import { expect } from "bun:test";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { cursorTo, entry, waitState } from "./deck.ts";
 import { budgets, type LsEntry, release, type Scenario, until } from "./index.ts";
 
 export const ready = 60_000;
+
+/**
+ * Starts Claude Code's next sessions in auto mode, with Bash left to its classifier rather than allowed outright.
+ * Through a gateway, as the fake is, auto mode first stops on a note about how it bills, acknowledged here.
+ */
+export function claudeAutoMode(s: Scenario): void {
+	writeFileSync(
+		join(s.home, ".claude/settings.json"),
+		JSON.stringify({ permissions: { allow: ["mcp__plugin_swb_swb"], defaultMode: "auto" } }),
+	);
+	const claudeJson = join(s.home, ".claude.json");
+	writeFileSync(
+		claudeJson,
+		JSON.stringify({ ...JSON.parse(readFileSync(claudeJson, "utf8")), autoModeClassifierBillingNoticeAcknowledgedAt: Date.now() }),
+	);
+}
 
 /** Starts a session in a harness the way session_launch does, and returns its row once its first turn has settled. */
 export async function launched(

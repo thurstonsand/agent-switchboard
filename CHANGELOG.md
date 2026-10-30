@@ -1,5 +1,11 @@
 # Changelog
 
+## UNRELEASED
+
+### Fixed
+
+- Claude Code in auto mode no longer reads blocked while its classifier checks a call, nor for the whole run of a command it allowed. A prompt sent in auto mode marks blocked only for `AskUserQuestion`, so the dialog auto mode falls back to after repeated denials goes unmarked, and a dialog after switching out of auto mode mid-turn can go unmarked until the next prompt.
+
 ## 0.9.0 — 2026-10-27
 
 Schema v8: update swb and the pi line together.

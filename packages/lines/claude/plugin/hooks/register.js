@@ -405,13 +405,22 @@ export function register(on) {
 		return { ...result, sessionTitle: pending.title };
 	});
 
-	// A call's ask opens the permission dialog, unless a host answers it elsewhere. Auto mode's classifier settles some
-	// asks first, which reads as blocked until its model request.
+	// A call's ask opens the permission dialog, unless a host answers it elsewhere. In auto mode the classifier answers it
+	// instead, and only the transcript says which mode a prompt went in, so swb leaves those asks out; AskUserQuestion
+	// asks the person in every mode, even right after an ask swb left out.
 	on("tool.check", async ($, e, next) => {
 		const verdict = await next(e);
-		if (line.managed && line.busy && !line.blocked && e.tool_use_id && verdict.decision === "ask" && verdict.decider !== "host") {
+		const person = e.tool === "AskUserQuestion";
+		if (
+			line.managed &&
+			line.busy &&
+			(person || !line.blocked) &&
+			e.tool_use_id &&
+			verdict.decision === "ask" &&
+			verdict.decider !== "host"
+		) {
 			line.blocked = true;
-			void record($, ["phase", "blocked", "--session", line.session]);
+			void record($, ["phase", "blocked", "--session", line.session, "--cwd", line.cwd, ...(person ? ["--asks-person"] : [])]);
 		}
 		return verdict;
 	});
