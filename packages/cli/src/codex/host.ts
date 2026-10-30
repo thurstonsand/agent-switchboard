@@ -94,7 +94,7 @@ export function codexSocket(host: string): string {
 	return join(stateDir(), "codex", `${host}.sock`);
 }
 
-export async function codexHost(args: string[]): Promise<void> {
+export async function codexHost(args: string[], updated = false): Promise<void> {
 	const { values } = parseArgs({
 		args,
 		options: {
@@ -170,11 +170,14 @@ export async function codexHost(args: string[]): Promise<void> {
 		],
 		{ stdin: "inherit", stdout: "inherit", stderr: "inherit" },
 	);
+	let stopped = false;
 	const stopTui = () => {
+		stopped = true;
 		if (tui.exitCode === null) tui.kill("SIGTERM");
 	};
 	// The TUI owns the terminal; a stop from swb reaches this process and goes on to the TUI.
-	process.on("SIGINT", () => {});
+	const ignoreInterrupt = () => {};
+	process.on("SIGINT", ignoreInterrupt);
 	process.on("SIGHUP", stopTui);
 	process.on("SIGTERM", stopTui);
 
@@ -197,7 +200,28 @@ export async function codexHost(args: string[]): Promise<void> {
 	client.close();
 	server.stdin.end();
 	await server.exited;
+	db.close();
+	process.off("SIGINT", ignoreInterrupt);
+	process.off("SIGHUP", stopTui);
+	process.off("SIGTERM", stopTui);
+	// Codex's startup updater exits 0, just like quitting. Retry once only if no conversation opened and
+	// the installed version actually changed. Restart the server too, keeping it on the TUI's new version.
+	if (
+		!updated &&
+		code === 0 &&
+		!stopped &&
+		!line.bound &&
+		client.serverVersion !== null &&
+		codexVersion() !== `codex-cli ${client.serverVersion}`
+	)
+		return codexHost(args, true);
 	process.exit(code ?? 1);
+}
+
+function codexVersion(): string {
+	const result = Bun.spawnSync(["codex", "--version"], { stdout: "pipe", stderr: "pipe" });
+	if (result.exitCode !== 0) throw new SwbError(`codex --version: ${result.stderr.toString().trim()}`);
+	return result.stdout.toString().trim();
 }
 
 const UNREAD_GRACE_MS = 5000;

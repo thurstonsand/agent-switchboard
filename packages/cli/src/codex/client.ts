@@ -6,6 +6,7 @@ export type Notification = { method: string; params: Record<string, unknown> };
 
 /** A client of a Codex app-server, over its unix socket. */
 export class CodexClient {
+	serverVersion: string | null = null;
 	readonly #ws: UnixWebSocket;
 	#id = 0;
 	readonly #pending = new Map<number, Pending>();
@@ -50,10 +51,12 @@ export class CodexClient {
 
 	static async connect(socket: string, name: string): Promise<CodexClient> {
 		const client = new CodexClient(await UnixWebSocket.connect(socket));
-		await client.request("initialize", {
+		const { userAgent } = await client.request<{ userAgent: string }>("initialize", {
 			clientInfo: { name, title: null, version: "0" },
 			capabilities: { experimentalApi: true },
 		});
+		// Codex embeds its build version in originator/version; an unfamiliar format disables update recovery.
+		client.serverVersion = /^[^/\s]+\/(\d+\.\d+\.\d+(?:[-+][^\s]+)?)\s/.exec(userAgent)?.[1] ?? null;
 		client.#ws.send(JSON.stringify({ jsonrpc: "2.0", method: "initialized" }));
 		return client;
 	}
