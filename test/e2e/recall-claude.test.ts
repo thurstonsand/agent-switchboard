@@ -124,8 +124,16 @@ test("Claude's native reader answers about live, archived, and pi conversations 
 	expect(s.query("select session_id from sessions")).toHaveLength(3);
 	// Each reader searches, reads, then answers.
 	expect(readerRequests()).toHaveLength(9);
+	// Beside its own tools, Claude Code offers a reserved placeholder that it says never to call.
 	for (const r of readerRequests()) {
-		expect(r.tools).toEqual(["mcp__plugin_swb_swb__recall_search", "mcp__plugin_swb_swb__recall_read", "Read", "Grep", "Glob"]);
+		expect((r.tools as string[]).toSorted()).toEqual([
+			"DeferredToolPlaceholder",
+			"Glob",
+			"Grep",
+			"Read",
+			"mcp__plugin_swb_swb__recall_read",
+			"mcp__plugin_swb_swb__recall_search",
+		]);
 		expect(r.model).toBe("claude-opus-5-5");
 	}
 	const main = s.requests("claude").find((r) => String(r.prompt).startsWith("ask "));
