@@ -78,10 +78,22 @@ async function shell(command: string, input?: string, timeoutMs = 20_000): Promi
 		stdout: "pipe",
 		stderr: "pipe",
 	});
-	const timer = setTimeout(() => proc.kill(), timeoutMs);
+	const timer = setTimeout(() => stop(proc), timeoutMs);
 	const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
 	clearTimeout(timer);
 	return { code, out, err };
+}
+
+/**
+ * Stops everything a `shell` started. Its `exec` only replaces the shell when the harness is a binary: a zsh function
+ * runs it as a child instead, and an interactive zsh ignores SIGTERM, so the whole session's group is killed.
+ */
+function stop(proc: Bun.Subprocess): void {
+	try {
+		process.kill(-proc.pid, "SIGKILL");
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+	}
 }
 
 const BINARIES: Record<Harness, string> = { pi: "pi", claude: "claude", codex: "codex" };
@@ -124,7 +136,7 @@ async function serverReply<T>(command: string, lines: object[], pick: (message: 
 	proc.stdin.write(`${lines.map((l) => JSON.stringify(l)).join("\n")}\n`);
 	proc.stdin.flush();
 	let reply: T | undefined;
-	const timer = setTimeout(() => proc.kill(), 30_000);
+	const timer = setTimeout(() => stop(proc), 30_000);
 	let buffered = "";
 	const decoder = new TextDecoder();
 	for await (const chunk of proc.stdout) {
@@ -144,7 +156,7 @@ async function serverReply<T>(command: string, lines: object[], pick: (message: 
 		if (reply !== undefined) break;
 	}
 	clearTimeout(timer);
-	proc.kill();
+	stop(proc);
 	if (reply === undefined) {
 		const err = (await new Response(proc.stderr).text()).trim();
 		throw new Error(`${command.replace(/^exec /, "")} gave no answer${err ? `: ${err.split("\n").at(-1)}` : ""}`);
