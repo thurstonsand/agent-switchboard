@@ -1,6 +1,6 @@
 [tools]
 bun = "1.4.4"
-node = "24"
+node = "26"
 "aqua:biomejs/biome" = "2.6.3"
 # tmux-builds has no 3.8 yet; this builds it from its release tarball, with libevent and ncurses headers.
 "asdf:mise-plugins/mise-tmux" = "3.8"
