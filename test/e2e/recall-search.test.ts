@@ -157,6 +157,7 @@ test("searches started at once on an empty index all answer, and index each tran
 			if (!existsSync(recallDb())) return false;
 			const db = new Database(recallDb(), { readonly: true });
 			try {
+				db.exec("PRAGMA busy_timeout = 5000");
 				const indexed = db
 					.query("SELECT DISTINCT s.session_id FROM chunks c JOIN sources s ON s.id = c.source WHERE c.text LIKE '%meadow%'")
 					.all();
@@ -179,6 +180,7 @@ test("searches started at once on an empty index all answer, and index each tran
 	for (const list of listed) expect(list).toEqual([...ids].sort());
 	const db = new Database(recallDb(), { readonly: true });
 	try {
+		db.exec("PRAGMA busy_timeout = 5000");
 		const sources = db.query("SELECT session_id, count(*) AS n FROM sources GROUP BY session_id ORDER BY session_id").all();
 		expect(sources).toEqual([...ids].sort().map((session_id) => ({ session_id, n: 1 })));
 		const twice = db.query("SELECT source, ref, kind, text, count(*) AS n FROM chunks GROUP BY source, ref, kind, text HAVING n > 1").all();
