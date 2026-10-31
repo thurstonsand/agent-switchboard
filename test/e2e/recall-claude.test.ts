@@ -124,10 +124,9 @@ test("Claude's native reader answers about live, archived, and pi conversations 
 	expect(s.query("select session_id from sessions")).toHaveLength(3);
 	// Each reader searches, reads, then answers.
 	expect(readerRequests()).toHaveLength(9);
-	// Beside its own tools, Claude Code offers a reserved placeholder that it says never to call.
+	// Claude Code 2.1.312 adds a non-callable placeholder; check the reader's usable tools.
 	for (const r of readerRequests()) {
-		expect((r.tools as string[]).toSorted()).toEqual([
-			"DeferredToolPlaceholder",
+		expect((r.tools as string[]).filter((name) => name !== "DeferredToolPlaceholder").toSorted()).toEqual([
 			"Glob",
 			"Grep",
 			"Read",
@@ -138,7 +137,6 @@ test("Claude's native reader answers about live, archived, and pi conversations 
 	}
 	const main = s.requests("claude").find((r) => String(r.prompt).startsWith("ask "));
 	for (const tool of ["mcp__plugin_swb_swb__recall_search", "mcp__plugin_swb_swb__recall_read"]) expect(main?.tools).not.toContain(tool);
-	expect(main?.tools).toContain("DeferredToolPlaceholder");
 	expect(JSON.stringify(main?.toolSpecs)).not.toContain("swb:reader");
 	expect(String(main?.context)).not.toContain("swb:reader");
 	// Readers are filed as the caller's subagents; the caller's own transcript holds only its answers.
