@@ -86,11 +86,18 @@ async function shell(command: string, input?: string, timeoutMs = 20_000): Promi
 
 /**
  * Stops everything a `shell` started. Its `exec` only replaces the shell when the harness is a binary: a zsh function
- * runs it as a child instead, and an interactive zsh ignores SIGTERM, so the whole session's group is killed.
+ * runs it as a child instead, and an interactive zsh ignores SIGTERM, so the whole session's group is signalled.
+ * SIGTERM first: a Claude Code killed outright here leaves the next session to stop waiting seconds on its way out.
+ * Whatever outlasts it a second gets SIGKILL.
  */
 function stop(proc: Bun.Subprocess): void {
+	signalGroup(proc, "SIGTERM");
+	setTimeout(() => signalGroup(proc, "SIGKILL"), 1000).unref();
+}
+
+function signalGroup(proc: Bun.Subprocess, signal: NodeJS.Signals): void {
 	try {
-		process.kill(-proc.pid, "SIGKILL");
+		process.kill(-proc.pid, signal);
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
 	}
