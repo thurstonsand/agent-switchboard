@@ -279,6 +279,21 @@ test("session_launch and a scheduled launch, from pi, Claude Code, or Codex, sta
 	]);
 });
 
+test("on a code-mode-only model, Codex offers swb's tools directly, beside its own subagents, and session_launch starts a session", async () => {
+	s = scenario("harnesses", "code-mode", { packages: [], recorder: true, harnesses: ["codex"] });
+	const parent = await launched(s, "codex", "reply up", undefined, ["--model", "gpt-6-sol"]);
+	const [first] = s.requests("codex") as { model: string; tools: string[] }[];
+	expect(first?.model).toBe("gpt-6-sol");
+	expect(first?.tools).toEqual(expect.arrayContaining(["exec", "spawn_agent", "session_launch", "session_send_message"]));
+	type(s, parent.id, `call session_launch {"harness":"pi","goal":"reply from code mode","title":"from code mode","requestResponse":false}`);
+	const child = await until(
+		() => s.ls().find((e) => e.parentId === parent.id && e.title === "from code mode" && e.activity === "idle"),
+		ready,
+		"the child launched",
+	);
+	expect(child.harness).toBe("pi");
+});
+
 test("on a fresh install, swb new starts the automatic shortlist's default, Claude Code, once its models are listed", async () => {
 	s = scenario("harnesses", "first-new", { packages: [], recorder: true, harnesses: ["claude"] });
 	expect(existsSync(join(s.env.XDG_STATE_HOME as string, "agent-switchboard", "catalog.json"))).toBe(false);

@@ -69,8 +69,9 @@ export function writeCodexLine(swb: string): void {
 					"PI_CODING_AGENT_DIR",
 					"PI_CODING_AGENT_SESSION_DIR",
 				],
-				// Straight into the model's tool list, not behind tool search, so the agent sees them like its own.
-				omit_tools_from: ["deferred"],
+				// Straight into the model's tool list, so the agent sees them like its own: not behind tool search, and not
+				// only inside code mode's exec, where a code-mode-only model such as gpt-6-sol reaches for spawn_agent instead.
+				omit_tools_from: ["deferred", "code_mode"],
 				// session_ask waits as long as its reader works, which Codex's 300 s default would cut short.
 				tool_timeout_sec: 3600,
 				// swb mcp answers each call independently, so several session_ask readers can work at once.

@@ -19,7 +19,7 @@ const signals = process.env.FAKE_SIGNALS ?? "/tmp";
 let n = 0;
 
 type Part = { type: string; text?: string };
-type Item = { type: string; role?: string; content?: Part[]; name?: string; output?: unknown };
+type Item = { type: string; role?: string; content?: Part[]; name?: string; output?: unknown; tools?: Tool[] };
 
 /** A tool call's output as the model reads it. */
 function outputText(item: Item | undefined): string {
@@ -103,7 +103,11 @@ const server = Bun.serve({
 		const input = body.input ?? [];
 		const texts = userTexts(input);
 		const last = input.at(-1);
-		const tools = toolNames(body.tools ?? []);
+		// A code-mode-only model, like gpt-6-sol, gets its tools as an input item instead.
+		const tools = toolNames([
+			...(body.tools ?? []),
+			...input.flatMap((item) => (item.type === "additional_tools" ? (item.tools ?? []) : [])),
+		]);
 		const names = tools.map((tool) => tool.name);
 		const id = `resp_${++n}`;
 		appendFileSync(

@@ -348,6 +348,24 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"codex-code-mode": {
+		harnesses: ["codex"],
+		setup: async (s) => {
+			files(s);
+			// gpt-6-sol is code-mode-only: every tool Codex doesn't offer directly is a function inside exec.
+			const config = join(s.home, ".codex/config.toml");
+			writeFileSync(config, readFileSync(config, "utf8").replace('model = "gpt-5.5"', 'model = "gpt-6-sol"'));
+			const parent = await launch(s, "codex", "Plan the v3 release");
+			typeInto(
+				s,
+				parent,
+				`call session_launch ${JSON.stringify({ harness: "pi", goal: "reply Docs drafted", title: "Draft the v3 docs", requestResponse: false })}`,
+			);
+			await waitLs(s, "the child idle", (ls) => ls.some((e) => e.parentId === parent && e.activity === "idle"));
+			await waitLs(s, "the parent idle", (ls) => ls.find((e) => e.id === parent)?.activity === "idle");
+		},
+	},
+
 	"session-ask": {
 		harnesses: ["claude", "codex"],
 		setup: async (s) => {
