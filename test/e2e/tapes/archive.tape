@@ -1,4 +1,4 @@
-# a is refused mid-turn; once idle it archives and kills the pi; a on the Archived row brings it back.
+# a is refused mid-turn; once idle it archives in place, its card on the Stage, and stops the pi; a on the Archived row brings it back.
 Source common.tape
 
 Type "# archive with a: refused mid-turn, then archived, then unarchived" Sleep 1s Enter
@@ -15,7 +15,10 @@ Wait+Screen /turn running/
 Wait+Screen /released busy/
 Sleep 1.5s
 Type "a"
-Wait+Screen /Archived \(1\)/
+Wait+Screen /a unarchive/
+Screenshot ../artifacts/phase6/videos/archive-at-once.png
+Wait+Screen /didn't quit/
+Screenshot ../artifacts/phase6/videos/archive-hung.png
 Sleep 2s
 Type "G"
 Sleep 500ms

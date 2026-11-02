@@ -1070,6 +1070,7 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
 				break;
 			}
 			roster.pin = null;
+			roster.lingering = null;
 			toast(message.error, "error");
 			break;
 		case "stopped":
@@ -1260,6 +1261,11 @@ class Roster implements Component, Focusable {
 	lastIndex = 0;
 	/** After `a`, the cursor keeps its index instead of chasing the session into its new section. */
 	pin: { index: number; answered: boolean } | null = null;
+	/**
+	 * The session the cursor archived here, which keeps its row where it was, marked archived, for one last look, until
+	 * the cursor leaves it. Only the cursor's own row lingers, so leaving it by any means sends it to Archived.
+	 */
+	lingering: string | null = null;
 	/** The session whose archive prompt offers its family or linked worktree. */
 	archiving: string | null = null;
 	scrollTop = 0;
@@ -1334,7 +1340,9 @@ class Roster implements Component, Focusable {
 	rows(): Row[] {
 		const rows: Row[] = [];
 		const all = [...entries.values()].filter((e) => this.matches(e));
-		const open = all.filter((e) => e.open);
+		const lingers = (e: Entry) => !e.open && e.id === this.lingering && e.id === this.selectedKey;
+		const open = all.filter((e) => e.open || lingers(e));
+		const sectionHere = (e: Entry) => (lingers(e) ? (e.operator ? "operators" : "open") : sectionOf(e));
 		// A session nests under its parent when they share a bucket. Siblings, and families, go by the newest activity
 		// anywhere beneath them, so a busy grandchild brings its whole line up.
 		const pushFamilies = (members: Entry[], depth: number, header: string) => {
@@ -1429,11 +1437,11 @@ class Roster implements Component, Focusable {
 			for (const e of operators) rows.push(flat(e, 0, "operators"));
 		}
 		pushGroups(
-			open.filter((e) => sectionOf(e) === "open"),
+			open.filter((e) => sectionHere(e) === "open"),
 			0,
 			"open",
 		);
-		const idle = open.filter((e) => sectionOf(e) === "inactive");
+		const idle = open.filter((e) => sectionHere(e) === "inactive");
 		if (idle.length > 0 && section("inactive", "Inactive", idle.length)) pushGroups(idle, 1, "inactive");
 		// Soonest to wake first; one waiting on a message has no time, so it comes last.
 		const resting = open
@@ -1445,7 +1453,7 @@ class Roster implements Component, Focusable {
 		if (resting.length > 0 && section("snoozed", "Snoozed", resting.length)) {
 			for (const e of resting) rows.push(flat(e, 0, "snoozed"));
 		}
-		const archived = all.filter((e) => !e.open).sort((a, b) => archivedKey(b) - archivedKey(a));
+		const archived = all.filter((e) => !e.open && !lingers(e)).sort((a, b) => archivedKey(b) - archivedKey(a));
 		if (section("archived", "Archived", archived.length)) {
 			for (const e of archived) rows.push(flat(e, 0, "archived"));
 		}
@@ -1470,6 +1478,8 @@ class Roster implements Component, Focusable {
 		if (index === -1) index = Math.min(this.lastIndex, rows.length - 1);
 		this.selectedKey = (rows[index] as Row).key;
 		this.lastIndex = index;
+		// Left by any means, a lingering row is in Archived for good, even when the cursor comes back to it there.
+		if (this.lingering !== this.selectedKey) this.lingering = null;
 		return index;
 	}
 
@@ -1771,19 +1781,33 @@ class Roster implements Component, Focusable {
 
 	move(delta: number): void {
 		peek.byKeys = true;
+		const from = this.stepFrom(delta);
 		const rows = this.rows();
 		if (rows.length === 0) return;
-		const index = this.resolveCursor(rows);
-		const next = Math.max(0, Math.min(rows.length - 1, index + delta));
+		const next = Math.max(0, Math.min(rows.length - 1, from));
 		this.selectedKey = (rows[next] as Row).key;
 		this.lastIndex = next;
 		stage.holdForNew = false;
 	}
 
+	/**
+	 * Where a step of delta from the cursor lands. Off a lingering row, which goes to Archived as the cursor leaves, it
+	 * counts as if that row were gone already: the row below has taken its place.
+	 */
+	stepFrom(delta: number): number {
+		const rows = this.rows();
+		const index = this.resolveCursor(rows);
+		const row = rows[index];
+		if (row?.kind !== "session" || row.entry.open || row.entry.id !== this.lingering) return index + delta;
+		this.lingering = null;
+		return delta > 0 ? index + delta - 1 : index + delta;
+	}
+
 	/** Moves to the next session row in that direction, if there is one. */
 	moveSession(delta: number): void {
+		const from = this.stepFrom(delta);
 		const rows = this.rows();
-		for (let i = this.resolveCursor(rows) + delta; i >= 0 && i < rows.length; i += delta) {
+		for (let i = from; i >= 0 && i < rows.length; i += delta) {
 			const row = rows[i] as Row;
 			if (row.kind !== "session") continue;
 			this.selectedKey = row.key;
@@ -1861,8 +1885,11 @@ class Roster implements Component, Focusable {
 			this.archiving = e.id;
 			return;
 		}
-		// Only the cursor's own row moving takes the cursor along.
-		if (row.key === this.selected()?.key) this.pin = { index: this.resolveCursor(this.rows()), answered: false };
+		// Only the cursor's own row moving takes the cursor along; archived, it lingers where it is.
+		if (row.key === this.selected()?.key) {
+			this.pin = { index: this.resolveCursor(this.rows()), answered: false };
+			if (e.open) this.lingering = e.id;
+		}
 		post(e.open ? { type: "archive", ids: [e.id] } : { type: "unarchive", id: e.id });
 	}
 
@@ -1872,6 +1899,7 @@ class Roster implements Component, Focusable {
 		this.archiving = null;
 		if (!e || all === null) return;
 		this.pin = { index: this.resolveCursor(this.rows()), answered: false };
+		this.lingering = e.id;
 		post({
 			type: "archive",
 			ids: [e.id, ...(all ? openDescendants(entries.values(), e.id).map((d) => d.id) : [])],
@@ -2467,7 +2495,11 @@ class Roster implements Component, Focusable {
 			this.hints(this.listTop + bodyHeight + 1 + detailLines + 1),
 		);
 		syncPeek(wantPeek(this.peekSpot(rows, index)));
-		this.place(lines, peekOverlays(rows, width, height), width);
+		this.place(
+			lines,
+			[...peekOverlays(rows, width, height), ...toastOverlay(now, width, this.listTop + bodyHeight + 1 + detailLines)],
+			width,
+		);
 		const out = lines.map((line) => truncateToWidth(line, width, "…", true));
 		if (perf.render.n === 0) mark("roster.first-frame");
 		perf.render.add(performance.now() - t0);
@@ -3064,6 +3096,20 @@ function peekOverlays(rows: Row[], width: number, height: number): Overlay[] {
 	];
 }
 
+/**
+ * A toast too long for the message line rises from it over the roster's bottom rows, under a rule, so none of it is
+ * cut; the list beneath keeps its place.
+ */
+function toastOverlay(now: number, width: number, y: number): Overlay[] {
+	const t = toasts.filter((t) => t.until > now).at(-1);
+	if (!t) return [];
+	const text = t.level === "error" ? `✗ ${t.text}` : t.text;
+	if (visibleWidth(text) <= width - 1) return [];
+	const paint = t.level === "error" ? red : green;
+	const lines = [gray("─".repeat(width)), ...wrapTextWithAnsi(text, width - 1).map((line) => ` ${paint(line)}`)];
+	return [{ id: "toast", about: t.text, x: 0, y: y - lines.length + 1, width, view: { lines, buttons: [] }, leaves: false, pointer: null }];
+}
+
 /** The launch card is as wide as this, or the Stage, whichever is narrower. */
 const LAUNCH_COLS = 56;
 /** The launch card's menu, no wider than this. */
@@ -3478,8 +3524,14 @@ async function prefixKey(k: string, id: string | undefined): Promise<void> {
 	else if (k === "x") roster.stop(row);
 	else if (k === "R") roster.reload(row);
 	else if (k === "a") {
-		// Asking whether the family goes too needs the keyboard where the question is.
-		if (row?.kind === "session" && row.entry.open && openDescendants(entries.values(), row.entry.id).length > 0) await focusRoster();
+		// The cursor's session lingers once archived, and the keyboard goes to the roster to look it over or move on; so
+		// does asking whether its family or worktree goes too.
+		if (
+			row?.kind === "session" &&
+			row.entry.open &&
+			(row.key === roster.selected()?.key || row.entry.worktree !== null || openDescendants(entries.values(), row.entry.id).length > 0)
+		)
+			await focusRoster();
 		roster.toggleArchived(row);
 	} else if (k === "p") roster.toParent(row);
 	else if (k === "s" || k === "S") {

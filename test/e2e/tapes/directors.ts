@@ -679,13 +679,101 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"archive-linger": {
+		setup: async (s) => {
+			await seed(
+				s,
+				{ title: "Profile roster render", turns: ["profiled"] },
+				{ title: "Draft the changelog", turns: ["changelog drafted"] },
+				{ title: "Bisect the flaky test", turns: ["bisected"] },
+			);
+			// Live from the start: focusing the shell beside a dormant session wakes it, which isn't this tape's story.
+			const profile = s.ls().find((e) => e.title === "Profile roster render")?.id as string;
+			s.swb("wake", profile);
+			await waitLs(s, "Profile live", (ls) => ls.find((e) => e.id === profile)?.activity === "idle");
+		},
+		run: async (s) => {
+			const signals = join(s.home, "e2e-signals");
+			const id = (title: string) => s.ls().find((e) => e.title === title)?.id as string;
+			const pis = () =>
+				s
+					.tmux(s.servers.sessions, "list-sessions", "-F", "#{session_name} #{@swb_kind}")
+					.split("\n")
+					.filter((line) => line.endsWith(" pi"))
+					.map((line) => line.split(" ")[0] as string);
+			const bisect = id("Bisect the flaky test");
+			const draft = id("Draft the changelog");
+			// Every shutdown holds until released, so the wait shows.
+			const hold = () => {
+				rmSync(join(signals, "shutdown.release"), { force: true });
+				rmSync(join(signals, "shutdown.entered"), { force: true });
+				writeFileSync(join(signals, "shutdown.hold"), "");
+			};
+			mkdirSync(signals, { recursive: true });
+			hold();
+
+			const live = await waitDeck(
+				s,
+				"Bisect live with the keyboard",
+				(x) => x.staged.id === bisect && x.staged.kind === "live" && x.focus === "stage",
+			);
+			const old = live.staged.host as string;
+			await waitDeck(
+				s,
+				"Bisect archived in place, the roster focused",
+				(x) =>
+					x.focus === "roster" &&
+					x.cursor === bisect &&
+					x.staged.kind === "dormant" &&
+					x.rows.some((r) => r.kind === "session" && r.id === bisect && r.state === "archived"),
+			);
+			expect(pis()).toContain(old);
+			await until(() => s.signal("shutdown.entered") !== "", TAPE, "Bisect's shutdown held");
+			await waitDeck(s, "the wake asked for", (x) => x.waking.some((w) => w.id === bisect));
+			await Bun.sleep(3000);
+			// Bisect's old pi still quitting, and no new one for it yet: Profile's is the only other.
+			expect(pis()).toContain(old);
+			expect(pis()).toHaveLength(2);
+			release(s, "shutdown");
+			await waitDeck(s, "a fresh pi for Bisect", (x) => x.staged.kind === "live" && x.staged.host !== old);
+			await waitDeck(
+				s,
+				"on to Draft, Bisect in Archived",
+				(x) => x.cursor === draft && x.rows.some((r) => r.kind === "section" && r.label === "Archived" && r.count === 1),
+			);
+
+			const draftUp = await waitDeck(s, "Draft live", (x) => x.staged.id === draft && x.staged.kind === "live");
+			const draftOld = draftUp.staged.host as string;
+			hold();
+			await waitLs(s, "Draft archived", (ls) => ls.find((e) => e.id === draft)?.open === false);
+			await waitLs(s, "Draft unarchived from the shell", (ls) => ls.find((e) => e.id === draft)?.open === true);
+			await Bun.sleep(2000);
+			// swb wake is still waiting on the old pi, and has started nothing.
+			expect(hostOf(s, draft)).toBe(draftOld);
+			expect(pis()).toContain(draftOld);
+			release(s, "shutdown");
+			await until(() => s.ls().find((e) => e.id === draft)?.live && hostOf(s, draft) !== draftOld, TAPE, "a fresh pi for Draft");
+			expect(pis()).not.toContain(draftOld);
+		},
+	},
+
 	archive: {
 		run: async (s) => {
 			await entered(s, "busy");
 			await waitDeck(s, "the refusal", (x) => x.toasts.some((t) => t.text.includes("turn running")));
 			expect(s.ls()[0]?.open).toBe(true);
 			await Bun.sleep(1500);
+			// Its shutdown holds past swb's grace: the row moves at once, and the Deck says so when swb closes it.
+			writeFileSync(join(s.home, "e2e-signals", "shutdown.hold"), "");
 			release(s, "busy");
+			await waitDeck(
+				s,
+				"archived in place",
+				(x) => x.rows.some((r) => r.kind === "session" && r.state === "archived") && x.staged.kind === "dormant",
+			);
+			expect(s.ls()[0]?.live).toBe(true);
+			await waitDeck(s, "the stop's failure", (x) => x.toasts.some((t) => t.text.includes("didn't quit in 10s")));
+			release(s, "shutdown");
 			await waitLs(s, "archived", (ls) => ls[0]?.open === false && !ls[0].live);
 			await waitLs(s, "unarchived", (ls) => ls[0]?.open === true);
 		},

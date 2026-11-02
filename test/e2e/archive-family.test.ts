@@ -45,7 +45,9 @@ test("a on a session that started others still open asks first: esc keeps them, 
 	s.keys("a");
 	await until(() => !entry(s, root).open, budgets.settle, "root archived alone");
 	expect(open()).toEqual([false, true, true, true]);
-	// Its child stands on its own while it's archived, and goes back under it when it returns.
+	// Its child stands on its own while it's archived, once the cursor has left root's lingering row, and goes back
+	// under it when it returns.
+	s.keys("j");
 	st = await waitState(s, "the child a root of its own", (x) => sessionRows(x).find((r) => r.id === child)?.origin === "session");
 	expect(sessionRows(st).find((r) => r.id === child)).toMatchObject({ level: 0, origin: "session" });
 	s.swb("unarchive", root);

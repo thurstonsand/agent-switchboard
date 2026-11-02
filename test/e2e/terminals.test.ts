@@ -99,7 +99,10 @@ test("three Decks stay in sync: a wake, an archive, and a new session in one sho
 	await waitState(s, "b gone from the drive Deck", (x) => rowIndex(x, b) === -1);
 	await until(() => rowIndex(two.state(), b) === -1, budgets.settle, "b gone from Deck two");
 	const archived = (st: DeckState) => st.rows.find((r) => r.kind === "section" && r.label === "Archived");
-	for (const st of [state(s), two.state(), three.state()]) expect(archived(st)).toMatchObject({ count: 1 });
+	for (const st of [state(s), two.state()]) expect(archived(st)).toMatchObject({ count: 1 });
+	// Deck three, where it was archived, keeps b where it was until its cursor leaves.
+	await until(() => rowState(three.state(), b) === "archived", budgets.settle, "b archived in place in Deck three");
+	expect(archived(three.state())).toMatchObject({ count: 0 });
 
 	await pickNew(s, ["n"], two);
 	await until(() => sessionRows(two.state()).some((r) => r.provisional), budgets.piReady, "a new pi in Deck two");

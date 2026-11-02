@@ -10,6 +10,7 @@ import { type ScheduleView, schedulesBySession, snooze } from "../schedules.ts";
 import {
 	archive,
 	archiveWorktree,
+	beingStopped,
 	ensureEditor,
 	ensureSessionsServer,
 	ensureShell,
@@ -178,6 +179,7 @@ function snapshot(): Polled {
 		"#{pane_dead_time}",
 		"#{@swb_version}",
 		"#{@swb_reaped}",
+		"#{@swb_stopping}",
 	);
 	const died: Record<string, string[]> = {};
 	for (const [name, kind, , , , dead, deadAt] of listed) {
@@ -192,7 +194,14 @@ function snapshot(): Polled {
 	const alive = listed.filter(([, kind, , , , dead]) => kind === "pi" && dead !== "1");
 	const attached = new Map(alive.map(([name, , count]) => [name as string, count === "1"]));
 	const reaped = new Map(alive.filter((row) => row[8]).map((row) => [row[0] as string, Number(row[8])]));
-	const w: World = { now: Date.now(), bootId: boot, hosts: new Set(attached.keys()), inactiveAfterMs: config.inactiveAfterMs };
+	// A harness some swb is stopping reads as gone already: its session shows dormant, and its wake waits for it.
+	const quitting = new Set(alive.filter((row) => row[9]).map((row) => row[0] as string));
+	const w: World = {
+		now: Date.now(),
+		bootId: boot,
+		hosts: new Set([...attached.keys()].filter((host) => !quitting.has(host))),
+		inactiveAfterMs: config.inactiveAfterMs,
+	};
 	const known = new Set(rows.map((row) => row.session_id));
 	const entries: Entry[] = deriveSessions(rows, w).map((state, i) => {
 		const row = rows[i] as SessionRow;
@@ -446,6 +455,7 @@ async function handle(message: ToWorker): Promise<void> {
 			saveLayout(db, layoutRoot, message.layout);
 			return;
 		case "wake":
+			if (afterStop(message)) return;
 			try {
 				const host = wake(db, message.id, "resume");
 				launched.add(host);
@@ -476,13 +486,18 @@ async function handle(message: ToWorker): Promise<void> {
 				if (message.deleteWorktreeFor) {
 					await archiveWorktree(db, message.deleteWorktreeFor, message.ids, null);
 					worktrees.clear();
-				} else archive(db, message.ids);
-				post({ type: "toggled", error: null });
+					post({ type: "toggled", error: null });
+				} else {
+					const { refused, stopped } = archive(db, message.ids);
+					post({ type: "toggled", error: refused?.message ?? null });
+					stopped.catch((error: Error) => post({ type: "stopped", error: error.message }));
+				}
 			} catch (error) {
 				post({ type: "toggled", error: (error as Error).message });
 			}
 			break;
 		case "unarchive":
+			if (afterStop(message)) return;
 			try {
 				unarchive(db, message.id);
 				post({ type: "toggled", error: null });
@@ -587,10 +602,27 @@ async function handle(message: ToWorker): Promise<void> {
 	tick();
 }
 
-self.onmessage = async (event: MessageEvent<ToWorker>) => {
+/**
+ * Puts off a wake or an unarchive while its session's harness is quitting, whichever swb stops it, and does it once
+ * the harness is gone or its stopper's deadline passes. Waiting here keeps the worker free meanwhile.
+ */
+function afterStop(message: { type: "wake"; id: string } | { type: "unarchive"; id: string }): boolean {
+	const stop = beingStopped(db, message.id);
+	// Past its deadline, the wake closes what its stopper didn't.
+	if (!stop || Date.now() >= stop.deadline) return false;
+	void (async () => {
+		while (Date.now() < stop.deadline && listSessions(SESSIONS).some(([name]) => name === stop.host)) await Bun.sleep(50);
+		await receive(message);
+	})();
+	return true;
+}
+
+async function receive(message: ToWorker): Promise<void> {
 	try {
-		await handle(event.data);
+		await handle(message);
 	} catch (error) {
 		post({ type: "error", text: (error as Error).message });
 	}
-};
+}
+
+self.onmessage = (event: MessageEvent<ToWorker>) => void receive(event.data);

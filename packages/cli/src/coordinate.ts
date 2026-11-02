@@ -394,6 +394,7 @@ async function archiveRun(db: Db, from: string, plan: ArchivePlan, deleteWorktre
 		await Promise.all(ids.map((to) => send(db, { from, to, body: "", requestResponse: false, requestId: null, kind: "cancel" })));
 	};
 	let deleted: string | null = null;
+	let closed = "";
 	if (deleteWorktree) {
 		deleted = await archiveWorktree(
 			db,
@@ -405,10 +406,16 @@ async function archiveRun(db: Db, from: string, plan: ArchivePlan, deleteWorktre
 	} else {
 		if (members.some((s) => s.id === from)) recordTx(db, () => markArchived(db, from));
 		for (const s of cancelling) recordTx(db, () => markArchived(db, s.id));
-		archive(
+		const { refused, stopped } = archive(
 			db,
 			members.filter((s) => s.id !== from && !cancelling.includes(s)).map((s) => s.id),
 		);
+		// Archived either way: a harness swb had to close is news alongside that, not a failure of it.
+		closed = await stopped.then(
+			() => "",
+			(error: Error) => `A harness ${error.message}.`,
+		);
+		if (refused) throw refused;
 		await cancel(cancelling.map((s) => s.id));
 	}
 	const started = members.length - (target.open ? 1 : 0);
@@ -422,6 +429,7 @@ async function archiveRun(db: Db, from: string, plan: ArchivePlan, deleteWorktre
 			? `Cancelled the turns of ${cancelling.map((s) => `"${displayName(s)}"`).join(", ")}; each quits as its turn ends.`
 			: "",
 		members.some((s) => s.id === from) ? "This session quits when this turn ends: end it now with a brief final message." : "",
+		closed,
 	]
 		.filter(Boolean)
 		.join(" ");

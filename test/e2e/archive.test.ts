@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cursorTo, entry, piSessions, reply, rowIndex, seed, sessionRows, state, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
@@ -72,9 +72,9 @@ test("a provider retry inside the archiving turn does not reopen the session", a
 	s.save("archived-through-retry.txt", `${s.screen()}\n${JSON.stringify(s.ls(), null, 2)}`);
 });
 
-test("a archives an idle live session and kills its pi; a on an Archived row leaves it dormant and open; the cursor stays put", async () => {
+test("a archives an idle live session at once: it lingers on view, dormant, until the cursor leaves, and a pi that won't quit is closed and said so; a on an Archived row leaves it dormant and open", async () => {
 	s = scenario("phase3", "archive-toggle");
-	const [a, b, , d] = (await seed(s, { turns: ["a"] }, { turns: ["b"] }, { turns: ["c"] }, { turns: ["d"] })) as [
+	const [a, b, , d] = (await seed(s, { turns: ["a"] }, { turns: ["b"], title: "bravo" }, { turns: ["c"] }, { turns: ["d"] })) as [
 		string,
 		string,
 		string,
@@ -85,13 +85,36 @@ test("a archives an idle live session and kills its pi; a on an Archived row lea
 	await cursorTo(s, b);
 	s.keys("w");
 	const up = await waitState(s, "b live", (x) => x.staged.id === b && x.staged.kind === "live", budgets.piReady);
+	const host = up.staged.host as string;
 	const at = rowIndex(up, b);
+	writeFileSync(join(s.home, "e2e-signals", "shutdown.hold"), "");
 	s.keys("a");
-	const after = await waitState(s, "b archived", (x) => rowIndex(x, b) === -1);
-	expect(rowIndex(after, after.cursor as string)).toBe(at);
-	expect(after.cursor).toBe(a);
-	await until(() => !piSessions(s).includes(up.staged.host as string), budgets.settle, "b's pi killed");
+	// Its row stays put, marked archived, and the Stage shows its card while its pi is still in its shutdown, which
+	// holds past swb's 10s grace.
+	const after = await waitState(
+		s,
+		"b archived in place",
+		(x) => sessionRows(x).find((r) => r.id === b)?.state === "archived" && x.staged.kind === "dormant",
+	);
+	expect(piSessions(s)).toContain(host);
+	expect(rowIndex(after, b)).toBe(at);
+	expect(after).toMatchObject({ cursor: b, focus: "roster", staged: { id: b } });
+	await until(() => s.signal("shutdown.entered") !== "", budgets.settle, "b's shutdown held");
+	s.save("archived-b-lingering.txt", s.screen());
+	const told = await waitState(s, "the stop's failure", (x) => x.toasts.length > 0, 10_000 + budgets.settle);
+	expect(told.toasts).toContainEqual({ text: `didn't quit in 10s; swb closed it: "bravo"`, level: "error" });
+	// Too long for the message line, it wraps over the roster rather than losing its end.
+	await until(() => s.screen().includes(`"bravo"`), budgets.settle, "the whole toast on screen");
+	expect(piSessions(s)).not.toContain(host);
 	expect(entry(s, b)).toMatchObject({ open: false, live: false });
+	release(s, "shutdown");
+
+	// j steps to the row below as if b were gone already, and b goes to Archived.
+	s.keys("j");
+	const left = await waitState(s, "the cursor off b", (x) => x.cursor !== b);
+	expect(left.cursor).toBe(a);
+	expect(rowIndex(left, a)).toBe(at);
+	expect(rowIndex(left, b)).toBe(-1);
 	s.save("archived-b.txt", s.screen());
 
 	s.keys("G", "Enter");
@@ -108,6 +131,73 @@ test("a archives an idle live session and kills its pi; a on an Archived row lea
 	expect(entry(s, d)).toMatchObject({ open: true, live: false });
 	expect(piSessions(s)).toHaveLength(0);
 	s.save("unarchived-d.txt", s.screen());
+});
+
+test("M-a a archives from the Stage and hands the roster the keyboard; a wake or an unarchive while its pi is still quitting waits for it, then goes ahead", async () => {
+	s = scenario("phase3", "archive-wake-stopping");
+	const { id, host } = await liveSession(s, "ready");
+	const signals = join(s.home, "e2e-signals");
+	await waitState(s, "its first prompt recorded", (x) => sessionRows(x).some((r) => r.id === id && !r.provisional));
+	writeFileSync(join(signals, "shutdown.hold"), "");
+	s.keys("M-a", "a");
+	await waitState(
+		s,
+		"archived in place, the roster focused",
+		(x) => x.cursor === id && x.focus === "roster" && x.staged.kind === "dormant",
+	);
+	await until(() => s.signal("shutdown.entered") !== "", budgets.settle, "its shutdown held");
+
+	// Enter wakes it once the old pi is gone, never onto that pi's pane.
+	s.keys("Enter");
+	await Bun.sleep(1500);
+	expect(piSessions(s)).toEqual([host]);
+	expect(state(s).staged.kind).not.toBe("live");
+	release(s, "shutdown");
+	const woke = await waitState(s, "woken afresh", (x) => x.staged.kind === "live" && x.staged.host !== host, budgets.piReady);
+	expect(piSessions(s)).toEqual([woke.staged.host as string]);
+	expect(entry(s, id)).toMatchObject({ open: false, live: true });
+
+	// Unarchiving waits the same way, and leaves it open and dormant. A prompt opens it first, so M-a a archives again.
+	await waitState(s, "the keyboard on it", (x) => x.focus === "stage");
+	await reply(s, "again");
+	await until(() => entry(s, id).open && entry(s, id).activity === "idle", budgets.settle, "open and idle");
+	await waitState(s, "its row open", (x) => sessionRows(x).find((r) => r.id === id)?.state !== "archived");
+	rmSync(join(signals, "shutdown.release"));
+	rmSync(join(signals, "shutdown.entered"));
+	s.keys("M-a", "a");
+	await waitState(s, "archived again", (x) => x.focus === "roster" && x.staged.kind === "dormant");
+	await until(() => s.signal("shutdown.entered") !== "", budgets.settle, "its shutdown held again");
+	s.keys("a");
+	await Bun.sleep(1500);
+	expect(entry(s, id).open).toBe(false);
+	release(s, "shutdown");
+	await until(() => entry(s, id).open, budgets.settle, "open again");
+	expect(entry(s, id)).toMatchObject({ open: true, live: false });
+	expect(piSessions(s)).toHaveLength(0);
+	expect(state(s).cursor).toBe(id);
+	s.save("unarchived-after-stop.txt", s.screen());
+});
+
+test("swb wake from a shell waits out a harness a Deck is stopping, then starts it afresh", async () => {
+	s = scenario("phase3", "archive-cli-wake-stopping");
+	const { id, host } = await liveSession(s, "ready");
+	await waitState(s, "its first prompt recorded", (x) => sessionRows(x).some((r) => r.id === id && !r.provisional));
+	writeFileSync(join(s.home, "e2e-signals", "shutdown.hold"), "");
+	s.keys("M-a", "a");
+	await until(() => s.signal("shutdown.entered") !== "", budgets.settle, "its shutdown held");
+	s.swb("unarchive", id);
+	const t0 = Date.now();
+	const woken = Bun.spawn([`${s.bin}/swb`, "wake", id], { env: s.env, stdout: "pipe" });
+	await Bun.sleep(1500);
+	expect(woken.exitCode).toBeNull();
+	release(s, "shutdown");
+	expect(await woken.exited).toBe(0);
+	const fresh = (await new Response(woken.stdout).text()).trim();
+	expect(Date.now() - t0).toBeGreaterThan(1500);
+	expect(fresh).not.toBe(host);
+	await waitState(s, "the Deck on the fresh pi", (x) => x.staged.kind === "live" && x.staged.host === fresh, budgets.piReady);
+	expect(piSessions(s)).toEqual([fresh]);
+	expect(entry(s, id)).toMatchObject({ open: true, live: true });
 });
 
 test("/archive archives and quits; before the first prompt it refuses", async () => {

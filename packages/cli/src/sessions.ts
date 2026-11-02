@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, sep } from "node:path";
 import { bootId, type Db, dbPath, type Harness, linkedWorktree, operatorDir, projectRoot, stateDir } from "@swb/shared";
-import { isArchived, markArchived, recordTx } from "@swb/shared/record";
+import { isArchived, markArchived, recordTx, titleOf } from "@swb/shared/record";
 import { now, since } from "@swb/shared/trace";
 import { type Effort, HARNESS_EFFORTS } from "./config.ts";
 import { displayName, type RuntimeRow, runtimeLive, states } from "./derive.ts";
@@ -140,17 +140,66 @@ function stopIdlePis(): void {
 
 /**
  * Closing a pane hangs pi up on a dead terminal, and it exits before its shutdown hooks run; SIGTERM lets the
- * recorder save the draft and clear its runtime. One that ignores it has its pane closed after 5 s.
+ * recorder save the draft and clear its runtime. One that ignores it has its pane closed after STOP_GRACE_MS.
  */
 export function stopPis(stopping: RuntimeRow[]): void {
-	for (const runtime of stopping) process.kill(runtime.pid, "SIGTERM");
-	const deadline = Date.now() + 5000;
-	const open = () => {
-		const left = new Set(listSessions(SESSIONS).map(([name]) => name as string));
-		return stopping.filter((runtime) => left.has(runtime.tmux_session));
-	};
-	while (open().length > 0 && Date.now() < deadline) Bun.sleepSync(20);
-	for (const runtime of open()) tmuxTry(SESSIONS, "kill-session", "-t", `=${runtime.tmux_session}`);
+	const deadline = Date.now() + STOP_GRACE_MS;
+	for (const runtime of stopping) term(runtime, deadline);
+	while (stillOpen(stopping).length > 0 && Date.now() < deadline) Bun.sleepSync(20);
+	for (const runtime of stillOpen(stopping)) tmuxTry(SESSIONS, "kill-session", "-t", `=${runtime.tmux_session}`);
+}
+
+/** Claude Code's own shutdown failsafe fires at 5 s at the earliest, so this leaves its shutdown room to finish. */
+const STOP_GRACE_MS = 10_000;
+
+/**
+ * SIGTERMs a harness, and marks its tmux session with when its stopper closes it, so every swb, whichever stops it,
+ * reads it as gone already and starts its session again only once it is. False when it was gone before the signal.
+ */
+function term(runtime: RuntimeRow, deadline: number): boolean {
+	try {
+		process.kill(runtime.pid, "SIGTERM");
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+		throw error;
+	}
+	tmuxTry(SESSIONS, "set", "-t", `=${runtime.tmux_session}:`, "@swb_stopping", String(deadline));
+	return true;
+}
+
+function stillOpen(stopping: RuntimeRow[]): RuntimeRow[] {
+	const left = new Set(listSessions(SESSIONS).map(([name]) => name as string));
+	return stopping.filter((runtime) => left.has(runtime.tmux_session));
+}
+
+/**
+ * stopPis for one harness, for a caller that has already moved on. It resolves once the harness is gone, true when it
+ * outlived its grace and swb closed its pane, which cut the rest of its shutdown short.
+ */
+async function stopInBackground(runtime: RuntimeRow): Promise<boolean> {
+	const deadline = Date.now() + STOP_GRACE_MS;
+	if (!term(runtime, deadline)) return false;
+	while (stillOpen([runtime]).length > 0 && Date.now() < deadline) await Bun.sleep(20);
+	if (stillOpen([runtime]).length === 0) return false;
+	tmuxTry(SESSIONS, "kill-session", "-t", `=${runtime.tmux_session}`);
+	return true;
+}
+
+/** The harness hosting a session that some swb is stopping, and when its stopper closes it, if one is. */
+export function beingStopped(db: Db, id: string): { host: string; deadline: number } | null {
+	const host = db.get("SELECT tmux_session FROM runtimes WHERE session_id = ?", id)?.tmux_session as string | undefined;
+	if (!host) return null;
+	const marked = tmuxTry(SESSIONS, "show", "-qv", "-t", `=${host}:`, "@swb_stopping");
+	return marked.ok && marked.out !== "" ? { host, deadline: Number(marked.out) } : null;
+}
+
+/** Waits out a harness some swb is stopping, closing it at its stopper's deadline, as the stopper would. */
+function awaitStop(db: Db, id: string): void {
+	const stop = beingStopped(db, id);
+	if (!stop) return;
+	const open = () => listSessions(SESSIONS).some(([name]) => name === stop.host);
+	while (open() && Date.now() < stop.deadline) Bun.sleepSync(20);
+	tmuxTry(SESSIONS, "kill-session", "-t", `=${stop.host}`);
 }
 
 export function onlyControl(server: string): boolean {
@@ -566,6 +615,8 @@ export function lastWords(host: string): string[] {
 /** Starts a dormant session, unless something already hosts it, and returns its tmux session. */
 export function wake(db: Db, id: string, then: Wake): string {
 	ensureSessionsServer();
+	// Outside the tx: the harness's shutdown writes the db.
+	awaitStop(db, id);
 	return db.tx(() => {
 		const listed = listSessions(SESSIONS, "#{@swb_kind}", "#{pane_dead}");
 		const resuming = new Set(db.all("SELECT tmux_session FROM launches WHERE resume_id = ?", id).map((row) => row.tmux_session as string));
@@ -742,12 +793,13 @@ export async function archiveWorktree(
 }
 
 /**
- * Archives sessions, refusing any mid-turn; idle live pis are killed together, and editors nobody needs any more go
- * with them. Of several, the rest are archived before the refusals are raised.
+ * Archives sessions, refusing any mid-turn, and returns without waiting for their idle live harnesses to quit, which can
+ * take seconds; editors nobody needs any more go at once. Of several, the rest are archived and `refused` says why
+ * the others weren't. `stopped` settles once the harnesses are gone, rejecting with any that had to be closed.
  */
-export function archive(db: Db, ids: string[]): void {
+export function archive(db: Db, ids: string[]): { refused: SwbError | null; stopped: Promise<void> } {
 	const hosts = new Set(listSessions(SESSIONS).map(([name]) => name as string));
-	const stopping: RuntimeRow[] = [];
+	const quitting: { runtime: RuntimeRow; name: string }[] = [];
 	const refused: string[] = [];
 	for (const id of ids) {
 		try {
@@ -759,16 +811,22 @@ export function archive(db: Db, ids: string[]): void {
 				markArchived(db, id);
 				return runtime;
 			});
-			if (runtime) stopping.push(runtime);
+			if (runtime) quitting.push({ runtime, name: titleOf(db, id) ?? id });
 		} catch (error) {
 			if (!(error instanceof SwbError)) throw error;
 			refused.push(error.message);
 		}
 	}
-	if (stopping.length > 0) stopPis(stopping);
 	gc(db);
-	if (refused.length === 1 && ids.length === 1) throw new SwbError(refused[0] as string);
-	if (refused.length > 0) throw new SwbError(`${refused.length} of ${ids.length} not archived: ${refused[0]}`);
+	const stopped = Promise.all(quitting.map(({ runtime }) => stopInBackground(runtime))).then((closed) => {
+		const late = quitting.filter((_, i) => closed[i]).map(({ name }) => `"${name}"`);
+		// The roster's message line is narrow: what happened comes first, and the names are what get cut.
+		if (late.length > 0) throw new SwbError(`didn't quit in ${STOP_GRACE_MS / 1000}s; swb closed it: ${late.join(", ")}`);
+	});
+	if (refused.length === 0) return { refused: null, stopped };
+	const why =
+		refused.length === 1 && ids.length === 1 ? (refused[0] as string) : `${refused.length} of ${ids.length} not archived: ${refused[0]}`;
+	return { refused: new SwbError(why), stopped };
 }
 
 /** Stops a live idle pi, keeping its session open to wake later; refuses mid-turn, as archive does. */
