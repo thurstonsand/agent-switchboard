@@ -17,7 +17,7 @@ Wait+Screen /Scheduled for/
 Sleep 2.5s
 Screenshot ../artifacts/phase6/videos/merged-tools-launch-at.png
 Type "call session_schedules {}" Sleep 400ms Enter
-Wait+Screen /Schedules \(id/
+Wait+Screen /in 25 seconds \(\d+ more lines?, /
 Sleep 2.5s
 Screenshot ../artifacts/phase6/videos/merged-tools-schedules.png
 Type `update Watch CI {"cancel":true}` Sleep 400ms Enter
