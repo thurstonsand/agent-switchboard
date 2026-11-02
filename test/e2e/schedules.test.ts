@@ -63,12 +63,15 @@ test("a recurring schedule that missed runs while the machine slept fires once, 
 	const { details } = await scheduled(s, "reply tick", "--from", pi.id, "--cron", "*/5 * * * *", "--label", "Every 5 minutes");
 	expect(details.nextAt).toBeGreaterThan(Date.now());
 	// The machine slept through a dozen runs: the schedule was due an hour ago.
+	const asleep = Date.now();
 	const db = s.db();
-	db.run("update schedules set next_at = ? where id = ?", [Date.now() - 3_600_000, details.id]);
+	db.run("update schedules set next_at = ? where id = ?", [asleep - 3_600_000, details.id]);
 	db.close();
 	await until(() => s.signal("replied.tick") !== "", ready, "the missed run delivered");
 	await Bun.sleep(2000);
-	expect(s.query("select count(*) as n from messages where schedule_id = ?", details.id)).toEqual([{ n: 1 }]);
+	// Only the runs missed while asleep: across a five-minute mark, the next real run fires during the wait too.
+	const missed = s.query("select count(*) as n from messages where schedule_id = ? and scheduled_for < ?", details.id, asleep);
+	expect(missed).toEqual([{ n: 1 }]);
 	const [row] = s.query<{ next_at: number }>("select next_at from schedules where id = ?", details.id);
 	expect(row?.next_at).toBeGreaterThan(Date.now());
 	expect(row?.next_at).toBeLessThanOrEqual(Date.now() + 5 * 60_000);
