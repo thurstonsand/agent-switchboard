@@ -220,9 +220,9 @@ async function drain($) {
 }
 
 /** A launch's Group as swb's flags take it: omitted, named, or none. */
-function groupFlags(prefix, group) {
+function groupFlags(group) {
 	if (group === undefined) return [];
-	return group === null ? [`${prefix}no-group`] : [`${prefix}group`, group];
+	return group === null ? ["--no-group"] : ["--group", group];
 }
 
 async function useTool($, name, e) {
@@ -230,7 +230,7 @@ async function useTool($, name, e) {
 	const self = await $.session.id();
 	const from = ["--from", self];
 	// A launch carries forward the model and effort this session runs on, which swb reads from its records.
-	if (name === "session_launch" || name === "session_schedule") await line.recording;
+	if (name === "session_launch") await line.recording;
 	switch (name) {
 		case "session_reachable":
 			return swb($, ["reachable", ...from]);
@@ -242,8 +242,6 @@ async function useTool($, name, e) {
 				["send", ...from, "--to", e.session, "--request-id", e.tool_use_id, ...(e.requestResponse ? ["--request-response"] : [])],
 				e.message,
 			);
-		case "session_cancel":
-			return swb($, ["send", ...from, "--to", e.session, "--cancel"]);
 		case "session_launch":
 			return swb(
 				$,
@@ -255,8 +253,11 @@ async function useTool($, name, e) {
 					e.cwd ?? line.cwd,
 					"--title",
 					e.title,
-					...groupFlags("--", e.group),
+					...groupFlags(e.group),
 					...(e.requestResponse ? ["--request-response"] : []),
+					...["at", "cron", "label"].flatMap((k) => (e[k] !== undefined ? [`--${k}`, e[k]] : [])),
+					"--request-id",
+					e.tool_use_id,
 				],
 				e.goal,
 			);
@@ -273,25 +274,13 @@ async function useTool($, name, e) {
 					...(e.at !== undefined ? ["--at", e.at] : []),
 					...(e.cron !== undefined ? ["--cron", e.cron] : []),
 					...(e.session !== undefined ? ["--to", e.session] : []),
-					...(e.launch
-						? [
-								...["harness", "model", "effort", "agent"].flatMap((k) => (e.launch[k] ? [`--launch-${k}`, e.launch[k]] : [])),
-								"--launch-title",
-								e.launch.title,
-								"--launch-cwd",
-								e.launch.cwd ?? line.cwd,
-								...groupFlags("--launch-", e.launch.group),
-							]
-						: []),
 					...(e.requestResponse ? ["--request-response"] : []),
 					...(e.snooze ? ["--snooze"] : []),
 				],
 				e.message,
 			);
 		case "session_schedules":
-			return swb($, ["schedules", ...from]);
-		case "session_unschedule":
-			return swb($, ["unschedule", e.id, ...from]);
+			return swb($, e.unschedule ? ["unschedule", e.unschedule, ...from] : ["schedules", ...from]);
 		case "swb_show_session":
 			return swb($, ["show", e.session, ...from, ...(e.view ? ["--view", e.view] : [])]);
 		case "swb_update_session": {

@@ -2,6 +2,10 @@
 
 ## UNRELEASED
 
+### Changed
+
+- swb's tools cost about 40% less context in Claude Code and Codex, and nearly half in pi, which no longer repeats each description, the shortlist included, in its system prompt. Rules an agent needs at one moment, like ending its turn after archiving or reloading itself, now come in that tool's result. Three tools merge into others: `session_cancel` is `swb_update_session`'s `cancel`, `session_unschedule` is `session_schedules`' `unschedule`, and a scheduled launch is `session_launch` with `at` or `cron` and a `label` instead of `session_schedule`'s `launch`. A Claude Code permission rule naming `session_cancel` or `session_unschedule` needs the new names. `swb launch` takes `--at`, `--cron`, `--label`, and `--request-id`, and `swb schedule` drops its `--launch-*` flags.
+
 ### Fixed
 
 - Claude Code in auto mode no longer reads blocked while its classifier checks a call, nor for the whole run of a command it allowed. A prompt sent in auto mode marks blocked only for `AskUserQuestion`, so the dialog auto mode falls back to after repeated denials goes unmarked, and a dialog after switching out of auto mode mid-turn can go unmarked until the next prompt.

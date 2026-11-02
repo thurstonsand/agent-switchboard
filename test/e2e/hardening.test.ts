@@ -23,8 +23,7 @@ test("a pi-sessions subagent never becomes a Session and runs on the default tmu
 	s.keys("-l", "tools", "Enter");
 	await until(() => s.signal("tools") !== "", budgets.settle, "the tool list");
 	const tools = JSON.parse(s.signal("tools")) as string[];
-	for (const name of ["session_reachable", "session_send_message", "session_cancel", "session_launch", "swb_update_session"])
-		expect(tools).toContain(name);
+	for (const name of ["session_reachable", "session_send_message", "session_launch", "swb_update_session"]) expect(tools).toContain(name);
 	for (const name of ["subagent_list", "subagent_send", "subagent_cancel", "subagent_launch"]) expect(tools).toContain(name);
 	expect(tools).not.toContain("session_handoff");
 

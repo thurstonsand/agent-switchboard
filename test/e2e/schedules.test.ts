@@ -75,20 +75,22 @@ test("a recurring schedule that missed runs while the machine slept fires once, 
 test("a schedule launches a new session, refuses what can't work, unschedules, and a retried call schedules once", async () => {
 	s = scenario("schedules", "launch");
 	const pi = await launched(s, "pi", "reply up");
-	await scheduled(
+	const launching = await swbIn(
 		s,
 		"reply launched",
+		"launch",
 		"--from",
 		pi.id,
-		"--launch-harness",
+		"--harness",
 		"pi",
-		"--launch-title",
+		"--title",
 		"fresh one",
 		"--at",
 		"PT2S",
 		"--label",
 		"soon",
 	);
+	expect(launching.code).toBe(0);
 	const child = await until(() => s.ls().find((e) => e.parentId === pi.id), ready, "the launched session");
 	expect(child).toMatchObject({ harness: "pi", cwd: s.project });
 	await until(() => s.signal("replied.launched") !== "", ready, "the launched session working on its goal");
@@ -102,34 +104,36 @@ test("a schedule launches a new session, refuses what can't work, unschedules, a
 		[["--at", "2020-01-01T09:00:00Z"], "at: 2020-01-01T09:00:00Z has passed"],
 		[["--cron", "0 9 * *"], 'cron: "0 9 * *" needs 5 fields, "M H DoM Mon DoW"'],
 		[["--at", "PT1H", "--request-response"], "a message to this session can't request a response from it"],
-		[
-			["--at", "PT1H", "--snooze", "--launch-harness", "pi", "--launch-title", "x"],
-			"snooze needs an existing session; a launch has none to snooze",
-		],
-		[["--at", "PT1H", "--launch-title", "x", "--launch-group", " "], "a Group needs a name; null means no Group"],
-		[["--at", "PT1H", "--launch-title", "x", "--launch-group", "fix;"], "a Group's name takes only letters, digits, spaces, and - _ ."],
-		[
-			["--at", "PT1H", "--launch-title", "x", "--launch-cwd", operatorDir, "--launch-group", "lab"],
-			"an Operator belongs to no Project, so it takes no Group",
-		],
-		[["--at", "PT1H", "--launch-no-group"], "schedule: --launch-no-group needs --launch-title"],
-		[
-			["--at", "PT1H", "--launch-title", "x", "--launch-group", "lab", "--launch-no-group"],
-			"--launch-group and --launch-no-group conflict",
-		],
 	];
 	for (const [args, error] of refusals) {
 		const result = await swbIn(s, "reply nope", "schedule", "--from", pi.id, "--label", "nope", ...args);
 		expect({ args, err: result.err.trim() }).toEqual({ args, err: `swb: ${error}` });
 	}
+	const launchRefusals: [string[], string][] = [
+		[["--at", "PT1H"], "the label is empty: say when it runs, in plain words"],
+		[["--at", "PT1H", "--label", "nope", "--group", " "], "a Group needs a name; null means no Group"],
+		[["--at", "PT1H", "--label", "nope", "--group", "fix;"], "a Group's name takes only letters, digits, spaces, and - _ ."],
+		[
+			["--at", "PT1H", "--label", "nope", "--cwd", operatorDir, "--group", "lab"],
+			"an Operator belongs to no Project, so it takes no Group",
+		],
+		[["--at", "PT1H", "--label", "nope", "--group", "lab", "--no-group"], "--group and --no-group conflict"],
+	];
+	for (const [args, error] of launchRefusals) {
+		const result = await swbIn(s, "reply nope", "launch", "--from", pi.id, "--title", "x", ...args);
+		expect({ args, err: result.err.trim() }).toEqual({ args, err: `swb: ${error}` });
+	}
+	expect((await swbIn(s, "reply nope", "launch", "--from", pi.id, "--at", "PT1H", "--label", "nope")).err.trim()).toBe(
+		"swb: launch: --at, --cron, and --label need --from and --title",
+	);
 
 	const first = await scheduled(s, "reply once", "--from", pi.id, "--at", "PT1H", "--label", "in an hour", "--request-id", "call-1");
 	const again = await scheduled(s, "reply once", "--from", pi.id, "--at", "PT1H", "--label", "in an hour", "--request-id", "call-1");
 	expect(again.details.id).toBe(first.details.id);
 	expect(s.query("select count(*) as n from schedules where request_id = 'call-1'")).toEqual([{ n: 1 }]);
-	expect(JSON.parse(s.swb("unschedule", first.details.id, "--from", pi.id)).text).toBe(
-		`Unscheduled "in an hour" (schedule: ${first.details.id}).`,
-	);
+	type(s, pi.id, `call session_schedules {"unschedule":"${first.details.id}"}`);
+	const unscheduled = `Unscheduled "in an hour" (schedule: ${first.details.id}).`;
+	await until(() => pane(s, pi.id).includes(unscheduled), budgets.settle, "unscheduled through session_schedules");
 	expect(s.swbTry("unschedule", first.details.id, "--from", pi.id).err.trim()).toBe(
 		`swb: schedule ${first.details.id} is already cancelled`,
 	);

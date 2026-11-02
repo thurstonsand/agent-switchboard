@@ -35,12 +35,29 @@ export async function callTool(
 				kind: "message",
 			});
 		}
-		case "session_cancel": {
-			const a = parsed(name, args);
-			return send(db, { from, to: a.session, body: "", requestResponse: false, requestId: null, kind: "cancel" });
-		}
 		case "session_launch": {
 			const a = parsed(name, args);
+			if (a.at !== undefined || a.cron !== undefined || a.label !== undefined)
+				return schedule(db, {
+					from,
+					to: null,
+					launch: {
+						harness: a.harness ?? null,
+						model: a.model ?? null,
+						effort: a.effort ?? null,
+						agent: a.agent ?? null,
+						cwd: a.cwd ?? null,
+						title: a.title,
+						group: a.group,
+					},
+					body: a.goal,
+					at: a.at ?? null,
+					cron: a.cron ?? null,
+					label: a.label ?? "",
+					requestResponse: a.requestResponse,
+					snooze: false,
+					requestId: callerId(callId),
+				});
 			return launchSession(db, {
 				from,
 				harness: a.harness ?? null,
@@ -57,36 +74,23 @@ export async function callTool(
 		}
 		case "session_schedule": {
 			const a = parsed(name, args);
-			// A retried call must not schedule twice, which only the call's id can tell.
-			if (!callId) throw new SwbError("swb: Codex gave this call no id");
 			return schedule(db, {
 				from,
 				to: a.session ?? null,
-				launch: a.launch
-					? {
-							harness: a.launch.harness ?? null,
-							model: a.launch.model ?? null,
-							effort: a.launch.effort ?? null,
-							agent: a.launch.agent ?? null,
-							cwd: a.launch.cwd ?? null,
-							title: a.launch.title,
-							group: a.launch.group,
-						}
-					: null,
+				launch: null,
 				body: a.message,
 				at: a.at ?? null,
 				cron: a.cron ?? null,
 				label: a.label,
 				requestResponse: a.requestResponse ?? false,
 				snooze: a.snooze ?? false,
-				requestId: callId,
+				requestId: callerId(callId),
 			});
 		}
-		case "session_schedules":
-			parsed(name, args);
-			return listSchedules(db, from);
-		case "session_unschedule":
-			return unschedule(db, from, parsed(name, args).id);
+		case "session_schedules": {
+			const a = parsed(name, args);
+			return a.unschedule ? unschedule(db, from, a.unschedule) : listSchedules(db, from);
+		}
 		case "swb_show_session": {
 			const a = parsed(name, args);
 			return show(db, from, a.session, a.view ?? null);
@@ -104,6 +108,12 @@ export async function callTool(
 			return update(db, from, a.session ?? from, a);
 		}
 	}
+}
+
+/** A schedule's request id: a retried call must not schedule twice, which only the call's id can tell. */
+function callerId(callId: string | null): string {
+	if (!callId) throw new SwbError("swb: Codex gave this call no id");
+	return callId;
 }
 
 /**

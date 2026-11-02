@@ -43,4 +43,16 @@ test("Claude Code and Codex schedule and snooze through swb's tools, and Claude 
 	type(s, codex.id, `call session_send_message {"session":"${claude.id}","message":"SWB-wake-claude","requestResponse":false}`);
 	await until(() => pane(s, claude.id).includes("got SWB-wake-claude"), ready, "Claude woken by Codex's message");
 	expect(snoozeOf(s, claude.id).snoozed).toBe(false);
+
+	for (const id of [claude.id, codex.id]) {
+		type(s, id, `call session_schedule {"message":"SWB-never","at":"PT1H","label":"in an hour"}`);
+		const pending = () =>
+			s.query<{ id: string; cancelled: number }>(
+				"select id, cancelled_at is not null as cancelled from schedules where source_id = ? and body = 'SWB-never'",
+				id,
+			)[0];
+		const schedule = await until(() => pending()?.id, budgets.settle, "the schedule to unschedule");
+		type(s, id, `call session_schedules {"unschedule":"${schedule}"}`);
+		await until(() => pending()?.cancelled === 1, budgets.settle, "unscheduled through session_schedules");
+	}
 });

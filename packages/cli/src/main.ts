@@ -47,10 +47,11 @@ const USAGE = `swb: Agent Switchboard
   swb reload ID [--idle]       restart a session's agent on fresh config and have it carry on; --idle waits for its turn to end
                                and leaves it waiting for a prompt
   swb launch [--harness H] [--model M] [--effort E] [--agent A] [--cwd DIR] [--from ID] [--title T]
-             [--group NAME | --no-group] [--request-response]
+             [--group NAME | --no-group] [--request-response] [(--at WHEN | --cron EXPR) --label TEXT [--request-id KEY]]
                                start a new session in the background on the shortlist's preset matching those; naming none, the
                                preset nearest what --from runs now, else the default; its goal on stdin. It starts in --from's
-                               Group when both are in one Project, unless --group or --no-group says otherwise
+                               Group when both are in one Project, unless --group or --no-group says otherwise. With --at or
+                               --cron, as swb schedule takes them, it launches then instead, or anew each time the cron fires
   swb send --from ID --to ID [--request-response] [--request-id KEY] [--cancel]
                                message a session, waking it if dormant; the body on stdin
   swb reachable --from ID      every open session but the caller, as a line's tool reads it
@@ -60,12 +61,9 @@ const USAGE = `swb: Agent Switchboard
                                session_ask's reader, bound to a session: its first message from {"question"}, then its tools,
                                each taking its arguments as JSON on stdin
   swb recall sync              bring the search index up to date with every session's transcripts
-  swb schedule --from ID [--to ID | --launch-title T [--launch-harness H] [--launch-model M] [--launch-effort E]
-               [--launch-agent A] [--launch-cwd DIR] [--launch-group NAME | --launch-no-group]] (--at WHEN | --cron EXPR)
-               --label TEXT [--request-response] [--snooze] [--request-id KEY]
-                               message a session later, or launch one on a preset and in a Group, as swb launch does; the body
-                               on stdin. WHEN is ISO 8601: a time, local unless it has an offset, or a duration (PT2H); EXPR is
-                               5-field cron in local time
+  swb schedule --from ID [--to ID] (--at WHEN | --cron EXPR) --label TEXT [--request-response] [--snooze] [--request-id KEY]
+                               message a session later; the body on stdin. WHEN is ISO 8601: a time, local unless it has an
+                               offset, or a duration (PT2H); EXPR is 5-field cron in local time
   swb schedules --from ID      the schedules a session set or receives
   swb unschedule ID --from ID  cancel a pending schedule
   swb show ID --from ID [--view agent|editor|split]

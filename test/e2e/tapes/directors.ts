@@ -442,6 +442,30 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"merged-tools": {
+		setup: async (s) => {
+			await launched(s, "reply watching", { cwd: s.project, title: "Watch CI" });
+			await launched(s, "reply on it", { cwd: s.project, title: "Coordinator" });
+		},
+		run: async (s) => {
+			const watch = s.ls().find((e) => e.title === "Watch CI")?.id as string;
+			typeInto(s, watch, "hold ci");
+			await entered(s, "ci");
+			await waitLs(s, "Watch CI working", (ls) => ls.find((e) => e.id === watch)?.activity === "working");
+			// The tape types a scheduled launch and a listing first.
+			await waitLs(s, "Watch CI's turn cancelled", (ls) => ls.find((e) => e.id === watch)?.activity === "idle", 3 * TAPE);
+			release(s, "ci");
+			const coordinator = s.ls().find((e) => e.title === "Coordinator")?.id as string;
+			const child = await waitLs(
+				s,
+				"Nightly triage launched on schedule",
+				(ls) => ls.some((e) => e.title === "Nightly triage" && e.parentId === coordinator && e.activity === "idle"),
+				2 * TAPE,
+			);
+			expect(child.find((e) => e.title === "Nightly triage")).toMatchObject({ harness: "pi", live: true });
+		},
+	},
+
 	"launch-wake-archive": {
 		harnesses: ["claude", "codex"],
 		setup: async (s) => {

@@ -246,23 +246,29 @@ export async function show(db: Db, from: string, id: string, view: View | null):
 	if (!showing) throw new SwbError(`no Deck is showing this session, so there is none to switch; \`swb open ${id}\` opens one on it`);
 	await postCommand(showing.deck, "show", [id, from, ...(view ? [view] : [])]);
 	const name = displayName({ id, title: titleOf(db, id) });
-	return { text: `Showing "${name}".`, details: { id, deck: showing.deck } };
+	return {
+		text: `Showing "${name}". The user isn't watching this session now, so end your turn with one short line.`,
+		details: { id, deck: showing.deck },
+	};
 }
 
 export type Update = Omit<ToolArgs<"swb_update_session">, "session">;
 
 /**
- * Applies any combination of changes to a session: unarchiving first, reloading and then archiving last. Every change
+ * Applies any combination of changes to a session: unarchiving first, cancelling after snoozing, reloading and then archiving last. Every change
  * is checked before any is made, so a refused archive leaves the rest undone too.
  */
 export async function update(db: Db, from: string, id: string, change: Update): Promise<ToolResult> {
-	const { archived, family, force, snooze: snoozing, group, title, reload: reloading } = change;
-	if ([archived, snoozing, group, title, reloading].every((value) => value === undefined))
-		throw new SwbError("nothing to change: give archived, snooze, group, title, or reload");
+	const { archived, family, force, cancel, snooze: snoozing, group, title, reload: reloading } = change;
+	if ([archived, cancel || undefined, snoozing, group, title, reloading].every((value) => value === undefined))
+		throw new SwbError("nothing to change: give archived, cancel, snooze, group, title, or reload");
 	if (change.deleteWorktree && (archived !== true || id !== from))
 		throw new SwbError("deleteWorktree goes only with archived: true for this session");
 	if ((family !== undefined || force !== undefined) && archived !== true)
 		throw new SwbError("family and force go only with archived: true");
+	if (cancel && id === from) throw new SwbError("cancel stops another session's turn; to stop this one, end your turn");
+	if (cancel && (archived === true || reloading !== undefined))
+		throw new SwbError("cancel goes without archived or reload, which settle a running turn themselves");
 	if (archived === true && snoozing !== undefined)
 		throw new SwbError("an archived session can't be snoozed; give one of archived or snooze");
 	if (archived === true && reloading !== undefined)
@@ -300,6 +306,8 @@ export async function update(db: Db, from: string, id: string, change: Update): 
 		);
 	}
 	if (snoozing !== undefined) done.push(snooze(db, from, id, snoozing).text);
+	// After snoozing, which can still refuse its time: a cancel can't be taken back.
+	if (cancel) done.push((await send(db, { from, to: id, body: "", requestResponse: false, requestId: null, kind: "cancel" })).text);
 	if (reloading !== undefined) done.push(reload(db, from, id, reloading));
 	if (archiving) done.push(deleted ?? (await archiveRun(db, from, archiving)));
 	return {
@@ -307,6 +315,7 @@ export async function update(db: Db, from: string, id: string, change: Update): 
 		details: {
 			id,
 			archived,
+			cancel,
 			group: trimmedGroup,
 			title: trimmedTitle,
 			snooze: snoozing,
@@ -337,7 +346,10 @@ export function reload(db: Db, from: string | null, id: string, mode: ReloadMode
 			if (pending !== "continue") setReload(db, id, mode);
 			return true;
 		});
-	if (waits) return `${name} restarts when ${from === id ? "this" : "its"} turn ends${mode === "continue" ? ", then carries on" : ""}.`;
+	if (waits)
+		return from === id
+			? `This session restarts when this turn ends${mode === "continue" ? ", then carries on" : ""}: end it now with a brief final message.`
+			: `${name} restarts when its turn ends${mode === "continue" ? ", then carries on" : ""}.`;
 	restart(db, id, mode);
 	const how = target.live ? "Restarted" : "Started";
 	return mode === "continue" ? `${how} ${name}; it carries on where it left off.` : `${how} ${name}.`;
@@ -405,7 +417,7 @@ async function archiveRun(db: Db, from: string, plan: ArchivePlan, deleteWorktre
 		cancelling.length > 0
 			? `Cancelled the turns of ${cancelling.map((s) => `"${displayName(s)}"`).join(", ")}; each quits as its turn ends.`
 			: "",
-		members.some((s) => s.id === from) ? "This session quits when this turn ends." : "",
+		members.some((s) => s.id === from) ? "This session quits when this turn ends: end it now with a brief final message." : "",
 	]
 		.filter(Boolean)
 		.join(" ");

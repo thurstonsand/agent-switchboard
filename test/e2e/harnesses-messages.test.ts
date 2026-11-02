@@ -143,7 +143,7 @@ test("agents use swb's tools across harnesses: list, message, launch, and cancel
 	await settled(s, codex.id, "Codex done messaging pi");
 	type(s, codex.id, "hold x2");
 	await until(() => s.signal("x2.entered") !== "", ready, "Codex holding");
-	type(s, pi.id, `call session_cancel {"session":"${codex.id}"}`);
+	type(s, pi.id, `call swb_update_session {"session":"${codex.id}","cancel":true}`);
 	await until(() => entry(s, codex.id).activity === "idle", budgets.settle, "Codex's turn stopped");
 	release(s, "x2");
 	s.save("agents.txt", [pane(s, pi.id), pane(s, claude.id), pane(s, codex.id), pane(s, child.id)].join("\n=====\n"));

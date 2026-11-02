@@ -149,10 +149,8 @@ function scheduled(db: Db, row: ScheduleRow, from: string, snoozed: boolean): To
 /** Accepts a schedule; with snooze, its recipient is snoozed until the first fire. */
 export async function schedule(db: Db, s: ScheduleSpec): Promise<ToolResult> {
 	checkBody("message", s.body);
-	if (!s.label.trim()) throw new SwbError("the label is empty");
+	if (!s.label.trim()) throw new SwbError("the label is empty: say when it runs, in plain words");
 	if ((s.at === null) === (s.cron === null)) throw new SwbError("give at, to run once, or cron, to recur: one of them");
-	if (s.to !== null && s.launch !== null) throw new SwbError("give session or launch, not both");
-	if (s.launch && s.snooze) throw new SwbError("snooze needs an existing session; a launch has none to snooze");
 	const to = s.launch ? null : (s.to ?? s.from);
 	if (to === s.from && s.requestResponse) throw new SwbError("a message to this session can't request a response from it");
 	// Refused now rather than when it fires; it fires on the shortlist as it is then.

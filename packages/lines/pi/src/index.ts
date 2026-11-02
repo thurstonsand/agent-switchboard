@@ -61,9 +61,9 @@ function claim(): Process | undefined {
 }
 
 /** A launch's Group as swb's flags take it: omitted, named, or none. */
-function groupFlags(prefix: string, group: string | null | undefined): string[] {
+function groupFlags(group: string | null | undefined): string[] {
 	if (group === undefined) return [];
-	return group === null ? [`${prefix}no-group`] : [`${prefix}group`, group];
+	return group === null ? ["--no-group"] : ["--group", group];
 }
 
 /** Runs swb, feeding it stdin, and parses the tool result it prints; its stderr is the error. */
@@ -326,7 +326,6 @@ export default function (pi: ExtensionAPI) {
 				name,
 				label,
 				description: describeTool(name, TOOLS[name].description, guide),
-				promptSnippet: describeTool(name, TOOLS[name].description, guide),
 				promptGuidelines: TOOLS[name].guidelines,
 				parameters: toolParameters(name, name === "swb_update_session" && linkedWorktree(cwd) !== null),
 				renderCall(args, theme) {
@@ -470,16 +469,10 @@ export default function (pi: ExtensionAPI) {
 	);
 
 	tool(
-		"session_cancel",
-		"Cancel",
-		(args) => titleOf(args.session),
-		(args: { session: string }, ctx) => swb(proc.launch.bin, ["send", "--from", self(ctx), "--to", args.session, "--cancel"]),
-	);
-
-	tool(
 		"session_launch",
 		"Launch",
-		(args) => `${[args.harness, args.agent, args.model].filter(Boolean).join(" ") || "default"} · ${args.title}`,
+		(args) =>
+			`${[args.harness, args.agent, args.model].filter(Boolean).join(" ") || "default"} · ${args.title}${args.label ? ` · ${args.label}` : ""}`,
 		(
 			args: {
 				harness?: string;
@@ -491,8 +484,12 @@ export default function (pi: ExtensionAPI) {
 				title: string;
 				group?: string | null;
 				requestResponse: boolean;
+				at?: string;
+				cron?: string;
+				label?: string;
 			},
 			ctx,
+			toolCallId,
 		) =>
 			swb(
 				proc.launch.bin,
@@ -505,8 +502,11 @@ export default function (pi: ExtensionAPI) {
 					args.cwd ?? ctx.cwd,
 					"--title",
 					args.title,
-					...groupFlags("--", args.group),
+					...groupFlags(args.group),
 					...(args.requestResponse ? ["--request-response"] : []),
+					...(["at", "cron", "label"] as const).flatMap((k) => (args[k] !== undefined ? [`--${k}`, args[k]] : [])),
+					"--request-id",
+					toolCallId,
 				],
 				args.goal,
 			),
@@ -515,8 +515,7 @@ export default function (pi: ExtensionAPI) {
 	tool(
 		"session_schedule",
 		"Schedule",
-		(args) =>
-			`${args.launch ? `new ${(args.launch as { title: string }).title}` : args.session ? titleOf(args.session) : "this session"} · ${args.label}${args.snooze ? " · snooze" : ""}`,
+		(args) => `${args.session ? titleOf(args.session) : "this session"} · ${args.label}${args.snooze ? " · snooze" : ""}`,
 		(
 			args: {
 				message: string;
@@ -524,15 +523,6 @@ export default function (pi: ExtensionAPI) {
 				cron?: string;
 				label: string;
 				session?: string;
-				launch?: {
-					harness?: string;
-					model?: string;
-					effort?: string;
-					agent?: string;
-					cwd?: string;
-					title: string;
-					group?: string | null;
-				};
 				requestResponse?: boolean;
 				snooze?: boolean;
 			},
@@ -552,18 +542,6 @@ export default function (pi: ExtensionAPI) {
 					...(args.at !== undefined ? ["--at", args.at] : []),
 					...(args.cron !== undefined ? ["--cron", args.cron] : []),
 					...(args.session !== undefined ? ["--to", args.session] : []),
-					...(args.launch
-						? [
-								...(["harness", "model", "effort", "agent"] as const).flatMap((k) =>
-									args.launch?.[k] ? [`--launch-${k}`, args.launch[k]] : [],
-								),
-								"--launch-title",
-								args.launch.title,
-								"--launch-cwd",
-								args.launch.cwd ?? ctx.cwd,
-								...groupFlags("--launch-", args.launch.group),
-							]
-						: []),
 					...(args.requestResponse ? ["--request-response"] : []),
 					...(args.snooze ? ["--snooze"] : []),
 				],
@@ -574,15 +552,9 @@ export default function (pi: ExtensionAPI) {
 	tool(
 		"session_schedules",
 		"Schedules",
-		() => "",
-		(_args, ctx) => swb(proc.launch.bin, ["schedules", "--from", self(ctx)]),
-	);
-
-	tool(
-		"session_unschedule",
-		"Unschedule",
-		(args) => String(args.id),
-		(args: { id: string }, ctx) => swb(proc.launch.bin, ["unschedule", args.id, "--from", self(ctx)]),
+		(args) => (args.unschedule ? `unschedule ${args.unschedule}` : ""),
+		(args: { unschedule?: string }, ctx) =>
+			swb(proc.launch.bin, args.unschedule ? ["unschedule", args.unschedule, "--from", self(ctx)] : ["schedules", "--from", self(ctx)]),
 	);
 
 	tool(
@@ -603,6 +575,7 @@ export default function (pi: ExtensionAPI) {
 			const parts = [
 				args.archived === true ? `archive${args.family ? " family" : ""}${args.force ? " · force" : ""}` : "",
 				args.archived === false ? "unarchive" : "",
+				args.cancel ? "cancel turn" : "",
 				args.snooze !== undefined ? `snooze ${snoozeText(args.snooze as Snooze)}` : "",
 				args.group === null ? "ungroup" : args.group !== undefined ? `group ${args.group}` : "",
 				args.title !== undefined ? `retitle as "${args.title}"` : "",

@@ -8,227 +8,147 @@ import { HARNESSES, RELOAD_MODES, SNOOZE_PRESETS, VIEWS } from "./index.ts";
 /** `readOnly`: it only reads. The rest change only the user's own sessions, and never destroy one. */
 export type ToolSpec = { description: string; guidelines: string[]; parameters: TSchema; readOnly: boolean };
 
-const session = Type.String({ description: "The target session's id, from session_reachable." });
-const requestResponse = Type.Boolean({ description: "Whether the recipient should reply to this session." });
-const cwd = Type.Optional(Type.String({ description: "Its working directory; defaults to this session's." }));
-const title = Type.String({ description: "A short title for the roster." });
-const group = Type.Optional(
-	Type.Union([Type.String(), Type.Null()], {
-		description:
-			"The Group to put the new session in. If omitted, it joins this session's Group when both are in the same Project, and no Group otherwise. Pass null to keep it out of any Group. To use this session's Group in another Project, pass its name.",
-	}),
-);
-/** A preset by its fields, as session_launch's description lists them. */
-const preset = {
-	harness: Type.Optional(
-		Type.Union(
-			HARNESSES.map((name) => Type.Literal(name)),
-			{ description: "pi, claude (Claude Code), or codex." },
-		),
-	),
-	model: Type.Optional(Type.String({ description: "As listed." })),
-	effort: Type.Optional(Type.String({ description: "As listed; needed only between presets of one model." })),
-	agent: Type.Optional(Type.String({ description: "A Claude Code agent, as listed, in place of model and effort." })),
-};
+const session = Type.String({ description: "The session's id." });
+const requestResponse = Type.Boolean({ description: "Whether it should reply to you." });
 
 export const TOOLS = {
 	session_reachable: {
-		description: "List every open session on the switchboard except this one.",
-		guidelines: [
-			"Use session_reachable to find another session before messaging, cancelling, or archiving it.",
-			"Sessions in other projects and other harnesses are all reachable; a dormant one wakes when messaged.",
-		],
+		description: "List every open session but this one, in any project or harness.",
+		guidelines: ["Call session_reachable only for an id you don't already have."],
 		parameters: Type.Object({}),
 		readOnly: true,
 	},
 	session_send_message: {
-		description:
-			"Send a message to another session on the switchboard. It arrives in that session's conversation, mid-turn when it is working; a dormant session is woken first.",
-		guidelines: [
-			"Messages are for coordinating with the session that owns the work; don't send what you can do yourself.",
-			"Set requestResponse when you need an answer; the reply arrives later as a message to you, so end your turn instead of polling.",
-		],
+		description: "Message another session. It arrives mid-turn if that session is working, and wakes it if dormant.",
+		guidelines: ["Message the session that owns the work; don't send what you can do yourself."],
 		parameters: Type.Object({
 			session,
-			message: Type.String({ description: "The message, self-contained: the recipient doesn't see this conversation." }),
+			message: Type.String({ description: "Self-contained: the recipient doesn't see this conversation." }),
 			requestResponse,
 		}),
 		readOnly: false,
 	},
-	session_cancel: {
-		description: "Stop another session's running turn. The session stays open.",
-		guidelines: ["Only cancel another session's turn when the user asks for it."],
-		parameters: Type.Object({ session }),
-		readOnly: false,
-	},
 	session_launch: {
-		description: "Start a new session on the switchboard, on one of the presets below.",
+		description:
+			"Start a new session on one of the presets below. With at or cron and a label, as session_schedule takes them, launch later instead, or anew each time the cron fires.",
 		guidelines: [
-			"Write the goal as a complete briefing: objective, relevant context, constraints, and what done means.",
-			"Launch a new session when the work is independent of this one, belongs to another directory, or the user asks for one.",
-			"Omit the preset fields to carry forward what this session runs now. To switch, pass the fields of the preset whose note fits the work; anything not listed is refused.",
+			"Launch a new session when the work is independent of this one, belongs to another directory, or the user asks. For part of this work you need back this turn, use your harness's own subagents, if it has them.",
+			"Omit session_launch's preset fields to run what this session runs; otherwise pass the fields of the preset whose note fits the work.",
 		],
 		parameters: Type.Object({
-			...preset,
-			goal: Type.String({ description: "The self-contained briefing, delivered as its first message." }),
-			cwd,
-			title,
-			group,
-			requestResponse: Type.Boolean({ description: "Whether it should report back to this session when done." }),
+			harness: Type.Optional(Type.Enum(HARNESSES, { description: "claude is Claude Code." })),
+			model: Type.Optional(Type.String()),
+			effort: Type.Optional(Type.String()),
+			agent: Type.Optional(Type.String()),
+			goal: Type.String({
+				description: "Its first message: a self-contained briefing of the objective, context, constraints, and what done means.",
+			}),
+			cwd: Type.Optional(Type.String({ description: "Defaults to this session's." })),
+			title: Type.String({ description: "Short, for the roster." }),
+			group: Type.Optional(
+				Type.Union([Type.String(), Type.Null()], {
+					description: "Omit for this session's Group within its Project, or pass a Group's name, in any Project; null for none.",
+				}),
+			),
+			requestResponse: Type.Boolean({ description: "Whether it reports back when done." }),
+			at: Type.Optional(Type.String()),
+			cron: Type.Optional(Type.String()),
+			label: Type.Optional(Type.String()),
 		}),
 		readOnly: false,
 	},
 	session_schedule: {
-		description:
-			"Schedule a message for later, once or on a recurring cron schedule: to this session, another session, or a new session launched when it fires.",
+		description: "Schedule a message, once or on a cron, to this session or another. session_launch launches on a schedule.",
 		guidelines: [
-			"Schedule only when the user asks to remind, follow up, check back, or repeat something. To wait on another session, set requestResponse on your message instead of scheduling checks.",
-			"For something expected within a few minutes, keep working in this turn instead.",
-			"Write the message as instructions for when it fires: what to check, and what to do with each outcome. A recurring message should say when to unschedule itself.",
-			"To message this session, omit both session and launch.",
-			"Set snooze only when the user asks for it.",
+			"Schedule only when the user asks to remind, follow up, check back, or repeat something. To wait on another session, set requestResponse on your message instead.",
+			"Write a scheduled message as instructions for when it fires: what to check, what to do with each outcome, and, if recurring, when to unschedule.",
 		],
 		parameters: Type.Object({
-			message: Type.String({ description: "What to deliver, self-contained when it goes to another session." }),
+			message: Type.String({ description: "Self-contained when it goes to another session." }),
 			at: Type.Optional(
 				Type.String({
-					description:
-						'When, once: an ISO 8601 time, local unless it has an offset ("2026-10-23T15:00"), or a duration from now ("PT2H", "P1D").',
+					description: 'Once: an ISO 8601 time, local unless it has an offset ("2026-10-23T15:00"), or a duration from now ("PT2H").',
 				}),
 			),
-			cron: Type.Optional(
-				Type.String({
-					description:
-						'Recurring instead: standard 5-field cron in local time, "M H DoM Mon DoW" (e.g. "57 8 * * 1-5" = weekdays at 8:57am).',
-				}),
-			),
-			label: Type.String({ description: 'When it runs, in plain words, such as "Weekdays, 8:57 AM".' }),
-			session: Type.Optional(session),
-			launch: Type.Optional(
-				Type.Object(
-					{
-						...preset,
-						cwd,
-						title,
-						group,
-					},
-					{
-						description:
-							"Instead of an existing session, launch a new one each time it fires, on a preset as session_launch takes it, with the message as its goal.",
-					},
-				),
-			),
+			cron: Type.Optional(Type.String({ description: 'Recurring: 5-field cron in local time ("57 8 * * 1-5" is weekdays at 8:57am).' })),
+			label: Type.String({ description: 'When it runs, in plain words ("Weekdays, 8:57 AM").' }),
+			session: Type.Optional(Type.String({ description: "The recipient's id; omit for this session." })),
 			requestResponse: Type.Optional(requestResponse),
-			snooze: Type.Optional(Type.Boolean({ description: "Snooze the recipient until this fires." })),
+			snooze: Type.Optional(Type.Boolean({ description: "Snooze the recipient until it fires; only when the user asks." })),
 		}),
 		readOnly: false,
 	},
 	session_schedules: {
-		description:
-			"List this session's schedules, the ones it set and the ones that deliver to it: pending ones with their next run, finished ones with their last.",
-		guidelines: [],
-		parameters: Type.Object({}),
-		readOnly: true,
-	},
-	session_unschedule: {
-		description: "Cancel a pending schedule.",
+		description: "List the schedules this session set or receives, or cancel one.",
 		guidelines: ["Unschedule only when the user asks, or when the schedule's stated completion condition is met."],
-		parameters: Type.Object({ id: Type.String({ description: "The schedule's id, from session_schedules." }) }),
+		parameters: Type.Object({
+			unschedule: Type.Optional(Type.String({ description: "A pending schedule's id, to cancel it." })),
+		}),
 		readOnly: false,
 	},
 	swb_update_session: {
-		description: "Update one session on the switchboard: this one, unless you name another.",
+		description: "Archive, snooze, group, retitle, or reload a session, or cancel its turn: this one unless you name another.",
 		guidelines: [
-			"Archive only when the user asks, or when you started that session and have driven it to completion.",
-			"Archiving this session quits it when the turn ends: call it last, then end with a brief final message.",
-			"Archiving refuses any session other than this one that is mid-turn, blocked, cut off, or errored, and names them. If they should go anyway, call again with force, which cancels their turns.",
-			"Unarchiving doesn't restart a session; session_send_message wakes it.",
-			"Snooze or unsnooze only when the user asks.",
-			"Group sessions when the user asks, or to keep sessions you started for one piece of work together. Reuse a Group session_reachable lists in that Project rather than inventing a near-duplicate.",
-			"Retitle a session when the user asks, or when its title no longer says what it is working on.",
-			"Reload a session when the user asks, or when you changed something it reads only at startup (its AGENTS.md or CLAUDE.md, settings, extensions, plugins, skills, or MCP servers) and it needs the change now.",
-			"Reloading this session restarts it when this turn ends: call it last, then end with a brief final message. With continue, it starts a turn on its own once it's back; with idle, it waits for the user.",
-			"Reloading another session with continue restarts it at once, cutting off a running turn, its tools, and its background work, then picks that turn back up; an idle or dormant one starts a turn.",
+			"Archive a session only when the user asks or you started it and drove it to completion. Snooze or unsnooze a session, or cancel another's turn, only when the user asks.",
+			"Group sessions when the user asks or to keep sessions you started for one piece of work together, reusing a Group session_reachable lists.",
+			"Retitle a session when the user asks or its title no longer fits its work.",
+			"Reload a session when the user asks or after changing what it reads only at startup (AGENTS.md, CLAUDE.md, settings, extensions, plugins, skills, MCP servers).",
 		],
 		parameters: Type.Object({
 			session: Type.Optional(session),
-			archived: Type.Optional(Type.Boolean({ description: "True to archive, false to unarchive." })),
+			archived: Type.Optional(Type.Boolean({ description: "false unarchives." })),
 			deleteWorktree: Type.Optional(
 				Type.Boolean({
 					description:
 						"With archived true, for this session only: delete its linked worktree, keeping the branch and conversations. With family true, archive its descendants too, but delete only this worktree. Only when the user asks. Refuses modified or untracked files, locked worktrees, scheduled launches into it, or open/live sessions using it outside the selected family. Ignored files are deleted. Conversations whose directory is gone resume in the Project root, or fail clearly if that is gone too. Call last, then end your turn.",
 				}),
 			),
-			family: Type.Optional(
-				Type.Boolean({ description: "With archived true: archive every open session it started too, and the ones they started." }),
-			),
+			family: Type.Optional(Type.Boolean({ description: "With archived: every open session it started, and theirs, too." })),
 			force: Type.Optional(
-				Type.Boolean({
-					description: "With archived true: archive sessions mid-turn, blocked, cut off, or errored anyway, cancelling their turns.",
-				}),
+				Type.Boolean({ description: "With archived: also those mid-turn, blocked, cut off, or errored, cancelling their turns." }),
 			),
+			cancel: Type.Optional(Type.Boolean({ description: "Stop another session's running turn." })),
 			group: Type.Optional(
-				Type.Union([Type.String(), Type.Null()], {
-					description: "The Group to move it into, within its Project; null takes it out of its Group.",
-				}),
+				Type.Union([Type.String(), Type.Null()], { description: "The Group to move it into, in its Project; null takes it out." }),
 			),
-			title: Type.Optional(Type.String({ description: "A new, short title." })),
+			title: Type.Optional(Type.String()),
 			snooze: Type.Optional(
-				Type.Union([...[...SNOOZE_PRESETS, "off"].map((preset) => Type.Literal(preset)), Type.Object({ until: Type.String() })], {
-					description: 'How long to snooze it, off to unsnooze, or {"until":"2026-11-05T09:00:00-08:00"} for a set time.',
+				Type.Union([Type.Enum([...SNOOZE_PRESETS, "off"]), Type.Object({ until: Type.String() })], {
+					description: 'A preset, off to unsnooze, or {"until": an ISO 8601 time}.',
 				}),
 			),
 			reload: Type.Optional(
-				Type.Union(
-					RELOAD_MODES.map((mode) => Type.Literal(mode)),
-					{
-						description:
-							"Restart the session's agent process on the same conversation, so it reads its instructions and configuration afresh. continue: it carries on working afterward. idle: it waits for its next prompt.",
-					},
-				),
+				Type.Enum(RELOAD_MODES, {
+					description:
+						"Restart it on the same conversation. continue: it carries on, cutting off and resuming another's running turn. idle: it waits.",
+				}),
 			),
 		}),
 		readOnly: false,
 	},
 	session_search: {
-		description:
-			"Search every session's conversation on the switchboard but this one's, open or archived, subagents included, for what was asked, said, or done. Lists the sessions that match, best first, with the passages that matched.",
+		description: "Search other sessions' conversations, open or archived, subagents included. Lists matches best first, with passages.",
 		guidelines: [
-			'Plain words must all appear, each as a word or its start; "quoted phrases" match exactly; OR, -word, and parentheses narrow it.',
-			"Filter in the same query: harness:pi|claude|codex, project:NAME, file:PATH (read or changed), after: and before: a date, an ISO 8601 time, or a duration ago (P7D), archived:yes|no. Filters alone list the most recent sessions that pass.",
-			"Once session_search finds a session, ask it what you need with session_ask.",
+			'In session_search, plain words must all appear, as words or their starts; "phrases" match exactly; OR, -word, and parentheses narrow. Filters: harness:pi|claude|codex, project:NAME, file:PATH (read or changed), after: and before: (a date, an ISO 8601 time, or a duration ago like P7D), archived:yes|no. Filters alone list recent sessions.',
+			"Question a session_search hit with session_ask.",
 		],
 		parameters: Type.Object({
-			query: Type.String({ description: 'Words, phrases, and filters, such as "redirect loop" file:src/auth.ts after:P14D.' }),
-			limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "How many sessions to list; 10 by default." })),
+			query: Type.String({ description: 'Such as "redirect loop" file:src/auth.ts after:P14D.' }),
+			limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "10 by default." })),
 		}),
 		readOnly: true,
 	},
 	session_ask: {
 		description:
-			"Ask a question about another session's conversation, open or archived. A reader with its own context reads that session's transcript and answers, so the transcript never fills this conversation.",
-		guidelines: [
-			"Ask focused questions rather than for a broad recap.",
-			"To ask a session that is still working on something, message it instead; session_ask reads only what its transcript holds so far.",
-		],
-		parameters: Type.Object({
-			session: Type.String({ description: "The session's id." }),
-			question: Type.String({ description: "What to find out from that session's transcript, self-contained." }),
-		}),
+			"Ask about another session's conversation, open or archived. A reader with its own context answers, keeping the transcript out of yours.",
+		guidelines: ["Ask session_ask focused questions, not for a recap. To ask a session still at work, message it instead."],
+		parameters: Type.Object({ session, question: Type.String({ description: "Self-contained." }) }),
 		readOnly: true,
 	},
 	swb_show_session: {
-		description: "Show the user a specific session by switching focus to it.",
-		guidelines: ["Call it last in your turn, and end with one short line; the user won't be watching this session afterward."],
-		parameters: Type.Object({
-			session,
-			view: Type.Optional(
-				Type.Union(
-					VIEWS.map((view) => Type.Literal(view)),
-					{ description: "agent, its directory's editor, or a split of both; omit unless the user asks for one." },
-				),
-			),
-		}),
+		description: "Switch the user's view to a session, when they ask to see it.",
+		guidelines: [],
+		parameters: Type.Object({ session, view: Type.Optional(Type.Enum(VIEWS, { description: "Omit unless the user asks for one." })) }),
 		readOnly: false,
 	},
 } satisfies Record<string, ToolSpec>;
@@ -264,7 +184,7 @@ export const READER_TOOLS = {
 				Type.Integer({ minimum: 0, maximum: 500, description: "Entries to read after ref; as many as fit by default." }),
 			),
 			body: Type.Optional(
-				Type.Union([Type.Literal("preview"), Type.Literal("full")], {
+				Type.Enum(["preview", "full"], {
 					description: "preview (the default) cuts tool calls and results short; full reads them whole.",
 				}),
 			),

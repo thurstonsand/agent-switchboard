@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { pane, ready, settled, type } from "./harness/agents.ts";
 import { cursorTo, entry, launched, waitState } from "./harness/deck.ts";
 import { budgets, git, gitRepo, gitWorktree, type Scenario, scenario, until } from "./harness/index.ts";
-import { scheduled, swbIn } from "./harness/schedules.ts";
+import { swbIn } from "./harness/schedules.ts";
 
 let s: Scenario;
 afterEach(async () => {
@@ -175,20 +175,23 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 	const startingId = JSON.parse(started.out).details.id as string;
 	await settled(s, startingId, "starting peer idle");
 	s.swb("archive", startingId);
-	const schedule = await scheduled(
+	const scheduling = await swbIn(
 		s,
 		"reply scheduled",
+		"launch",
 		"--from",
 		id,
-		"--launch-title",
+		"--title",
 		"Future work",
-		"--launch-cwd",
+		"--cwd",
 		tree,
 		"--at",
 		"PT1H",
 		"--label",
 		"Check feature",
 	);
+	expect(scheduling.code).toBe(0);
+	const schedule = JSON.parse(scheduling.out) as { details: { id: string } };
 	await ask();
 	clickDelete();
 	await waitState(s, "schedule refusal", (st) => st.toasts.some((t) => t.text.includes("Check feature")));

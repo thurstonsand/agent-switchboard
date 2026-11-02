@@ -260,7 +260,7 @@ test("session_launch and a scheduled launch, from pi, Claude Code, or Codex, sta
 		type(
 			s,
 			parent.id,
-			`call session_schedule {"message":"reply ${title}","at":"PT1S","label":"now","launch":{"harness":"pi","title":"${title}","group":"night shift"}}`,
+			`call session_launch {"harness":"pi","goal":"reply ${title}","title":"${title}","group":"night shift","requestResponse":false,"at":"PT1S","label":"now"}`,
 		);
 		await until(() => entry(s, parent.id).activity === "idle", ready, `${parent.harness} done scheduling`);
 	}

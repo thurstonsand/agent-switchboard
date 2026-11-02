@@ -43,7 +43,7 @@ test("pi reloading itself restarts when its turn ends and carries on with the AG
 	// The pi it replaced started before AGENTS.md was written.
 	await until(() => s.signal("reloaded.system").includes("SWB-RELOAD-PI"), ready, "the reloaded pi carrying on, on the new AGENTS.md");
 	await restarted(pi.id, first, "pi restarted on its own conversation");
-	expect(pane(s, pi.id)).toContain("This session restarts when this turn ends, then carries on.");
+	expect(pane(s, pi.id)).toContain("This session restarts when this turn ends, then carries on: end it now");
 	expect(entry(s, pi.id).reload).toBeNull();
 	// The Stage watching it follows it back, rather than staying on the card it showed while pi was down.
 	await waitState(s, "the Stage back on the self-reloaded pi", (x) => x.staged.id === pi.id && x.staged.kind === "live");
@@ -143,5 +143,9 @@ test("Claude Code and Codex told to continue restart mid-turn and pick it back u
 	const reloaded = prompted(claude.id);
 	await Bun.sleep(3000);
 	expect(prompted(claude.id)).toBe(reloaded);
-	expect(s.requests("claude").some((r) => String(r.toolOutput).includes("This session restarts when this turn ends."))).toBe(true);
+	expect(
+		s
+			.requests("claude")
+			.some((r) => String(r.toolOutput).includes("This session restarts when this turn ends: end it now with a brief final message.")),
+	).toBe(true);
 });
