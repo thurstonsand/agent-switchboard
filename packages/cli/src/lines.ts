@@ -10,6 +10,7 @@ import hooks from "../../lines/claude/plugin/hooks/hooks.json";
 // @ts-expect-error: the mod is embedded as text, never imported as a module.
 import register from "../../lines/claude/plugin/hooks/register.js" with { type: "text" };
 import { SwbError } from "./errors.ts";
+import { lock } from "./lock.ts";
 
 /** Replaced whole, so a harness reading it mid-write never sees half a file. */
 function write(path: string, text: string): void {
@@ -60,18 +61,25 @@ enabled = false
  * generator replaces the whole mcp_servers table from -c to switch servers off, which leaves a server declared only
  * with -c no command, and its title request fails unseen.
  */
-export function declareCodexServer(): void {
+export async function declareCodexServer(): Promise<void> {
 	const path = codexConfig();
-	const text = existsSync(path) ? readFileSync(path, "utf8") : "";
-	let config: { mcp_servers?: Record<string, unknown> };
+	// Discovery and every Codex swb starts check at once; two that both find it missing would declare it twice, and
+	// Codex refuses a config.toml that does.
+	const release = await lock(join(stateDir(), "codex-config.lock"), `declaring swb's MCP server in ${path} for 10 seconds`, 10_000);
 	try {
-		config = Bun.TOML.parse(text) as typeof config;
-	} catch (error) {
-		throw new SwbError(`${path}: ${(error as Error).message}`);
+		const text = existsSync(path) ? readFileSync(path, "utf8") : "";
+		let config: { mcp_servers?: Record<string, unknown> };
+		try {
+			config = Bun.TOML.parse(text) as typeof config;
+		} catch (error) {
+			throw new SwbError(`${path}: ${(error as Error).message}`);
+		}
+		if (config.mcp_servers?.swb) return;
+		mkdirSync(dirname(path), { recursive: true });
+		appendFileSync(path, text === "" || text.endsWith("\n") ? CODEX_STUB : `\n${CODEX_STUB}`);
+	} finally {
+		release();
 	}
-	if (config.mcp_servers?.swb) return;
-	mkdirSync(dirname(path), { recursive: true });
-	appendFileSync(path, text === "" || text.endsWith("\n") ? CODEX_STUB : `\n${CODEX_STUB}`);
 }
 
 /** The -c overrides that switch the declared server on, as swb runs it, for one of swb's own app-servers. */

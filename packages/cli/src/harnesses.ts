@@ -403,7 +403,7 @@ export async function discover(
 	// Every Codex swb hosts needs swb's MCP server declared. A config.toml that won't parse stops Codex, and its presets say why.
 	if (status.codex.problem === null) {
 		try {
-			declareCodexServer();
+			await declareCodexServer();
 		} catch (error) {
 			status.codex = { version: status.codex.version, problem: (error as Error).message };
 		}

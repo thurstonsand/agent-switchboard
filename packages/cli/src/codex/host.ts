@@ -114,7 +114,7 @@ export async function codexHost(args: string[], updated = false): Promise<void> 
 	if (!codex) throw new SwbError("codex not found on PATH");
 	for (const name of ["SWB_MANAGED", "SWB_DB", "SWB_TMUX_SESSION", "SWB_BIN"]) delete process.env[name];
 
-	declareCodexServer();
+	await declareCodexServer();
 	// Both read config: the server for the model's instructions and tools, the TUI for its trust check.
 	const operator = values.operator ? codexOperatorConfig().flatMap((value) => ["-c", value]) : [];
 	const socket = codexSocket(host);
