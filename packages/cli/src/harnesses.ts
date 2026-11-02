@@ -1,11 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { HARNESSES, type Harness, pidAlive, shortlistPath, stateDir } from "@swb/shared";
+import { HARNESSES, type Harness, shortlistPath, stateDir } from "@swb/shared";
 import { harnessName } from "@swb/shared/mailbox";
 import { type Config, EFFORTS, type Effort, HARNESS_EFFORTS, loadConfig, type Preset } from "./config.ts";
 import { SwbError } from "./errors.ts";
 import { declareCodexServer } from "./lines.ts";
+import { lock } from "./lock.ts";
 import { loginShell, newer } from "./sessions.ts";
 
 // What each harness can start, as the login shell that launches sessions finds it: whether it's installed and new
@@ -381,41 +382,11 @@ function writeAtomic(path: string, text: string): void {
 	renameSync(temp, path);
 }
 
-const lockPath = () => join(stateDir(), "catalog.lock");
-const LOCK_WAIT_MS = 3 * 60_000;
-
 /**
  * Makes this the only swb reading model lists until the returned release: Codex app-servers starting together on one
- * CODEX_HOME fail to open its state db. The lock holds its owner's pid, so one left by a process that died is taken over.
+ * CODEX_HOME fail to open its state db.
  */
-async function lockCatalog(): Promise<() => void> {
-	mkdirSync(stateDir(), { recursive: true, mode: 0o700 });
-	const path = lockPath();
-	const mine = `${process.pid} ${crypto.randomUUID()}`;
-	const until = Date.now() + LOCK_WAIT_MS;
-	for (;;) {
-		try {
-			writeFileSync(path, mine, { flag: "wx", mode: 0o600 });
-			return () => {
-				if (readFileSync(path, "utf8") === mine) rmSync(path);
-			};
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-		}
-		let holder = 0;
-		try {
-			holder = Number(readFileSync(path, "utf8").split(" ")[0]);
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-			continue;
-		}
-		// An empty file is a lock being written.
-		if (holder > 0 && !pidAlive(holder)) rmSync(path, { force: true });
-		else if (Date.now() > until)
-			throw new SwbError(`swb ${holder} has been reading model lists for 3 minutes; remove ${path} if it's stuck`);
-		else await Bun.sleep(100);
-	}
-}
+const lockCatalog = () => lock(join(stateDir(), "catalog.lock"), "reading model lists for 3 minutes", 3 * 60_000);
 
 /**
  * Finds what each harness can start. Statuses come back first, through `onStatus`, since the slow part is the model
