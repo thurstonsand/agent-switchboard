@@ -29,6 +29,12 @@
 			"rangeStrategy": "bump"
 		},
 		{
+			"description": "The harnesses the e2e runs from node_modules, pinned exactly so every host and CI test one version, and each release arrives as its own PR rather than inside lock file maintenance.",
+			"matchFileNames": ["package.json"],
+			"matchPackageNames": ["@anthropic-ai/claude-code", "@openai/codex", "@earendil-works/pi-coding-agent"],
+			"rangeStrategy": "pin"
+		},
+		{
 			"description": "Pinned to the version pi ships. Pi's extension loader aliases typebox to its own bundled copy, so our declaration only types what pi executes and must match it. It moves when pi moves, not on Renovate's schedule.",
 			"matchPackageNames": ["typebox"],
 			"enabled": false

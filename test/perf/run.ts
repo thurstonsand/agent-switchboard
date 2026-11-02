@@ -96,7 +96,7 @@ function readTrace(s: Scenario): TraceEvent[] {
 		});
 }
 
-type Live = { variant: Variant; s: Scenario | null; ctx: unknown; failed: string | null; skipped: string | null };
+type Live = { variant: Variant; s: Scenario | null; ctx: unknown; failed: string | null };
 
 async function runSuite(suite: Suite<unknown>, probes: Suite<unknown>["probes"], variants: Variant[]): Promise<ProbeResult[]> {
 	const warmup = Number(values.warmup);
@@ -113,12 +113,11 @@ async function runSuite(suite: Suite<unknown>, probes: Suite<unknown>["probes"],
 			});
 			s.env.SWB_TRACE = join(s.root, "trace.jsonl");
 			const ctx = await suite.setup({ s, variant });
-			lives.push({ variant, s, ctx, failed: null, skipped: null });
+			lives.push({ variant, s, ctx, failed: null });
 		} catch (error) {
 			const message = (error as Error).message;
-			const missing = /needs (\w+), and this host has no npm-global install/.exec(message);
-			lives.push({ variant, s, ctx: null, failed: missing ? null : message, skipped: missing ? `no ${missing[1]} on this host` : null });
-			if (!missing) log(`${suite.name}: setup failed in ${variant.label}: ${message}`);
+			lives.push({ variant, s, ctx: null, failed: message });
+			log(`${suite.name}: setup failed in ${variant.label}: ${message}`);
 		}
 	}
 	const results: ProbeResult[] = [];
@@ -130,7 +129,7 @@ async function runSuite(suite: Suite<unknown>, probes: Suite<unknown>["probes"],
 		for (let i = 0; i < warmup + runs; i++) {
 			// Alternating which build goes first spreads the machine's drift evenly over both.
 			for (const live of i % 2 === 0 ? lives : lives.toReversed()) {
-				if (!live.s || live.failed || live.skipped || errors.has(live)) continue;
+				if (!live.s || live.failed || errors.has(live)) continue;
 				progress(`${probe.name}: ${live.variant.label} ${i < warmup ? "warmup" : `${i - warmup + 1}/${runs}`}`);
 				try {
 					const measured = await probe.sample({ s: live.s, variant: live.variant }, live.ctx, i);
@@ -148,13 +147,11 @@ async function runSuite(suite: Suite<unknown>, probes: Suite<unknown>["probes"],
 			}
 		}
 		progress("");
-		const skipped = lives.find((live) => live.skipped)?.skipped ?? null;
 		results.push({
 			name: probe.name,
 			suite: suite.name,
 			feels: probe.feels,
 			primary: probe.primary,
-			skipped,
 			variants: Object.fromEntries(
 				lives.map((live) => {
 					const measured = samples.get(live) ?? [];

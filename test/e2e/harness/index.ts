@@ -11,7 +11,7 @@ import {
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 export const repo = resolve(import.meta.dir, "../../..");
 
@@ -26,19 +26,26 @@ export function which(tool: string): string {
 	return run(["mise", "which", tool]);
 }
 
-// Resolved once, before any scenario swaps HOME: the mise shims stop working under a disposable HOME.
+/**
+ * A harness's package for this platform, which its npm package lists as an optional dependency and bun installs
+ * beside it. It holds the native binary, not npm's node wrapper, so a pane's pid is the harness itself.
+ */
+function native(pkg: string): string {
+	const wrapper = realpathSync(join(repo, "node_modules", pkg));
+	return dirname(Bun.resolveSync(`${pkg}-${process.platform}-${process.arch}/package.json`, wrapper));
+}
+
+// Resolved once, before any scenario swaps HOME: the mise shims stop working under a disposable HOME. The harnesses
+// are the ones bun.lock pins, so every host, CI's included, tests the same versions.
 const tools = (() => {
 	const node = which("node");
 	const tmux = which("tmux");
 	const wt = which("wt");
-	const npmRoot = run(["mise", "x", "--", "npm", "root", "-g"]);
-	const piCli = process.env.SWB_E2E_PI_CLI ?? join(npmRoot, "@earendil-works/pi-coding-agent/dist/bundle/cli.js");
-	// The native binaries, not npm's node wrappers, so a pane's pid is the harness itself.
-	const claude = join(npmRoot, "@anthropic-ai/claude-code/bin/claude.exe");
-	const codexVendor = join(npmRoot, "@openai/codex/node_modules/@openai");
-	const codex = existsSync(codexVendor)
-		? ([...new Bun.Glob("codex-*/vendor/*/bin/codex").scanSync({ cwd: codexVendor, absolute: true })][0] ?? "")
-		: "";
+	const piCli = process.env.SWB_E2E_PI_CLI ?? join(repo, "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js");
+	const claude = join(native("@anthropic-ai/claude-code"), "claude");
+	const codexPackage = native("@openai/codex");
+	const codex = [...new Bun.Glob("vendor/*/bin/codex").scanSync({ cwd: codexPackage, absolute: true })][0];
+	if (!codex) throw new Error(`no codex binary in ${codexPackage}; run mise run bootstrap`);
 	return { node, tmux, wt, piCli, claude, codex, bun: process.execPath };
 })();
 
@@ -137,10 +144,7 @@ export function scenario(
 	symlinkSync(join(dist, "swb"), join(bin, "swb"));
 	symlinkSync(tools.wt, join(bin, "wt"));
 	const harnesses = options.harnesses ?? [];
-	for (const harness of harnesses) {
-		if (!tools[harness]) throw new Error(`this scenario needs ${harness}, and this host has no npm-global install of it`);
-		symlinkSync(tools[harness], join(bin, harness));
-	}
+	for (const harness of harnesses) symlinkSync(tools[harness], join(bin, harness));
 
 	const path = `${bin}:/usr/local/bin:/usr/bin:/bin`;
 	const profile = `export PATH=${path}\n`;

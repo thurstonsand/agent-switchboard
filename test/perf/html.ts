@@ -22,8 +22,7 @@ function bars(probe: ProbeResult, results: Results, x: (value: number) => number
 		.map((label, i) => {
 			const v = probe.variants[label];
 			const st = v?.stats[probe.primary];
-			if (!v || v.error || !st)
-				return `<div class="bar"><span class="note">${esc(v?.error?.split("\n")[0] ?? probe.skipped ?? "no samples")}</span></div>`;
+			if (!v || v.error || !st) return `<div class="bar"><span class="note">${esc(v?.error?.split("\n")[0] ?? "no samples")}</span></div>`;
 			return `<div class="bar" title="${esc(label)}: median ${ms(st.median)}, p25 ${ms(st.p25)}, p75 ${ms(st.p75)}, n ${st.n}">
 				<div class="fill" style="width:${x(st.median)}%;background:${COLORS[i]}"></div>
 				<div class="iqr" style="left:${x(st.p25)}%;width:${Math.max(0.3, x(st.p75) - x(st.p25))}%"></div>

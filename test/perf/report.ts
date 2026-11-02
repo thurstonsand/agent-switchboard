@@ -19,7 +19,6 @@ export type ProbeResult = {
 	feels: string;
 	primary: string;
 	variants: Record<string, VariantResult>;
-	skipped: string | null;
 };
 
 export type Meta = {
@@ -134,9 +133,8 @@ export function table(results: Results): string {
 		const failed = a?.error ?? b?.error;
 		const sa = a?.stats[probe.primary];
 		const sb = b?.stats[probe.primary];
-		if (probe.skipped || failed || !sa || (other && !sb)) {
-			const note = probe.skipped ? `skipped: ${probe.skipped}` : `failed: ${(failed ?? "no samples").split("\n")[0]}`;
-			rows.push({ name: probe.name, metric: probe.primary, note });
+		if (failed || !sa || (other && !sb)) {
+			rows.push({ name: probe.name, metric: probe.primary, note: `failed: ${(failed ?? "no samples").split("\n")[0]}` });
 		} else if (!sb) rows.push([probe.name, probe.primary, ms(sa.median), ms(sa.p90), ms(sa.min), String(sa.n)]);
 		else {
 			const delta = sb.median - sa.median;

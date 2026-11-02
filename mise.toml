@@ -20,14 +20,17 @@ run = "biome check ."
 run = "biome check --write ."
 
 [tasks.typecheck]
+depends = ["bootstrap"]
 run = "bun x tsc -p tsconfig.json --noEmit"
 
 [tasks.build]
 description = "Compile swb into dist/swb"
+depends = ["bootstrap"]
 run = "bun build --compile --minify --splitting --sourcemap --bytecode --format=esm packages/cli/src/main.ts packages/cli/src/deck/worker.ts --outfile dist/swb"
 
 [tasks."dist:pi"]
 description = "Bundle the pi line exactly as the release publishes it"
+depends = ["bootstrap"]
 run = [
   "rm -rf dist/pi && mkdir -p dist/pi",
   "bun build packages/lines/pi/src/index.ts --target=node --format=esm --outfile dist/pi/index.js --external '@earendil-works/*' --external typebox",
