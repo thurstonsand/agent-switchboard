@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-02
+
 ### Added
 
 - Archiving a session in a linked worktree can delete the worktree too: `d` in the Deck's archive prompt, or `D` with the sessions it started, and `deleteWorktree` on `swb_update_session`. The branch and the conversations stay. It refuses a worktree with modified or untracked files, a locked one, one a schedule launches into, and one other open sessions still use; ignored files go with it. A conversation whose directory is gone resumes in its Project root, with the same history and a notice that its files may differ, in all three harnesses.
