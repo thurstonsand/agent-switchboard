@@ -236,7 +236,8 @@ export function search(db: Db, from: string | null, input: string, limit = SEARC
 						...shown.map(describe),
 						...(more > 0 ? [`${more} more match; narrow the query, or raise limit.`] : []),
 					].join("\n");
-		return { text, details: { sessions, more } };
+		const summary = `${sessions.map((s) => s.title).join(", ")}${more > 0 ? `, and ${more} more` : ""}`;
+		return { text, details: { sessions, more }, ...(shown.length > 0 ? { summary } : {}) };
 	} finally {
 		index.close();
 	}

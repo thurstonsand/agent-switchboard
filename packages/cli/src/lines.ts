@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { stateDir } from "@swb/shared";
 // Macros inline the tool schemas as JSON at build time, rather than bundling their TypeBox objects here.
-import { readerToolsAsJson, toolsAsJson } from "@swb/shared/tools" with { type: "macro" };
+import { readerToolsAsJson, toolLabels, toolsAsJson } from "@swb/shared/tools" with { type: "macro" };
 import { READER_PROMPT } from "@swb/shared/tools";
 import manifest from "../../lines/claude/plugin/.claude-plugin/plugin.json";
 import hooks from "../../lines/claude/plugin/hooks/hooks.json";
@@ -33,8 +33,9 @@ export function writeClaudeLine(swb: string): string {
 	write(join(dir, "hooks", "register.js"), register as string);
 	write(
 		join(dir, "hooks", "tools.js"),
-		`// Written by swb: the contracts and reader instructions every line shares.
+		`// Written by swb: the contracts, labels, and reader instructions every line shares.
 export const TOOLS = ${JSON.stringify(toolsAsJson(), null, "\t")};
+export const LABELS = ${JSON.stringify(toolLabels(), null, "\t")};
 export const READER_TOOLS = ${JSON.stringify(readerToolsAsJson(), null, "\t")};
 export const READER_PROMPT = ${JSON.stringify(READER_PROMPT)};
 `,

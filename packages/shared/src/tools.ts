@@ -5,21 +5,26 @@ import { HARNESSES, RELOAD_MODES, SNOOZE_PRESETS, VIEWS } from "./index.ts";
 // The coordination tools every line gives its agent, defined once. pi takes these schemas as they are; Claude Code
 // and Codex take them as JSON Schema. Each tool runs an swb command and returns its text to the model unchanged.
 
-/** `readOnly`: it only reads. The rest change only the user's own sessions, and never destroy one. */
-export type ToolSpec = { description: string; guidelines: string[]; parameters: TSchema; readOnly: boolean };
+/**
+ * `label`: what a call's row in the transcript names it by. `readOnly`: it only reads. The rest change only the user's
+ * own sessions, and never destroy one.
+ */
+export type ToolSpec = { label: string; description: string; guidelines: string[]; parameters: TSchema; readOnly: boolean };
 
 const session = Type.String({ description: "The session's id." });
 const requestResponse = Type.Boolean({ description: "Whether it should reply to you." });
 
 export const TOOLS = {
 	session_reachable: {
+		label: "Reachable sessions",
 		description: "List every open session but this one, in any project or harness.",
 		guidelines: ["Call session_reachable only for an id you don't already have."],
 		parameters: Type.Object({}),
 		readOnly: true,
 	},
 	session_send_message: {
-		description: "Message another session. It arrives mid-turn if that session is working, and wakes it if dormant.",
+		label: "Message",
+		description: "Message another session. It arrives mid-turn if that session is working.",
 		guidelines: ["Message the session that owns the work; don't send what you can do yourself."],
 		parameters: Type.Object({
 			session,
@@ -29,6 +34,7 @@ export const TOOLS = {
 		readOnly: false,
 	},
 	session_launch: {
+		label: "Launch",
 		description:
 			"Start a new session on one of the presets below. With at or cron and a label, as session_schedule takes them, launch later instead, or anew each time the cron fires.",
 		guidelines: [
@@ -58,6 +64,7 @@ export const TOOLS = {
 		readOnly: false,
 	},
 	session_schedule: {
+		label: "Schedule",
 		description: "Schedule a message, once or on a cron, to this session or another. session_launch launches on a schedule.",
 		guidelines: [
 			"Schedule only when the user asks to remind, follow up, check back, or repeat something. To wait on another session, set requestResponse on your message instead.",
@@ -79,6 +86,7 @@ export const TOOLS = {
 		readOnly: false,
 	},
 	session_schedules: {
+		label: "Schedules",
 		description: "List the schedules this session set or receives, or cancel one.",
 		guidelines: ["Unschedule only when the user asks, or when the schedule's stated completion condition is met."],
 		parameters: Type.Object({
@@ -87,6 +95,7 @@ export const TOOLS = {
 		readOnly: false,
 	},
 	swb_update_session: {
+		label: "Update session",
 		description: "Archive, snooze, group, retitle, or reload a session, or cancel its turn: this one unless you name another.",
 		guidelines: [
 			"Archive a session only when the user asks or you started it and drove it to completion. Snooze or unsnooze a session, or cancel another's turn, only when the user asks.",
@@ -127,6 +136,7 @@ export const TOOLS = {
 		readOnly: false,
 	},
 	session_search: {
+		label: "Search sessions",
 		description: "Search other sessions' conversations, open or archived, subagents included. Lists matches best first, with passages.",
 		guidelines: [
 			'In session_search, plain words must all appear, as words or their starts; "phrases" match exactly; OR, -word, and parentheses narrow. Filters: harness:pi|claude|codex, project:NAME, file:PATH (read or changed), after: and before: (a date, an ISO 8601 time, or a duration ago like P7D), archived:yes|no. Filters alone list recent sessions.',
@@ -139,6 +149,7 @@ export const TOOLS = {
 		readOnly: true,
 	},
 	session_ask: {
+		label: "Ask session",
 		description:
 			"Ask about another session's conversation, open or archived. A reader with its own context answers, keeping the transcript out of yours.",
 		guidelines: ["Ask session_ask focused questions, not for a recap. To ask a session still at work, message it instead."],
@@ -146,6 +157,7 @@ export const TOOLS = {
 		readOnly: true,
 	},
 	swb_show_session: {
+		label: "Show",
 		description: "Switch the user's view to a session, when they ask to see it.",
 		guidelines: [],
 		parameters: Type.Object({ session, view: Type.Optional(Type.Enum(VIEWS, { description: "Omit unless the user asks for one." })) }),
@@ -159,6 +171,7 @@ export const TOOLS = {
  */
 export const READER_TOOLS = {
 	recall_search: {
+		label: "Search session",
 		description:
 			"Search the session's conversation, its subagents' included, for entries that say something: each hit's ref, time, who said it, where it sits, its size, and the passage that matched.",
 		guidelines: [
@@ -171,6 +184,7 @@ export const READER_TOOLS = {
 		readOnly: true,
 	},
 	recall_read: {
+		label: "Read session",
 		description:
 			"Read the session's entries in order, from one ref along its branch: prompts, replies, tool calls and their results, summaries, and how a turn ended. Long results are cut in preview; full reads them whole.",
 		guidelines: [],
@@ -225,8 +239,11 @@ export function parsed<N extends ToolName | ReaderToolName>(name: N, args: unkno
 	throw new Error(`${name}: ${problems.join("; ")}`);
 }
 
-/** What every coordination command prints: the text the model reads, and facts for the line to render. */
-export type ToolResult = { text: string; details: Record<string, unknown> };
+/**
+ * What every coordination command prints: the text the model reads, and facts for the line to render. `summary`: what a
+ * person reads for the call where the text's first line is for the model, such as the legend over a list.
+ */
+export type ToolResult = { text: string; details: Record<string, unknown>; summary?: string };
 
 function asJson<N extends string>(specs: Record<N, ToolSpec>): { name: N; description: string; inputSchema: unknown }[] {
 	return (Object.keys(specs) as N[]).map((name) => ({
@@ -239,6 +256,11 @@ function asJson<N extends string>(specs: Record<N, ToolSpec>): { name: N; descri
 /** The contract as plain JSON Schema, for the harnesses that don't take TypeBox. */
 export function toolsAsJson(): { name: ToolName; description: string; inputSchema: unknown }[] {
 	return asJson(TOOLS);
+}
+
+/** Each tool's label, for Claude Code's line, which takes the contract as JSON. */
+export function toolLabels(): Record<ToolName, string> {
+	return Object.fromEntries((Object.keys(TOOLS) as ToolName[]).map((name) => [name, TOOLS[name].label])) as Record<ToolName, string>;
 }
 
 /** The reader's tools as plain JSON Schema. */

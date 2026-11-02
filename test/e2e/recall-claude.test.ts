@@ -186,6 +186,8 @@ test("a reader that takes twenty-five seconds returns its answer, past the hook'
 	const target = await launched(s, "claude", "reply SWB-slow-target");
 	const caller = await launched(s, "claude", "reply caller ready");
 	type(s, caller.id, `ask-id ${target.id} :: reader-hold 25000 What markers?`);
+	// Its row says so while the reader works, though Claude Code calls the call done once the hook holds it.
+	await until(() => pane(s, caller.id).includes("  ⎿  Running…"), 15000, "the ask's row running");
 	await until(() => pane(s, caller.id).includes("asked: reader found: SWB-slow-target"), 60000, "slow answer rendered");
 	const requests = s.requests("claude");
 	const start = requests.find((r) => String(r.prompt).startsWith("ask-id") && !r.toolResult);

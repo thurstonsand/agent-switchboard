@@ -15,6 +15,7 @@ Sleep 1s
 Type "tell codex The API moved to v3; update the endpoint docs" Sleep 400ms Enter
 Wait+Screen /Delivered to "Docs writer"/
 Sleep 2.5s
+Screenshot ../artifacts/phase6/videos/cross-harness-claude-tools.png
 Alt+a
 Type "h"
 Type "/Docs writer" Sleep 300ms Enter

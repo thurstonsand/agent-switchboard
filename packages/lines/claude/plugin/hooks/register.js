@@ -3,10 +3,98 @@
 // other sessions: mid-turn as context on the next tool result, or as a new turn when idle.
 //
 // claude plugin validate only accepts `$` passed to top-level functions, so every call goes through one.
-import { READER_PROMPT, READER_TOOLS, TOOLS } from "./tools.js";
+import { LABELS, READER_PROMPT, READER_TOOLS, TOOLS } from "./tools.js";
 
 // What Claude calls the tools of this plugin's swb mcp server, every swb tool among them.
 const PREFIX = "mcp__plugin_swb_swb__";
+
+/** What a call's row names after its label, from its arguments alone: drawing can't wait on swb for a title. */
+function target(name, args) {
+	switch (name) {
+		case "session_search":
+			return args.query;
+		case "session_ask":
+			return args.question;
+		case "session_send_message":
+			return args.message;
+		case "session_launch":
+			return `${[args.harness, args.agent, args.model].filter(Boolean).join(" ") || "default"} · ${args.title}${args.label ? ` · ${args.label}` : ""}`;
+		case "session_schedule":
+			return `${args.session ? "another session" : "this session"} · ${args.label}${args.snooze ? " · snooze" : ""}`;
+		case "session_schedules":
+			return args.unschedule ? `unschedule ${args.unschedule}` : "";
+		case "swb_show_session":
+			return args.view ?? "";
+		case "swb_update_session":
+			return [
+				args.archived === true ? `archive${args.family ? " family" : ""}${args.force ? " · force" : ""}` : "",
+				args.archived === false ? "unarchive" : "",
+				args.cancel ? "cancel turn" : "",
+				args.snooze !== undefined ? `snooze ${typeof args.snooze === "string" ? args.snooze : args.snooze.until}` : "",
+				args.group === null ? "ungroup" : args.group !== undefined ? `group ${args.group}` : "",
+				args.title !== undefined ? `retitle as "${args.title}"` : "",
+				args.reload !== undefined ? `reload · ${args.reload}` : "",
+			]
+				.filter(Boolean)
+				.join(" · ");
+		default:
+			return "";
+	}
+}
+
+/**
+ * swb's summary of each call that has one, by tool_use_id: what a person reads in place of the text's first line, which
+ * is for the model. The transcript stores only the text, since an MCP tool's result is all read by the model, so these
+ * last as long as this process; a row drawn again after a restart shows the first line.
+ */
+const summaries = new Map();
+
+/**
+ * Claude Code folds MCP calls into one `Called plugin:swb:swb` line, which only ctrl+o opens. A run of nothing but swb
+ * calls draws a row for each instead, as pi's line does: its label and target, then what it answered, or the
+ * error in red. A call with no answer yet is running: isRunning stays false while a hook answers it.
+ */
+function drawCalls($, e) {
+	const { Box, Text } = $.ui.resolve(e);
+	return Box({
+		flexDirection: "column",
+		children: e.props.calls.map((call) => {
+			const name = call.tool.slice(PREFIX.length);
+			// While the model still writes a call, its input lacks fields; the row names only the label until they arrive.
+			const { required = [] } = TOOLS.find((tool) => tool.name === name).inputSchema;
+			// Each row shows one line of the transcript's width, and Claude Code notes any text past 100,000 characters.
+			const what = required.every((key) => key in call.input) ? target(name, call.input).replace(/\s+/g, " ").slice(0, 500) : "";
+			const answer = (
+				call.isInterrupted
+					? "Interrupted"
+					: call.output === undefined
+						? "Running…"
+						: ((call.isErrored ? undefined : summaries.get(call.tool_use_id)) ?? String(call.output).trim().split("\n")[0])
+			).slice(0, 500);
+			return Box({
+				key: call.tool_use_id,
+				flexDirection: "column",
+				children: [
+					Text({
+						wrap: "truncate-end",
+						children: [
+							"  ",
+							Text({ bold: true, children: [LABELS[name]] }),
+							what ? Text({ dimColor: true, children: [` · ${what}`] }) : "",
+						],
+					}),
+					answer
+						? Text({
+								wrap: "truncate-end",
+								...(call.isErrored ? { color: "error" } : { dimColor: true }),
+								children: [`  ⎿  ${answer}`],
+							})
+						: "",
+				],
+			});
+		}),
+	});
+}
 
 async function registerReader($) {
 	await $.agent.register({
@@ -139,10 +227,14 @@ async function ack($, ids) {
 	if (ids.length > 0) await swb($, ["__ack", ...ids]);
 }
 
-function receipt($, m, how) {
+/**
+ * The only trace of a message delivered mid-turn: it rides as context on a tool result, which the transcript doesn't show.
+ * One that starts a turn shows as that turn's prompt.
+ */
+function receipt($, m) {
 	// Claude Code draws a log's trailing newline as �.
 	const body = m.body.trim();
-	$.ui.log(`↘ ${m.title} (${how}): ${body.length > 200 ? `${body.slice(0, 200)}…` : body}`);
+	$.ui.log(`↘ ${m.title} (mid-turn): ${body.length > 200 ? `${body.slice(0, 200)}…` : body}`);
 }
 
 /** The held messages for the session this process shows now; any others wait for theirs. */
@@ -167,7 +259,6 @@ async function submitPending($) {
 		$.ui.log(`swb: couldn't start a turn for ${batch.length} message(s): ${error.message}`);
 		return;
 	}
-	for (const m of batch) receipt($, m, "new turn");
 	await ack(
 		$,
 		batch.map((m) => m.id),
@@ -476,7 +567,9 @@ export function register(on) {
 			if (!line.managed) return { deny: "this Claude Code session isn't on the switchboard: swb didn't start it" };
 			try {
 				if (tool.name === "session_ask") return { result: await ask($, e) };
-				return { result: JSON.parse(await useTool($, tool.name, e)).text };
+				const { text, summary } = JSON.parse(await useTool($, tool.name, e));
+				if (summary !== undefined) summaries.set(e.tool_use_id, summary);
+				return { result: text };
 			} catch (error) {
 				return { deny: error.message };
 			}
@@ -486,12 +579,21 @@ export function register(on) {
 		if (!line.managed || e.agentId || next.origin.plugin !== "engine" || !("result" in result)) return result;
 		const batch = take();
 		if (batch.length === 0) return result;
-		for (const m of batch) receipt($, m, "mid-turn");
+		for (const m of batch) receipt($, m);
 		await ack(
 			$,
 			batch.map((m) => m.id),
 		);
 		return { ...result, context: [...(result.context ?? []), ...batch.map((m) => m.text)] };
+	});
+
+	// Only the folded line: unfolded, under ctrl+o or --verbose, each call draws Claude Code's own row, in full. A run
+	// that mixes in other tools keeps Claude Code's line, which counts them all. Not gated on isCallsOnly: a failed
+	// call clears it, and its error is what most needs showing.
+	on("ui.render", { component: "ToolGroup" }, ($, e, next) => {
+		const ours = (call) => call.tool.startsWith(PREFIX) && Object.hasOwn(LABELS, call.tool.slice(PREFIX.length));
+		if (e.props.isExpanded || !e.props.calls.every(ours)) return next(e);
+		return drawCalls($, e);
 	});
 
 	// A typed edit raises prompt.edit; a submit, a clear, a recall, or a fill raises prompt.change.

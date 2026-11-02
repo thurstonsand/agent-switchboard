@@ -43,7 +43,7 @@ test("pi reloading itself restarts when its turn ends and carries on with the AG
 	// The pi it replaced started before AGENTS.md was written.
 	await until(() => s.signal("reloaded.system").includes("SWB-RELOAD-PI"), ready, "the reloaded pi carrying on, on the new AGENTS.md");
 	await restarted(pi.id, first, "pi restarted on its own conversation");
-	expect(pane(s, pi.id)).toContain("This session restarts when this turn ends, then carries on: end it now");
+	expect(pane(s, pi.id)).toContain("This session restarts when this turn ends: end it now");
 	expect(entry(s, pi.id).reload).toBeNull();
 	// The Stage watching it follows it back, rather than staying on the card it showed while pi was down.
 	await waitState(s, "the Stage back on the self-reloaded pi", (x) => x.staged.id === pi.id && x.staged.kind === "live");
@@ -60,13 +60,13 @@ test("pi reloading itself restarts when its turn ends and carries on with the AG
 	// Dormant, idle has nothing to restart; continue starts it to carry on. Archived, it's refused.
 	s.tmux(s.servers.sessions, "kill-session", "-t", `=${host(s, pi.id)}`);
 	await until(() => !entry(s, pi.id).live, budgets.settle, "pi dormant");
-	expect(s.swb("reload", pi.id, "--idle")).toContain("isn't running");
+	expect(s.swb("reload", pi.id, "--idle")).toContain("reads its configuration afresh when its next turn starts");
 	rmSync(join(s.home, "e2e-signals", "reloaded.system"));
 	// A pi just started records idle before its carry-on turn starts, so idle alone can come before that turn.
 	const prompted = () =>
 		(s.query<{ at: number }>("select last_prompt_at as at from sessions where session_id = ?", pi.id)[0] as { at: number }).at;
 	const before = prompted();
-	expect(s.swb("reload", pi.id)).toContain("Started");
+	expect(s.swb("reload", pi.id)).toContain("Restarted");
 	await until(
 		() => s.signal("reloaded.system") !== "" && prompted() > before && entry(s, pi.id).activity === "idle",
 		ready,
@@ -87,7 +87,7 @@ test("Claude Code and Codex told to continue restart mid-turn and pick it back u
 	writeFileSync(join(s.project, "AGENTS.md"), "SWB-RELOAD-CODEX\n");
 
 	const claudePid = pid(claude.id) as number;
-	expect(s.swb("reload", claude.id)).toContain("it carries on where it left off");
+	expect(s.swb("reload", claude.id)).toContain("Restarted");
 	await until(
 		() =>
 			s
@@ -131,7 +131,7 @@ test("Claude Code and Codex told to continue restart mid-turn and pick it back u
 	type(s, codex.id, "hold x2");
 	await until(() => s.signal("x2.entered") !== "", ready, "Codex holding");
 	const heldPid = pid(codex.id) as number;
-	expect(s.swb("reload", codex.id)).toContain("it carries on where it left off");
+	expect(s.swb("reload", codex.id)).toContain("Restarted");
 	await restarted(codex.id, heldPid, "Codex restarted");
 	await until(() => pane(s, codex.id).includes("released x2"), ready, "the restarted Codex finishing its cut-off turn");
 

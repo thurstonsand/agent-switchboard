@@ -53,7 +53,7 @@ const USAGE = `swb: Agent Switchboard
                                Group when both are in one Project, unless --group or --no-group says otherwise. With --at or
                                --cron, as swb schedule takes them, it launches then instead, or anew each time the cron fires
   swb send --from ID --to ID [--request-response] [--request-id KEY] [--cancel]
-                               message a session, waking it if dormant; the body on stdin
+                               message a session; the body on stdin
   swb reachable --from ID      every open session but the caller, as a line's tool reads it
   swb search --from ID [--limit N]
                                every session's conversation but the caller's, searched, as session_search reads it; the query on stdin

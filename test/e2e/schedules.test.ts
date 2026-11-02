@@ -50,6 +50,9 @@ test("a session schedules itself a message and snoozes until then; the clock wak
 	expect(s.query("select count(*) as n from messages where schedule_id is not null")).toEqual([{ n: 1 }]);
 
 	type(s, pi.id, "call session_schedules {}");
+	// Collapsed, the row names the schedule; expanded, it reads as the model's listing.
+	await until(() => pane(s, pi.id).includes("Schedules in 8 seconds ("), budgets.settle, "the listing's row");
+	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, pi.id)}:`, "C-o");
 	await until(() => pane(s, pi.id).includes("ran "), budgets.settle, "the listing");
 	expect(pane(s, pi.id)).toContain('· "in 8 seconds" · ran ');
 });

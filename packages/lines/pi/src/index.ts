@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import type { FSWatcher } from "node:fs";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext, keyHint } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Db, describeTool, launchGuide, linkedWorktree, operatorDir } from "@swb/shared";
 import { frame, listen, markDelivered, pendingFor, sender } from "@swb/shared/mailbox";
@@ -317,29 +317,38 @@ export default function (pi: ExtensionAPI) {
 	const guide = launchGuide();
 	const tool = (
 		name: ToolName,
-		label: string,
 		target: (args: Record<string, unknown>) => string,
 		run: (args: never, ctx: ExtensionContext, toolCallId: string, signal?: AbortSignal) => Promise<ToolResult>,
 	) => {
 		const register = (cwd: string) =>
 			pi.registerTool({
 				name,
-				label,
+				label: TOOLS[name].label,
 				description: describeTool(name, TOOLS[name].description, guide),
 				promptGuidelines: TOOLS[name].guidelines,
 				parameters: toolParameters(name, name === "swb_update_session" && linkedWorktree(cwd) !== null),
 				renderCall(args, theme) {
 					const what = target(args as Record<string, unknown>);
-					return new Text(`${theme.fg("toolTitle", theme.bold(label))}${what ? ` · ${theme.fg("accent", what)}` : ""}`, 0, 0);
+					return new Text(`${theme.fg("toolTitle", theme.bold(TOOLS[name].label))}${what ? ` · ${theme.fg("accent", what)}` : ""}`, 0, 0);
 				},
-				renderResult(result, _options, theme, context) {
-					const output = result.content.find((item) => item.type === "text")?.text ?? "";
-					return new Text(context.isError ? theme.fg("error", output) : theme.fg("dim", output), 0, 0);
+				// Collapsed, a call reads as swb's summary, or the text's first line; expanded, as the text the model read.
+				renderResult(result, options, theme, context) {
+					const output = (result.content.find((item) => item.type === "text")?.text ?? "").trim();
+					if (context.isError) return new Text(theme.fg("error", output), 0, 0);
+					if (options.expanded) return new Text(theme.fg("dim", output), 0, 0);
+					const lines = output.split("\n");
+					const { summary } = result.details as { summary?: string };
+					const hidden = summary === undefined ? lines.length - 1 : lines.length;
+					const more =
+						hidden > 0
+							? `${theme.fg("muted", ` (${hidden} more ${hidden === 1 ? "line" : "lines"}, `)}${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`
+							: "";
+					return new Text(`${theme.fg("dim", summary ?? (lines[0] as string))}${more}`, 0, 0);
 				},
 				async execute(toolCallId, params, signal, _onUpdate, ctx) {
 					if (proc.failure) throw new Error(`swb: not recording: ${proc.failure}`);
 					const result = await run(params as never, ctx, toolCallId, signal);
-					return { content: [{ type: "text", text: result.text }], details: result.details };
+					return { content: [{ type: "text", text: result.text }], details: { ...result.details, summary: result.summary } };
 				},
 			});
 		register(process.cwd());
@@ -352,14 +361,12 @@ export default function (pi: ExtensionAPI) {
 
 	tool(
 		"session_reachable",
-		"Reachable sessions",
 		() => "",
 		(_args, ctx) => swb(proc.launch.bin, ["reachable", "--from", self(ctx)]),
 	);
 
 	tool(
 		"session_search",
-		"Search sessions",
 		(args) => String(args.query ?? ""),
 		(args: { query: string; limit?: number }, ctx, _toolCallId, signal) =>
 			swb(proc.launch.bin, ["search", "--from", self(ctx), ...(args.limit ? ["--limit", String(args.limit)] : [])], args.query, signal),
@@ -367,7 +374,6 @@ export default function (pi: ExtensionAPI) {
 
 	tool(
 		"session_ask",
-		"Ask session",
 		(args) => titleOf(args.session),
 		async (args: { session: string; question: string }, ctx, _toolCallId, signal) => {
 			signal?.throwIfAborted();
@@ -400,22 +406,22 @@ export default function (pi: ExtensionAPI) {
 				customTools: [
 					defineTool({
 						name: "recall_search",
-						label: "Search session",
+						label: READER_TOOLS.recall_search.label,
 						description: [READER_TOOLS.recall_search.description, ...READER_TOOLS.recall_search.guidelines].join("\n"),
 						parameters: READER_TOOLS.recall_search.parameters,
 						async execute(_id, params, signal) {
 							const result = await swb(proc.launch.bin, ["recall", "search", args.session], JSON.stringify(params), signal);
-							return { content: [{ type: "text", text: result.text }], details: result.details };
+							return { content: [{ type: "text", text: result.text }], details: { ...result.details, summary: result.summary } };
 						},
 					}),
 					defineTool({
 						name: "recall_read",
-						label: "Read session",
+						label: READER_TOOLS.recall_read.label,
 						description: READER_TOOLS.recall_read.description,
 						parameters: READER_TOOLS.recall_read.parameters,
 						async execute(_id, params, signal) {
 							const result = await swb(proc.launch.bin, ["recall", "read", args.session], JSON.stringify(params), signal);
-							return { content: [{ type: "text", text: result.text }], details: result.details };
+							return { content: [{ type: "text", text: result.text }], details: { ...result.details, summary: result.summary } };
 						},
 					}),
 				],
@@ -449,7 +455,6 @@ export default function (pi: ExtensionAPI) {
 
 	tool(
 		"session_send_message",
-		"Message",
 		(args) => titleOf(args.session),
 		(args: { session: string; message: string; requestResponse: boolean }, ctx, toolCallId) =>
 			swb(
@@ -470,7 +475,6 @@ export default function (pi: ExtensionAPI) {
 
 	tool(
 		"session_launch",
-		"Launch",
 		(args) =>
 			`${[args.harness, args.agent, args.model].filter(Boolean).join(" ") || "default"} · ${args.title}${args.label ? ` · ${args.label}` : ""}`,
 		(
@@ -514,7 +518,6 @@ export default function (pi: ExtensionAPI) {
 
 	tool(
 		"session_schedule",
-		"Schedule",
 		(args) => `${args.session ? titleOf(args.session) : "this session"} · ${args.label}${args.snooze ? " · snooze" : ""}`,
 		(
 			args: {
@@ -551,7 +554,6 @@ export default function (pi: ExtensionAPI) {
 
 	tool(
 		"session_schedules",
-		"Schedules",
 		(args) => (args.unschedule ? `unschedule ${args.unschedule}` : ""),
 		(args: { unschedule?: string }, ctx) =>
 			swb(proc.launch.bin, args.unschedule ? ["unschedule", args.unschedule, "--from", self(ctx)] : ["schedules", "--from", self(ctx)]),
@@ -559,7 +561,6 @@ export default function (pi: ExtensionAPI) {
 
 	tool(
 		"swb_show_session",
-		"Show",
 		(args) => `${titleOf(args.session)}${args.view ? ` · ${args.view}` : ""}`,
 		(args: { session: string; view?: string }, ctx) =>
 			swb(proc.launch.bin, ["show", args.session, "--from", self(ctx), ...(args.view ? ["--view", args.view] : [])]),
@@ -570,7 +571,6 @@ export default function (pi: ExtensionAPI) {
 
 	tool(
 		"swb_update_session",
-		"Update session",
 		(args) => {
 			const parts = [
 				args.archived === true ? `archive${args.family ? " family" : ""}${args.force ? " · force" : ""}` : "",

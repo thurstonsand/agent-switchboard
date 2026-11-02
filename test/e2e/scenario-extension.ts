@@ -26,7 +26,7 @@ import { agentStep, readerQuestion } from "./fakes/agent.ts";
 //                     `hold child.<name>` before answering, signalling its active tools as `child.<name>.tools`
 //   handoff <name>    launch a new pi session through swb's session_launch, with the goal `reply child <name>`
 //   message <id> <n>  send session <id> a message with swb's session_send_message, which it answers like `reply <n>`
-//   reach <n>         find the first dormant session through session_reachable and message it like `message`
+//   reach <n>         find the first session session_reachable lists and message it like `message`
 //   call <tool> <json>  call any tool with those arguments, then answer "tool done call"
 //   tools [name]      signal the active tool names as `tools` or `tools.<name>`, and answer "tools listed"
 //   tell <harness> <m>, launch <harness> <title>, show <title>, update <title> <json>   use swb's tools as fakes/agent.ts scripts them
@@ -122,11 +122,11 @@ export default function (pi: ExtensionAPI) {
 		if (last.role === "toolResult") {
 			const prompt = text(context.messages.findLast((message) => message.role === "user") as Message);
 			if ((last as { toolName?: string }).toolName === "session_reachable") {
-				const dormant = /^- (\S+) · .* · dormant · /m.exec(text(last))?.[1];
-				if (!dormant) throw new Error(`scenario: nothing dormant to reach in ${text(last)}`);
+				const first = /^- (\S+) · /m.exec(text(last))?.[1];
+				if (!first) throw new Error(`scenario: nothing to reach in ${text(last)}`);
 				return fauxAssistantMessage(
 					fauxToolCall("session_send_message", {
-						session: dormant,
+						session: first,
 						message: `wake-reply ${prompt.split(" ")[1]}`,
 						requestResponse: false,
 					}),

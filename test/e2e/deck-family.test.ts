@@ -33,7 +33,7 @@ test("swb_update_session groups and retitles in one call, pi takes the title as 
 	// Dormant, alpha's pi hasn't taken the title yet.
 	expect(own(a)).toBe("alpha");
 	const reachable = JSON.parse(s.swb("reachable", "--from", caller)) as { text: string };
-	expect(reachable.text).toContain('"Auth rewrite" · dormant · ');
+	expect(reachable.text).toContain('"Auth rewrite" · idle · ');
 	expect(reachable.text).toContain(' · Group "auth"');
 
 	s.keys("-l", `call swb_update_session {"title":"Coordinator"}`, "Enter");

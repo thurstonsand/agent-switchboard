@@ -22,7 +22,7 @@ Sleep 600ms
 Enter
 Sleep 800ms
 Type "tell codex Add a section on auth" Sleep 400ms Enter
-Wait+Screen /Delivered to "Write the v3 migration guide", which was woken/
+Wait+Screen /Delivered to "Write the v3 migration guide"/
 Sleep 2.5s
 Alt+a
 Type "h"

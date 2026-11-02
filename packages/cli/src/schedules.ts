@@ -212,7 +212,11 @@ export function listSchedules(db: Db, from: string): ToolResult {
 	if (pending.length + finished.length === 0) return { text: "No schedules.", details: { schedules: [] } };
 	const lines = [...pending, ...finished].map((row) => `- ${describe(db, row, from)}`);
 	const text = `Schedules (id · when · runs · recipient):\n${lines.join("\n")}`;
-	return { text, details: { schedules: [...pending, ...finished].map(publicRow) } };
+	return {
+		text,
+		details: { schedules: [...pending, ...finished].map(publicRow) },
+		summary: [...pending, ...finished].map((row) => row.label).join(", "),
+	};
 }
 
 /** One schedule as session_schedules lists it: id, when, its runs, who it goes to or comes from, and its message. */

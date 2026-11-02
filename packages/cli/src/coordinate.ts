@@ -19,9 +19,13 @@ import { inUse } from "./transcripts/read.ts";
 // The coordination every line's tools run. Each returns the text the model reads, so all three harnesses say the same
 // thing, and the facts a line may render. The sender is always the line's own session, never a tool argument.
 
+/** Working, blocked, idle, or a turn that ended badly; whether its process runs is swb's to handle. */
+function stateOf(s: SessionState): string {
+	return s.cutOff ? "cut off" : s.errored ? "errored" : s.activity;
+}
+
 function describe(s: SessionState): string {
-	const state = s.cutOff ? "cut off" : s.errored ? `errored${s.live ? "" : ", dormant"}` : s.live ? s.activity : "dormant";
-	return `- ${s.id} · ${harnessName(s.harness)} · "${displayName(s)}" · ${state} · ${s.cwd}${s.group ? ` · Group "${s.group}"` : ""}`;
+	return `- ${s.id} · ${harnessName(s.harness)} · "${displayName(s)}" · ${stateOf(s)} · ${s.cwd}${s.group ? ` · Group "${s.group}"` : ""}`;
 }
 
 export function reachable(db: Db, from: string): ToolResult {
@@ -31,7 +35,7 @@ export function reachable(db: Db, from: string): ToolResult {
 	const text =
 		open.length === 0
 			? "No other open sessions."
-			: `Open sessions (id · harness · title · state · directory · Group, if it's in one); a dormant one wakes when messaged:\n${open.map(describe).join("\n")}`;
+			: `Open sessions (id · harness · title · state · directory · Group):\n${open.map(describe).join("\n")}`;
 	const sessions = open.map((s) => ({
 		id: s.id,
 		harness: s.harness,
@@ -39,10 +43,9 @@ export function reachable(db: Db, from: string): ToolResult {
 		cwd: s.cwd,
 		project: s.project,
 		group: s.group,
-		live: s.live,
-		activity: s.activity,
+		state: stateOf(s),
 	}));
-	return { text, details: { sessions } };
+	return { text, details: { sessions }, ...(open.length > 0 ? { summary: open.map(displayName).join(", ") } : {}) };
 }
 
 export type Send = { from: string; to: string; body: string; requestResponse: boolean; requestId: string | null; kind: MessageKind };
@@ -55,7 +58,10 @@ export async function send(db: Db, m: Send): Promise<ToolResult> {
 	// A forced archive marks a session before it cancels the turn, so a cancel may reach one already archived.
 	if (!target.open && m.kind === "message") throw new SwbError(`"${displayName(target)}" is archived; unarchive it first`);
 	if (m.kind === "cancel" && !(target.live && target.activity !== "idle")) {
-		return { text: `"${displayName(target)}" has no running turn to cancel.`, details: { delivered: false, target: m.to } };
+		return {
+			text: `"${displayName(target)}" has no running turn to cancel.`,
+			details: { delivered: false, target: { id: target.id, title: target.title, harness: target.harness } },
+		};
 	}
 	const id = recordTx(db, () => {
 		if (m.requestId) {
@@ -92,8 +98,8 @@ export async function send(db: Db, m: Send): Promise<ToolResult> {
 				? `Cancelled ${name}'s turn.`
 				: `${name} hasn't taken the cancel yet.`
 			: delivered
-				? `Delivered to ${name}${woke ? ", which was woken for it" : ""}.${m.requestResponse ? " Its reply will arrive as a message; end your turn rather than waiting." : ""}`
-				: `Queued for ${name}${woke ? ", which is starting" : ""}; it arrives when its session takes it.`;
+				? `Delivered to ${name}.${m.requestResponse ? " Its reply will arrive as a message; end your turn rather than waiting." : ""}`
+				: `Queued for ${name}.`;
 	return { text, details: { id, delivered, woke, target: { id: target.id, title: target.title, harness: target.harness } } };
 }
 
@@ -293,7 +299,7 @@ export async function update(db: Db, from: string, id: string, change: Update): 
 	const deleted = change.deleteWorktree && archiving ? await archiveRun(db, from, archiving, true, force ?? false) : null;
 	if (archived === false) {
 		unarchive(db, id);
-		done.push(`Unarchived ${name}. It stays dormant until messaged.`);
+		done.push(`Unarchived ${name}.`);
 	}
 	if (trimmedTitle !== undefined) {
 		recordTx(db, () => rename(db, id, trimmedTitle));
@@ -338,7 +344,7 @@ export function reload(db: Db, from: string | null, id: string, mode: ReloadMode
 	const target = sessionState(db, id);
 	const name = from === id ? "This session" : `"${displayName(target)}"`;
 	if (!target.open) throw new SwbError(`${name} is archived; unarchive it first`);
-	if (!target.live && mode === "idle") return `${name} isn't running; it starts on its configuration as it is then.`;
+	if (!target.live && mode === "idle") return `${name} reads its configuration afresh when its next turn starts.`;
 	// Read with the write, so a turn settling meanwhile either sees the reload and quits for it, or is over and restarts now.
 	const waits =
 		target.live &&
@@ -352,11 +358,10 @@ export function reload(db: Db, from: string | null, id: string, mode: ReloadMode
 		});
 	if (waits)
 		return from === id
-			? `This session restarts when this turn ends${mode === "continue" ? ", then carries on" : ""}: end it now with a brief final message.`
-			: `${name} restarts when its turn ends${mode === "continue" ? ", then carries on" : ""}.`;
+			? "This session restarts when this turn ends: end it now with a brief final message."
+			: `${name} restarts when its turn ends.`;
 	restart(db, id, mode);
-	const how = target.live ? "Restarted" : "Started";
-	return mode === "continue" ? `${how} ${name}; it carries on where it left off.` : `${how} ${name}.`;
+	return `Restarted ${name}.`;
 }
 
 /** What keeps a session from going quietly: a turn still running or waiting on the user, or one that never finished. */
@@ -421,13 +426,9 @@ async function archiveRun(db: Db, from: string, plan: ArchivePlan, deleteWorktre
 	const started = members.length - (target.open ? 1 : 0);
 	const sessions = `${started} session${started === 1 ? "" : "s"} it started`;
 	return [
-		deleted
-			? `Deleted worktree ${deleted}; its branch is kept. These conversations resume in the Project root if their directory is gone.`
-			: "",
+		deleted ? `Deleted worktree ${deleted}; its branch is kept.` : "",
 		target.open ? `Archived ${name}${started > 0 ? ` and ${sessions}` : ""}.` : `${name} was already archived; archived ${sessions}.`,
-		cancelling.length > 0
-			? `Cancelled the turns of ${cancelling.map((s) => `"${displayName(s)}"`).join(", ")}; each quits as its turn ends.`
-			: "",
+		cancelling.length > 0 ? `Cancelled the turns of ${cancelling.map((s) => `"${displayName(s)}"`).join(", ")}.` : "",
 		members.some((s) => s.id === from) ? "This session quits when this turn ends: end it now with a brief final message." : "",
 		closed,
 	]
