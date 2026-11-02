@@ -89,8 +89,7 @@ async function shell(command: string, input?: string, timeoutMs = 20_000): Promi
 /**
  * Stops everything a `shell` started. Its `exec` only replaces the shell when the harness is a binary: a zsh function
  * runs it as a child instead, and an interactive zsh ignores SIGTERM, so the whole session's group is signalled.
- * SIGTERM first: a Claude Code killed outright here leaves the next session to stop waiting seconds on its way out.
- * Whatever outlasts it a second gets SIGKILL.
+ * SIGTERM first, for the same reason serverReply ends its input; whatever outlasts it a second gets SIGKILL.
  */
 function stop(proc: Bun.Subprocess): void {
 	signalGroup(proc, "SIGTERM");
@@ -132,7 +131,9 @@ function readJson(path: string): Record<string, unknown> | null {
 
 /**
  * Starts a harness's own server through the login shell, writes it `lines`, and returns the first line it writes back
- * that `pick` takes. The server answers and then waits for more, so it's stopped once that line is in.
+ * that `pick` takes. The server answers and then waits for more, so once that line is in its input ends, and it exits
+ * as it would from any pipe. A signal there instead races its shutdown: a Claude Code killed outright mid-exit leaves
+ * the next session to stop waiting seconds on its way out.
  */
 async function serverReply<T>(command: string, lines: object[], pick: (message: Record<string, unknown>) => T | undefined): Promise<T> {
 	const proc = Bun.spawn([loginShell(), "-lic", command], {
@@ -164,8 +165,9 @@ async function serverReply<T>(command: string, lines: object[], pick: (message: 
 			.find((r) => r !== undefined);
 		if (reply !== undefined) break;
 	}
+	proc.stdin.end();
+	await proc.exited;
 	clearTimeout(timer);
-	stop(proc);
 	if (reply === undefined) {
 		const err = (await new Response(proc.stderr).text()).trim();
 		throw new Error(`${command.replace(/^exec /, "")} gave no answer${err ? `: ${err.split("\n").at(-1)}` : ""}`);
