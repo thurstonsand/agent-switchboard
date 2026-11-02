@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- An idle session nobody is viewing now stops after an hour by default, not 30 minutes, matching Claude Code's hour-long prompt cache. `reap_after` still sets it.
+
 ## [0.10.0] - 2026-11-02
 
 ### Added

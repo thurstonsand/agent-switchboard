@@ -221,11 +221,11 @@ export const SETTINGS: Setting[] = [
 		description: "A live session that's idle and on no one's screen is stopped after this long. It stays open, and waking it resumes it.",
 		synonyms: ["reap", "kill", "memory", "duration"],
 		control: { kind: "duration" },
-		fallback: fixed("30m"),
+		fallback: fixed("1h"),
 		apply: (config, value) => {
 			config.reapAfterMs = durationMs(value);
 		},
-		example: "30m",
+		example: "1h",
 		note: "an idle live session nobody is viewing is stopped after this long",
 	},
 	{
