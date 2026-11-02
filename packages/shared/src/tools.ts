@@ -153,6 +153,12 @@ export const TOOLS = {
 		parameters: Type.Object({
 			session: Type.Optional(session),
 			archived: Type.Optional(Type.Boolean({ description: "True to archive, false to unarchive." })),
+			deleteWorktree: Type.Optional(
+				Type.Boolean({
+					description:
+						"With archived true, for this session only: delete its linked worktree, keeping the branch and conversations. With family true, archive its descendants too, but delete only this worktree. Only when the user asks. Refuses modified or untracked files, locked worktrees, scheduled launches into it, or open/live sessions using it outside the selected family. Ignored files are deleted. Conversations whose directory is gone resume in the Project root, or fail clearly if that is gone too. Call last, then end your turn.",
+				}),
+			),
 			family: Type.Optional(
 				Type.Boolean({ description: "With archived true: archive every open session it started too, and the ones they started." }),
 			),
@@ -283,6 +289,13 @@ export type ToolName = keyof typeof TOOLS;
 export type ReaderToolName = keyof typeof READER_TOOLS;
 const ALL = { ...TOOLS, ...READER_TOOLS };
 export type ToolArgs<N extends ToolName | ReaderToolName> = Static<(typeof ALL)[N]["parameters"]>;
+
+/** Main checkouts and plain directories never advertise worktree deletion. */
+export function toolParameters(name: ToolName, worktree: boolean): TSchema {
+	return name === "swb_update_session" && !worktree
+		? Type.Omit(TOOLS.swb_update_session.parameters, ["deleteWorktree"])
+		: TOOLS[name].parameters;
+}
 
 /** A tool's arguments from a model, checked against its schema before anything runs. */
 export function parsed<N extends ToolName | ReaderToolName>(name: N, args: unknown): ToolArgs<N> {

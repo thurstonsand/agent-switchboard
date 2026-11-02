@@ -11,7 +11,7 @@ import { checkBody, SwbError } from "./errors.ts";
 import { requestedGroup } from "./groups.ts";
 import { type Caller, launchFlags, presetLaunch } from "./harnesses.ts";
 import { snooze } from "./schedules.ts";
-import { archive, ensureSessionsServer, launch, restart, unarchive, wake } from "./sessions.ts";
+import { archive, archiveWorktree, ensureSessionsServer, launch, restart, unarchive, wake } from "./sessions.ts";
 import { rename, setGroup, setReload } from "./store.ts";
 import { inUse } from "./transcripts/read.ts";
 
@@ -259,6 +259,8 @@ export async function update(db: Db, from: string, id: string, change: Update): 
 	const { archived, family, force, snooze: snoozing, group, title, reload: reloading } = change;
 	if ([archived, snoozing, group, title, reloading].every((value) => value === undefined))
 		throw new SwbError("nothing to change: give archived, snooze, group, title, or reload");
+	if (change.deleteWorktree && (archived !== true || id !== from))
+		throw new SwbError("deleteWorktree goes only with archived: true for this session");
 	if ((family !== undefined || force !== undefined) && archived !== true)
 		throw new SwbError("family and force go only with archived: true");
 	if (archived === true && snoozing !== undefined)
@@ -278,6 +280,7 @@ export async function update(db: Db, from: string, id: string, change: Update): 
 	const archiving = archived === true ? archivePlan(all, from, target, family ?? false, force ?? false) : null;
 
 	const done: string[] = [];
+	const deleted = change.deleteWorktree && archiving ? await archiveRun(db, from, archiving, true, force ?? false) : null;
 	if (archived === false) {
 		unarchive(db, id);
 		done.push(`Unarchived ${name}. It stays dormant until messaged.`);
@@ -298,7 +301,7 @@ export async function update(db: Db, from: string, id: string, change: Update): 
 	}
 	if (snoozing !== undefined) done.push(snooze(db, from, id, snoozing).text);
 	if (reloading !== undefined) done.push(reload(db, from, id, reloading));
-	if (archiving) done.push(await archiveRun(db, from, archiving));
+	if (archiving) done.push(deleted ?? (await archiveRun(db, from, archiving)));
 	return {
 		text: done.join(" "),
 		details: {
@@ -366,21 +369,38 @@ function archivePlan(all: SessionState[], from: string, target: SessionState, fa
 }
 
 /** Archives what the plan names. A forced session is archived, then its turn cancelled, so its line quits as the turn ends. */
-async function archiveRun(db: Db, from: string, plan: ArchivePlan): Promise<string> {
+async function archiveRun(db: Db, from: string, plan: ArchivePlan, deleteWorktree = false, force = false): Promise<string> {
 	const { target, members } = plan;
 	const name = from === target.id ? "this session" : `"${displayName(target)}"`;
-	if (members.length === 0) return `${name} is already archived.`;
-	if (members.some((s) => s.id === from)) recordTx(db, () => markArchived(db, from));
+	if (members.length === 0 && !deleteWorktree) return `${name} is already archived.`;
 	const cancelling = plan.unsettled.filter((s) => s.live);
-	for (const s of cancelling) recordTx(db, () => markArchived(db, s.id));
-	archive(
-		db,
-		members.filter((s) => s.id !== from && !cancelling.includes(s)).map((s) => s.id),
-	);
-	await Promise.all(cancelling.map((s) => send(db, { from, to: s.id, body: "", requestResponse: false, requestId: null, kind: "cancel" })));
+	const cancel = async (ids: string[]) => {
+		await Promise.all(ids.map((to) => send(db, { from, to, body: "", requestResponse: false, requestId: null, kind: "cancel" })));
+	};
+	let deleted: string | null = null;
+	if (deleteWorktree) {
+		deleted = await archiveWorktree(
+			db,
+			target.id,
+			members.map((s) => s.id),
+			from,
+			force ? cancel : null,
+		);
+	} else {
+		if (members.some((s) => s.id === from)) recordTx(db, () => markArchived(db, from));
+		for (const s of cancelling) recordTx(db, () => markArchived(db, s.id));
+		archive(
+			db,
+			members.filter((s) => s.id !== from && !cancelling.includes(s)).map((s) => s.id),
+		);
+		await cancel(cancelling.map((s) => s.id));
+	}
 	const started = members.length - (target.open ? 1 : 0);
 	const sessions = `${started} session${started === 1 ? "" : "s"} it started`;
 	return [
+		deleted
+			? `Deleted worktree ${deleted}; its branch is kept. These conversations resume in the Project root if their directory is gone.`
+			: "",
 		target.open ? `Archived ${name}${started > 0 ? ` and ${sessions}` : ""}.` : `${name} was already archived; archived ${sessions}.`,
 		cancelling.length > 0
 			? `Cancelled the turns of ${cancelling.map((s) => `"${displayName(s)}"`).join(", ")}; each quits as its turn ends.`

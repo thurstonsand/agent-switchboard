@@ -88,13 +88,9 @@ test("a session whose directory is gone wakes into its own transcript from its p
 	await waitState(s, "the exited card", (x) => x.staged.id === id && x.staged.kind === "exited");
 	git(s, s.project, "worktree", "remove", "--force", worktree);
 	s.keys("Enter");
-	await until(() => s.screen().includes("cwd from session file does not exist"), budgets.piReady, "pi's missing-cwd prompt on the Stage");
-	expect(state(s)).toMatchObject({ focus: "stage", staged: { id, kind: "loading" } });
-	s.save("missing-cwd.txt", s.screen());
-	expect(s.screen()).toContain(realpathSync(s.project));
-	s.keys("Enter");
 	await waitState(s, "woken", (x) => x.staged.id === id && x.staged.kind === "live", budgets.piReady);
 	await until(() => s.screen().includes("before the move"), budgets.settle, "the conversation, continued in the project");
+	await until(() => s.screen().includes("This conversation moved from"), budgets.settle, "relocation notice");
 	s.save("woken.txt", s.screen());
 	expect(s.query<{ cwd: string }>("select cwd from runtimes where session_id = ?", id)).toEqual([{ cwd: realpathSync(s.project) }]);
 	expect(s.ls().map((e) => e.id)).toEqual([id]);

@@ -1260,7 +1260,7 @@ class Roster implements Component, Focusable {
 	lastIndex = 0;
 	/** After `a`, the cursor keeps its index instead of chasing the session into its new section. */
 	pin: { index: number; answered: boolean } | null = null;
-	/** The session whose archive prompt is open beneath its row: it started others still open. */
+	/** The session whose archive prompt offers its family or linked worktree. */
 	archiving: string | null = null;
 	scrollTop = 0;
 	collapsed = new Set<string>();
@@ -1524,6 +1524,8 @@ class Roster implements Component, Focusable {
 		if (this.archiving !== null) {
 			const k = decodeKittyPrintable(data) ?? data;
 			if (k === "a" || k === "A") this.finishArchiving(k === "A");
+			else if (k === "d" && entries.get(this.archiving)?.worktree) this.finishArchiving(false, true);
+			else if (k === "D" && entries.get(this.archiving)?.worktree) this.finishArchiving(true, true);
 			else if (matchesKey(data, "escape")) this.finishArchiving(null);
 			stage.keyAt = 0;
 			tui.requestRender();
@@ -1853,7 +1855,7 @@ class Roster implements Component, Focusable {
 			toast("nothing to archive before the first prompt", "error");
 			return;
 		}
-		if (e.open && openDescendants(entries.values(), e.id).length > 0) {
+		if (e.open && (e.worktree || openDescendants(entries.values(), e.id).length > 0)) {
 			this.selectedKey = e.id;
 			this.hover = null;
 			this.archiving = e.id;
@@ -1865,12 +1867,16 @@ class Roster implements Component, Focusable {
 	}
 
 	/** The archive prompt's answer: the session alone, all it started besides, or (null) neither. */
-	finishArchiving(all: boolean | null): void {
+	finishArchiving(all: boolean | null, deleteWorktree = false): void {
 		const e = this.archiving === null ? undefined : entries.get(this.archiving);
 		this.archiving = null;
 		if (!e || all === null) return;
 		this.pin = { index: this.resolveCursor(this.rows()), answered: false };
-		post({ type: "archive", ids: [e.id, ...(all ? openDescendants(entries.values(), e.id).map((d) => d.id) : [])] });
+		post({
+			type: "archive",
+			ids: [e.id, ...(all ? openDescendants(entries.values(), e.id).map((d) => d.id) : [])],
+			...(deleteWorktree ? { deleteWorktreeFor: e.id } : {}),
+		});
 	}
 
 	/** h folds the family under a session; l and space open it again. */
@@ -2502,7 +2508,11 @@ class Roster implements Component, Focusable {
 		// The archive prompt opens beneath its row, pushing the rows after it down; its row is the cursor's.
 		const asking = this.archiving === null ? -1 : rows.findIndex((r) => r.key === this.archiving);
 		if (asking === -1) this.archiving = null;
-		const prompt = asking === -1 ? 0 : ARCHIVE_PROMPT_LINES;
+		const archiveEntry = this.archiving === null ? undefined : entries.get(this.archiving);
+		const prompt =
+			asking === -1
+				? 0
+				: ARCHIVE_PROMPT_LINES + (archiveEntry?.worktree ? 1 + (openDescendants(entries.values(), archiveEntry.id).length > 0 ? 1 : 0) : 0);
 		if (index < this.scrollTop) this.scrollTop = index;
 		if (index + prompt >= this.scrollTop + height) this.scrollTop = index + prompt - height + 1;
 		this.scrollTop = Math.max(0, Math.min(this.scrollTop, Math.max(0, rows.length + prompt - height)));
@@ -2530,23 +2540,37 @@ class Roster implements Component, Focusable {
 		return [...out, ...picker.map(([line]) => line)];
 	}
 
-	/** The archive prompt, under the row of a session that started others still open: what they're doing, then the choice. */
+	/** Archive alone, with its family, or delete this linked worktree as well. */
 	archivePrompt(e: Entry, width: number, top: number): string[] {
 		const inner = Math.max(1, width - 4);
 		const family = openDescendants(entries.values(), e.id);
 		const box = (text: string) => ` │${truncateToWidth(text, inner, "…", true)}│`;
-		const choice = this.clickable(top + 2, [
+		const choices: [string, (() => void) | null][] = [
 			[" │ Archive  ", null],
 			[key("a", "this"), () => this.finishArchiving(false)],
-			["  ", null],
-			[key("A", `all ${family.length + 1}`), () => this.finishArchiving(true)],
-			["  ", null],
-			[key("esc", "abort"), () => this.finishArchiving(null)],
-		]);
+		];
+		if (family.length > 0) choices.push(["  ", null], [key("A", `all ${family.length + 1}`), () => this.finishArchiving(true)]);
+		choices.push(["  ", null], [key("esc", "abort"), () => this.finishArchiving(null)]);
+		const choice = this.clickable(top + 2, choices);
+		const deletion = e.worktree
+			? this.clickable(top + 3, [
+					[" │ ", null],
+					[key("d", "archive + delete worktree"), () => this.finishArchiving(false, true)],
+				])
+			: null;
+		const deleteFamily =
+			e.worktree && family.length > 0
+				? this.clickable(top + 4, [
+						[" │ ", null],
+						[key("D", `all ${family.length + 1} + delete this worktree`), () => this.finishArchiving(true, true)],
+					])
+				: null;
 		return [
 			` ┌${"─".repeat(inner)}┐`,
-			box(` ${familyTally(family)}`),
+			box(` ${family.length > 0 ? familyTally(family) : "Branch kept; clean worktree only"}`),
 			`${truncateToWidth(choice, inner + 2, "…", true)}│`,
+			...(deletion ? [`${truncateToWidth(deletion, inner + 2, "…", true)}│`] : []),
+			...(deleteFamily ? [`${truncateToWidth(deleteFamily, inner + 2, "…", true)}│`] : []),
 			` └${"─".repeat(inner)}┘`,
 		];
 	}

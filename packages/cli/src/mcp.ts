@@ -2,8 +2,8 @@ import { parseArgs } from "node:util";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { describeTool, launchGuide } from "@swb/shared";
-import { readerToolsAsJson, TOOLS, type ToolName, toolsAsJson } from "@swb/shared/tools";
+import { describeTool, launchGuide, linkedWorktree } from "@swb/shared";
+import { readerToolsAsJson, TOOLS, type ToolName, toolParameters, toolsAsJson } from "@swb/shared/tools";
 import { callTool } from "./codex/tools.ts";
 import { UsageError } from "./errors.ts";
 import { VERSION } from "./version.ts";
@@ -18,15 +18,19 @@ type McpHarness = "claude" | "codex";
  * Read-only tools say so: Codex asks before a tool unless it's read-only, or neither destructive nor open-world, and
  * Claude Code runs a tool beside others only when it's read-only. The rest change only the user's own sessions.
  */
-function annotations(name: ToolName) {
-	return TOOLS[name].readOnly ? { readOnlyHint: true } : { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
+function annotations(name: ToolName, worktree: boolean) {
+	return TOOLS[name].readOnly
+		? { readOnlyHint: true }
+		: { readOnlyHint: false, destructiveHint: name === "swb_update_session" && worktree, openWorldHint: false };
 }
 
 function listing(harness: McpHarness) {
+	const worktree = linkedWorktree(process.cwd()) !== null;
 	const tools = toolsAsJson().map((tool) => ({
 		...tool,
+		inputSchema: JSON.parse(JSON.stringify(toolParameters(tool.name, worktree))),
 		description: describeTool(tool.name, tool.description, launchGuide()),
-		annotations: annotations(tool.name),
+		annotations: annotations(tool.name, worktree),
 		// Upfront rather than behind Claude Code's tool search; Codex's line asks the same through omit_tools_from.
 		...(harness === "claude" ? { _meta: { "anthropic/alwaysLoad": true } } : {}),
 	}));

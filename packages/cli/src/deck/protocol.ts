@@ -14,6 +14,7 @@ export type Entry = SessionState & {
 	/** The tmux session hosting it, when live. */
 	host: string | null;
 	provisional: boolean;
+	worktree: string | null;
 	/** What its Peek lists: schedules aimed at it, or launches it set, pending ones and the last that finished. */
 	schedules: ScheduleView[];
 };
@@ -192,7 +193,7 @@ export type ToWorker =
 	| { type: "refresh"; models: boolean }
 	| NewSession
 	| { type: "visit"; id: string }
-	| { type: "archive"; ids: string[] }
+	| { type: "archive"; ids: string[]; deleteWorktreeFor?: string }
 	| { type: "unarchive"; id: string }
 	| { type: "snooze"; id: string; snooze: Snooze }
 	| { type: "stop"; id: string }

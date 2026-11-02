@@ -100,6 +100,7 @@ export async function codexHost(args: string[], updated = false): Promise<void> 
 		options: {
 			host: { type: "string" },
 			resume: { type: "string" },
+			"recovery-notice": { type: "string" },
 			model: { type: "string" },
 			effort: { type: "string" },
 			prompt: { type: "string" },
@@ -154,11 +155,19 @@ export async function codexHost(args: string[], updated = false): Promise<void> 
 		? (db.get("SELECT transcript FROM sessions WHERE session_id = ?", values.resume)?.transcript as string)
 		: null;
 	if (values.resume && transcript && archivedInCodex(transcript)) await client.request("thread/unarchive", { threadId: values.resume });
+	if (values.resume && values["recovery-notice"]) {
+		await client.request("thread/resume", { threadId: values.resume, cwd: process.cwd() });
+		await client.request("thread/inject_items", {
+			threadId: values.resume,
+			items: [{ type: "message", role: "developer", content: [{ type: "input_text", text: values["recovery-notice"] }] }],
+		});
+	}
 
 	const tui = Bun.spawn(
 		[
 			codex,
 			...(values.resume ? ["resume", values.resume] : []),
+			...(values["recovery-notice"] ? ["--cd", process.cwd()] : []),
 			"--remote",
 			`unix://${socket}`,
 			"-c",

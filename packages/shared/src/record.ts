@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import type { Db, Row } from "./db.ts";
 import { bootId, branch, type Harness, pidAlive, projectRoot, SCHEMA_VERSION } from "./index.ts";
 
@@ -40,6 +41,7 @@ export type Hosting = { host: string; harness: Harness; sessionId: string; cwd: 
 /** A process starts hosting a session: its runtime row, keyed by its tmux session, now names it. */
 export function startHosting(db: Db, h: Hosting): void {
 	recordTx(db, () => {
+		if (!existsSync(h.cwd)) throw new Error(`session directory no longer exists: ${h.cwd}`);
 		const other = hostOfSession(db, h.sessionId, h.host);
 		if (other) throw new Error(`session ${h.sessionId} is already open in another process (${other})`);
 		db.run("DELETE FROM runtimes WHERE session_id = ? AND tmux_session != ?", h.sessionId, h.host);
@@ -82,6 +84,8 @@ export type Turn = { harness: Harness; host: string; sessionId: string; cwd: str
  */
 export function startTurn(db: Db, t: Turn): string | null {
 	return recordTx(db, () => {
+		const phase = db.get("SELECT phase FROM sessions WHERE session_id = ?", t.sessionId)?.phase;
+		if ((!phase || phase === "idle") && !existsSync(t.cwd)) throw new Error(`session directory no longer exists: ${t.cwd}`);
 		const now = Date.now();
 		const first = !db.get("SELECT 1 FROM sessions WHERE session_id = ?", t.sessionId);
 		const launch = first ? db.get("DELETE FROM launches WHERE tmux_session = ? RETURNING parent_id, group_name", t.host) : undefined;
@@ -140,15 +144,17 @@ export function settle(db: Db, s: Settle): { quit: boolean } {
 	return recordTx(db, () => {
 		harnessTitled(db, s.sessionId, s.title);
 		db.run(
-			"UPDATE sessions SET phase = 'idle', last_settled_at = ?, cwd = ?, project_root = ?, branch = ?, title = coalesce(?, title) WHERE session_id = ?",
+			"UPDATE sessions SET phase = 'idle', last_settled_at = ?, title = coalesce(?, title) WHERE session_id = ?",
 			Date.now(),
-			s.cwd,
-			projectRoot(s.cwd),
-			branch(s.cwd),
 			s.title,
 			s.sessionId,
 		);
-		db.run("UPDATE runtimes SET cwd = ?, project_root = ? WHERE tmux_session = ?", s.cwd, projectRoot(s.cwd), s.host);
+		// An archive-and-delete turn keeps the checkout's last recorded Project and branch.
+		if (existsSync(s.cwd)) {
+			const project = projectRoot(s.cwd);
+			db.run("UPDATE sessions SET cwd = ?, project_root = ?, branch = ? WHERE session_id = ?", s.cwd, project, branch(s.cwd), s.sessionId);
+			db.run("UPDATE runtimes SET cwd = ?, project_root = ? WHERE tmux_session = ?", s.cwd, project, s.host);
+		}
 		const reloading = db.get("SELECT 1 FROM marks WHERE session_id = ? AND reload IS NOT NULL", s.sessionId);
 		return { quit: isArchived(db, s.sessionId) || Boolean(reloading) };
 	});

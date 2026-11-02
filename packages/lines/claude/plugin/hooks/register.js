@@ -77,6 +77,7 @@ async function stopReader($, agentId) {
 const line = {
 	managed: false,
 	started: false,
+	recovered: false,
 	bin: "",
 	host: "",
 	session: "",
@@ -104,7 +105,12 @@ async function env($, name) {
 
 /** Runs swb; a failure carries its stderr, which is what the model or the person should read. */
 async function swb($, args, stdin) {
-	const result = await $.process.run([line.bin, ...args], { ...(stdin === undefined ? {} : { stdin }), timeoutMs: 90000 });
+	// The last turn still has to settle after archive-and-delete removes the session's directory.
+	const result = await $.process.run([line.bin, ...args], {
+		...(args[0] === "__record" ? { cwd: "/" } : {}),
+		...(stdin === undefined ? {} : { stdin }),
+		timeoutMs: 90000,
+	});
 	if (result.exitCode !== 0) throw new Error(result.stderr.trim().replace(/^swb: /, "") || `swb ${args[0]} exited ${result.exitCode}`);
 	return result.stdout;
 }
@@ -375,6 +381,16 @@ async function saveDraft($) {
 }
 
 export function register(on) {
+	on("classic.SessionStart", async ($, e, next) => {
+		const result = await next(e);
+		if (line.recovered) return result;
+		line.recovered = true;
+		const notice = await $.env.get("SWB_RECOVERY_NOTICE");
+		if (!notice) return result;
+		$.ui.log(notice.replace(/^swb: /, ""));
+		return { ...result, additionalContext: [...(result.additionalContext ?? []), notice] };
+	});
+
 	on("session.start", async ($, e, next) => {
 		const result = await next(e);
 		await connectTools($);

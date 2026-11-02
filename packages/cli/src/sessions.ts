@@ -1,16 +1,17 @@
-import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
-import { bootId, type Db, dbPath, type Harness, operatorDir, projectRoot, stateDir } from "@swb/shared";
+import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, sep } from "node:path";
+import { bootId, type Db, dbPath, type Harness, linkedWorktree, operatorDir, projectRoot, stateDir } from "@swb/shared";
 import { isArchived, markArchived, recordTx } from "@swb/shared/record";
 import { now, since } from "@swb/shared/trace";
 import { type Effort, HARNESS_EFFORTS } from "./config.ts";
-import { type RuntimeRow, runtimeLive } from "./derive.ts";
+import { displayName, type RuntimeRow, runtimeLive, states } from "./derive.ts";
 import { SwbError } from "./errors.ts";
 import { writeClaudeLine } from "./lines.ts";
 import { claudeOperatorSettings } from "./operator.ts";
 import { openStore, setReload } from "./store.ts";
 import { CLIENT_CWD, cleanEnv, killServer, listSessions, quote, SESSIONS, tmux, tmuxClient, tmuxTry } from "./tmux.ts";
 import { archivedInCodex } from "./transcripts/codex.ts";
+import { relocatePi } from "./transcripts/pi.ts";
 import { VERSION } from "./version.ts";
 
 export const SWB = process.execPath;
@@ -280,7 +281,7 @@ export type LaunchSpec = {
 	harness: Harness;
 	cwd: string;
 	/** The session to resume, when it has run before, its recorded transcript, and whether to continue a cut-off turn. */
-	resume: { id: string; transcript: string; continueTurn: boolean } | null;
+	resume: { id: string; transcript: string; continueTurn: boolean; notice: string | null } | null;
 	/** A new session's id, for the harnesses that take one up front (pi, Claude Code). */
 	sessionId?: string;
 	/** The first turn's prompt. */
@@ -307,7 +308,7 @@ function harnessCommand(spec: LaunchSpec, host: string): string[] {
 	switch (spec.harness) {
 		case "pi": {
 			// --session-id only searches the starting directory's sessions, and a moved-away one would mint a fresh
-			// session under this id. The transcript reaches pi's own missing-cwd prompt instead.
+			// session under this id. Always resume the recorded transcript.
 			const id = spec.resume ? ["--session", spec.resume.transcript] : spec.sessionId ? ["--session-id", spec.sessionId] : [];
 			// An agent's launch has no one at the trust prompt.
 			const approve = spec.parentId || spec.sessionId ? ["--approve"] : [];
@@ -342,6 +343,7 @@ function harnessCommand(spec: LaunchSpec, host: string): string[] {
 				"--host",
 				host,
 				...(spec.resume ? ["--resume", spec.resume.id] : []),
+				...(spec.resume?.notice ? ["--recovery-notice", spec.resume.notice] : []),
 				// Codex picks a cut-off turn back up from its own history, with no prompt from swb.
 				...(spec.resume?.continueTurn ? ["--continue"] : []),
 				...(spec.cwd === operatorDir() ? ["--operator"] : []),
@@ -360,6 +362,7 @@ function harnessCommand(spec: LaunchSpec, host: string): string[] {
 export function launch(db: Db, spec: LaunchSpec): string {
 	const at = now();
 	const { cwd, resume } = spec;
+	if (!statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) throw new SwbError(`no directory ${cwd}`);
 	const name = `${basename(projectRoot(cwd)).replaceAll(/[.:]/g, "_")}-${randomHex(2)}`;
 	db.run(
 		"INSERT OR REPLACE INTO launches (tmux_session, resume_id, parent_id, group_name, created_at) VALUES (?, ?, ?, ?, ?)",
@@ -387,6 +390,7 @@ export function launch(db: Db, spec: LaunchSpec): string {
 		`SWB_TMUX_SESSION=${name}`,
 		"-e",
 		`SWB_BIN=${SWB}`,
+		...(spec.resume?.notice ? ["-e", `SWB_RECOVERY_NOTICE=${spec.resume.notice}`] : []),
 		"-e",
 		"PI_IMAGE_PROTOCOL=none",
 		// pi asks tmux whether its client forwards hyperlinks, but it starts with no client; both servers always forward them.
@@ -567,7 +571,18 @@ export function wake(db: Db, id: string, then: Wake): string {
 		const session = db.get("SELECT cwd, project_root, harness, transcript, phase, effort FROM sessions WHERE session_id = ?", id);
 		if (!session) throw new SwbError(`no session ${id}`);
 		// tmux starts a missing directory in $HOME, away from the session's Project.
-		const cwd = existsSync(session.cwd as string) ? (session.cwd as string) : (session.project_root as string);
+		const cwd = statSync(session.cwd as string, { throwIfNoEntry: false })?.isDirectory()
+			? (session.cwd as string)
+			: (session.project_root as string);
+		if (!statSync(cwd, { throwIfNoEntry: false })?.isDirectory())
+			throw new SwbError(
+				`session directory ${session.cwd} and Project root ${session.project_root} are unavailable; restore a directory before waking this conversation`,
+			);
+		const notice =
+			cwd === session.cwd
+				? null
+				: `swb: This conversation moved from ${session.cwd} to ${cwd} because its directory no longer exists. The files and branch here may differ; check them before continuing.`;
+		if (notice && session.harness === "pi") relocatePi(session.transcript as string, cwd);
 		// Not live, so a phase other than idle means its process died mid-turn.
 		const cutOff = session.phase !== "idle" && !isArchived(db, id);
 		const harness = session.harness as Harness;
@@ -578,7 +593,7 @@ export function wake(db: Db, id: string, then: Wake): string {
 		return launch(db, {
 			harness,
 			cwd,
-			resume: { id, transcript: session.transcript as string, continueTurn: then !== "idle" && cutOff },
+			resume: { id, transcript: session.transcript as string, continueTurn: then !== "idle" && cutOff, notice },
 			...(then === "continue" && !cutOff ? { prompt: RELOADED } : {}),
 			...(effort && HARNESS_EFFORTS.claude.includes(effort) ? { effort } : {}),
 		});
@@ -606,6 +621,113 @@ function liveHost(db: Db, id: string, hosts: Set<string>): string | null {
 function liveRuntime(db: Db, id: string, hosts: Set<string>): RuntimeRow | null {
 	const runtime = db.get("SELECT tmux_session, boot_id, pid FROM runtimes WHERE session_id = ?", id) as RuntimeRow | null;
 	return runtime && runtimeLive(runtime, bootId(), hosts) ? runtime : null;
+}
+
+/** Stop the selected family before removing its checkout; recheck under the lifecycle lock before committing the archive. */
+export async function archiveWorktree(
+	db: Db,
+	id: string,
+	ids: string[],
+	from: string | null,
+	cancel: ((ids: string[]) => Promise<void>) | null = null,
+): Promise<string> {
+	const selected = new Set([id, ...ids]);
+	const check = (allowWorking: boolean) => {
+		const all = states(db);
+		const target = all.find((s) => s.id === id);
+		if (!target) throw new SwbError(`no session ${id}`);
+		const tree = linkedWorktree(target.cwd);
+		if (!tree) throw new SwbError("not a linked worktree; the main checkout cannot be deleted");
+		const root = realpathSync(tree.path);
+		const inside = (path: string) => {
+			const canonical = existsSync(path) ? realpathSync(path) : path;
+			return canonical === root || canonical.startsWith(root + sep);
+		};
+		for (const s of all) {
+			if (!allowWorking && selected.has(s.id) && s.id !== from && s.live && s.activity !== "idle")
+				throw new SwbError("turn running: wait for it to complete before deleting the worktree");
+			if (!selected.has(s.id) && (s.open || s.live) && inside(s.cwd))
+				throw new SwbError(`worktree is still used by "${displayName(s)}"; archive that session first`);
+		}
+		const listedHosts = listSessions(SESSIONS, "#{pane_start_path}", "#{pane_dead}");
+		const hosts = new Set(listedHosts.map(([name]) => name as string));
+		const starting = new Set(
+			db
+				.all("SELECT tmux_session FROM launches WHERE tmux_session NOT IN (SELECT tmux_session FROM runtimes)")
+				.map((row) => row.tmux_session as string),
+		);
+		for (const [host, cwd, dead] of listedHosts) {
+			if (starting.has(host as string) && dead !== "1" && inside(cwd as string))
+				throw new SwbError(`worktree has a session starting (${host}); wait for it to register before archiving`);
+		}
+		for (const r of db.all("SELECT session_id, cwd FROM runtimes")) {
+			if (!selected.has(r.session_id as string) && inside(r.cwd as string) && liveRuntime(db, r.session_id as string, hosts))
+				throw new SwbError(`worktree is still used by session ${r.session_id}; stop it first`);
+		}
+		for (const schedule of db.all(
+			"SELECT id, label, launch FROM schedules WHERE cancelled_at IS NULL AND next_at IS NOT NULL AND launch IS NOT NULL",
+		)) {
+			const launch = JSON.parse(schedule.launch as string) as { cwd: string };
+			if (inside(launch.cwd)) throw new SwbError(`worktree is used by schedule "${schedule.label}" (${schedule.id}); unschedule it first`);
+		}
+		for (const s of db.all("SELECT transcript FROM sessions WHERE transcript IS NOT NULL")) {
+			if (inside(s.transcript as string))
+				throw new SwbError("worktree contains a session transcript; move it before deleting the worktree");
+		}
+		const listed = Bun.spawnSync(["git", "--git-dir", tree.common, "worktree", "list", "--porcelain", "-z"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		if (listed.exitCode !== 0) throw new SwbError(listed.stderr.toString().trim());
+		const record = listed.stdout
+			.toString()
+			.split("\0\0")
+			.find((row) => row.startsWith(`worktree ${tree.path}\0`));
+		if (record?.split("\0").some((field) => field === "locked" || field.startsWith("locked ")))
+			throw new SwbError("worktree is locked; unlock it first");
+		const dirty = Bun.spawnSync(["git", "-C", tree.path, "status", "--porcelain", "--untracked-files=all"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		if (dirty.exitCode !== 0) throw new SwbError(dirty.stderr.toString().trim());
+		if (dirty.stdout.length > 0) throw new SwbError("worktree has modified or untracked files; save them before deleting it");
+		return { tree, inside, all, hosts };
+	};
+	const initial = recordTx(db, () => check(cancel !== null));
+	const working = initial.all.filter((s) => selected.has(s.id) && s.id !== from && s.live && s.activity !== "idle").map((s) => s.id);
+	if (cancel && working.length > 0) {
+		await cancel(working);
+		const deadline = Date.now() + 15_000;
+		while (states(db).some((s) => working.includes(s.id) && s.live && s.activity !== "idle")) {
+			if (Date.now() >= deadline) throw new SwbError("cancelled turns have not stopped; the worktree was not deleted");
+			await Bun.sleep(100);
+		}
+	}
+	const stopping = recordTx(db, () => {
+		const { hosts } = check(false);
+		return [...selected].flatMap((id) => {
+			const runtime = id === from ? null : liveRuntime(db, id, hosts);
+			return runtime ? [runtime] : [];
+		});
+	});
+	if (stopping.length > 0) stopPis(stopping);
+	const path = recordTx(db, () => {
+		const { tree, inside, all } = check(false);
+		if (all.some((s) => selected.has(s.id) && s.id !== from && s.live))
+			throw new SwbError("a selected session restarted; retry archiving before deleting its worktree");
+		// This swb command (or Deck worker) can itself have started inside the checkout it is removing.
+		if (inside(process.cwd())) process.chdir(dirname(tree.common));
+		const result = Bun.spawnSync(["git", "--git-dir", tree.common, "worktree", "remove", "--", tree.path], {
+			cwd: dirname(tree.common),
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		if (result.exitCode !== 0) throw new SwbError(`worktree not deleted: ${result.stderr.toString().trim()}`);
+		for (const id of selected) markArchived(db, id);
+		return tree.path;
+	});
+	gc(db);
+	return path;
 }
 
 /**

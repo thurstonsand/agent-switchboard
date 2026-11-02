@@ -113,6 +113,14 @@ export function projectRoot(cwd: string): string {
 	return common ? dirname(common) : cwd;
 }
 
+/** A linked checkout, including when cwd is beneath it; never the repository's main checkout. */
+export function linkedWorktree(cwd: string): { path: string; common: string } | null {
+	const result = git(cwd, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir");
+	if (!result) return null;
+	const [path, dir, common] = result.split("\n") as [string, string, string];
+	return dir !== common ? { path, common } : null;
+}
+
 export function branch(cwd: string): string | null {
 	const name = git(cwd, "rev-parse", "--abbrev-ref", "HEAD");
 	return name === "HEAD" ? git(cwd, "rev-parse", "--short", "HEAD") : name;

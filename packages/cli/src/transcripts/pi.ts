@@ -1,5 +1,17 @@
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { SwbError } from "../errors.ts";
 import { type Conversation, type Ending, type Entry, lines, type Part, type Subagent, textOf } from "./conversation.ts";
+
+/** Pi resolves its cwd before loading extensions; relocate a dormant session's header without changing its history or id. */
+export function relocatePi(path: string, cwd: string): void {
+	const text = readFileSync(path, "utf8");
+	const end = text.indexOf("\n");
+	const header = JSON.parse(text.slice(0, end));
+	if (header.type !== "session" || header.version !== 3) throw new SwbError(`${path}: expected a pi v3 session header`);
+	const temporary = `${path}.${process.pid}.tmp`;
+	writeFileSync(temporary, JSON.stringify({ ...header, cwd }) + text.slice(end), { mode: 0o600 });
+	renameSync(temporary, path);
+}
 
 type PiBlock = { type?: string; text?: string; id?: string; name?: string; arguments?: unknown };
 type PiMessage = {

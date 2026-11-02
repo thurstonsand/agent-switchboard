@@ -108,7 +108,7 @@ const server = Bun.serve({
 		const id = `resp_${++n}`;
 		appendFileSync(
 			log,
-			`${JSON.stringify({ n, at: Date.now(), model: body.model, texts, last: last?.type, tools: names, toolOutput: last?.type === "function_call_output" ? outputText(last).slice(0, 4000) : null, context: JSON.stringify(input).slice(0, 200_000) })}\n`,
+			`${JSON.stringify({ n, at: Date.now(), model: body.model, texts, last: last?.type, tools: names, toolSpecs: body.tools, toolOutput: last?.type === "function_call_output" ? outputText(last).slice(0, 4000) : null, context: JSON.stringify(input).slice(0, 200_000) })}\n`,
 		);
 		const prompt = (texts.at(-1) ?? "").trim();
 		const answering = last?.type === "message";

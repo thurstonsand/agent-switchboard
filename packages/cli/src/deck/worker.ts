@@ -1,13 +1,24 @@
 /// <reference lib="webworker" />
 import { statSync } from "node:fs";
-import { bootId, type Db, type Harness, operatorDir, projectRoot, type View } from "@swb/shared";
+import { bootId, type Db, type Harness, linkedWorktree, operatorDir, projectRoot, type View } from "@swb/shared";
 import { span } from "@swb/shared/trace";
 import type { Config } from "../config.ts";
 import { deriveSessions, type RuntimeRecord, runtimeLive, runtimeRecords, type SessionRow, sessionRows, type World } from "../derive.ts";
 import { addDir, removeDir, targets } from "../dirs.ts";
 import { type Catalog, discover, launchFlags, readCatalog, resolveLaunch, shortlist, writeGuide } from "../harnesses.ts";
 import { type ScheduleView, schedulesBySession, snooze } from "../schedules.ts";
-import { archive, ensureEditor, ensureSessionsServer, ensureShell, launch, restart, stop, unarchive, wake } from "../sessions.ts";
+import {
+	archive,
+	archiveWorktree,
+	ensureEditor,
+	ensureSessionsServer,
+	ensureShell,
+	launch,
+	restart,
+	stop,
+	unarchive,
+	wake,
+} from "../sessions.ts";
 import { loadLayout, markVisited, openStore, saveLayout, setGroup, setView } from "../store.ts";
 import { listSessions, SESSIONS, tmux, tmuxTry, UI } from "../tmux.ts";
 import { locateTranscript } from "../transcripts/read.ts";
@@ -32,6 +43,7 @@ let lastJson = "";
 let dataVersion = -1;
 let rows: SessionRow[] = [];
 let runtimes: RuntimeRecord[] = [];
+const worktrees = new Map<string, string | null>();
 let schedules = new Map<string, ScheduleView[]>();
 /** What each launch left for the first session its process records, by tmux session, until that session takes it. */
 let launches = new Map<string, { parentId: string | null; group: string | null }>();
@@ -130,6 +142,7 @@ function readDb(): void {
 	dataVersion = version;
 	rows = sessionRows(db);
 	runtimes = runtimeRecords(db);
+	for (const { cwd } of rows) if (!worktrees.has(cwd)) worktrees.set(cwd, linkedWorktree(cwd)?.path ?? null);
 	schedules = schedulesBySession(db);
 	launches = new Map(
 		db
@@ -194,6 +207,7 @@ function snapshot(): Polled {
 			transcript: row.transcript,
 			host: state.live ? (row.runtime?.tmux_session ?? null) : null,
 			provisional: false,
+			worktree: worktrees.get(state.cwd) ?? null,
 			schedules: schedules.get(row.session_id) ?? [],
 		};
 	});
@@ -228,6 +242,7 @@ function snapshot(): Polled {
 			transcript: null,
 			host: runtime.tmux_session,
 			provisional: true,
+			worktree: null,
 			schedules: [],
 		});
 	}
@@ -402,7 +417,7 @@ async function peek(id: string, cwd: string, path: string | null, harness: Harne
 	post({ type: "peek", id, info: { last, diff: await diffOf(cwd), error } });
 }
 
-function handle(message: ToWorker): void {
+async function handle(message: ToWorker): Promise<void> {
 	switch (message.type) {
 		case "init":
 			deck = message.deck;
@@ -463,7 +478,10 @@ function handle(message: ToWorker): void {
 			break;
 		case "archive":
 			try {
-				archive(db, message.ids);
+				if (message.deleteWorktreeFor) {
+					await archiveWorktree(db, message.deleteWorktreeFor, message.ids, null);
+					worktrees.clear();
+				} else archive(db, message.ids);
 				post({ type: "toggled", error: null });
 			} catch (error) {
 				post({ type: "toggled", error: (error as Error).message });
@@ -574,9 +592,9 @@ function handle(message: ToWorker): void {
 	tick();
 }
 
-self.onmessage = (event: MessageEvent<ToWorker>) => {
+self.onmessage = async (event: MessageEvent<ToWorker>) => {
 	try {
-		handle(event.data);
+		await handle(event.data);
 	} catch (error) {
 		post({ type: "error", text: (error as Error).message });
 	}

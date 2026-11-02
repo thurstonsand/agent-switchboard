@@ -54,7 +54,13 @@ function signal(name: string): void {
 
 async function released(name: string, abort: AbortSignal | undefined): Promise<void> {
 	while (!existsSync(join(signals, `${name}.release`))) {
-		if (abort?.aborted) throw new Error(`hold ${name} aborted`);
+		if (abort?.aborted) {
+			if (existsSync(join(signals, "cancel.hold"))) {
+				signal("cancel.entered");
+				await released("cancel", undefined);
+			}
+			throw new Error(`hold ${name} aborted`);
+		}
 		await new Promise((resolve) => setTimeout(resolve, 50));
 	}
 }
@@ -198,6 +204,8 @@ export default function (pi: ExtensionAPI) {
 				});
 			case "tools":
 				writeFileSync(join(signals, arg ? `tools.${arg}` : "tools"), JSON.stringify(pi.getActiveTools()));
+				writeFileSync(join(signals, arg ? `tool-specs.${arg}` : "tool-specs"), JSON.stringify(getCurrentTools(context.messages)));
+				writeFileSync(join(signals, arg ? `context.${arg}` : "context"), JSON.stringify(context.messages));
 				return fauxAssistantMessage("tools listed");
 			case "message":
 				return fauxAssistantMessage(

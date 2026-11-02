@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { Db, describeTool, launchGuide, operatorDir } from "@swb/shared";
+import { Db, describeTool, launchGuide, linkedWorktree, operatorDir } from "@swb/shared";
 import { frame, listen, markDelivered, pendingFor, sender } from "@swb/shared/mailbox";
 import {
 	markArchived as archiveMark,
@@ -20,13 +20,14 @@ import {
 	startTurn,
 	turnErrored,
 } from "@swb/shared/record";
-import { READER_PROMPT, READER_TOOLS, TOOLS, type ToolName, type ToolResult } from "@swb/shared/tools";
+import { READER_PROMPT, READER_TOOLS, TOOLS, type ToolName, type ToolResult, toolParameters } from "@swb/shared/tools";
 import { mark, span } from "@swb/shared/trace";
 
 type Launch = { readonly db: string; readonly tmuxSession: string; readonly bin: string };
 // Outlives /reload, which re-imports this module with a fresh module cache.
 type Process = {
 	launch: Launch;
+	recoveryNotice: string | null;
 	failure?: string;
 	db?: Db;
 	attention: Set<string>;
@@ -45,6 +46,7 @@ function claim(): Process | undefined {
 	if (env.SWB_MANAGED === "1" && env.SWB_DB && env.SWB_TMUX_SESSION) {
 		store[KEY] = {
 			launch: Object.freeze({ db: env.SWB_DB, tmuxSession: env.SWB_TMUX_SESSION, bin: env.SWB_BIN ?? "" }),
+			recoveryNotice: env.SWB_RECOVERY_NOTICE ?? null,
 			attention: new Set(),
 			...(env.SWB_BIN ? {} : { failure: "started by an swb older than this line; upgrade swb" }),
 		};
@@ -54,6 +56,7 @@ function claim(): Process | undefined {
 	delete env.SWB_DB;
 	delete env.SWB_TMUX_SESSION;
 	delete env.SWB_BIN;
+	delete env.SWB_RECOVERY_NOTICE;
 	return store[KEY];
 }
 
@@ -228,6 +231,10 @@ export default function (pi: ExtensionAPI) {
 				if (id === current) deliver();
 			});
 		});
+		if (proc.recoveryNotice) {
+			pi.sendMessage({ customType: "swb.recovery", content: proc.recoveryNotice, display: true }, { triggerTurn: false });
+			proc.recoveryNotice = null;
+		}
 	});
 
 	// Not the user message_start: a launched session's first turn starts with its goal as a message.
@@ -313,28 +320,32 @@ export default function (pi: ExtensionAPI) {
 		label: string,
 		target: (args: Record<string, unknown>) => string,
 		run: (args: never, ctx: ExtensionContext, toolCallId: string, signal?: AbortSignal) => Promise<ToolResult>,
-	) =>
-		pi.registerTool({
-			name,
-			label,
-			description: describeTool(name, TOOLS[name].description, guide),
-			promptSnippet: describeTool(name, TOOLS[name].description, guide),
-			promptGuidelines: TOOLS[name].guidelines,
-			parameters: TOOLS[name].parameters,
-			renderCall(args, theme) {
-				const what = target(args as Record<string, unknown>);
-				return new Text(`${theme.fg("toolTitle", theme.bold(label))}${what ? ` · ${theme.fg("accent", what)}` : ""}`, 0, 0);
-			},
-			renderResult(result, _options, theme, context) {
-				const output = result.content.find((item) => item.type === "text")?.text ?? "";
-				return new Text(context.isError ? theme.fg("error", output) : theme.fg("dim", output), 0, 0);
-			},
-			async execute(toolCallId, params, signal, _onUpdate, ctx) {
-				if (proc.failure) throw new Error(`swb: not recording: ${proc.failure}`);
-				const result = await run(params as never, ctx, toolCallId, signal);
-				return { content: [{ type: "text", text: result.text }], details: result.details };
-			},
-		});
+	) => {
+		const register = (cwd: string) =>
+			pi.registerTool({
+				name,
+				label,
+				description: describeTool(name, TOOLS[name].description, guide),
+				promptSnippet: describeTool(name, TOOLS[name].description, guide),
+				promptGuidelines: TOOLS[name].guidelines,
+				parameters: toolParameters(name, name === "swb_update_session" && linkedWorktree(cwd) !== null),
+				renderCall(args, theme) {
+					const what = target(args as Record<string, unknown>);
+					return new Text(`${theme.fg("toolTitle", theme.bold(label))}${what ? ` · ${theme.fg("accent", what)}` : ""}`, 0, 0);
+				},
+				renderResult(result, _options, theme, context) {
+					const output = result.content.find((item) => item.type === "text")?.text ?? "";
+					return new Text(context.isError ? theme.fg("error", output) : theme.fg("dim", output), 0, 0);
+				},
+				async execute(toolCallId, params, signal, _onUpdate, ctx) {
+					if (proc.failure) throw new Error(`swb: not recording: ${proc.failure}`);
+					const result = await run(params as never, ctx, toolCallId, signal);
+					return { content: [{ type: "text", text: result.text }], details: result.details };
+				},
+			});
+		register(process.cwd());
+		if (name === "swb_update_session") pi.on("session_start", (_event, ctx) => register(ctx.cwd));
+	};
 
 	const self = (ctx: ExtensionContext) => ctx.sessionManager.getSessionId();
 	/** A session id as the roster names it, for a tool call's line. */

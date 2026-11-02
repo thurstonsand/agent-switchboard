@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState } from "../../../packages/cli/src/deck/protocol.ts";
 import { claudeAutoMode, recalled, subagentDone } from "../harness/agents.ts";
-import { config, launched, launchTry, seed } from "../harness/deck.ts";
+import { config, cursorTo, launched, launchTry, seed } from "../harness/deck.ts";
 import { git, gitRepo, gitWorktree, type LsEntry, type PiPackage, release, repo, type Scenario, until, which } from "../harness/index.ts";
 
 export type Director = {
@@ -646,6 +646,39 @@ export const directors: Record<string, Director> = {
 			release(s, "busy");
 			await waitLs(s, "archived", (ls) => ls[0]?.open === false && !ls[0].live);
 			await waitLs(s, "unarchived", (ls) => ls[0]?.open === true);
+		},
+	},
+
+	"archive-worktree": {
+		setup: async (s) => {
+			gitRepo(s, s.project);
+			const cwd = gitWorktree(s, s.project, "feature");
+			await launched(s, "reply implementation finished", { cwd, title: "Finished feature" });
+		},
+		run: async (s) => {
+			await waitDrive(s, "Deck ready", (st) => st.ready);
+			const id = s.ls()[0]?.id as string;
+			await cursorTo(s, id);
+			s.keys("a");
+			await waitDrive(s, "worktree archive choice", (st) => st.mode === "archive");
+			await Bun.sleep(4500);
+			s.keys("Escape");
+			const child = await launched(s, "reply review finished", { cwd: s.project, from: id, title: "Review" });
+			await cursorTo(s, id);
+			s.keys("a");
+			await waitDrive(s, "family and worktree choices", (st) => st.archive?.all === 2);
+			await Bun.sleep(3000);
+			for (const text of ["a this", "esc abort", "archive + delete worktree", "all 2 + delete this worktree"]) {
+				const [x, y] = await onScreen(s, text, 42);
+				s.swb("drive", "move", String(x), String(y));
+				await Bun.sleep(700);
+			}
+			const [x, y] = await onScreen(s, "all 2 + delete this worktree", 42);
+			s.swb("drive", "click", String(x), String(y));
+			await waitLs(s, "archived and deleted", (ls) => ls.find((e) => e.id === id)?.open === false);
+			expect(s.ls().find((e) => e.id === child)?.open).toBe(false);
+			expect(git(s, s.project, "worktree", "list", "--porcelain")).not.toContain(`${s.project}-feature`);
+			expect(git(s, s.project, "branch", "--list", "feature").trim()).toBe("feature");
 		},
 	},
 
