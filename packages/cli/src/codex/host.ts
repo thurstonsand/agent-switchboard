@@ -273,8 +273,14 @@ class CodexLine {
 	notify({ method, params }: Notification): void {
 		if (method === "thread/started") {
 			const thread = params.thread as Thread & { threadSource: string | null };
-			if (thread.ephemeral) this.ephemeral.add(thread.id);
-			if (thread.ephemeral && thread.threadSource === READER_SOURCE) this.readers.set(thread.id, false);
+			if (thread.ephemeral) {
+				this.ephemeral.add(thread.id);
+				// Status can arrive before thread/started, including for Codex's title generator.
+				const status = this.statuses.get(thread.id);
+				this.statuses.delete(thread.id);
+				if (thread.threadSource === READER_SOURCE) this.readers.set(thread.id, status?.type === "active");
+				this.reap();
+			}
 		}
 		const threadId = params.threadId as string | undefined;
 		if (threadId && this.ephemeral.has(threadId)) {
