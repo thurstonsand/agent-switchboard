@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { entry, reply, state, waitState } from "./harness/deck.ts";
+import { entry, piSessions, reply, sessionRows, state, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -45,8 +45,18 @@ test("managed pi yields recall to swb, keeps subagents, and stays yielded after 
 	const managed = await tools("managed");
 	// session_search and session_ask are swb's own, registered at load beside pi-sessions without a conflict.
 	for (const name of ["session_search", "session_ask"]) expect(managed.filter((tool) => tool === name)).toEqual([name]);
-	for (const name of ["session_launch", "subagent_list", "subagent_send", "subagent_cancel", "subagent_launch"])
+	for (const name of [
+		"session_reachable",
+		"session_send_message",
+		"session_launch",
+		"swb_update_session",
+		"subagent_list",
+		"subagent_send",
+		"subagent_cancel",
+		"subagent_launch",
+	])
 		expect(managed).toContain(name);
+	expect(managed).not.toContain("session_handoff");
 	await until(() => entry(s, parent).activity === "idle", budgets.settle, "parent idle");
 	// Answered by swb's reader, whose recall_read reads swb's own record of the session.
 	s.keys("-l", `ask-id ${parent} :: what did it say?`, "Enter");
@@ -73,6 +83,9 @@ test("managed pi yields recall to swb, keeps subagents, and stays yielded after 
 	for (const name of ["session_search", "session_ask", "submit_task_report"]) expect(child).toContain(name);
 	expect(child).not.toContain("swb_update_session");
 	expect(s.ls().map((e) => e.id)).toEqual([parent]);
+	expect(sessionRows(state(s)).map((r) => r.id)).toEqual([parent]);
+	expect(piSessions(s)).toHaveLength(1);
+	expect(s.tmux("default", "list-sessions", "-F", "#{session_name}")).toMatch(/^pi-[0-9a-f]+$/m);
 	const screen = s.screen();
 	expect(history()).not.toContain("Invalid host");
 	expect(history()).not.toContain("conflict");

@@ -181,11 +181,10 @@ test("Claude's native reader answers about live, archived, and pi conversations 
 	);
 });
 
-test("a reader that takes twenty-five seconds returns its answer, past the hook's 10s budget", async () => {
+test("a reader that takes eleven seconds returns its answer, past the hook's 10s budget", async () => {
 	s = scenario("recall-claude", "slow", { packages: [], recorder: true, harnesses: ["claude"] });
-	const target = await launched(s, "claude", "reply SWB-slow-target");
-	const caller = await launched(s, "claude", "reply caller ready");
-	type(s, caller.id, `ask-id ${target.id} :: reader-hold 25000 What markers?`);
+	const [target, caller] = await Promise.all([launched(s, "pi", "reply SWB-slow-target"), launched(s, "claude", "reply caller ready")]);
+	type(s, caller.id, `ask-id ${target.id} :: reader-hold 11000 What markers?`);
 	// Its row says so while the reader works, though Claude Code calls the call done once the hook holds it.
 	await until(() => pane(s, caller.id).includes("  ⎿  Running…"), 15000, "the ask's row running");
 	await until(() => pane(s, caller.id).includes("asked: reader found: SWB-slow-target"), 60000, "slow answer rendered");
@@ -194,7 +193,7 @@ test("a reader that takes twenty-five seconds returns its answer, past the hook'
 	const end = requests.find((r) => String(r.prompt).startsWith("ask-id") && r.toolResult);
 	const elapsedMs = Number(end?.at) - Number(start?.at);
 	s.save("latency.json", JSON.stringify({ elapsedMs }));
-	expect(elapsedMs).toBeGreaterThan(25000);
+	expect(elapsedMs).toBeGreaterThan(10000);
 	expect(end?.toolOutput).toBe("reader found: SWB-slow-target");
 	expect(pane(s, caller.id)).not.toContain("ran past its");
 	expect(transcripts().find((f) => f.path.endsWith(`/${caller.id}.jsonl`))?.text).not.toContain("ran past its");
@@ -202,17 +201,18 @@ test("a reader that takes twenty-five seconds returns its answer, past the hook'
 
 test("Esc during a reader stops it, leaves the caller usable, and adds no Session", async () => {
 	s = scenario("recall-claude", "cancel", { packages: [], recorder: true, harnesses: ["claude"] });
-	const target = await launched(s, "claude", "reply SWB-cancel-target");
-	const caller = await launched(s, "claude", "reply caller ready");
+	const [target, caller] = await Promise.all([
+		launched(s, "claude", "reply SWB-cancel-target"),
+		launched(s, "claude", "reply caller ready"),
+	]);
 	type(s, caller.id, `ask-id ${target.id} :: reader-hold 15000 Cancel this reader`);
 	await until(() => readerRequests().length > 0, 10000, "reader started");
 	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, caller.id)}:`, "Escape");
+	await until(() => s.signal("reader.aborted"), 5000, "the reader's model request aborted before its delayed answer");
 	await until(() => s.ls().find((row) => row.id === caller.id)?.activity === "idle", 15000, "caller idle after Esc");
 	type(s, caller.id, "reply after cancel");
 	// Claude Code marks its reply ⏺ on macOS and ● elsewhere.
 	await until(() => /[●⏺] after cancel/.test(pane(s, caller.id)), 10000, "caller usable");
-	// Stay past the delayed response: a stopped reader makes no further request, so it neither recalls nor answers.
-	await Bun.sleep(16000);
 	expect(s.ls()).toHaveLength(2);
 	expect(readerRequests()).toHaveLength(1);
 	expect(pane(s, caller.id)).not.toContain("didn't stop");
@@ -223,9 +223,11 @@ test("Esc during a reader stops it, leaves the caller usable, and adds no Sessio
 
 test("two session_asks in one response run their readers at once", async () => {
 	s = scenario("recall-claude", "parallel", { packages: [], recorder: true, harnesses: ["claude"] });
-	const a = await launched(s, "claude", "reply SWB-parallel-a");
-	const b = await launched(s, "claude", "reply SWB-parallel-b");
-	const caller = await launched(s, "claude", "reply caller ready");
+	const [a, b, caller] = await Promise.all([
+		launched(s, "claude", "reply SWB-parallel-a"),
+		launched(s, "claude", "reply SWB-parallel-b"),
+		launched(s, "claude", "reply caller ready"),
+	]);
 	await until(
 		() => recalled(s, a.id).includes("SWB-parallel-a") && recalled(s, b.id).includes("SWB-parallel-b"),
 		15000,

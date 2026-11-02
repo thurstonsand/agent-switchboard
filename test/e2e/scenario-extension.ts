@@ -121,7 +121,7 @@ export default function (pi: ExtensionAPI) {
 		if (step) return fauxAssistantMessage(step.text);
 		if (last.role === "toolResult") {
 			const prompt = text(context.messages.findLast((message) => message.role === "user") as Message);
-			if ((last as { toolName?: string }).toolName === "session_reachable") {
+			if (prompt.startsWith("reach ") && (last as { toolName?: string }).toolName === "session_reachable") {
 				const first = /^- (\S+) · /m.exec(text(last))?.[1];
 				if (!first) throw new Error(`scenario: nothing to reach in ${text(last)}`);
 				return fauxAssistantMessage(

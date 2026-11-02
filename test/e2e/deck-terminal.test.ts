@@ -76,6 +76,8 @@ test("a pi follows theme changes even in copy mode, and dims only on the Deck wh
 	await reply(s, "one");
 	await until(() => userMessageBg(host) === "219;229;229", budgets.settle, "pi's light user message");
 	await until(() => renderedMessageBg() === "219;229;229", budgets.settle, "focused pi at full brightness");
+	await waitState(s, "the roster's light background", (x) => x.colors.background === "#f9f5d7");
+	expect(await piColor(host, "11")).toBe(LIGHT_BG);
 	s.keys("M-a", "s");
 	await waitState(s, "the shell, with the keyboard", (x) => x.layout.shell !== null && x.focus === "shell");
 	await until(() => renderedMessageBg() === "186;194;194", budgets.settle, "inactive pi dimmed 15% in light mode");
@@ -85,6 +87,8 @@ test("a pi follows theme changes even in copy mode, and dims only on the Deck wh
 	s.swb("drive", "theme", "dark");
 	await until(() => userMessageBg(host) === "35;54;54", budgets.settle, "pi's dark user message");
 	await until(() => renderedMessageBg() === "22;35;35", budgets.settle, "inactive pi dimmed 35% in dark mode");
+	await waitState(s, "the roster's dark background", (x) => x.colors.background === "#1d2021");
+	await until(async () => (await piColor(host, "11")) === DARK_BG, budgets.settle, "pi's dark background");
 	expect(s.swb("drive", "capture", "--ansi")).toMatch(/\[39m(?:.\[49m)? ▾ Operators /);
 	s.save("dark.ansi", s.swb("drive", "capture", "--ansi"));
 
@@ -112,20 +116,6 @@ test("a pi follows theme changes even in copy mode, and dims only on the Deck wh
 	await waitState(s, "the roster shown and focused", (x) => !x.layout.rosterHidden && x.focus === "roster");
 	await until(() => renderedMessageBg() === "186;194;194", budgets.settle, "15% dimming survives hiding and showing the roster");
 });
-
-test("the roster and a live pi report the harness terminal's background, and both follow drive theme dark", async () => {
-	s = scenario("phase2", "theme");
-	s.swb("drive", "start", "--", "new");
-	const st = await waitState(s, "the new pi live", (x) => x.staged.kind === "live", budgets.piReady);
-	await waitState(s, "the roster's light background", (x) => x.colors.background === "#f9f5d7");
-	expect(await piColor(st.staged.host as string, "11")).toBe(LIGHT_BG);
-	s.save("light.ansi", s.swb("drive", "capture", "--ansi"));
-	s.swb("drive", "theme", "dark");
-	await waitState(s, "the roster's dark background", (x) => x.colors.background === "#1d2021");
-	await until(async () => (await piColor(st.staged.host as string, "11")) === DARK_BG, budgets.settle, "pi's dark background");
-	s.save("dark.ansi", s.swb("drive", "capture", "--ansi"));
-});
-
 test("a pi woken with w and never viewed reports the terminal's background and palette, and re-themes while still unviewed", async () => {
 	s = scenario("phase2", "unviewed-theme");
 	const [a, b] = (await seed(s, { turns: ["a"] }, { turns: ["b"] })) as [string, string];

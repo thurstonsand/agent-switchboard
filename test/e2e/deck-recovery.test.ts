@@ -74,12 +74,14 @@ test("two Decks waking one session start exactly one pi", async () => {
 test("a Deck killed while its wake waits on the launch lock doesn't wedge later wakes", async () => {
 	s = scenario("phase2", "killed-waker");
 	const [a] = (await seed(s, { turns: ["a"] })) as [string];
+	s.swb("drive", "start");
+	s.swb("drive", "stop");
 	// The close after the sleep keeps the connection reachable: one collected mid-sleep closes, and its lock goes with it.
 	const holder = Bun.spawn(
 		[
 			process.execPath,
 			"-e",
-			`const d = new (require("bun:sqlite").Database)(${JSON.stringify(s.dbFile)}); d.run("BEGIN IMMEDIATE"); console.log("held"); await Bun.sleep(60000); d.close();`,
+			`const d = new (require("bun:sqlite").Database)(${JSON.stringify(s.dbFile)}); d.run("PRAGMA busy_timeout = 5000"); d.run("BEGIN IMMEDIATE"); console.log("held"); await Bun.sleep(60000); d.close();`,
 		],
 		{ stdout: "pipe" },
 	);

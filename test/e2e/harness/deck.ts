@@ -39,9 +39,15 @@ export function config(s: Scenario, toml: string): void {
 }
 
 export async function waitState(s: Scenario, what: string, probe: (st: DeckState) => boolean, ms = budgets.settle): Promise<DeckState> {
+	const first = state(s);
+	if (probe(first)) return first;
+	// Resolve the driven Deck once; polling its public socket avoids three processes per observation.
+	const socket = join(s.env.XDG_STATE_HOME as string, "agent-switchboard/decks", `${first.deck}.sock`);
 	return until(
-		() => {
-			const st = state(s);
+		async () => {
+			const response = await fetch("http://deck/state", { unix: socket });
+			if (!response.ok) throw new Error(`Deck state: ${response.status} ${await response.text()}`);
+			const st = (await response.json()) as DeckState;
 			return probe(st) && st;
 		},
 		ms,
@@ -76,28 +82,43 @@ export async function reply(s: Scenario, text: string): Promise<void> {
 	await until(() => s.signal(`replied.${text}`) !== "", budgets.settle, `reply ${text}`);
 }
 
-/** Dormant, Unseen sessions with a conversation each, optionally titled: started in a Deck, prompted, then their pi killed while idle. */
+/** Dormant, Unseen conversations, made through /new in one headless pi. No Deck needs to watch fixture setup. */
 export async function seed(s: Scenario, ...conversations: { turns: string[]; title?: string }[]): Promise<string[]> {
 	const ids: string[] = [];
+	const first = conversations[0];
+	if (!first) return ids;
+	let id = await launched(s, `reply ${first.turns[0]}`, { cwd: s.project });
+	const { tmux_session: host } = s.query("SELECT tmux_session FROM runtimes WHERE session_id = ?", id)[0] as { tmux_session: string };
+	const prompt = (text: string) => {
+		s.tmux(s.servers.sessions, "send-keys", "-t", `=${host}:`, "-l", text);
+		s.tmux(s.servers.sessions, "send-keys", "-t", `=${host}:`, "Enter");
+	};
 	for (const { turns, title } of conversations) {
-		s.swb("drive", "start", "--", "new", "--harness", "pi");
-		const st = await waitState(s, "the new pi live on the Stage", (x) => x.staged.kind === "live", budgets.piReady);
-		// Unfocused, so watching the turns land doesn't Visit them.
-		s.swb("drive", "focus", "out");
-		for (const turn of turns) await reply(s, turn);
-		const id = st.staged.id as string;
+		if (ids.length > 0) {
+			prompt("/new");
+			id = await until(
+				() => {
+					const row = s.query<{ session_id: string }>("SELECT session_id FROM runtimes WHERE tmux_session = ?", host)[0];
+					return row && row.session_id !== ids.at(-1) && row.session_id;
+				},
+				budgets.settle,
+				"the next conversation",
+			);
+		}
+		for (const turn of turns.slice(ids.length === 0 ? 1 : 0)) {
+			prompt(`reply ${turn}`);
+			await until(() => s.signal(`replied.${turn}`) !== "", budgets.settle, `reply ${turn}`);
+		}
 		if (title) {
-			s.keys("-l", `/name ${title}`, "Enter");
+			prompt(`/name ${title}`);
 			await until(() => entry(s, id)?.title === title, budgets.settle, `${title} titled`);
 		}
-		await until(() => entry(s, id)?.activity === "idle" && entry(s, id).unseen === true, budgets.settle, "idle");
-		s.tmux(s.servers.sessions, "kill-session", "-t", `=${st.staged.host}`);
-		await until(() => !entry(s, id).live, budgets.settle, "dormant");
+		await until(() => s.ls().some((row) => row.id === id && row.activity === "idle" && row.unseen), budgets.settle, "idle and Unseen");
 		ids.push(id);
 	}
-	s.swb("drive", "stop");
-	// Each seeding Deck saved its cursor for the next Deck in the Project, whichever settled last: the scenario's first
-	// Deck starts where a fresh one would, on the newest session.
+	s.tmux(s.servers.sessions, "kill-session", "-t", `=${host}`);
+	await until(() => s.ls().every((row) => !ids.includes(row.id) || !row.live), budgets.settle, "seeded conversations dormant");
+	// The scenario's first Deck starts where a fresh one would, on the newest session.
 	s.query("DELETE FROM deck_layouts");
 	return ids;
 }

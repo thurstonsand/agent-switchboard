@@ -311,16 +311,14 @@ export async function until<T>(
 	what: string,
 ): Promise<T> {
 	const deadline = Date.now() + timeoutMs;
+	let interval = 20;
 	for (;;) {
 		const value = await probe();
 		if (value) return value;
 		if (Date.now() > deadline) throw new Error(`timed out after ${timeoutMs} ms waiting for ${what}`);
-		await Bun.sleep(50);
+		await Bun.sleep(Math.min(interval, Math.max(0, deadline - Date.now())));
+		interval = Math.min(interval * 2, 200);
 	}
-}
-
-export function capture(s: Scenario, server: string, target: string): string {
-	return s.tmux(server, "capture-pane", "-p", "-J", "-t", target);
 }
 
 export function release(s: Scenario, name: string): void {

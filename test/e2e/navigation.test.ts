@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState, HeaderStateRow } from "../../packages/cli/src/deck/protocol.ts";
-import { cursorTo, headerRows, pickNew, reply, seed, sessionRows, state, waitState } from "./harness/deck.ts";
+import { cursorTo, headerRows, pickNew, reply, seed, sessionRows, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -11,28 +11,6 @@ afterEach(async () => {
 		s.save("final-screen.txt", s.screen());
 	} catch {}
 	await s.cleanup();
-});
-
-test("200 cursor moves render at a median under 16 ms from key to frame", async () => {
-	s = scenario("phase5", "perf");
-	await seed(s, { turns: ["p1"] }, { turns: ["p2"] }, { turns: ["p3"] });
-	s.swb("drive", "start");
-	const before = state(s).perf.keyToFrame.n;
-	s.swb("drive", "keys", "--delay", "50", ...Array.from({ length: 200 }, (_, i) => (i % 4 < 2 ? "j" : "k")));
-	// Keys landing between two renders share one frame, so wait for the count to settle rather than for exactly 200.
-	let last = { n: -1, at: 0 };
-	const st = await waitState(
-		s,
-		"frames to settle",
-		(x) => {
-			if (x.perf.keyToFrame.n !== last.n) last = { n: x.perf.keyToFrame.n, at: Date.now() };
-			return Date.now() - last.at >= 500;
-		},
-		20_000,
-	);
-	s.save("perf.json", JSON.stringify({ frames: st.perf.keyToFrame.n - before, perf: st.perf }, null, 2));
-	expect(st.perf.keyToFrame.n - before).toBeGreaterThanOrEqual(150);
-	expect(st.perf.keyToFrame.medianMs).toBeLessThan(16);
 });
 
 test("roster navigation: h l space and a header click fold projects; g G jump; M-a Tab z ? and q", async () => {

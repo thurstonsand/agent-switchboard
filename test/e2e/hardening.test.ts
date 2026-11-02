@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { VERSION } from "../../packages/cli/src/version.ts";
-import { cursorTo, entry, piSessions, reply, seed, sessionRows, state, waitState } from "./harness/deck.ts";
+import { cursorTo, entry, piSessions, reply, seed, sessionRows, waitState } from "./harness/deck.ts";
 import { alive, budgets, release, repo, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -11,33 +11,6 @@ afterEach(async () => {
 		s.save("final-screen.txt", s.screen());
 	} catch {}
 	await s.cleanup();
-});
-
-test("a pi-sessions subagent never becomes a Session and runs on the default tmux server; swb's tools replace pi-sessions' peer tools", async () => {
-	s = scenario("phase5", "subagents", { packages: ["pi-sessions"], recorder: true });
-	s.swb("drive", "start", "--", "new");
-	await waitState(s, "the parent live", (x) => x.staged.kind === "live" && x.focus === "stage", budgets.piReady);
-	await reply(s, "parent");
-	const [parent] = s.ls().map((e) => e.id) as [string];
-
-	s.keys("-l", "tools", "Enter");
-	await until(() => s.signal("tools") !== "", budgets.settle, "the tool list");
-	const tools = JSON.parse(s.signal("tools")) as string[];
-	for (const name of ["session_reachable", "session_send_message", "session_launch", "swb_update_session"]) expect(tools).toContain(name);
-	for (const name of ["subagent_list", "subagent_send", "subagent_cancel", "subagent_launch"]) expect(tools).toContain(name);
-	expect(tools).not.toContain("session_handoff");
-
-	s.keys("-l", "subagent s1", "Enter");
-	await until(() => s.signal("child.s1.entered") !== "", budgets.piReady, "the subagent's turn");
-	// The sessions server keeps the caller's TMUX_TMPDIR, so "default" here is the scenario's own default server.
-	const defaultServer = s.tmux("default", "list-sessions", "-F", "#{session_name}");
-	expect(defaultServer).toMatch(/^pi-[0-9a-f]+$/m);
-	expect(piSessions(s)).toHaveLength(1);
-	expect(s.ls().map((e) => e.id)).toEqual([parent]);
-	expect(sessionRows(state(s)).map((r) => r.id)).toEqual([parent]);
-	expect(s.query("select 1 from runtimes")).toHaveLength(1);
-	s.save("subagent-running.txt", `${s.screen()}\n--- default tmux server\n${defaultServer}`);
-	release(s, "child.s1");
 });
 
 test("session_launch starts a managed pi Session that records its parent, and messaging it while dormant wakes it", async () => {
@@ -131,6 +104,8 @@ test("a newer swb takes over: idle pis stop, a working one keeps its turn, and e
 	s = scenario("phase5", "upgrade");
 	const { sessions, ui } = s.servers;
 	const [a, b] = (await seed(s, { turns: ["a"] }, { turns: ["b"] })) as [string, string];
+	s.swb("drive", "start");
+	s.swb("drive", "stop");
 	s.swb("wake", a);
 	s.swb("wake", b);
 	await until(() => entry(s, a).live && entry(s, b).live, budgets.piReady, "both live");

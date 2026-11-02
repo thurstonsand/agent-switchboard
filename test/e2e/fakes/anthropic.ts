@@ -10,7 +10,7 @@
 // Requests without tools (titles) get a short reply, auto mode's classifier allows every action, and prompt suggestions none. Every request is appended to $FAKE_LOG as one
 // JSON line: the latest prompt, whether it carried a tool result, the tools offered, every swb message marker seen, and
 // the conversation as sent, instructions included.
-import { appendFileSync } from "node:fs";
+import { appendFileSync, writeFileSync } from "node:fs";
 import { agentStep, readerQuestion, titleOf } from "./agent.ts";
 
 const port = Number(process.env.FAKE_PORT ?? 0);
@@ -91,7 +91,10 @@ const server = Bun.serve({
 		);
 		// A slow model response keeps the native reader alive without giving it a write-capable holding tool.
 		const hold = /^reader-hold (\d+)/.exec(readerQuestion(lastTyped) ?? "");
-		if (hold && !toolResult) await Bun.sleep(Number(hold[1]));
+		if (hold && !toolResult) {
+			req.signal.addEventListener("abort", () => writeFileSync(`${signals}/reader.aborted`, "aborted\n"), { once: true });
+			await Bun.sleep(Number(hold[1]));
+		}
 
 		const [verb, ...rest] = lastTyped.trim().split(" ");
 		// Claude Code joins a prompt that failed to the next one, so only the newest paragraph can fail again.

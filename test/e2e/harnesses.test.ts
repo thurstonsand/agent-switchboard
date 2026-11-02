@@ -20,35 +20,14 @@ afterEach(async () => {
 	await s.cleanup();
 });
 
-test("a Claude Code session is recorded from its first turn to idle, with its transcript, title, and pid", async () => {
-	s = scenario("harnesses", "claude-lifecycle", { packages: [], recorder: true, harnesses: ["claude"] });
-	const claude = await launched(s, "claude", "reply hello from claude");
-	expect(claude).toMatchObject({ harness: "claude", open: true, live: true, cwd: s.project, parentId: null });
-	const [row] = s.query<{ transcript: string; phase: string }>("select transcript, phase from sessions where session_id = ?", claude.id);
-	expect(row?.phase).toBe("idle");
-	expect(existsSync(row?.transcript as string)).toBe(true);
-	await until(() => pane(s, claude.id).includes("hello from claude"), budgets.settle, "the reply on screen");
-	s.save("claude.txt", pane(s, claude.id));
-});
-
-test("a Codex session binds to the thread its TUI shows, and is recorded from its first turn to idle", async () => {
-	s = scenario("harnesses", "codex-lifecycle", { packages: [], recorder: true, harnesses: ["codex"] });
-	const codex = await launched(s, "codex", "reply hello from codex");
-	expect(codex).toMatchObject({ harness: "codex", open: true, live: true, cwd: s.project });
-	expect(s.tmux(s.servers.sessions, "display", "-p", "-t", `=${host(s, codex.id)}:`, "#{pane_title}")).toStartWith(codex.id.slice(0, 29));
-	await until(() => pane(s, codex.id).includes("hello from codex"), budgets.settle, "the reply on screen");
-	await until(
-		() => s.ls().find((x) => x.id === codex.id)?.title === "Hello from codex",
-		budgets.settle,
-		"titled by Codex's own title generator",
-	);
-	s.save("codex.txt", pane(s, codex.id));
-});
-
 test("Codex's /new moves its host to the new thread: that one is recorded, and the old one goes dormant", async () => {
 	s = scenario("harnesses", "codex-new", { packages: [], recorder: true, harnesses: ["codex"] });
 	const first = await launched(s, "codex", "reply first thread");
 	const hostName = host(s, first.id);
+	expect(first).toMatchObject({ harness: "codex", open: true, live: true, cwd: s.project, activity: "idle" });
+	expect(s.tmux(s.servers.sessions, "display", "-p", "-t", `=${hostName}:`, "#{pane_title}")).toStartWith(first.id.slice(0, 29));
+	await until(() => pane(s, first.id).includes("first thread"), budgets.settle, "the reply on screen");
+	await until(() => entry(s, first.id).title === "First thread", budgets.settle, "titled by Codex's own title generator");
 	type(s, first.id, "/new");
 	await Bun.sleep(1000);
 	s.tmux(s.servers.sessions, "send-keys", "-t", `=${hostName}:`, "-l", "reply second thread");
@@ -75,6 +54,10 @@ test("Claude Code's /clear moves its host to the new session before its first pr
 	s = scenario("harnesses", "claude-clear", { packages: [], recorder: true, harnesses: ["claude"] });
 	const first = await launched(s, "claude", "reply first session");
 	const hostName = host(s, first.id);
+	expect(first).toMatchObject({ harness: "claude", open: true, live: true, cwd: s.project, parentId: null, activity: "idle" });
+	const [row] = s.query<{ transcript: string }>("select transcript from sessions where session_id = ?", first.id);
+	expect(existsSync(row?.transcript as string)).toBe(true);
+	await until(() => pane(s, first.id).includes("first session"), budgets.settle, "the reply on screen");
 	type(s, first.id, "/clear");
 	await until(
 		() =>
@@ -254,6 +237,7 @@ test("session_launch and a scheduled launch, from pi, Claude Code, or Codex, sta
 			);
 			expect(child.group).toBe(expected);
 			await until(() => entry(s, parent.id).activity === "idle", ready, `${parent.harness} done launching ${name}`);
+			s.tmux(s.servers.sessions, "kill-session", "-t", `=${host(s, child.id)}`);
 		}
 	for (const parent of parents) {
 		const title = `${parent.harness} scheduled`;

@@ -43,11 +43,6 @@ async function firstTurn(): Promise<void> {
 	s.save("screen.txt", s.screen());
 }
 
-test("the first prompt turns a provisional runtime into a Session that works, settles, and takes its title", async () => {
-	s = scenario("phase1", "first-turn");
-	await firstTurn();
-});
-
 test("the dist:pi bundle, packed and installed with pi install as npm publishes it, records the first turn", async () => {
 	s = scenario("phase7", "installed-bundle", { packages: [], recorder: false });
 	// pi install shells out to npm, which the scenario's PATH leaves out; node's own bin dir carries both.

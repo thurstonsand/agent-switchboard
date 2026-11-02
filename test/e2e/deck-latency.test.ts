@@ -38,6 +38,8 @@ async function latencies(n: number): Promise<number[]> {
 test("with the db writer lock held and a 50 MB transcript being parsed, the cursor still moves within 100 ms", async () => {
 	s = scenario("phase2", "slow-worker");
 	const [a, b] = (await seed(s, { turns: ["small"] }, { turns: ["huge"] })) as [string, string];
+	s.swb("drive", "start");
+	s.swb("drive", "stop");
 	const [{ transcript }] = s.query<{ transcript: string }>("SELECT transcript FROM sessions WHERE session_id = ?", b) as [
 		{ transcript: string },
 	];

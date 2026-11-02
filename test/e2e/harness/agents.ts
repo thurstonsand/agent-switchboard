@@ -111,10 +111,16 @@ export function pane(s: Scenario, id: string): string {
  * as its own key: Codex takes keys arriving with a burst of typing as part of a paste, and leaves the prompt unsent.
  */
 export function type(s: Scenario, id: string, text: string): void {
+	const [runtime] = s.query<{ tmux_session: string; harness: string }>(
+		"select tmux_session, harness from runtimes where session_id = ?",
+		id,
+	);
+	if (!runtime) throw new Error(`no runtime for ${id}`);
+	const target = `=${runtime.tmux_session}:`;
 	s.tmux(s.servers.sessions, "set-buffer", "-b", "e2e-type", "--", text);
-	s.tmux(s.servers.sessions, "paste-buffer", "-p", "-d", "-b", "e2e-type", "-t", `=${host(s, id)}:`);
-	Bun.sleepSync(300);
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, id)}:`, "Enter");
+	s.tmux(s.servers.sessions, "paste-buffer", "-p", "-d", "-b", "e2e-type", "-t", target);
+	if (runtime.harness === "codex") Bun.sleepSync(300);
+	s.tmux(s.servers.sessions, "send-keys", "-t", target, "Enter");
 }
 
 export async function cardEndings(s: Scenario, harness: "pi" | "claude" | "codex"): Promise<void> {
@@ -128,8 +134,12 @@ export async function cardEndings(s: Scenario, harness: "pi" | "claude" | "codex
 	type(s, stopped.id, held("e1"));
 	type(s, failed.id, "fail boom");
 	await until(() => ["k1", "q1", "e1"].every((name) => s.signal(`${name}.entered`) !== ""), ready, "the tool calls running");
-	// Claude Code writes its transcript a few seconds behind.
-	await Bun.sleep(5000);
+	await until(
+		() => [cut, quit, stopped].every(({ id }) => /→ [^\n]+echo entered/.test(recalled(s, id))),
+		ready,
+		"the tool calls persisted for the dormant cards",
+	);
+	await until(() => entry(s, failed.id).errored, ready, "the failed turn recorded");
 	const pid = (id: string) => (s.query<{ pid: number }>("select pid from runtimes where session_id = ?", id)[0] as { pid: number }).pid;
 	const socket = `${host(s, cut.id)}.sock`;
 	process.kill(pid(cut.id), "SIGKILL");
