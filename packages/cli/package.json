@@ -7,7 +7,7 @@
 		"@earendil-works/pi-tui": "^1.4.0",
 		"@modelcontextprotocol/sdk": "1.32.1",
 		"@swb/shared": "workspace:*",
-		"croner": "10.0.1",
+		"croner": "11.0.0",
 		"smol-toml": "1.9.1"
 	}
 }
