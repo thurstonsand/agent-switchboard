@@ -9,8 +9,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  agree:
+    name: The tag, the version, and the changelog agree
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - run: |
+          version="${GITHUB_REF_NAME#v}"
+          published="$(jq -r .version packages/lines/pi/package.json)"
+          latest="$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md || true)"
+          if [ "$published" != "$version" ] || [ "$latest" != "## [$version]" ]; then
+            echo "::error::$GITHUB_REF_NAME, but packages/lines/pi/package.json says $published and CHANGELOG.md's latest release is '${latest#'## '}'. Release with mise run release."
+            exit 1
+          fi
+
   ci:
     name: CI
+    needs: agree
     permissions:
       contents: read
     uses: ./.github/workflows/ci.yml
@@ -30,12 +47,10 @@ jobs:
       - uses: jdx/mise-action@v5
       - run: bun install --frozen-lockfile
 
-      - name: Version and release notes from the tag
+      - name: Release notes from the changelog
         run: |
-          version="${GITHUB_REF_NAME#v}"
           scripts/extract-release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
-          bun scripts/set-release-version.ts "$version"
-          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
           echo "OUT=$RUNNER_TEMP/release" >> "$GITHUB_ENV"
 
       - name: Build every artifact

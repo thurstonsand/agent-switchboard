@@ -9,8 +9,10 @@ const manifest = {
 	license: source.license,
 	repository: source.repository,
 	keywords: source.keywords,
+	files: ["index.js", "CHANGELOG.md", "LICENSE"],
 	pi: { extensions: ["./index.js"] },
 	peerDependencies: source.peerDependencies,
 };
 writeFileSync("dist/pi/package.json", `${JSON.stringify(manifest, null, "\t")}\n`);
 copyFileSync("LICENSE", "dist/pi/LICENSE");
+copyFileSync("CHANGELOG.md", "dist/pi/CHANGELOG.md");

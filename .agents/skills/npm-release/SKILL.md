@@ -18,65 +18,39 @@ One `vX.Y.Z` tag on `main` produces three things, all from `.github/workflows/re
 
 ## Release model
 
-- Release from `main`.
-- Versions come from the tag. Nothing is bumped locally: the workflow runs `scripts/set-release-version.ts` before building.
-- `CHANGELOG.md` holds the human release notes. The GitHub release and the annotated tag carry the same text.
+- Release from `main` with `mise run release X.Y.Z`. Nothing else bumps a version, and CI never commits.
+- The released version lives on `main` in `packages/lines/pi/package.json`. The npm package publishes it, and `release:build` stamps the swb binaries with it.
+- `CHANGELOG.md` holds the human release notes: `## [Unreleased]`, then `## [X.Y.Z] - YYYY-MM-DD` sections, newest first. `mise run check` fails when a heading doesn't parse, versions don't strictly descend, or the latest release isn't the version in `package.json`. The npm package ships the changelog, so pi shows a release's entries after an update. The annotated tag and the GitHub release carry the same section.
 - Stable tags are immutable. Never force-push a release tag.
 - The `pi` branch is generated. Never edit it by hand.
 
 ## 1. Inspect release state
 
 - Check git state first. Leave unrelated changes alone. If release-relevant changes are uncommitted, ask whether they belong in the release.
-- Inspect changes since the latest stable tag (all of `main` for the first release).
+- Inspect changes since the latest stable tag.
 - Summarize user-facing features and fixes, install or release changes, and the likely semver bump.
 
 Ask the user to confirm the target version unless they already gave one.
 
-## 2. Prepare release notes
+## 2. Review the release notes
 
-Promote `## UNRELEASED` in `CHANGELOG.md` to a versioned entry in the existing format:
+Read `## [Unreleased]` against the changes. Omit internal refactors with no user-facing effect. If the user edits the notes, keep their wording. Commit and push any edits, and wait for CI on that commit.
 
-```md
-## X.Y.Z — YYYY-MM-DD
-
-### Added
-
-- **Summary** — detail
-```
-
-Omit internal refactors with no user-facing effect. If the user edits the notes, keep their wording.
-
-## 3. Verify locally
+## 3. Release
 
 ```sh
-mise run check
-mise run e2e
-mise run release:check
+mise run release X.Y.Z
 ```
 
-`release:check` builds every artifact into a scratch dir, runs this host's binary, and lists the npm tarball. Do not proceed on failures; fix them or report the blocker.
+It refuses unless you're on `main`, the tree is clean, `main` matches `origin/main`, CI on `HEAD` succeeded, `[Unreleased]` has entries, and `X.Y.Z` is greater than the current version. Then it runs `mise run release:check`, moves `[Unreleased]`'s entries under `## [X.Y.Z] - <today>`, writes the version to `packages/lines/pi/package.json` and `bun.lock`, commits `chore(release): X.Y.Z`, tags `vX.Y.Z` with that section as its body, and pushes `main` and the tag together.
 
-## 4. Commit and push
+If it refuses, fix the cause and run it again. If it fails after committing, inspect before retrying; never move or overwrite a tag that was pushed.
 
-Stage only release-relevant files, commit, and push `main`.
+## 4. Watch the workflow
 
-## 5. Tag
+`gh run list --workflow Release`, then watch it to completion. It first checks that the tag, `package.json`'s version, and the changelog's latest release agree, then runs CI, builds, replaces the `pi` branch, publishes to npm with the `latest` dist-tag (skipped when that version is already on npm), and creates the GitHub release last. Every step is safe to re-run, so a failure at any step is fixed and retried with `gh run rerun --failed`. A fix that needs a code change ships as the next patch: the tag is immutable.
 
-```sh
-VERSION=X.Y.Z
-scripts/extract-release-notes.sh "v${VERSION}" > "/tmp/agent-switchboard-v${VERSION}-notes.md"
-cat "/tmp/agent-switchboard-v${VERSION}-notes.md"
-git tag -a "v${VERSION}" --cleanup=verbatim -F "/tmp/agent-switchboard-v${VERSION}-notes.md"
-git push origin "v${VERSION}"
-```
-
-If the tag already exists, stop and inspect; do not overwrite it.
-
-## 6. Watch the workflow
-
-`gh run list --workflow Release`, then watch it to completion. It runs CI, builds, replaces the `pi` branch, publishes to npm with the `latest` dist-tag (skipped when that version is already on npm), and creates the GitHub release last. Every step is safe to re-run, so a failure at any step is fixed and retried with `gh run rerun --failed`. A fix that needs a code change ships as the next patch: the tag is immutable.
-
-## 7. Verify
+## 5. Verify
 
 ```sh
 VERSION=X.Y.Z

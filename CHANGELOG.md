@@ -1,10 +1,11 @@
 # Changelog
 
-## UNRELEASED
+## [Unreleased]
 
 ### Added
 
 - Archiving a session in a linked worktree can delete the worktree too: `d` in the Deck's archive prompt, or `D` with the sessions it started, and `deleteWorktree` on `swb_update_session`. The branch and the conversations stay. It refuses a worktree with modified or untracked files, a locked one, one a schedule launches into, and one other open sessions still use; ignored files go with it. A conversation whose directory is gone resumes in its Project root, with the same history and a notice that its files may differ, in all three harnesses.
+- pi shows what changed in swb's pi line after an update, under Extension Updates: the npm package now ships this changelog.
 - The Deck dims the panes the keyboard isn't in, by 35% on a dark terminal and 15% on a light one, so a cursor drawn in another pane no longer looks like where you're typing.
 
 ### Changed
@@ -29,7 +30,7 @@
 - The Deck's cursor no longer stalls while something else is writing to the disk, such as a build or a backup. Each move wrote the Stage's card and target to files, and a key could wait 100 ms or more on those writes; they now pass over the Deck's socket.
 - Claude Code in auto mode no longer reads blocked while its classifier checks a call, nor for the whole run of a command it allowed. A prompt sent in auto mode marks blocked only for `AskUserQuestion`, so the dialog auto mode falls back to after repeated denials goes unmarked, and a dialog after switching out of auto mode mid-turn can go unmarked until the next prompt.
 
-## 0.9.0 — 2026-10-27
+## [0.9.0] - 2026-10-27
 
 Schema v8: update swb and the pi line together.
 
@@ -46,7 +47,7 @@ Schema v8: update swb and the pi line together.
 - Claude Code on a machine with managed settings shows when it's blocked on a permission prompt or errored, and follows `/clear` and `/resume`. Its built-in `cc-plugin-sec-default` mod skips every plugin's settings hooks, which the line used for those, and Claude Code posted a notice for each. A title set through swb still uses one, so on such a machine Claude Code doesn't take it, and says so.
 - swb started with no locale, as launchd, cron, or a bare shell start it, works as from your terminal. tmux printed a tab to such a client as `_`, so a Deck opened from one lost its roster, every swb command restarted the clock, and `swb quit` failed.
 
-## 0.8.0 — 2026-10-26
+## [0.8.0] - 2026-10-26
 
 Schema v7: update swb and the pi line together.
 
@@ -81,7 +82,7 @@ Schema v7: update swb and the pi line together.
 - Several swb processes opening a new database at once, as the first sessions after an install or the first indexing after this update do, no longer fail with `database is locked`.
 - Waking a session in Inactive leaves its row there while it starts, instead of moving it to its Project and back.
 
-## 0.7.0 — 2026-10-21
+## [0.7.0] - 2026-10-21
 
 Schema v6: update swb and the pi line together.
 
@@ -133,14 +134,14 @@ Schema v6: update swb and the pi line together.
 - `group_by = "worktree"`. A config that still sets `group_by` fails to load; delete the key.
 - `harness`, the harness `n` started. The shortlist's default replaces it; a config that still sets `harness` fails to load.
 
-## 0.6.4 — 2026-10-16
+## [0.6.4] - 2026-10-16
 
 ### Fixed
 
 - On tmux 3.8, a row's Peek and the `?` help were dark grey boxes on a light terminal, their dim text hard to read, and copy mode highlighted search matches in its own colours instead of your terminal's. All of them wear your terminal's colours again, as on tmux 3.7.
 - ctrl-hjkl move out of an nvim Editor again when your config is LazyVim, whose own window keys used to replace swb's.
 
-## 0.6.3 — 2026-10-16
+## [0.6.3] - 2026-10-16
 
 Requires Claude Code 2.1.300 or later, and pi 1.2.0 or later.
 
@@ -152,7 +153,7 @@ Requires Claude Code 2.1.300 or later, and pi 1.2.0 or later.
 
 - Claude Code: after an upgrade restarted a session, a prompt you'd already sent could reappear in the input box, and a restored draft could be lost at the next restart.
 
-## 0.6.2 — 2026-10-15
+## [0.6.2] - 2026-10-15
 
 ### Added
 
@@ -166,7 +167,7 @@ Requires Claude Code 2.1.300 or later, and pi 1.2.0 or later.
 - Codex asked permission before every call to swb's tools. They now declare themselves read-only, or non-destructive and closed-world, which Codex's default policy runs without asking.
 - A Codex session swb had just started could have an error printed over its screen: swb read its thread before Codex had written it. A read now has five seconds to succeed before swb says so.
 
-## 0.6.1 — 2026-10-15
+## [0.6.1] - 2026-10-15
 
 The first release of these changes: v0.6.0 stopped in CI, which lacked Claude Code and Codex, before it published anything.
 
@@ -200,7 +201,7 @@ Schema v5: update swb and the pi line together. With pi-sessions, needs pi-sessi
 - A pi whose first turn starts during another extension's startup shows as working for that turn, not idle.
 - pi's links are clickable hyperlinks on the Stage.
 
-## 0.5.0 — 2026-10-10
+## [0.5.0] - 2026-10-10
 
 Needs pi-sessions 0.17.0 or later for Operators.
 
@@ -221,7 +222,7 @@ Needs pi-sessions 0.17.0 or later for Operators.
 
 - The help popup fits its keys instead of wrapping and scrolling.
 
-## 0.4.0 — 2026-10-10
+## [0.4.0] - 2026-10-10
 
 Schema v3: update swb and the recorder together; an older one refuses the db.
 
@@ -251,7 +252,7 @@ Schema v3: update swb and the recorder together; an older one refuses the db.
 - A pi started with no viewer gets the terminal's palette hues, not pi's built-in ones.
 - Archive and reap stop pi with SIGTERM, so its shutdown hooks run.
 
-## 0.3.0 — 2026-10-09
+## [0.3.0] - 2026-10-09
 
 ### Added
 
@@ -263,13 +264,13 @@ Schema v3: update swb and the recorder together; an older one refuses the db.
 
 - `M-a e` and the other view keys put the keyboard on the pane they bring up. A split refused for want of columns puts it on pi.
 
-## 0.2.2 — 2026-10-09
+## [0.2.2] - 2026-10-09
 
 ### Fixed
 
 - A project's own tools win in managed pi again. When `tmux` resolved to a mise shim, it prepended the starting project's mise PATH to each new pane, and the shell's mise activation then pushed the project's `.venv/bin` far down PATH, so `python3` resolved to mise's python instead of the venv's.
 
-## 0.2.1 — 2026-10-09
+## [0.2.1] - 2026-10-09
 
 ### Added
 
@@ -280,7 +281,7 @@ Schema v3: update swb and the recorder together; an older one refuses the db.
 - Managed pi and the editor start in your login shell from the passwd entry. Before, they ran under tmux's `/bin/sh`, skipping your shell setup and mise activation, so a project tool could resolve to the system one (e.g. a python too old for `tomllib`).
 - swb's tmux servers no longer pick up the starting project's mise env through a mise `tmux` shim.
 
-## 0.2.0 — 2026-10-09
+## [0.2.0] - 2026-10-09
 
 ### Added
 
@@ -291,7 +292,7 @@ Schema v3: update swb and the recorder together; an older one refuses the db.
 
 - A session is tracked from its first turn, not its first user message. A pi-sessions handoff child, which starts with a custom message, used to never get a row. A provider retry after `swb_archive` no longer reopens the session.
 
-## 0.1.0 — 2026-10-08
+## [0.1.0] - 2026-10-08
 
 ### Added
 

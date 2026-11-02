@@ -45,9 +45,10 @@ usage = 'arg "<out>"'
 run = """
 set -eu
 out="$usage_out"
+version="$(bun -p 'JSON.stringify(require("./packages/lines/pi/package.json").version)')"
 mkdir -p "$out"
 for target in linux-x64 darwin-arm64; do
-  bun build --compile --minify --splitting --sourcemap --bytecode --format=esm --target="bun-$target" packages/cli/src/main.ts packages/cli/src/deck/worker.ts --outfile "$out/swb-$target"
+  bun build --compile --minify --splitting --sourcemap --bytecode --format=esm --target="bun-$target" --define SWB_VERSION="$version" packages/cli/src/main.ts packages/cli/src/deck/worker.ts --outfile "$out/swb-$target"
 done
 cp -R dist/pi "$out/pi"
 npm pack ./dist/pi --pack-destination "$out"
@@ -70,6 +71,15 @@ tar -tzf "$out"/thurstonsand-pi-agent-switchboard-*.tgz
 ls -l "$out"
 """
 
+[tasks.release]
+description = "Release X.Y.Z from a green, pushed main: move Unreleased under it, set the version, commit, tag, and push"
+usage = 'arg "<version>" help="The version to release, X.Y.Z"'
+run = 'bun scripts/release.ts "$usage_version"'
+
+[tasks."changelog:check"]
+description = "CHANGELOG.md's headings parse, its versions descend, and its latest release is the version published"
+run = "bun scripts/changelog.ts"
+
 [tasks.readme]
 description = "Regenerate README.md's settings block from the settings registry"
 run = "bun scripts/settings-readme.ts"
@@ -79,12 +89,12 @@ run = "bun scripts/settings-readme.ts --check"
 
 [tasks.check]
 description = "Full verification gate"
-depends = ["lint", "typecheck", "build", "dist:pi", "readme:check"]
+depends = ["lint", "typecheck", "build", "dist:pi", "readme:check", "changelog:check"]
 
 [tasks.install]
 description = "Build swb from this checkout into ~/.local/bin"
 run = [
-  "bun build --compile --minify --splitting --sourcemap --bytecode --format=esm --define SWB_INSTALL_VERSION=\\\"$(git describe --tags --match 'v*' | sed 's/^v//')\\\" packages/cli/src/main.ts packages/cli/src/deck/worker.ts --outfile dist/swb",
+  "bun build --compile --minify --splitting --sourcemap --bytecode --format=esm --define SWB_VERSION=\\\"$(git describe --tags --match 'v*' | sed 's/^v//')\\\" packages/cli/src/main.ts packages/cli/src/deck/worker.ts --outfile dist/swb",
   "install -m 0755 dist/swb ~/.local/bin/swb",
 ]
 

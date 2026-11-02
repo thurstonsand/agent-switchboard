@@ -23,6 +23,7 @@ mise run e2e            # real pi in a private tmux server, scripted by the faux
 mise run install        # build swb from this checkout into ~/.local/bin
 mise run dist:pi        # build the pi extension bundle exactly as the release publishes it
 mise run release:check  # build every release artifact into a scratch dir and smoke-test this host's binary
+mise run release X.Y.Z  # release a green, pushed main: changelog, version, commit, tag, push
 mise run evidence       # render the VHS tapes in test/e2e/tapes to test/e2e/artifacts/phase6/videos
 mise run perf           # time what a person waits for, on real harnesses; `-- --help` for options
 mise run perf:compare   # two results files side by side

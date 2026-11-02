@@ -7,8 +7,8 @@ if [[ $# -ne 1 ]]; then
 fi
 
 awk -v version="${1#v}" '
-  # Headings look like "## X.Y.Z — YYYY-MM-DD".
-  index($0, "## " version " ") == 1 {
+  # Headings look like "## [X.Y.Z] - YYYY-MM-DD".
+  index($0, "## [" version "] ") == 1 {
     capture = 1
     found = 1
     print
