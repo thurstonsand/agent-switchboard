@@ -132,8 +132,8 @@ function readJson(path: string): Record<string, unknown> | null {
 /**
  * Starts a harness's own server through the login shell, writes it `lines`, and returns the first line it writes back
  * that `pick` takes. The server answers and then waits for more, so once that line is in its input ends, and it exits
- * as it would from any pipe. A signal there instead races its shutdown: a Claude Code killed outright mid-exit leaves
- * the next session to stop waiting seconds on its way out.
+ * as it would from any pipe. A signal there instead races its shutdown: a Claude Code killed while it writes
+ * ~/.claude.json leaves ~/.claude.json.lock behind, and the next Claude to stop waits seconds for that lock to go stale.
  */
 async function serverReply<T>(command: string, lines: object[], pick: (message: Record<string, unknown>) => T | undefined): Promise<T> {
 	const proc = Bun.spawn([loginShell(), "-lic", command], {
