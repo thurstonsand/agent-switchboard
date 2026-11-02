@@ -176,9 +176,6 @@ export type DeckState = {
 /** Where the shell sits against the pane holding the agent, or that it replaces the agent in its pane, when neither half would have room. */
 export type ShellAt = "below" | "beside" | "replace";
 
-/** `side` is the target file of the Stage's second pane, which exists only while split is showing. */
-export type DeckPaths = { sock: string; card: string; target: string; side: string; shell: string };
-
 /** A Deck's terminal as its programs see it, in hex; `palette` is null when the terminal didn't report all 16. */
 export type TerminalProfile = { foreground: string; background: string; palette: string[] | null; scheme: "light" | "dark" };
 
@@ -186,7 +183,7 @@ export type TerminalProfile = { foreground: string; background: string; palette:
 export type NewSession = { type: "new"; cwd: string; group: string | null; target: LaunchTarget | null; harness: Harness | null };
 
 export type ToWorker =
-	| { type: "init"; deck: string; paths: DeckPaths; config: Config; here: string }
+	| { type: "init"; deck: string; config: Config; here: string }
 	| { type: "layout"; layout: DeckLayout }
 	| { type: "wake"; id: string }
 	| { type: "config"; config: Config }

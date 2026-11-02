@@ -35,19 +35,7 @@ import { quote, SESSIONS, tmux, tmuxAsync, tmuxTry, UI } from "../tmux.ts";
 import { VERSION } from "../version.ts";
 import { writeConfig } from "../write-config.ts";
 import { Control } from "./control.ts";
-import {
-	deckEnv,
-	deckPaths,
-	HELP_POPUP,
-	NARROW_BELOW,
-	placeholderName,
-	removeDeckFiles,
-	rosterCols,
-	SPLIT_FROM,
-	stageScript,
-	writeAtomic,
-	writeCard,
-} from "./deck.ts";
+import { deckEnv, deckSocket, HELP_POPUP, NARROW_BELOW, placeholderName, rosterCols, SPLIT_FROM, stageScript } from "./deck.ts";
 import { type Overlay, type OverlayButton, Overlays, type OverlayView } from "./overlay.ts";
 import type {
 	Card,
@@ -116,7 +104,7 @@ const [stagePane, stageTty] = tmux(UI, "display", "-p", "-t", rosterPane, "#{P:#
 	.trim()
 	.split(" ") as [string, string];
 if (!stagePane || !stageTty) throw new UsageError("__roster: its window names no Stage");
-const paths = deckPaths(deck);
+const sock = deckSocket(deck);
 const placeholder = placeholderName(deck);
 /** config.toml as this Deck last applied it; a file that fails to read leaves it be, and says so. */
 let loaded: Loaded = readConfig();
@@ -159,8 +147,10 @@ const perf = { render: new Stat(), switchClient: new Stat(), keyToSwitch: new St
 // ── tmux ────────────────────────────────────────────────────────────────
 
 const ctl = new Control((line) => {
-	const [kind, tty] = line.split(" ");
-	if (kind === "%client-session-changed" && tty) stageUp([tty]);
+	const [kind, tty, , session] = line.split(" ");
+	if (kind !== "%client-session-changed" || !tty) return;
+	stageUp([tty]);
+	if (session === placeholder) parked(tty);
 });
 
 // ── model ───────────────────────────────────────────────────────────────
@@ -394,7 +384,9 @@ const stage = {
 	/** While `new` starts, the Stage holds on its loading card until the cursor is moved. */
 	holdForNew: false,
 	applied: onCard("empty", null, EMPTY),
-	cardJson: "",
+	/** The card the placeholder shows, as the JSON `/card` streams; `cardChanged` settles each time it changes. */
+	cardJson: JSON.stringify({ head: [], lines: ["Deck starting…"], turns: null, tail: [], ending: null, agent: "" } satisfies Card),
+	cardChanged: Promise.withResolvers<void>(),
 	watched: null as string | null,
 	visited: false,
 	visitTimer: null as Timer | null,
@@ -597,7 +589,7 @@ function switchStage(client: StageClient, target: string, force: boolean): void 
 			perf.switchClient.add(performance.now() - t0);
 			if (keyAt > 0) perf.keyToSwitch.add(performance.now() - keyAt);
 		} catch {
-			// A Stage client re-attaches to its target file whenever it drops.
+			// A Stage client that drops parks on the placeholder, which parked() hears and puts right.
 		}
 	});
 }
@@ -618,7 +610,6 @@ function syncSide(): void {
 				return;
 			}
 			if (side?.target === want) return;
-			writeAtomic(paths.side, want);
 			if (side) {
 				side.target = want;
 				if (side.up) await ctl.run(`switch-client -c ${quote(side.tty)} -t ${quote(`=${want}`)}`);
@@ -628,7 +619,7 @@ function syncSide(): void {
 				UI,
 				...["split-window", "-h", "-d", "-l", "35%", "-t", stagePane, "-P", "-F", "#{pane_id}\t#{pane_tty}"],
 				...deckEnv(),
-				stageScript(deck, paths.side),
+				stageScript(deck, want),
 			);
 			const [pane, tty] = created.split("\t") as [string, string];
 			side = { pane, tty, up: false, target: want };
@@ -654,12 +645,11 @@ function syncShell(fromOver: boolean): void {
 				if (!moving) shellKeys = false;
 			}
 			if (want === null || shellPane) return;
-			writeAtomic(paths.shell, want.target);
 			const created = await tmuxAsync(
 				UI,
 				...["split-window", want.at === "beside" ? "-h" : "-v", "-d", "-l", "50%", "-t", parent, "-P", "-F", "#{pane_id}"],
 				...deckEnv(),
-				stageScript(deck, paths.shell, true),
+				stageScript(deck, want.target, true),
 			);
 			shellPane = { pane: created, target: want.target, at: want.at, parent };
 			if (refocus || shellKeys) await tmuxAsync(UI, "select-pane", "-t", created);
@@ -730,17 +720,43 @@ function harnessStarting(a: Applied): boolean {
 	return a.kind === "loading" && a.target !== placeholder;
 }
 
-function writeStageCard(d: Applied): void {
+function setStageCard(d: Applied): void {
 	if (!d.card || d.target !== placeholder) return;
 	const json = JSON.stringify(d.card);
 	if (json === stage.cardJson) return;
 	stage.cardJson = json;
-	writeCard(paths, d.card);
+	stage.cardChanged.resolve();
+	stage.cardChanged = Promise.withResolvers();
+}
+
+/**
+ * The Stage's card as newline-delimited JSON, for the placeholder: each line the latest card, once the placeholder has
+ * taken the last one, so a burst of cursor moves sends only where it ended. It ends with the Deck.
+ */
+function cardStream(): Response {
+	const encoder = new TextEncoder();
+	let sent: string | null = null;
+	let gone = false;
+	const body = new ReadableStream(
+		{
+			async pull(controller) {
+				while (!gone && stage.cardJson === sent) await stage.cardChanged.promise;
+				if (gone) return;
+				sent = stage.cardJson;
+				controller.enqueue(encoder.encode(`${sent}\n`));
+			},
+			cancel() {
+				gone = true;
+			},
+		},
+		{ highWaterMark: 0 },
+	);
+	return new Response(body, { headers: { "content-type": "application/x-ndjson" } });
 }
 
 function apply(): void {
 	const d = desired();
-	span("roster.card", () => writeStageCard(d));
+	span("roster.card", () => setStageCard(d));
 	const prev = stage.applied;
 	stage.applied = d;
 	syncVisit();
@@ -768,7 +784,6 @@ function apply(): void {
 	if (harnessStarting(d) !== harnessStarting(prev)) tagStage("@swb_starting", harnessStarting(d));
 	syncLabels();
 	if (d.target === prev.target) return;
-	writeAtomic(paths.target, d.target);
 	switchStage(main, d.target, false);
 }
 
@@ -3485,7 +3500,7 @@ function syncRoster(toRoster: boolean): Promise<void> {
 				rosterHidden = rosterWindow !== stageWindow;
 				syncStatus();
 				// The card carries the title and state only while the roster is off-screen.
-				writeStageCard(desired());
+				setStageCard(desired());
 			}
 		}),
 	);
@@ -3613,7 +3628,7 @@ function layout(): Promise<void> {
 			else await tmuxAsync(UI, "resize-pane", "-t", rosterPane, "-x", String(rosterWidth()));
 		}
 		syncStatus();
-		if (narrow !== wasNarrow) writeStageCard(desired());
+		if (narrow !== wasNarrow) setStageCard(desired());
 		shownNarrow = narrow;
 	});
 }
@@ -3657,7 +3672,7 @@ function cleanup(): never {
 	overlays.closeAll();
 	stopDiscovery();
 	tmuxTry(SESSIONS, "kill-session", "-t", `=${placeholder}`);
-	removeDeckFiles(deck);
+	rmSync(sock, { force: true });
 	ctl.close();
 	process.exit(0);
 }
@@ -4169,12 +4184,17 @@ void queryColors(null);
 main.tty = stageTty;
 tmux(UI, "set", "-t", deck, "@swb_roster", rosterPane, ";", "set", "-p", "-t", rosterPane, "@swb_label", "swb");
 focusedPane = rosterPane;
-rmSync(paths.sock, { force: true });
+rmSync(sock, { force: true });
+// bun-types 1.4.4 leaves idleTimeout off unix servers, but Bun applies it to them, after 10 s by default.
+// @ts-expect-error
 Bun.serve({
-	unix: paths.sock,
+	unix: sock,
+	// The placeholder's card stream stays open, idle between cards, for as long as the Deck lives.
+	idleTimeout: 0,
 	async fetch(req) {
 		const url = new URL(req.url);
 		if (req.method === "GET" && url.pathname === "/state") return Response.json(viewState());
+		if (req.method === "GET" && url.pathname === "/card") return cardStream();
 		if (req.method === "POST" && url.pathname === "/cmd") {
 			const body = await req.json();
 			const { cmd, args: argv } = body;
@@ -4191,10 +4211,16 @@ Bun.serve({
 	},
 });
 
-post({ type: "init", deck, paths, config, here });
+post({ type: "init", deck, config, here });
 post({ type: "dirs" });
 if (args.new) newSession(args.new, null, null, args.harness ? asHarness(args.harness) : null);
 void layout();
+
+/** A Stage client on the placeholder unasked, as one that dropped and parked there is, goes back to what it shows. */
+function parked(tty: string): void {
+	if (tty === main.tty && main.up && stage.applied.target !== placeholder) switchStage(main, stage.applied.target, true);
+	if (side && tty === side.tty && side.up && side.target !== placeholder) switchStage(side, side.target, true);
+}
 
 /** A Stage's nested client is up once it attaches to the sessions server, which the control client hears. */
 function stageUp(ttys: string[]): void {

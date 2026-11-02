@@ -426,6 +426,8 @@ async function handle(message: ToWorker): Promise<void> {
 	switch (message.type) {
 		case "init":
 			deck = message.deck;
+			// Only now: the placeholder follows the roster's card stream, and the roster posts init once its socket listens.
+			ensurePlaceholder(deck);
 			config = message.config;
 			db = openStore();
 			layoutRoot = projectRoot(message.here);

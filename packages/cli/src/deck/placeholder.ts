@@ -1,5 +1,3 @@
-import { readFileSync, watch } from "node:fs";
-import { basename, dirname } from "node:path";
 import { parseArgs } from "node:util";
 import { matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { span } from "@swb/shared/trace";
@@ -7,35 +5,40 @@ import { UsageError } from "../errors.ts";
 import type { Card, Turn } from "./protocol.ts";
 import { cyan, dim, gray, yellow } from "./style.ts";
 
-const { values: args } = parseArgs({ args: process.argv.slice(3), options: { card: { type: "string" }, sock: { type: "string" } } });
-if (!args.card || !args.sock) throw new UsageError("__placeholder: --card and --sock are required");
-const cardPath = args.card;
+const { values: args } = parseArgs({ args: process.argv.slice(3), options: { sock: { type: "string" } } });
+if (!args.sock) throw new UsageError("__placeholder: --sock is required");
 const sock = args.sock;
 
 let card: Card = { head: [], lines: [], turns: null, tail: [], ending: null, agent: "" };
-let raw = "";
 let typedAt = 0;
 /** How long a keystroke's notice stays. */
 const TYPED_MS = 1500;
 let frame = "";
 
 /**
- * The Deck writes the card before it starts the placeholder and replaces it by renaming over it, so a missing card
- * means the Deck is gone. The Deck's worker can start a placeholder again just after the Deck's exit killed it; that one
- * exits here, on its first read.
+ * The roster streams the Stage's card, a line of JSON each time it changes, for as long as its Deck lives. The stream
+ * ending or failing means the Deck is gone, so this placeholder goes too, as does one the Deck's worker started again
+ * just after the Deck's exit killed it.
  */
-function load(): boolean {
-	let next: string;
+async function follow(): Promise<never> {
 	try {
-		next = readFileSync(cardPath, "utf8");
+		const response = await fetch("http://deck/card", { unix: sock, timeout: false });
+		let buffer = "";
+		for await (const chunk of response.body?.pipeThrough(new TextDecoderStream()) ?? []) {
+			buffer += chunk;
+			let nl = buffer.indexOf("\n");
+			while (nl !== -1) {
+				card = JSON.parse(buffer.slice(0, nl)) as Card;
+				buffer = buffer.slice(nl + 1);
+				nl = buffer.indexOf("\n");
+				span("placeholder.draw", draw);
+			}
+		}
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") process.exit(0);
-		throw error;
+		// A card that won't parse is a bug, not a Deck going away.
+		if (error instanceof SyntaxError) throw error;
 	}
-	if (next === raw) return false;
-	raw = next;
-	card = JSON.parse(raw) as Card;
-	return true;
+	process.exit(0);
 }
 
 function turnLines(turn: Turn, width: number): string[] {
@@ -118,9 +121,5 @@ process.on("SIGWINCH", () => {
 });
 process.on("SIGHUP", () => process.exit(0));
 
-// The roster replaces the card by renaming over it, which a watch on its directory hears.
-watch(dirname(cardPath), (_event, name) => {
-	if (name === basename(cardPath) && span("placeholder.load", load)) span("placeholder.draw", draw);
-});
-load();
 draw();
+void follow();

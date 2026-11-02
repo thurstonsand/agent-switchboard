@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { type Harness, stateDir } from "@swb/shared";
 import { now, since, span } from "@swb/shared/trace";
@@ -8,7 +8,7 @@ import { ensureOperatorDir } from "../operator.ts";
 import { ensureServer, ensureSessionsServer, hook, notify, onlyControl, randomHex, SWB, startScrubbed } from "../sessions.ts";
 import { openStore } from "../store.ts";
 import { CLIENT_CWD, cleanEnv, listSessions, quote, SESSIONS, tmux, tmuxClient, tmuxTry, UI } from "../tmux.ts";
-import type { Card, DeckPaths, DeckState } from "./protocol.ts";
+import type { DeckState } from "./protocol.ts";
 
 export const HELP_POPUP = ["-w", "72", "-h", "37", "-T", " swb keys ", `${SWB} __help`];
 
@@ -25,28 +25,13 @@ export function decksDir(): string {
 	return join(stateDir(), "decks");
 }
 
-export function deckPaths(deck: string): DeckPaths {
-	const dir = decksDir();
-	return {
-		sock: join(dir, `${deck}.sock`),
-		card: join(dir, `${deck}.card.json`),
-		target: join(dir, `${deck}.target`),
-		side: join(dir, `${deck}.side`),
-		shell: join(dir, `${deck}.shell`),
-	};
+/** The Deck's socket, the one file a Deck keeps: everything else it shares lives in its processes and in tmux. */
+export function deckSocket(deck: string): string {
+	return join(decksDir(), `${deck}.sock`);
 }
 
 export function placeholderName(deck: string): string {
 	return `placeholder-${deck}`;
-}
-
-export function writeAtomic(path: string, content: string): void {
-	writeFileSync(`${path}.tmp`, content);
-	renameSync(`${path}.tmp`, path);
-}
-
-export function writeCard(paths: DeckPaths, card: Card): void {
-	writeAtomic(paths.card, JSON.stringify(card));
 }
 
 const deckCmd = (what: string) => notify(`__deck #{session_name} ${what}`);
@@ -245,12 +230,11 @@ export function ensureUiServer(config: Config): void {
 	);
 }
 
-/** The Deck's placeholder session on the sessions server, which renders its cards. */
+/** The Deck's placeholder session on the sessions server, which renders the cards its roster streams. */
 export function ensurePlaceholder(deck: string): void {
 	const name = placeholderName(deck);
 	if (tmuxTry(SESSIONS, "has-session", "-t", `=${name}`).ok) return;
-	const paths = deckPaths(deck);
-	const command = `exec ${[SWB, "__placeholder", "--card", paths.card, "--sock", paths.sock].map(quote).join(" ")}`;
+	const command = `exec ${[SWB, "__placeholder", "--sock", deckSocket(deck)].map(quote).join(" ")}`;
 	tmux(
 		SESSIONS,
 		"new-session",
@@ -297,22 +281,18 @@ export function deckEnv(): string[] {
 }
 
 /**
- * A Stage pane: a nested client of the sessions server. It waits for the Deck's own client first, because a
- * nested client that attaches before the real terminal has no colors to inherit. Whenever it drops, it re-attaches
- * to the Deck's current target, else the placeholder; a shell's pane instead closes with its shell.
+ * A Stage pane: a nested client of the sessions server, attached first to `target`. It waits for the Deck's own client
+ * first, because a nested client that attaches before the real terminal has no colors to inherit. Whenever it drops, it
+ * parks on the placeholder, and the roster, hearing it land there, switches it back to what the Stage shows; a shell's
+ * pane instead closes with its shell.
  */
-export function stageScript(deck: string, targetPath: string, closes = false): string {
+export function stageScript(deck: string, target: string, closes = false): string {
 	const ui = tmuxClient(UI).map(quote).join(" ");
 	const sessions = tmuxClient(SESSIONS).map(quote).join(" ");
 	const wait = ["unset TMUX TMUX_PANE", `until ${ui} list-clients -t ${quote(`=${deck}`)} 2>/dev/null | grep -q .; do sleep 0.05; done`];
-	if (closes) return [...wait, `exec ${sessions} attach -t "=$(cat ${quote(targetPath)})" >/dev/null 2>&1`].join("\n");
-	return [
-		...wait,
-		"while :; do",
-		`  t=$(cat ${quote(targetPath)} 2>/dev/null)`,
-		`  ${sessions} attach -t "=$t" >/dev/null 2>&1 || ${sessions} attach -t ${quote(`=${placeholderName(deck)}`)} >/dev/null 2>&1 || sleep 0.2`,
-		"done",
-	].join("\n");
+	const attach = (session: string) => `${sessions} attach -t ${quote(`=${session}`)} >/dev/null 2>&1`;
+	if (closes) return [...wait, `exec ${attach(target)}`].join("\n");
+	return [...wait, attach(target), "while :; do", `  ${attach(placeholderName(deck))} || sleep 0.2`, "done"].join("\n");
 }
 
 /** `continue`: pi takes the keyboard on the most recent session in this Project, or a new one. */
@@ -329,11 +309,7 @@ export async function openDeck(intent: DeckIntent): Promise<void> {
 	span("deck.sessions-server", ensureSessionsServer);
 	span("deck.ui-server", () => ensureUiServer(config));
 	const deck = `deck-${randomHex(3)}`;
-	const paths = deckPaths(deck);
 	mkdirSync(decksDir(), { recursive: true, mode: 0o700 });
-	writeCard(paths, { head: [], lines: ["Deck starting…"], turns: null, tail: [], ending: null, agent: "" });
-	writeAtomic(paths.target, placeholderName(deck));
-	span("deck.placeholder", () => ensurePlaceholder(deck));
 	const panes = now();
 
 	const cols = process.stdout.columns;
@@ -359,7 +335,7 @@ export async function openDeck(intent: DeckIntent): Promise<void> {
 		"-y",
 		String(rows),
 		...env,
-		stageScript(deck, paths.target),
+		stageScript(deck, placeholderName(deck)),
 		";",
 		"set",
 		"-wF",
@@ -402,7 +378,7 @@ export function liveDecks(): string[] {
 	}
 	const live = names.filter((deck) => {
 		if (tmuxTry(UI, "has-session", "-t", `=${deck}`).ok) return true;
-		removeDeckFiles(deck);
+		rmSync(deckSocket(deck), { force: true });
 		return false;
 	});
 	// A roster that died without its cleanup leaves its placeholder behind on the sessions server.
@@ -413,18 +389,13 @@ export function liveDecks(): string[] {
 	return live;
 }
 
-export function removeDeckFiles(deck: string): void {
-	const paths = deckPaths(deck);
-	for (const path of [paths.sock, paths.card, paths.target, paths.side, paths.shell]) rmSync(path, { force: true });
-}
-
 export async function fetchState(deck: string): Promise<DeckState> {
-	const response = await fetch("http://deck/state", { unix: deckPaths(deck).sock });
+	const response = await fetch("http://deck/state", { unix: deckSocket(deck) });
 	if (!response.ok) throw new SwbError(`deck ${deck}: GET /state: ${response.status}`);
 	return (await response.json()) as DeckState;
 }
 
 export async function postCommand(deck: string, cmd: string, args: string[]): Promise<void> {
-	const response = await fetch("http://deck/cmd", { unix: deckPaths(deck).sock, method: "POST", body: JSON.stringify({ cmd, args }) });
+	const response = await fetch("http://deck/cmd", { unix: deckSocket(deck), method: "POST", body: JSON.stringify({ cmd, args }) });
 	if (!response.ok) throw new SwbError(`deck ${deck}: ${cmd}: ${await response.text()}`);
 }
