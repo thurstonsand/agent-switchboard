@@ -125,6 +125,15 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 		await waitState(s, "archive choice", (st) => st.mode === "archive");
 		await until(() => s.screen().includes("archive + delete worktree"), budgets.settle, "delete button");
 	};
+	// A row moving into Archived shifts the prompt under a click aimed from the screen before it, so each waits.
+	const archive = async (other: string) => {
+		s.swb("archive", other);
+		await waitState(
+			s,
+			"archived on the Deck",
+			(st) => !st.rows.some((r) => r.kind === "session" && r.id === other && r.state !== "archived"),
+		);
+	};
 	const clickDelete = () => {
 		const lines = s.screen().split("\n");
 		const y = lines.findIndex((line) => line.includes("archive + delete worktree"));
@@ -165,7 +174,7 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 	await waitState(s, "shared refusal", (st) => st.toasts.some((t) => t.text.includes("Still using it")));
 	expect(entry(s, id).open).toBe(true);
 	expect(existsSync(tree)).toBe(true);
-	s.swb("archive", other);
+	await archive(other);
 	writeFileSync(join(s.home, "e2e-signals/start.hold"), "");
 	const starting = swbIn(s, "reply starting", "launch", "--harness", "pi", "--cwd", tree);
 	await until(() => s.signal("start.entered") !== "", ready, "peer starting before registration");
@@ -178,7 +187,7 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 	expect(started.code).toBe(0);
 	const startingId = JSON.parse(started.out).details.id as string;
 	await settled(s, startingId, "starting peer idle");
-	s.swb("archive", startingId);
+	await archive(startingId);
 	const scheduling = await swbIn(
 		s,
 		"reply scheduled",
@@ -207,6 +216,8 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 	const away = await launched(s, "reply away", { from: id, cwd: awayTree, title: "Elsewhere" });
 	await cursorTo(s, id);
 	await ask();
+	// The prompt counts the family as the Deck sees it, which can be a snapshot behind the launches.
+	await until(() => s.screen().includes("all 3 + delete this worktree"), budgets.settle, "the whole family offered");
 	const lines = s.screen().split("\n");
 	const y = lines.findIndex((line) => line.includes("all 3 + delete this worktree"));
 	expect(y).toBeGreaterThan(0);

@@ -17,6 +17,7 @@ import {
 	lastWords,
 	launch,
 	restart,
+	stillRunning,
 	stop,
 	unarchive,
 	wake,
@@ -611,7 +612,7 @@ function afterStop(message: { type: "wake"; id: string } | { type: "unarchive"; 
 	// Past its deadline, the wake closes what its stopper didn't.
 	if (!stop || Date.now() >= stop.deadline) return false;
 	void (async () => {
-		while (Date.now() < stop.deadline && listSessions(SESSIONS).some(([name]) => name === stop.host)) await Bun.sleep(50);
+		while (Date.now() < stop.deadline && stillRunning([stop.host]).length > 0) await Bun.sleep(50);
 		await receive(message);
 	})();
 	return true;

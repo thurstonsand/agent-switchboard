@@ -145,8 +145,9 @@ function stopIdlePis(): void {
 export function stopPis(stopping: RuntimeRow[]): void {
 	const deadline = Date.now() + STOP_GRACE_MS;
 	for (const runtime of stopping) term(runtime, deadline);
-	while (stillOpen(stopping).length > 0 && Date.now() < deadline) Bun.sleepSync(20);
-	for (const runtime of stillOpen(stopping)) tmuxTry(SESSIONS, "kill-session", "-t", `=${runtime.tmux_session}`);
+	const hosts = stopping.map((runtime) => runtime.tmux_session);
+	while (stillRunning(hosts).length > 0 && Date.now() < deadline) Bun.sleepSync(20);
+	for (const host of hosts) tmuxTry(SESSIONS, "kill-session", "-t", `=${host}`);
 }
 
 /** Claude Code's own shutdown failsafe fires at 5 s at the earliest, so this leaves its shutdown room to finish. */
@@ -167,9 +168,17 @@ function term(runtime: RuntimeRow, deadline: number): boolean {
 	return true;
 }
 
-function stillOpen(stopping: RuntimeRow[]): RuntimeRow[] {
-	const left = new Set(listSessions(SESSIONS).map(([name]) => name as string));
-	return stopping.filter((runtime) => left.has(runtime.tmux_session));
+/**
+ * The hosts whose harness still runs. A pane that remain-on-exit keeps, as it does until the clock sees its harness
+ * register, outlives the harness, and its dead pane counts as quit.
+ */
+export function stillRunning(hosts: string[]): string[] {
+	const running = new Set(
+		listSessions(SESSIONS, "#{pane_dead}")
+			.filter(([, dead]) => dead !== "1")
+			.map(([name]) => name as string),
+	);
+	return hosts.filter((host) => running.has(host));
 }
 
 /**
@@ -178,11 +187,12 @@ function stillOpen(stopping: RuntimeRow[]): RuntimeRow[] {
  */
 async function stopInBackground(runtime: RuntimeRow): Promise<boolean> {
 	const deadline = Date.now() + STOP_GRACE_MS;
+	const host = runtime.tmux_session;
 	if (!term(runtime, deadline)) return false;
-	while (stillOpen([runtime]).length > 0 && Date.now() < deadline) await Bun.sleep(20);
-	if (stillOpen([runtime]).length === 0) return false;
-	tmuxTry(SESSIONS, "kill-session", "-t", `=${runtime.tmux_session}`);
-	return true;
+	while (stillRunning([host]).length > 0 && Date.now() < deadline) await Bun.sleep(20);
+	const late = stillRunning([host]).length > 0;
+	tmuxTry(SESSIONS, "kill-session", "-t", `=${host}`);
+	return late;
 }
 
 /** The harness hosting a session that some swb is stopping, and when its stopper closes it, if one is. */
@@ -197,8 +207,7 @@ export function beingStopped(db: Db, id: string): { host: string; deadline: numb
 function awaitStop(db: Db, id: string): void {
 	const stop = beingStopped(db, id);
 	if (!stop) return;
-	const open = () => listSessions(SESSIONS).some(([name]) => name === stop.host);
-	while (open() && Date.now() < stop.deadline) Bun.sleepSync(20);
+	while (stillRunning([stop.host]).length > 0 && Date.now() < stop.deadline) Bun.sleepSync(20);
 	tmuxTry(SESSIONS, "kill-session", "-t", `=${stop.host}`);
 }
 
