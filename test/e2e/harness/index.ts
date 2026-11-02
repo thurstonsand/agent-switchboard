@@ -282,14 +282,6 @@ export function scenario(
 				const panes = Bun.spawnSync([tools.tmux, "-L", server, "list-panes", "-a", "-F", "#{pane_pid}"], { env });
 				pids.push(...panes.stdout.toString().trim().split("\n").filter(Boolean).map(Number));
 				Bun.spawnSync([tools.tmux, "-L", server, "kill-server"], { env });
-				// A harness can survive its terminal closing; these disposable pane processes belong to cleanup.
-				for (const pid of pids.slice(1)) {
-					try {
-						process.kill(pid, "SIGKILL");
-					} catch (error) {
-						if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
-					}
-				}
 				await until(() => pids.every((pid) => !alive(pid)), 5000, `${server}: pids ${pids.join(",")} to die`);
 			}
 			// A harness killed mid-tool leaves its held command running, and a test that failed before releasing it would
