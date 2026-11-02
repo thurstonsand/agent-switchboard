@@ -13,7 +13,7 @@ import { loginShell, newer } from "./sessions.ts";
 // enough, the models it offers, and its own short list of them, from which the automatic shortlist is made.
 
 /** The oldest release whose line swb carries. */
-export const MIN_VERSION: Record<Harness, string> = { pi: "1.2.0", claude: "2.1.300", codex: "0.149.0" };
+export const MIN_VERSION: Record<Harness, string> = { pi: "1.5.0", claude: "2.1.300", codex: "0.149.0" };
 
 /** `problem` says why it can't start; null when it can. */
 export type HarnessStatus = { version: string | null; problem: string | null };

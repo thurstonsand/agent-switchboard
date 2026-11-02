@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import type { FSWatcher } from "node:fs";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { type ExtensionAPI, type ExtensionContext, keyHint } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Db, describeTool, launchGuide, linkedWorktree, operatorDir } from "@swb/shared";
 import { frame, listen, markDelivered, pendingFor, sender } from "@swb/shared/mailbox";
@@ -341,7 +341,7 @@ export default function (pi: ExtensionAPI) {
 					const hidden = summary === undefined ? lines.length - 1 : lines.length;
 					const more =
 						hidden > 0
-							? `${theme.fg("muted", ` (${hidden} more ${hidden === 1 ? "line" : "lines"}, `)}${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`
+							? `${theme.fg("muted", ` (${hidden} more ${hidden === 1 ? "line" : "lines"}, `)}${context.keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`
 							: "";
 					return new Text(`${theme.fg("dim", summary ?? (lines[0] as string))}${more}`, 0, 0);
 				},
