@@ -431,7 +431,7 @@ async function handle(message: ToWorker): Promise<void> {
 			config = message.config;
 			db = openStore();
 			layoutRoot = projectRoot(message.here);
-			post({ type: "restore", layout: loadLayout(db, layoutRoot) });
+			post({ type: "restore", root: layoutRoot, layout: loadLayout(db, layoutRoot) });
 			// As with a message, a tick that fails says so, and the next one tries again.
 			setInterval(() => {
 				try {

@@ -18,7 +18,7 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { harness as asHarness, configDir, type Harness, operatorDir, projectRoot, type SnoozePreset, VIEWS, type View } from "@swb/shared";
+import { harness as asHarness, configDir, type Harness, operatorDir, type SnoozePreset, VIEWS, type View } from "@swb/shared";
 import { harnessName } from "@swb/shared/mailbox";
 import { mark, span } from "@swb/shared/trace";
 import { ConfigError, configPath, type Loaded, readConfig } from "../config.ts";
@@ -100,6 +100,7 @@ const here = args.here;
 if (!process.env.TMUX_PANE) throw new UsageError("__roster: runs only inside a Deck pane");
 const rosterPane = process.env.TMUX_PANE;
 /** The Stage's pane and its tty, from the window option the Deck set as it made the Stage. */
+// biome-ignore lint/plugin: before the roster's first frame, when nothing waits on its keys yet.
 const [stagePane, stageTty] = tmux(UI, "display", "-p", "-t", rosterPane, "#{P:#{?#{==:#{pane_id},#{@swb_stage}},#{pane_id} #{pane_tty},}}")
 	.trim()
 	.split(" ") as [string, string];
@@ -107,6 +108,7 @@ if (!stagePane || !stageTty) throw new UsageError("__roster: its window names no
 const sock = deckSocket(deck);
 const placeholder = placeholderName(deck);
 /** config.toml as this Deck last applied it; a file that fails to read leaves it be, and says so. */
+// biome-ignore lint/plugin: before the roster's first frame, when nothing waits on its keys yet.
 let loaded: Loaded = readConfig();
 let config = loaded.config;
 let configError: ConfigError | null = null;
@@ -942,6 +944,8 @@ function followHost(): void {
 /** The cursor the last Deck in this Project left, until the first snapshot places it. */
 let restoredKey: string | null = null;
 let started = false;
+/** The Project `here` is in, which the worker finds before its first snapshot. */
+let hereRoot = "";
 /** `-c`: the session whose pi takes the keyboard once the Stage is up. */
 let continueTo: Entry | null = null;
 
@@ -955,9 +959,8 @@ function startCursor(): void {
 	// A snoozed session is out of the way until it wakes: neither -c nor the last visit lands on one.
 	const open = [...entries.values()].filter((e) => e.open && !e.provisional && !e.snoozed);
 	if (args.continue) {
-		const root = projectRoot(here);
 		const recent = open
-			.filter((e) => e.project === root)
+			.filter((e) => e.project === hereRoot)
 			.sort((a, b) => (b.visitedAt ?? 0) - (a.visitedAt ?? 0) || b.activityAt - a.activityAt)[0];
 		if (!recent) {
 			newSession(here, null, null);
@@ -1049,6 +1052,7 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
 	const message = event.data;
 	switch (message.type) {
 		case "restore":
+			hereRoot = message.root;
 			if (message.layout) {
 				roster.collapsed = new Set(message.layout.collapsed);
 				roster.expanded = new Set(message.layout.expanded.flatMap((saved) => SECTION_KEYS.filter((key) => key === saved)));
@@ -2203,6 +2207,7 @@ class Roster implements Component, Focusable {
 	addRows(): string[] {
 		const typed = this.path.getValue();
 		// Asked for on every render, hover, and state read; the disk is read once per keystroke.
+		// biome-ignore lint/plugin: the directory typed is the one read, as each key types it.
 		if (this.completed?.typed !== typed) this.completed = { typed, rows: completions(typed, scanBase()) };
 		return this.completed.rows;
 	}
@@ -2344,6 +2349,7 @@ class Roster implements Component, Focusable {
 				return;
 			}
 			const path = this.addTarget();
+			// biome-ignore lint/plugin: Enter waits on the directory it starts in.
 			if (!statSync(path, { throwIfNoEntry: false })?.isDirectory()) {
 				toast(`no directory ${shortPath(path)}`, "error");
 				return;
@@ -3617,7 +3623,7 @@ function layout(): Promise<void> {
 		if (narrow) await syncRoster(false);
 		if (narrow !== wasNarrow) {
 			// What floats over the Stage goes before a zoom: the roster draws a narrow Deck's overlays itself.
-			if (narrow) overlays.closeAll();
+			if (narrow) await overlays.closeAll();
 			if (narrow && zoomFlag !== "1") await tmuxAsync(UI, "resize-pane", "-Z", "-t", active === "1" ? stagePane : rosterPane);
 			if (!narrow && zoomFlag === "1") await tmuxAsync(UI, "resize-pane", "-Z", "-t", rosterPane);
 		}
@@ -3654,6 +3660,7 @@ function quit(): void {
  * children here that lead their own process group.
  */
 function stopDiscovery(): void {
+	// biome-ignore lint/plugin: at exit, when nothing waits on the roster's keys any more.
 	const children = Bun.spawnSync(["pgrep", "-P", String(process.pid)])
 		.stdout.toString()
 		.split("\n")
@@ -3669,10 +3676,12 @@ function stopDiscovery(): void {
 
 function cleanup(): never {
 	roster.settings?.saveProse();
-	overlays.closeAll();
+	overlays.closeAllNow();
 	stopDiscovery();
+	// biome-ignore-start lint/plugin: at exit, when nothing waits on the roster's keys any more.
 	tmuxTry(SESSIONS, "kill-session", "-t", `=${placeholder}`);
 	rmSync(sock, { force: true });
+	// biome-ignore-end lint/plugin: exit
 	ctl.close();
 	process.exit(0);
 }
@@ -3862,6 +3871,7 @@ function applyLoaded(next: Loaded): void {
 	if (JSON.stringify(before.dirs) !== JSON.stringify(config.dirs)) post({ type: "dirs" });
 	if (before.wakeOnHighlight !== config.wakeOnHighlight) scheduleHighlightWake();
 	if (before.shellPosition !== config.shellPosition) apply();
+	// biome-ignore lint/plugin: a Settings save, or a config.toml edit, writes it, once per change.
 	if (before.operatorInstructions !== config.operatorInstructions) ensureOperatorDir(config.operatorInstructions);
 	tui.requestRender();
 }
@@ -3869,6 +3879,7 @@ function applyLoaded(next: Loaded): void {
 /** config.toml again, after a change on disk: a valid one applies, an invalid one is reported and leaves the Deck as it was. */
 function reloadConfig(): void {
 	try {
+		// biome-ignore lint/plugin: synchronous, so a Settings save can't land between this read and loaded.
 		const next = readConfig();
 		if (next.text === loaded.text && configError === null) return;
 		applyLoaded(next);
@@ -3880,6 +3891,7 @@ function reloadConfig(): void {
 }
 
 // The directory, not the file: an editor that saves by renaming a new file into place replaces the file watched.
+// biome-ignore lint/plugin: before the roster's first frame, when nothing waits on its keys yet.
 mkdirSync(configDir(), { recursive: true });
 let reloadTimer: Timer | null = null;
 watch(configDir(), (_event, file) => {
@@ -3896,6 +3908,7 @@ function openConfig(line: number | null): void {
 	void deckClient().then(async (client) => {
 		if (!client) return;
 		const command = `exec ${config.editor} ${line === null ? "" : `+${line} `}${quote(configPath())}`;
+		// biome-ignore lint/plugin: a getent, on opening config.toml.
 		const shell = loginShell();
 		await tmuxAsync(
 			UI,
@@ -3919,6 +3932,7 @@ const settingsHost = {
 	error: () => configError,
 	save: (updated: Record<string, unknown>, reorder = false): string | null => {
 		try {
+			// biome-ignore lint/plugin: Settings shows what it saved on the frame after the key that saved it.
 			applyLoaded(writeConfig(loaded, updated, reorder));
 			return null;
 		} catch (error) {
@@ -3965,7 +3979,7 @@ function zoomRoster(on: boolean): void {
 		sizingRoster(async () => {
 			if (narrow || rosterHidden) return;
 			const zoomed = (await tmuxAsync(UI, "display", "-p", "-t", rosterPane, "#{window_zoomed_flag}")) === "1";
-			if (on && !zoomed) overlays.closeAll();
+			if (on && !zoomed) await overlays.closeAll();
 			if (on !== zoomed) await tmuxAsync(UI, "resize-pane", "-Z", "-t", rosterPane);
 			// Back beside the Stage, at whatever width Settings left it.
 			if (!on) await tmuxAsync(UI, "resize-pane", "-t", rosterPane, "-x", String(rosterWidth()));
@@ -4182,9 +4196,11 @@ tui.setTerminalColorSchemeNotifications(true);
 void queryColors(null);
 
 main.tty = stageTty;
+// biome-ignore-start lint/plugin: before the roster's first frame, when nothing waits on its keys yet.
 tmux(UI, "set", "-t", deck, "@swb_roster", rosterPane, ";", "set", "-p", "-t", rosterPane, "@swb_label", "swb");
 focusedPane = rosterPane;
 rmSync(sock, { force: true });
+// biome-ignore-end lint/plugin: startup
 // bun-types 1.4.4 leaves idleTimeout off unix servers, but Bun applies it to them, after 10 s by default.
 // @ts-expect-error
 Bun.serve({
@@ -4250,11 +4266,20 @@ void ctl.run("list-clients -F '#{client_tty}'").then(
 	(error: Error) => toast(`stage: ${error.message}`, "error"),
 );
 
+let listingClients = false;
 setInterval(() => {
 	// The control client misses attaches while it respawns after the sessions server restarts.
-	if (!main.up || (side && !side.up)) {
-		const clients = tmuxTry(SESSIONS, "list-clients", "-F", "#{client_tty}");
-		stageUp(clients.ok ? clients.out.split("\n") : []);
+	if (!listingClients && (!main.up || (side && !side.up))) {
+		listingClients = true;
+		void ctl
+			.run("list-clients -F '#{client_tty}'")
+			.then(
+				(out) => stageUp(out.split("\n")),
+				() => {},
+			)
+			.finally(() => {
+				listingClients = false;
+			});
 	}
 	const now = Date.now();
 	keepLayout(now);

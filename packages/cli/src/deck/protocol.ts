@@ -207,7 +207,7 @@ export type ToWorker =
 	| { type: "removeDir"; path: string };
 
 export type FromWorker =
-	| { type: "restore"; layout: DeckLayout | null }
+	| { type: "restore"; root: string; layout: DeckLayout | null }
 	| { type: "snapshot"; snapshot: Snapshot }
 	| { type: "woke"; id: string; host: string }
 	| { type: "created"; host: string }

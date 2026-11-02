@@ -1,0 +1,26 @@
+language js
+
+or {
+	`$fn($args)` where { $fn <: r"[A-Za-z]+Sync" },
+	`$obj.$fn($args)` where { $fn <: r"[A-Za-z]+Sync" },
+	`$fn($args)` where {
+		$fn <: or {
+			`tmux`,
+			`tmuxTry`,
+			`listSessions`,
+			`listPanes`,
+			`killServer`,
+			`ensureSessionsServer`,
+			`ensureServer`,
+			`ensurePlaceholder`,
+			`loginShell`,
+			`readConfig`,
+			`writeConfig`,
+			`ensureOperatorDir`,
+			`projectRoot`,
+			`completions`
+		}
+	}
+} as $call where {
+	register_diagnostic(span=$call, message="The roster's thread never waits on the disk or a process: use the async form, tmuxAsync or ctl, or the worker.")
+}

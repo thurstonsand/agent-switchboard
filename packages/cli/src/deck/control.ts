@@ -1,11 +1,11 @@
-import { ensureSessionsServer } from "../sessions.ts";
 import { CLIENT_CWD, cleanEnv, SESSIONS, tmuxClient } from "../tmux.ts";
 
 type Pending = { resolve: (out: string) => void; reject: (error: Error) => void };
 
 /**
  * One control-mode client on the sessions server, attached to its swb-ctl session: a command costs about a
- * millisecond, against ~11 ms to spawn tmux. It respawns on the next command after the server dies. It also hears
+ * millisecond, against ~11 ms to spawn tmux. It respawns on the next command after the server dies, and a command while
+ * the server is down fails: the Deck's worker is what starts it again. It also hears
  * the server's notifications, such as another client attaching, from when it attaches until the server dies.
  */
 export class Control {
@@ -16,7 +16,6 @@ export class Control {
 	constructor(private readonly notified: (line: string) => void) {}
 
 	private spawn(): Bun.Subprocess<"pipe", "pipe", "ignore"> {
-		ensureSessionsServer();
 		const proc = Bun.spawn([...tmuxClient(SESSIONS), "-C", "attach", "-f", "ignore-size,no-output", "-t", "=swb-ctl"], {
 			cwd: CLIENT_CWD,
 			env: cleanEnv(),

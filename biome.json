@@ -4,5 +4,16 @@
 	"formatter": { "indentStyle": "tab", "lineWidth": 140 },
 	"markdown": { "parser": { "frontmatter": true } },
 	"linter": { "rules": { "preset": "recommended" } },
-	"assist": { "actions": { "source": { "organizeImports": "on" } } }
+	"assist": { "actions": { "source": { "organizeImports": "on" } } },
+	"overrides": [
+		{
+			"includes": [
+				"packages/cli/src/deck/**",
+				"!packages/cli/src/deck/worker.ts",
+				"!packages/cli/src/deck/deck.ts",
+				"!packages/cli/src/deck/placeholder.ts"
+			],
+			"plugins": ["./packages/cli/src/deck/main-thread.grit"]
+		}
+	]
 }

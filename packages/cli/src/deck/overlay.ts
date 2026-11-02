@@ -72,9 +72,11 @@ export class Overlays {
 
 	constructor(private readonly host: OverlayHost) {
 		// A roster that died left its overlays behind; this one starts with none.
+		// biome-ignore-start lint/plugin: before the roster's first frame, when nothing waits on its keys yet.
 		const stray = tmuxTry(UI, "list-panes", "-t", host.pane, "-f", "#{pane_floating_flag}", "-F", "#{pane_id}");
 		for (const pane of stray.ok ? stray.out.split("\n").filter(Boolean) : []) tmuxTry(UI, "kill-pane", "-t", pane);
 		tmuxTry(UI, "set", "-u", "-t", host.deck, "@swb_leave");
+		// biome-ignore-end lint/plugin: startup
 	}
 
 	/** Makes the overlays on screen these, bottom to top. What only changed what it shows is repainted at once. */
@@ -110,15 +112,26 @@ export class Overlays {
 	 * Nothing of this roster stays on screen: at exit, and before its window zooms, where a float made or killed has
 	 * tmux resize the zoomed pane twice. The next sync puts back what's still wanted.
 	 */
-	closeAll(): void {
-		for (const s of this.shown.values()) {
+	async closeAll(): Promise<void> {
+		await Promise.allSettled(this.forgetAll().map((args) => tmuxAsync(UI, ...args)));
+	}
+
+	/** closeAll at exit, which can't wait for it. */
+	closeAllNow(): void {
+		// biome-ignore lint/plugin: the roster is exiting, and nothing waits on its keys any more.
+		for (const args of this.forgetAll()) tmuxTry(UI, ...args);
+	}
+
+	/** Forgets every overlay shown, returning the tmux commands that take them off screen. */
+	private forgetAll(): string[][] {
+		const commands = [...this.shown.values()].map((s) => {
 			s.killed = true;
 			s.input.destroy();
-			tmuxTry(UI, "kill-pane", "-t", s.pane);
-		}
+			return ["kill-pane", "-t", s.pane];
+		});
 		this.shown.clear();
 		this.leave = "";
-		tmuxTry(UI, "set", "-u", "-t", this.host.deck, "@swb_leave");
+		return [...commands, ["set", "-u", "-t", this.host.deck, "@swb_leave"]];
 	}
 
 	/** Whether every overlay wanted is on screen where it belongs, in order, and nothing else is. */
@@ -143,7 +156,7 @@ export class Overlays {
 				failures = 0;
 			} catch (error) {
 				// A float the UI server killed a moment ago fails a move in the same breath; the next pass knows it's gone.
-				this.forgetDead();
+				await this.forgetDead();
 				if (++failures > 1) {
 					this.host.failed(`overlay: ${(error as Error).message}`);
 					break;
@@ -230,6 +243,7 @@ export class Overlays {
 	}
 
 	private open(overlay: Overlay, pane: string, path: string): void {
+		// biome-ignore lint/plugin: a pty, not the disk.
 		const fd = openSync(path, "r+");
 		const input = new tty.ReadStream(fd);
 		input.setRawMode(true);
@@ -287,6 +301,7 @@ export class Overlays {
 	private write(s: Shown, text: string): void {
 		if (s.killed) return;
 		try {
+			// biome-ignore lint/plugin: a pty, not the disk.
 			writeSync(s.fd, text);
 		} catch {
 			// Gone mid-frame: its terminal's close is on its way to lost().
@@ -313,12 +328,14 @@ export class Overlays {
 	 * After a command that failed partway: forgets what's shown whose pane is gone, and kills any float that isn't shown,
 	 * as one made or left behind before the failure.
 	 */
-	private forgetDead(): void {
-		const alive = tmuxTry(UI, "list-panes", "-t", this.host.pane, "-f", "#{pane_floating_flag}", "-F", "#{pane_id}");
-		const panes = new Set(alive.ok ? alive.out.split("\n").filter(Boolean) : []);
+	private async forgetDead(): Promise<void> {
+		const alive = await tmuxAsync(UI, "list-panes", "-t", this.host.pane, "-f", "#{pane_floating_flag}", "-F", "#{pane_id}").catch(
+			() => "",
+		);
+		const panes = new Set(alive.split("\n").filter(Boolean));
 		for (const s of [...this.shown.values()]) if (!panes.has(s.pane)) this.drop(s);
 		const ours = new Set([...this.shown.values()].map((s) => s.pane));
-		for (const pane of panes) if (!ours.has(pane)) tmuxTry(UI, "kill-pane", "-t", pane);
+		await Promise.allSettled([...panes].filter((pane) => !ours.has(pane)).map((pane) => tmuxAsync(UI, "kill-pane", "-t", pane)));
 	}
 
 	/** The UI server's command that puts away what leaves with the pointer; see LEAVE in deck.ts. */
