@@ -45,7 +45,7 @@ swb send --from ID --to ID [--request-response] [--cancel]   message a session, 
 
 ### Harnesses
 
-swb runs Claude Code (2.1.300 or later) and Codex CLI (0.149 or later) the way it runs pi: the real TUI, in swb's tmux server, on the roster. Each plugs in through a **line** that swb ships and loads itself, so there is nothing else to install: Claude Code gets a plugin with a mod, and Codex runs on a private app-server that swb starts with it. `n`'s picker shows the preset a new session starts on, harness and model, on a card on the Stage; it opens on the default, and `Tab` drops the rest of the shortlist, a harness at a time, numbered for one key to pick (see Settings).
+swb runs Claude Code (2.1.300 or later) and Codex CLI (0.149 or later) the way it runs pi: the real TUI, in swb's tmux server, on the roster. Each plugs in through a **line** that swb ships and loads itself, so there is nothing else to install: Claude Code gets a plugin with a mod, and Codex runs on a private app-server that swb starts with it. For Codex, swb adds a switched-off `[mcp_servers.swb]` to `~/.codex/config.toml` when it's missing, which only swb's own Codex sessions switch on; a plain `codex` never offers swb's tools. `n`'s picker shows the preset a new session starts on, harness and model, on a card on the Stage; it opens on the default, and `Tab` drops the rest of the shortlist, a harness at a time, numbered for one key to pick (see Settings).
 
 Every managed session's agent gets the same tools, whatever its harness:
 

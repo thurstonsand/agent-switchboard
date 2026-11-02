@@ -5,6 +5,7 @@ import { HARNESSES, type Harness, pidAlive, shortlistPath, stateDir } from "@swb
 import { harnessName } from "@swb/shared/mailbox";
 import { type Config, EFFORTS, type Effort, HARNESS_EFFORTS, loadConfig, type Preset } from "./config.ts";
 import { SwbError } from "./errors.ts";
+import { declareCodexServer } from "./lines.ts";
 import { loginShell, newer } from "./sessions.ts";
 
 // What each harness can start, as the login shell that launches sessions finds it: whether it's installed and new
@@ -428,6 +429,14 @@ export async function discover(
 	const asked = Date.now();
 	const statuses = await Promise.all(HARNESSES.map(detect));
 	const status = Object.fromEntries(HARNESSES.map((h, i) => [h, statuses[i]])) as Record<Harness, HarnessStatus>;
+	// Every Codex swb hosts needs swb's MCP server declared. A config.toml that won't parse stops Codex, and its presets say why.
+	if (status.codex.problem === null) {
+		try {
+			declareCodexServer();
+		} catch (error) {
+			status.codex = { version: status.codex.version, problem: (error as Error).message };
+		}
+	}
 	// pi's own list is a file; the model lists need their harnesses, so they stand as last found until then.
 	onStatus({
 		at: Date.now(),

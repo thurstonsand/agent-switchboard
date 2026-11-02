@@ -13,6 +13,7 @@ import {
 	ensureEditor,
 	ensureSessionsServer,
 	ensureShell,
+	lastWords,
 	launch,
 	restart,
 	stop,
@@ -184,13 +185,7 @@ function snapshot(): Polled {
 		const host = name as string;
 		if (launched.has(host)) {
 			launched.delete(host);
-			const tail = tmuxTry(SESSIONS, "capture-pane", "-p", "-t", `=${host}:`);
-			died[host] = tail.ok
-				? tail.out
-						.split("\n")
-						.filter((line) => line.trim() !== "")
-						.slice(-5)
-				: [];
+			died[host] = lastWords(host);
 		} else if (Date.now() / 1000 - Number(deadAt) < ORPHAN_DEAD_S) continue;
 		tmuxTry(SESSIONS, "kill-session", "-t", `=${host}`);
 	}

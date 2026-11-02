@@ -552,6 +552,17 @@ const RELOADED = "This session was restarted to reload its configuration; contin
  */
 export type Wake = "idle" | "resume" | "continue";
 
+/** The last lines a harness left in its pane, kept by remain-on-exit when it dies before it registers. */
+export function lastWords(host: string): string[] {
+	const tail = tmuxTry(SESSIONS, "capture-pane", "-p", "-t", `=${host}:`);
+	return tail.ok
+		? tail.out
+				.split("\n")
+				.filter((line) => line.trim() !== "")
+				.slice(-5)
+		: [];
+}
+
 /** Starts a dormant session, unless something already hosts it, and returns its tmux session. */
 export function wake(db: Db, id: string, then: Wake): string {
 	ensureSessionsServer();

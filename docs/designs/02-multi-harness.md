@@ -153,10 +153,12 @@ swb launch --harness H --cwd D --from A    goal on stdin
 ```text
 swb __codex --host NAME [--resume ID]      the pane's process
   spawn codex app-server --listen unix://${state}/codex/NAME.sock   in its own process group
-    -c features.plugins=true -c plugins.swb@swb.enabled=true
-      swb writes the swb@swb plugin, whose manifest declares `swb mcp`, into $CODEX_HOME/plugins/cache/swb/swb/local.
-      Not -c mcp_servers.swb: Codex's title generator replaces the whole mcp_servers table, which strips a -c server's command
-      and fails the title thread; it turns plugins off instead.
+    -c mcp_servers.swb.enabled=true -c mcp_servers.swb.command=SWB …   switches on the [mcp_servers.swb] stub
+      swb appends to $CODEX_HOME/config.toml, enabled = false, when it finds Codex or starts one and the stub is missing.
+      Not -c alone: Codex's title generator replaces the whole mcp_servers table, which strips a -c-only server's command
+      and fails the title thread; the file layer underneath keeps the stub's command. Not a plugin: a managed
+      marketplace allowlist drops plugins from anywhere else, with no word in the TUI.
+  mcpServerStatus/list serverName=swb: no tools → die before the TUI starts, saying why; the Deck shows its last words
   connect as an observer
   spawn codex --remote unix://… [resume ID] -c tui.terminal_title=["session-id","status"] [prompt]   on the tty
   every 300 ms: pane title → thread id prefix → resolve on this server → bind (runtime row)

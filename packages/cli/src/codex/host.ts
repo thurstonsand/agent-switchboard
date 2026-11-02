@@ -18,7 +18,7 @@ import {
 import { mark, now, since } from "@swb/shared/trace";
 import { readTranscript } from "../deck/transcript.ts";
 import { SwbError, UsageError } from "../errors.ts";
-import { CODEX_PLUGIN, writeCodexLine } from "../lines.ts";
+import { codexServerOverrides, declareCodexServer } from "../lines.ts";
 import { codexOperatorConfig } from "../operator.ts";
 import { SWB } from "../sessions.ts";
 import { openStore } from "../store.ts";
@@ -114,7 +114,7 @@ export async function codexHost(args: string[], updated = false): Promise<void> 
 	if (!codex) throw new SwbError("codex not found on PATH");
 	for (const name of ["SWB_MANAGED", "SWB_DB", "SWB_TMUX_SESSION", "SWB_BIN"]) delete process.env[name];
 
-	writeCodexLine(SWB);
+	declareCodexServer();
 	// Both read config: the server for the model's instructions and tools, the TUI for its trust check.
 	const operator = values.operator ? codexOperatorConfig().flatMap((value) => ["-c", value]) : [];
 	const socket = codexSocket(host);
@@ -133,10 +133,7 @@ export async function codexHost(args: string[], updated = false): Promise<void> 
 			"app-server",
 			"--listen",
 			`unix://${socket}`,
-			"-c",
-			"features.plugins=true",
-			"-c",
-			`plugins.${CODEX_PLUGIN}.enabled=true`,
+			...codexServerOverrides(SWB),
 			...operator,
 		],
 		{ stdin: "pipe", stdout: "ignore", stderr: openSync(join(dir, `${host}.log`), "w") },
@@ -149,6 +146,16 @@ export async function codexHost(args: string[], updated = false): Promise<void> 
 	}
 	since("codex.app-server", starting);
 	const client = await CodexClient.connect(socket, "swb");
+	// A session without swb's tools can't reach the others, and Codex wouldn't say so; this one dies saying why instead.
+	const { data } = await client.request<{ data: { name: string; tools: Record<string, unknown> | null; toolsError: string | null }[] }>(
+		"mcpServerStatus/list",
+		{ serverName: "swb" },
+	);
+	const swb = data.find((server) => server.name === "swb");
+	if (Object.keys(swb?.tools ?? {}).length === 0)
+		throw new SwbError(
+			`Codex didn't load swb's tools: ${swb?.toolsError ?? "it switched swb's MCP server off, as an mcp_servers allowlist in managed requirements does"}`,
+		);
 	const db = openStore();
 	// Archived in Codex behind swb's back, by `codex archive` or another client: swb opening it means it's open.
 	const transcript = values.resume

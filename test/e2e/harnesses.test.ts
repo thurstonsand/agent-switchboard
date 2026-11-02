@@ -294,6 +294,32 @@ test("on a code-mode-only model, Codex offers swb's tools directly, beside its o
 	expect(child.harness).toBe("pi");
 });
 
+test("swb declares its MCP server in Codex's config.toml once, switched off, and only swb's own Codex sessions offer its tools", async () => {
+	s = scenario("harnesses", "codex-declared", { packages: [], recorder: true, harnesses: ["codex"] });
+	const path = join(s.home, ".codex/config.toml");
+	const mine = readFileSync(path, "utf8");
+	// Finding Codex declares it, below what was there.
+	s.swb("models");
+	const declared = readFileSync(path, "utf8");
+	expect(declared.startsWith(mine)).toBe(true);
+	expect((Bun.TOML.parse(declared) as { mcp_servers: unknown }).mcp_servers).toEqual({
+		swb: { command: "swb", args: ["mcp", "--harness", "codex"], enabled: false },
+	});
+	const session = await launched(s, "codex", "reply up");
+	// Codex writes its own settings in as it runs; swb's declaration stays the one it added.
+	expect(readFileSync(path, "utf8").split("[mcp_servers.swb]").length).toBe(2);
+	const requests = s.requests("codex") as { texts: string[]; tools: string[] }[];
+	expect(requests.find((r) => r.texts.at(-1) === "reply up")?.tools).toContain("session_launch");
+	// Codex's title request, on the thread that switches every MCP server off, still goes out and names the session.
+	expect(requests.some((r) => r.texts.at(-1)?.startsWith("Generate a concise"))).toBe(true);
+	await until(() => entry(s, session.id).title === "Up", ready, "Codex's own title");
+	const plain = Bun.spawnSync([join(s.bin, "codex"), "exec", "--skip-git-repo-check", "reply plain"], { env: s.env, cwd: s.project });
+	expect(plain.exitCode).toBe(0);
+	const outside = (s.requests("codex") as { texts: string[]; tools: string[] }[]).find((r) => r.texts.at(-1) === "reply plain");
+	expect(outside?.tools).toContain("exec_command");
+	expect(outside?.tools).not.toContain("session_launch");
+});
+
 test("on a fresh install, swb new starts the automatic shortlist's default, Claude Code, once its models are listed", async () => {
 	s = scenario("harnesses", "first-new", { packages: [], recorder: true, harnesses: ["claude"] });
 	expect(existsSync(join(s.env.XDG_STATE_HOME as string, "agent-switchboard", "catalog.json"))).toBe(false);

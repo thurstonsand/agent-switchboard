@@ -5,6 +5,8 @@
 ### Changed
 
 - swb's tools cost about 40% less context in Claude Code and Codex, and nearly half in pi, which no longer repeats each description, the shortlist included, in its system prompt. Rules an agent needs at one moment, like ending its turn after archiving or reloading itself, now come in that tool's result. Three tools merge into others: `session_cancel` is `swb_update_session`'s `cancel`, `session_unschedule` is `session_schedules`' `unschedule`, and a scheduled launch is `session_launch` with `at` or `cron` and a `label` instead of `session_schedule`'s `launch`. A Claude Code permission rule naming `session_cancel` or `session_unschedule` needs the new names. `swb launch` takes `--at`, `--cron`, `--label`, and `--request-id`, and `swb schedule` drops its `--launch-*` flags.
+- Codex gets swb's tools from a `[mcp_servers.swb]` that swb adds to `~/.codex/config.toml`, switched off, when it finds Codex and it isn't declared there, instead of from a plugin. Only swb's own Codex sessions switch it on. A Codex for Work policy that only allows its own plugin marketplace dropped the plugin silently; this server still loads. If you declared `[mcp_servers.swb]` yourself as a workaround, set `enabled = false` so plain `codex` stops offering swb's tools; swb supplies the rest. The old plugin under `~/.codex/plugins/cache/swb` is unused and safe to delete.
+- A Codex session whose swb tools don't load, such as under a managed `mcp_servers` allowlist, now ends before its TUI starts, saying why, instead of running without them.
 
 ### Fixed
 
