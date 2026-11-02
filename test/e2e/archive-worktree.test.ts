@@ -136,9 +136,13 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 	expect(entry(s, id).open).toBe(true);
 	await ask();
 	s.keys("a");
-	await until(() => !entry(s, id).open, budgets.settle, "ordinary archive");
+	await waitState(s, "ordinary archive shown", (st) =>
+		st.rows.some((row) => row.kind === "session" && row.id === id && row.state === "archived"),
+	);
+	expect(entry(s, id).open).toBe(false);
 	expect(existsSync(tree)).toBe(true);
 	s.swb("unarchive", id);
+	await waitState(s, "unarchive shown", (st) => st.rows.some((row) => row.kind === "session" && row.id === id && row.state !== "archived"));
 	await cursorTo(s, id);
 	writeFileSync(join(tree, "keep.txt"), "valuable work\n");
 	await ask();
