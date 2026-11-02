@@ -2,8 +2,14 @@
 
 ## UNRELEASED
 
+### Added
+
+- Archiving a session in a linked worktree can delete the worktree too: `d` in the Deck's archive prompt, or `D` with the sessions it started, and `deleteWorktree` on `swb_update_session`. The branch and the conversations stay. It refuses a worktree with modified or untracked files, a locked one, one a schedule launches into, and one other open sessions still use; ignored files go with it. A conversation whose directory is gone resumes in its Project root, with the same history and a notice that its files may differ, in all three harnesses.
+- The Deck dims the panes the keyboard isn't in, by 35% on a dark terminal and 15% on a light one, so a cursor drawn in another pane no longer looks like where you're typing.
+
 ### Changed
 
+- Archive in the Deck returns at once. The row, its card, and the keyboard stay where they were for a last look, and j or k moves on. The harness quits in the background; one still running after 10 s is closed and named, in a toast, by `swb archive`, and in the tool's result.
 - swb's tools cost about 40% less context in Claude Code and Codex, and nearly half in pi, which no longer repeats each description, the shortlist included, in its system prompt. Rules an agent needs at one moment, like ending its turn after archiving or reloading itself, now come in that tool's result. Three tools merge into others: `session_cancel` is `swb_update_session`'s `cancel`, `session_unschedule` is `session_schedules`' `unschedule`, and a scheduled launch is `session_launch` with `at` or `cron` and a `label` instead of `session_schedule`'s `launch`. A Claude Code permission rule naming `session_cancel` or `session_unschedule` needs the new names. `swb launch` takes `--at`, `--cron`, `--label`, and `--request-id`, and `swb schedule` drops its `--launch-*` flags.
 - Codex gets swb's tools from a `[mcp_servers.swb]` that swb adds to `~/.codex/config.toml`, switched off, when it finds Codex and it isn't declared there, instead of from a plugin. Only swb's own Codex sessions switch it on. A Codex for Work policy that only allows its own plugin marketplace dropped the plugin silently; this server still loads. If you declared `[mcp_servers.swb]` yourself as a workaround, set `enabled = false` so plain `codex` stops offering swb's tools; swb supplies the rest. The old plugin under `~/.codex/plugins/cache/swb` is unused and safe to delete.
 - A Codex session whose swb tools don't load, such as under a managed `mcp_servers` allowlist, now ends before its TUI starts, saying why, instead of running without them.
@@ -15,7 +21,8 @@
 ### Fixed
 
 - Codex on a code-mode-only model, such as gpt-6-sol, offers swb's tools directly. They were only reachable inside its `exec` tool, so an agent asked to start a session used Codex's own `spawn_agent` instead.
-
+- Accepting Codex's startup updater in a swb session goes on into the session, on the new Codex, instead of closing its pane.
+- `swb models`, and the Deck's look for harnesses, no longer hang when a harness is a shell function in your login shell, and no longer leave the next Claude Code session slow to quit.
 - A cron schedule fires each run once through the hour clocks fall back from daylight saving time. One set during that hour, or due when the machine woke in it, fired again every quarter second until the hour ended, sending its message or launching its session each time, and one already running skipped the hour's second pass.
 - The Deck's cursor no longer stalls while something else is writing to the disk, such as a build or a backup. Each move wrote the Stage's card and target to files, and a key could wait 100 ms or more on those writes; they now pass over the Deck's socket.
 - Claude Code in auto mode no longer reads blocked while its classifier checks a call, nor for the whole run of a command it allowed. A prompt sent in auto mode marks blocked only for `AskUserQuestion`, so the dialog auto mode falls back to after repeated denials goes unmarked, and a dialog after switching out of auto mode mid-turn can go unmarked until the next prompt.
