@@ -1,4 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { host, launched, pane, ready, send, settled, type } from "./harness/agents.ts";
 import { entry } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
@@ -252,4 +254,25 @@ test("a message to a dormant Claude Code or Codex session wakes it on its own co
 		expect(s.ls().filter((e) => e.harness === harness)).toHaveLength(1);
 		s.save(`woken-${harness}.txt`, pane(s, target.id));
 	}
+});
+
+test("a Codex session woken after config.toml changes provider resumes on the provider its conversation was saved with", async () => {
+	s = scenario("harnesses", "codex-provider", { packages: [], recorder: true, harnesses: ["codex"] });
+	const [pi, codex] = await Promise.all([launched(s, "pi", "reply pi-up"), launched(s, "codex", "reply SWB-first-codex")]);
+	s.tmux(s.servers.sessions, "kill-session", "-t", `=${host(s, codex.id)}`);
+	await until(() => !entry(s, codex.id).live, budgets.settle, "codex dormant");
+	// Codex 0.166 refuses a conversation on any provider but its own; the same fake under another name is enough.
+	const config = join(s.home, ".codex/config.toml");
+	const text = readFileSync(config, "utf8");
+	const fake = /\[model_providers\.fake\]\n(?:.+\n)+/.exec(text)?.[0] as string;
+	writeFileSync(
+		config,
+		`${text.replace('model_provider = "fake"', 'model_provider = "other"')}\n${fake.replace("[model_providers.fake]", "[model_providers.other]")}`,
+	);
+	const receipt = await send(s, pi.id, codex.id, "SWB-provider are you there");
+	expect(receipt.details).toMatchObject({ delivered: true, woke: true });
+	await until(() => pane(s, codex.id).includes("got SWB-provider are you there"), ready, "codex answering");
+	const answering = s.requests("codex").filter((r) => JSON.stringify(r).includes("SWB-provider"));
+	expect(JSON.stringify(answering[0])).toContain("SWB-first-codex");
+	s.save("woken-codex.txt", pane(s, codex.id));
 });

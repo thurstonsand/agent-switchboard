@@ -21,6 +21,7 @@
 ### Fixed
 
 - Codex on a code-mode-only model, such as gpt-6-sol, offers swb's tools directly. They were only reachable inside its `exec` tool, so an agent asked to start a session used Codex's own `spawn_agent` instead.
+- A Codex session woken after `model_provider` changed in `~/.codex/config.toml` goes on with its own provider, as Codex before 0.166 did. Codex 0.166 refuses a conversation on any other, so the session closed as it opened, and a message waiting for it woke it again and again without ever arriving. A new session starts on the provider config.toml names.
 - Accepting Codex's startup updater in a swb session goes on into the session, on the new Codex, instead of closing its pane.
 - `swb models`, and the Deck's look for harnesses, no longer hang when a harness is a shell function in your login shell, and no longer leave the next Claude Code session slow to quit.
 - A cron schedule fires each run once through the hour clocks fall back from daylight saving time. One set during that hour, or due when the machine woke in it, fired again every quarter second until the hour ended, sending its message or launching its session each time, and one already running skipped the hour's second pass.

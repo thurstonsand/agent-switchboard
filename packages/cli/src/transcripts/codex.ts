@@ -265,3 +265,14 @@ export function codexInUse(path: string): { model: string | null; effort: string
 		effort: context?.effort ?? context?.collaboration_mode?.settings?.reasoning_effort ?? null,
 	};
 }
+
+/** The model provider Codex holds a conversation to: its last settings, else its first line's; null in rollouts too old to say. */
+export function codexProvider(path: string): string | null {
+	const entries = lines(locateRollout(path)) as CodexLine[];
+	type Applied = { type?: string; thread_settings?: { model_provider_id?: string } };
+	const applied = entries.findLast((e) => e.type === "event_msg" && (e.payload as Applied).type === "thread_settings_applied")?.payload as
+		| Applied
+		| undefined;
+	const meta = entries.find((e) => e.type === "session_meta")?.payload as { model_provider?: string | null } | undefined;
+	return applied?.thread_settings?.model_provider_id ?? meta?.model_provider ?? null;
+}

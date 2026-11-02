@@ -23,7 +23,7 @@ import { codexOperatorConfig } from "../operator.ts";
 import { SWB } from "../sessions.ts";
 import { openStore } from "../store.ts";
 import { SESSIONS, tmuxTry } from "../tmux.ts";
-import { archivedInCodex } from "../transcripts/codex.ts";
+import { archivedInCodex, codexProvider } from "../transcripts/codex.ts";
 import { CodexClient, type Notification } from "./client.ts";
 
 // A Codex session's host: the process in its tmux pane. It owns a private app-server, runs the real Codex TUI
@@ -117,6 +117,12 @@ export async function codexHost(args: string[], updated = false): Promise<void> 
 	await declareCodexServer();
 	// Both read config: the server for the model's instructions and tools, the TUI for its trust check.
 	const operator = values.operator ? codexOperatorConfig().flatMap((value) => ["-c", value]) : [];
+	const db = openStore();
+	const transcript = values.resume
+		? (db.get("SELECT transcript FROM sessions WHERE session_id = ?", values.resume)?.transcript as string)
+		: null;
+	// Codex refuses a conversation on any provider but the one it holds it to, so the server runs on that one.
+	const provider = transcript ? codexProvider(transcript) : null;
 	const socket = codexSocket(host);
 	const dir = dirname(socket);
 	mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -135,6 +141,7 @@ export async function codexHost(args: string[], updated = false): Promise<void> 
 			`unix://${socket}`,
 			...codexServerOverrides(SWB),
 			...operator,
+			...(provider ? ["-c", `model_provider=${JSON.stringify(provider)}`] : []),
 		],
 		{ stdin: "pipe", stdout: "ignore", stderr: openSync(join(dir, `${host}.log`), "w") },
 	);
@@ -156,11 +163,7 @@ export async function codexHost(args: string[], updated = false): Promise<void> 
 		throw new SwbError(
 			`Codex didn't load swb's tools: ${swb?.toolsError ?? "it switched swb's MCP server off, as an mcp_servers allowlist in managed requirements does"}`,
 		);
-	const db = openStore();
 	// Archived in Codex behind swb's back, by `codex archive` or another client: swb opening it means it's open.
-	const transcript = values.resume
-		? (db.get("SELECT transcript FROM sessions WHERE session_id = ?", values.resume)?.transcript as string)
-		: null;
 	if (values.resume && transcript && archivedInCodex(transcript)) await client.request("thread/unarchive", { threadId: values.resume });
 	if (values.resume && values["recovery-notice"]) {
 		await client.request("thread/resume", { threadId: values.resume, cwd: process.cwd() });
