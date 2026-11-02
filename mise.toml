@@ -116,3 +116,12 @@ run = "bun test/perf/run.ts"
 [tasks."perf:compare"]
 description = "Compare two perf results files"
 run = "bun test/perf/run.ts compare"
+
+[tasks."eval:search"]
+description = "Replay every session_search on this machine against this checkout's ranker; `mise run eval:search -- --help` for options"
+depends = ["bootstrap"]
+run = "bun test/eval/search.ts"
+
+[tasks."eval:compare"]
+description = "Compare two search eval runs, the latest two by default"
+run = "bun test/eval/search.ts compare"

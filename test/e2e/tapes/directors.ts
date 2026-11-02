@@ -407,6 +407,31 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"search-eval": {
+		harnesses: ["claude", "codex"],
+		setup: async (s) => {
+			files(s);
+			const prompted = (id: string) =>
+				s.query<{ at: number }>("select last_prompt_at as at from sessions where session_id = ?", id)[0]?.at as number;
+			const turn = async (id: string, text: string) => {
+				const before = prompted(id);
+				typeInto(s, id, text);
+				await waitLs(s, `the turn for ${text}`, (ls) => prompted(id) > before && ls.find((e) => e.id === id)?.activity === "idle");
+			};
+			const claude = await launch(s, "claude", "Fix the login redirect");
+			const codex = await launch(s, "codex", "Document the v3 endpoints");
+			const pi = await launch(s, "pi", "Profile roster render");
+			const planner = await launch(s, "pi", "Planner");
+			await turn(claude, "reply The redirect loop came from a stale session cookie; clearing it on logout fixes it");
+			await turn(planner, "search redirect cookie");
+			await turn(planner, `ask-id ${claude} :: What fixed the redirect loop?`);
+			await turn(planner, "search v3 endpoints");
+			await turn(planner, `ask-id ${codex} :: Which endpoints changed?`);
+			await turn(planner, "search flamegraph");
+			await turn(planner, `ask-id ${pi} :: Where did the render time go?`);
+		},
+	},
+
 	"show-session": {
 		setup: async (s) => {
 			const infra = join(s.root, "infra");

@@ -26,6 +26,8 @@ mise run release:check  # build every release artifact into a scratch dir and sm
 mise run evidence       # render the VHS tapes in test/e2e/tapes to test/e2e/artifacts/phase6/videos
 mise run perf           # time what a person waits for, on real harnesses; `-- --help` for options
 mise run perf:compare   # two results files side by side
+mise run eval:search    # replay this machine's recorded session_search calls against this checkout's ranker
+mise run eval:compare   # two eval runs, the latest two by default
 ```
 
 `mise run e2e` runs test files in parallel, two workers per core, and each file's tests in order: a scenario mostly waits on its harnesses, and on a 4-core orb 8 workers was fastest, with more getting slower and flaky. A scenario shares nothing with another, so a new test file needs no setup to run beside the rest. deck-latency's tests hold the roster to 100 ms a keystroke, which a loaded machine misses, so they run alone once the rest are done. Under `CI`, it runs them one at a time: GitHub's runners starve the harnesses at 8 workers, and timing tests fail there that pass alone.

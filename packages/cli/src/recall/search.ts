@@ -38,7 +38,7 @@ function inProject(s: SessionState, project: string): boolean {
 	return /[/~]/.test(project) ? s.project === expand(project) : projectName(s.project).toLowerCase() === project.toLowerCase();
 }
 
-function passes(s: SessionState, f: Filters): boolean {
+export function passes(s: SessionState, f: Filters): boolean {
 	if (f.harness && s.harness !== f.harness) return false;
 	if (f.archived !== null && s.open === f.archived) return false;
 	if (f.project && !inProject(s, f.project)) return false;
@@ -122,7 +122,7 @@ export function matches(index: Db, query: Query, ids: string[], want: number): H
 	return [...strict, ...fetch(query.relaxed).filter((h) => !seen.has(h.id))];
 }
 
-function sessionsToIndex(db: Db, sessions: SessionState[]): Indexed[] {
+export function sessionsToIndex(db: Db, sessions: SessionState[]): Indexed[] {
 	const transcripts = new Map(
 		db.all("SELECT session_id, transcript FROM sessions").map((r) => [r.session_id as string, r.transcript as string]),
 	);
@@ -153,11 +153,49 @@ export const stamp = (at: number) => {
 
 const WHO: Record<string, string> = { user: "user", agent: "agent", call: "tool call", result: "tool result", summary: "summary" };
 
+export type Ranked = { s: SessionState; own: Hit[] };
+
+/**
+ * The candidates that match the query, best first, each with its matches, as they rank at `now`; the index is the
+ * caller's to bring up to date. `want` is how many the caller will show, which decides when the strict match falls
+ * back to the relaxed one.
+ */
+export function rank(index: Db, query: Query, candidates: SessionState[], want: number, now: number): Ranked[] {
+	if (query.filters.file) {
+		const touched = touching(index, query.filters.file, query.filters);
+		candidates = candidates.filter((s) => touched.has(s.id));
+	}
+	const left = excluded(index, query);
+	candidates = candidates.filter((s) => !left.has(s.id));
+	const hits = matches(
+		index,
+		query,
+		candidates.map((s) => s.id),
+		want,
+	);
+	const found = candidates.flatMap((s) => {
+		const own = hits.filter((h) => h.sessionId === s.id);
+		const titled = query.terms.length > 0 && query.terms.every((t) => (s.title ?? "").toLowerCase().includes(t.toLowerCase()));
+		if (query.match && own.length === 0 && !titled) return [];
+		return [{ s, own, titled }];
+	});
+	// A session ranks by where its best match falls among all of them, then by how many more it has.
+	const firsts = new Map<string, number>();
+	for (const h of hits) if (!firsts.has(h.sessionId)) firsts.set(h.sessionId, firsts.size);
+	const score = ({ s, own, titled }: (typeof found)[number]) => {
+		const rank = firsts.get(s.id) ?? firsts.size;
+		const text = own.slice(0, 5).reduce((sum, h, i) => sum + (WEIGHTS[h.kind] ?? 100) / (rank + 1) / (i + 1), 0);
+		const ageDays = Math.max(0, (now - s.activityAt) / 86_400_000);
+		return text + (titled ? TITLE_WEIGHT : 0) + RECENCY_MAX * 0.5 ** (ageDays / RECENCY_HALF_LIFE_DAYS);
+	};
+	return query.match ? found.sort((a, b) => score(b) - score(a)) : found.sort((a, b) => b.s.activityAt - a.s.activityAt);
+}
+
 export function search(db: Db, from: string | null, input: string, limit = SEARCH_LIMIT): ToolResult {
 	if (!Number.isInteger(limit) || limit < 1 || limit > SEARCH_LIMIT_MAX) throw new Error(`limit: 1 to ${SEARCH_LIMIT_MAX}`);
 	const query = parseQuery(input);
 	const all = states(db);
-	let candidates = all.filter((s) => s.id !== from && passes(s, query.filters));
+	const candidates = all.filter((s) => s.id !== from && passes(s, query.filters));
 	const index = openRecall();
 	try {
 		prune(
@@ -165,37 +203,9 @@ export function search(db: Db, from: string | null, input: string, limit = SEARC
 			all.map((s) => s.id),
 		);
 		syncSessions(index, sessionsToIndex(db, candidates));
-		if (query.filters.file) {
-			const touched = touching(index, query.filters.file, query.filters);
-			candidates = candidates.filter((s) => touched.has(s.id));
-		}
-		const left = excluded(index, query);
-		candidates = candidates.filter((s) => !left.has(s.id));
-		const hits = matches(
-			index,
-			query,
-			candidates.map((s) => s.id),
-			limit,
-		);
-		const now = Date.now();
-		const ranked = candidates.flatMap((s) => {
-			const own = hits.filter((h) => h.sessionId === s.id);
-			const titled = query.terms.length > 0 && query.terms.every((t) => (s.title ?? "").toLowerCase().includes(t.toLowerCase()));
-			if (query.match && own.length === 0 && !titled) return [];
-			return [{ s, own, titled }];
-		});
-		// A session ranks by where its best match falls among all of them, then by how many more it has.
-		const firsts = new Map<string, number>();
-		for (const h of hits) if (!firsts.has(h.sessionId)) firsts.set(h.sessionId, firsts.size);
-		const score = ({ s, own, titled }: (typeof ranked)[number]) => {
-			const rank = firsts.get(s.id) ?? firsts.size;
-			const text = own.slice(0, 5).reduce((sum, h, i) => sum + (WEIGHTS[h.kind] ?? 100) / (rank + 1) / (i + 1), 0);
-			const ageDays = Math.max(0, (now - s.activityAt) / 86_400_000);
-			return text + (titled ? TITLE_WEIGHT : 0) + RECENCY_MAX * 0.5 ** (ageDays / RECENCY_HALF_LIFE_DAYS);
-		};
-		const sorted = query.match ? ranked.sort((a, b) => score(b) - score(a)) : ranked.sort((a, b) => b.s.activityAt - a.s.activityAt);
+		const sorted = rank(index, query, candidates, limit, Date.now());
 		const shown = sorted.slice(0, limit);
-		const describe = ({ s, own }: (typeof ranked)[number]) =>
+		const describe = ({ s, own }: Ranked) =>
 			[
 				`- ${s.id} · ${harnessName(s.harness)} · "${displayName(s)}" · ${s.open ? "open" : "archived"} · ${s.cwd} · last active ${stamp(s.activityAt)}`,
 				...own
