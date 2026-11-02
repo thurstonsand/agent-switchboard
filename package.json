@@ -8,12 +8,13 @@
 	],
 	"devDependencies": {
 		"@anthropic-ai/claude-code": "2.1.316",
-		"@earendil-works/pi-ai": "^1.4.0",
-		"@earendil-works/pi-coding-agent": "1.4.0",
+		"@earendil-works/pi-ai": "^1.5.0",
+		"@earendil-works/pi-coding-agent": "1.5.0",
 		"@openai/codex": "0.166.0",
 		"@thurstonsand/pi-wt": "^1.16.0",
 		"@types/bun": "1.4.4",
 		"pi-sessions": "^0.22.0",
+		"typebox": "1.3.27",
 		"typescript": "7.0.2"
 	}
 }

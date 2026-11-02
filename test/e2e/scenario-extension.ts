@@ -7,9 +7,9 @@ import {
 	fauxText,
 	fauxToolCall,
 	getCurrentTools,
-	Type,
 } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { agentStep, readerQuestion } from "./fakes/agent.ts";
 
 // Scripted turns for e2e scenarios. The user's prompt picks the script:
