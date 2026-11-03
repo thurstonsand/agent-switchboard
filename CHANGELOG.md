@@ -5,6 +5,7 @@
 ### Changed
 
 - An idle session nobody is viewing now stops after an hour by default, not 30 minutes, matching Claude Code's hour-long prompt cache. `reap_after` still sets it.
+- The Deck lists its sessions sooner. It used to ask git, one directory at a time, about every directory any session ever ran in, archived ones included, before showing any; it now asks only about open sessions below their Project's root, all at once, and asks the harnesses what they offer after the list is up. A Deck opened when swb's tmux servers were down also no longer leaves its Stage blank for an extra 0.2 s.
 
 ## [0.10.0] - 2026-11-02
 

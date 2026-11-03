@@ -1,7 +1,8 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { promisify } from "node:util";
 
 export { Db, type Param, type Row } from "./db.ts";
 
@@ -97,11 +98,27 @@ export function pidAlive(pid: number): boolean {
 	}
 }
 
+// A directory in a cloud drive (Google Drive's File Provider, say) can block git's first stat indefinitely; that
+// answers as no repository rather than holding up a harness's startup or an import.
+const GIT_TIMEOUT_MS = 5000;
+
 function git(cwd: string, ...args: string[]): string | null {
 	try {
-		// A directory in a cloud drive (Google Drive's File Provider, say) can block git's first stat indefinitely; that
-		// answers as no repository rather than holding up a harness's startup or an import.
-		return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000 }).trim();
+		return execFileSync("git", ["-C", cwd, ...args], {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+			timeout: GIT_TIMEOUT_MS,
+		}).trim();
+	} catch {
+		return null;
+	}
+}
+
+const execFileAsync = promisify(execFile);
+
+async function gitAsync(cwd: string, ...args: string[]): Promise<string | null> {
+	try {
+		return (await execFileAsync("git", ["-C", cwd, ...args], { encoding: "utf8", timeout: GIT_TIMEOUT_MS })).stdout.trim();
 	} catch {
 		return null;
 	}
@@ -113,12 +130,22 @@ export function projectRoot(cwd: string): string {
 	return common ? dirname(common) : cwd;
 }
 
-/** A linked checkout, including when cwd is beneath it; never the repository's main checkout. */
-export function linkedWorktree(cwd: string): { path: string; common: string } | null {
-	const result = git(cwd, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir");
+const WORKTREE_QUERY = ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"];
+
+function worktreeFrom(result: string | null): { path: string; common: string } | null {
 	if (!result) return null;
 	const [path, dir, common] = result.split("\n") as [string, string, string];
 	return dir !== common ? { path, common } : null;
+}
+
+/** A linked checkout, including when cwd is beneath it; never the repository's main checkout. */
+export function linkedWorktree(cwd: string): { path: string; common: string } | null {
+	return worktreeFrom(git(cwd, ...WORKTREE_QUERY));
+}
+
+/** linkedWorktree without blocking, for a caller asking about many directories at once. */
+export async function linkedWorktreeAsync(cwd: string): Promise<{ path: string; common: string } | null> {
+	return worktreeFrom(await gitAsync(cwd, ...WORKTREE_QUERY));
 }
 
 export function branch(cwd: string): string | null {

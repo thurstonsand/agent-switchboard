@@ -162,9 +162,14 @@ export function deriveSessions(rows: SessionRow[], w: World): SessionState[] {
 	return states;
 }
 
+/** Never archived, or prompted since. */
+export function isOpen(row: SessionRow): boolean {
+	return row.archived_at === null || row.archived_at < row.last_prompt_at;
+}
+
 function derive(row: SessionRow, w: World): SessionState {
 	const live = row.runtime !== null && runtimeLive(row.runtime, w.bootId, w.hosts);
-	const open = row.archived_at === null || row.archived_at < row.last_prompt_at;
+	const open = isOpen(row);
 	const activity: Phase = live ? row.phase : "idle";
 	// A clean shutdown takes its runtime row with it; a killed process leaves one behind, from this boot or an earlier one.
 	const cutOff: CutOff | null =

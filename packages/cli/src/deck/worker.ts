@@ -1,9 +1,18 @@
 /// <reference lib="webworker" />
 import { statSync } from "node:fs";
-import { bootId, type Db, type Harness, linkedWorktree, operatorDir, projectRoot, type View } from "@swb/shared";
+import { bootId, type Harness, linkedWorktreeAsync, operatorDir, projectRoot, type View } from "@swb/shared";
 import { span } from "@swb/shared/trace";
 import type { Config } from "../config.ts";
-import { deriveSessions, type RuntimeRecord, runtimeLive, runtimeRecords, type SessionRow, sessionRows, type World } from "../derive.ts";
+import {
+	deriveSessions,
+	isOpen,
+	type RuntimeRecord,
+	runtimeLive,
+	runtimeRecords,
+	type SessionRow,
+	sessionRows,
+	type World,
+} from "../derive.ts";
 import { addDir, removeDir, targets } from "../dirs.ts";
 import { type Catalog, discover, launchFlags, readCatalog, resolveLaunch, shortlist, writeGuide } from "../harnesses.ts";
 import { type ScheduleView, schedulesBySession, snooze } from "../schedules.ts";
@@ -40,13 +49,19 @@ let deck = "";
 let config: Config;
 /** The Project of the directory swb was run in, whose saved layout this Deck starts from and keeps. */
 let layoutRoot = "";
-let db: Db;
+const db = openStore();
 const boot = bootId();
 let lastJson = "";
 let dataVersion = -1;
 let rows: SessionRow[] = [];
 let runtimes: RuntimeRecord[] = [];
+/** The linked worktree each open session's directory is, or null, as git answered; asked once per directory. */
 const worktrees = new Map<string, string | null>();
+/**
+ * Directories git is still answering for, all asked at once. No snapshot goes out meanwhile: one that took a worktree
+ * for none would let archive skip offering to delete it.
+ */
+const asking = new Set<string>();
 let schedules = new Map<string, ScheduleView[]>();
 /** What each launch left for the first session its process records, by tmux session, until that session takes it. */
 let launches = new Map<string, { parentId: string | null; group: string | null }>();
@@ -69,6 +84,8 @@ let catalog: Catalog | null = readCatalog();
 let discovering = false;
 /** Settles once this Deck has asked the harnesses: a launch that names no preset waits for it. */
 const { promise: found, resolve: foundNow } = Promise.withResolvers<void>();
+/** Settles once the roster has its first snapshot. */
+const { promise: posted, resolve: postedNow } = Promise.withResolvers<void>();
 
 /** Tells the roster, and every line's session_launch, what the shortlist now holds. */
 function announce(): void {
@@ -145,7 +162,6 @@ function readDb(): void {
 	dataVersion = version;
 	rows = sessionRows(db);
 	runtimes = runtimeRecords(db);
-	for (const { cwd } of rows) if (!worktrees.has(cwd)) worktrees.set(cwd, linkedWorktree(cwd)?.path ?? null);
 	schedules = schedulesBySession(db);
 	launches = new Map(
 		db
@@ -164,6 +180,22 @@ function readDb(): void {
 		setGroup(db, [id], name);
 		rows = sessionRows(db);
 	}
+}
+
+/** At its Project's root, an open session is in the main checkout or no repository at all; only one below it asks git. */
+function worktreeOf(row: SessionRow): string | null {
+	const { cwd } = row;
+	if (!isOpen(row) || cwd === row.project_root) return null;
+	if (!worktrees.has(cwd) && !asking.has(cwd)) {
+		asking.add(cwd);
+		void linkedWorktreeAsync(cwd).then((tree) => {
+			worktrees.set(cwd, tree?.path ?? null);
+			asking.delete(cwd);
+			// Before init, its own tick posts the first snapshot.
+			if (asking.size === 0 && deck) poll();
+		});
+	}
+	return worktrees.get(cwd) ?? null;
 }
 
 type Polled = { snapshot: Snapshot; attached: Map<string, boolean>; reaped: Map<string, number>; names: Set<string>; serverPid: string };
@@ -212,7 +244,7 @@ function snapshot(): Polled {
 			transcript: row.transcript,
 			host: state.live ? (row.runtime?.tmux_session ?? null) : null,
 			provisional: false,
-			worktree: worktrees.get(state.cwd) ?? null,
+			worktree: worktreeOf(row),
 			schedules: schedules.get(row.session_id) ?? [],
 		};
 	});
@@ -365,11 +397,22 @@ function tick(): Set<string> {
 		}
 	}
 	reap(snap, attached, reaped);
+	if (asking.size > 0) return names;
 	const json = JSON.stringify(snap);
 	if (json === lastJson) return names;
 	lastJson = json;
 	post({ type: "snapshot", snapshot: snap });
+	postedNow();
 	return names;
+}
+
+/** As with a message, a tick that fails says so, and the next one tries again. */
+function poll(): void {
+	try {
+		span("worker.tick", tick);
+	} catch (error) {
+		post({ type: "error", text: (error as Error).message });
+	}
 }
 
 /** A transcript, read again only once it has changed on disk. */
@@ -429,19 +472,12 @@ async function handle(message: ToWorker): Promise<void> {
 			// Only now: the placeholder follows the roster's card stream, and the roster posts init once its socket listens.
 			ensurePlaceholder(deck);
 			config = message.config;
-			db = openStore();
 			layoutRoot = projectRoot(message.here);
 			post({ type: "restore", root: layoutRoot, layout: loadLayout(db, layoutRoot) });
-			// As with a message, a tick that fails says so, and the next one tries again.
-			setInterval(() => {
-				try {
-					span("worker.tick", tick);
-				} catch (error) {
-					post({ type: "error", text: (error as Error).message });
-				}
-			}, TICK_MS);
+			setInterval(poll, TICK_MS);
 			if (catalog) post({ type: "catalog", catalog });
-			refresh(false);
+			// The roster shows "loading…" until its first snapshot, which shouldn't wait on refresh spawning every harness.
+			void posted.then(() => refresh(false));
 			break;
 		case "config": {
 			const prefixChanged = message.config.prefix !== config.prefix;
@@ -629,3 +665,7 @@ async function receive(message: ToWorker): Promise<void> {
 }
 
 self.onmessage = (event: MessageEvent<ToWorker>) => void receive(event.data);
+
+// The roster sends init only once its socket listens; git answers for the open sessions' worktrees meanwhile.
+readDb();
+for (const row of rows) worktreeOf(row);
