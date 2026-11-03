@@ -160,6 +160,12 @@ export async function drive(args: string[]): Promise<void> {
 			await raw(sgr(0, col, row), sgr(0, col, row, true));
 			break;
 		}
+		case "wheel": {
+			const [direction, col, row] = [rest[0], Number(rest[1]), Number(rest[2])];
+			if (direction !== "up" && direction !== "down") throw new UsageError(`drive: wheel takes up or down, got ${direction}`);
+			await raw(sgr(direction === "up" ? 64 : 65, col, row));
+			break;
+		}
 		case "drag": {
 			// --hold leaves the button down, for a look mid-drag; `release` lets go.
 			const [c1, r1, c2, r2] = rest.filter((arg) => arg !== "--hold").map(Number) as [number, number, number, number];

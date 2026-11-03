@@ -100,15 +100,53 @@ test("roster navigation: h l space and a header click fold projects; g G jump; M
 	s.keys("M-a", "z");
 	await waitState(s, "the roster back", (x) => !x.layout.rosterHidden);
 	s.keys("M-a", "?");
-	await until(() => s.screen().includes("any key or click closes"), budgets.settle, "the key help");
+	await until(() => s.screen().includes("key or click closes"), budgets.settle, "the key help");
 	s.save("help.txt", s.screen());
 	s.keys("x");
-	await until(() => !s.screen().includes("any key or click closes"), budgets.settle, "help closed");
+	await until(() => !s.screen().includes("key or click closes"), budgets.settle, "help closed");
 	s.keys("M-a", "h");
 	await waitState(s, "roster", (x) => x.focus === "roster");
 	s.keys("q");
 	await until(() => s.swbTry("drive", "state").code !== 0, budgets.settle, "the Deck closed");
 	expect(s.ls().find((e) => e.id === b)?.live).toBe(true);
+});
+
+test("? fits every key in a tall Deck, and in a short one scrolls them by wheel and keys", async () => {
+	s = scenario("phase5", "help-scroll");
+	await seed(s, { turns: ["here"] });
+	s.swb("drive", "start", "--size", "140x50");
+	await waitState(s, "the Deck", (x) => x.ready);
+	const first = "j k ↑ ↓      move";
+	const last = "a literal M-a";
+	s.keys("?");
+	await until(() => s.screen().includes("key or click closes"), budgets.settle, "the key help");
+	expect(s.screen()).toContain(first);
+	expect(s.screen()).toContain(last);
+	s.keys("x");
+	await until(() => !s.screen().includes("key or click closes"), budgets.settle, "help closed");
+
+	s.swb("drive", "resize", "140x24");
+	await Bun.sleep(500);
+	const cursor = state(s).cursor;
+	s.keys("M-a", "?");
+	await until(() => s.screen().includes("↓ 19 · j k, wheel scroll"), budgets.settle, "the short help, its end below");
+	expect(s.screen()).toContain(first);
+	expect(s.screen()).not.toContain(last);
+	for (let i = 0; i < 3; i++) s.swb("drive", "wheel", "down", "70", "12");
+	await until(() => s.screen().includes("↑ 3 ↓ 16"), budgets.settle, "three wheel turns down");
+	expect(s.screen()).not.toContain(first);
+	s.swb("drive", "wheel", "up", "70", "12");
+	await until(() => s.screen().includes("↑ 2 ↓ 17"), budgets.settle, "one back up");
+	s.keys(" ", " ");
+	await until(() => s.screen().includes(last) && s.screen().includes("↑ 19 ·"), budgets.settle, "space pages to the end");
+	s.keys("k", "k", "Up");
+	await until(() => s.screen().includes("↑ 16 ↓ 3"), budgets.settle, "k and ↑ back up");
+	s.keys("j");
+	await until(() => s.screen().includes("↑ 17 ↓ 2"), budgets.settle, "j down");
+	expect(state(s).cursor).toBe(cursor);
+	s.keys("q");
+	await until(() => !s.screen().includes("wheel scroll"), budgets.settle, "q closes it");
+	expect(state(s).ready).toBe(true);
 });
 
 test("[ and ] step back and forward through the sessions I visited, from the roster, the Stage, and the legend's arrows", async () => {

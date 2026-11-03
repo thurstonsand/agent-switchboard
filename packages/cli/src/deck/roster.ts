@@ -36,6 +36,7 @@ import { VERSION } from "../version.ts";
 import { writeConfig } from "../write-config.ts";
 import { Control } from "./control.ts";
 import { deckEnv, deckSocket, HELP_POPUP, NARROW_BELOW, placeholderName, rosterCols, SPLIT_FROM, stageScript } from "./deck.ts";
+import { helpSize } from "./help.ts";
 import { type Overlay, type OverlayButton, Overlays, type OverlayView } from "./overlay.ts";
 import type {
 	Card,
@@ -3646,9 +3647,16 @@ async function deckClient(): Promise<string | undefined> {
 	return (await tmuxAsync(UI, "list-clients", "-t", `=${deck}`, "-F", "#{client_name}")).split("\n")[0] || undefined;
 }
 
+/** `?`: every key in a popup sized to show them all, short of its terminal's size; tmux refuses a popup bigger than that. */
 async function showHelp(): Promise<void> {
-	const client = await deckClient();
-	if (client) await tmuxAsync(UI, "display-popup", "-c", client, "-E", ...HELP_POPUP);
+	const line = (await tmuxAsync(UI, "list-clients", "-t", `=${deck}`, "-F", "#{client_name}\t#{client_width}\t#{client_height}")).split(
+		"\n",
+	)[0];
+	if (!line) return;
+	const [client, cols, rows] = line.split("\t") as [string, string, string];
+	const size = helpSize(config.prefix);
+	const fit = ["-w", String(Math.min(size.width, Number(cols))), "-h", String(Math.min(size.height, Number(rows)))];
+	await tmuxAsync(UI, "display-popup", "-c", client, "-E", ...fit, ...HELP_POPUP);
 }
 
 /** A Peek's buttons: each one's label and the roster key it runs. */
@@ -3837,6 +3845,9 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 		case "key":
 			await syncFocus();
 			await prefixKey(argv[0] ?? "", argv[1]);
+			break;
+		case "help":
+			await showHelp();
 			break;
 		// The UI server saw the pointer leave both the roster and its overlays, or a key typed elsewhere; it put away
 		// what leaves with them, and stopped watching, on its way here.

@@ -10,7 +10,7 @@ import { openStore } from "../store.ts";
 import { CLIENT_CWD, cleanEnv, listSessions, quote, SESSIONS, tmux, tmuxClient, tmuxTry, UI } from "../tmux.ts";
 import type { DeckState } from "./protocol.ts";
 
-export const HELP_POPUP = ["-w", "72", "-h", "37", "-T", " swb keys ", `${SWB} __help`];
+export const HELP_POPUP = ["-T", " swb keys ", `${SWB} __help`];
 
 /** At least 20 columns, and never more than half the Deck. */
 export function rosterCols(width: RosterWidth, deckWidth: number): number {
@@ -207,7 +207,7 @@ function uiConf(config: Config): string {
 		`bind v ${notify("__deck #{session_name} view-split")}`,
 		`bind s ${notify("__deck #{session_name} shell")}`,
 		"bind q kill-session",
-		`bind ? display-popup -E ${HELP_POPUP.map(quote).join(" ")}`,
+		`bind ? ${notify("__deck #{session_name} help")}`,
 		`bind ${prefix} send-keys ${prefix}`,
 		// A Deck is created detached; destroy-unattached set globally would kill it before its client attaches.
 		`set-hook -g client-attached[0] "if -F '#{m:deck-*,#{session_name}}' 'set destroy-unattached on'"`,

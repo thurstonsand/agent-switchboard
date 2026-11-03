@@ -4,7 +4,7 @@ import { adopt } from "./commands/adopt.ts";
 import { archive } from "./commands/archive.ts";
 import { clock } from "./commands/clock.ts";
 import { launch, reachable, recall, schedule, schedules, search, send, show, unschedule, update } from "./commands/coordinate.ts";
-import { deckCommand, deckNotify, help } from "./commands/deck.ts";
+import { deckCommand, deckNotify } from "./commands/deck.ts";
 import { detached } from "./commands/detached.ts";
 import { dirs } from "./commands/dirs.ts";
 import { drive } from "./commands/drive.ts";
@@ -23,6 +23,7 @@ import { visit } from "./commands/visit.ts";
 import { wake } from "./commands/wake.ts";
 import { readConfig } from "./config.ts";
 import { editorNav, openDeck } from "./deck/deck.ts";
+import { help } from "./deck/help.ts";
 import { SwbError, UsageError } from "./errors.ts";
 import { VERSION } from "./version.ts";
 
@@ -73,7 +74,7 @@ const USAGE = `swb: Agent Switchboard
                                the MCP server a Claude Code or Codex session lists swb's tools from
   swb drive start [--size COLSxROWS] [--theme light|dark] [-- swb-args]
   swb drive keys [--delay MS] [-l TEXT]… [KEY…] | capture [--ansi] | theme light|dark | focus in|out
-            | click X Y | move X Y | drag X1 Y1 X2 Y2 [--hold] | release X Y (0-based cells) | resize COLSxROWS | clipboard | stop
+            | click X Y | wheel up|down X Y | move X Y | drag X1 Y1 X2 Y2 [--hold] | release X Y (0-based cells) | resize COLSxROWS | clipboard | stop
   swb drive state | wait PATH=VALUE [--timeout MS]
   swb deck state [--deck NAME] [--json]
   swb migrate                  create or upgrade the db

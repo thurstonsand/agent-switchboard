@@ -1440,8 +1440,8 @@ export const directors: Record<string, Director> = {
 			await click(" shell ");
 			await waitDrive(s, "the shell closed", (x) => x.layout.shell === null);
 			await click("? keys");
-			await click("any key or click closes", 1000);
-			await until(() => !s.swb("drive", "capture").includes("any key or click closes"), TAPE, "help closed by a click");
+			await click("key or click closes", 1000);
+			await until(() => !s.swb("drive", "capture").includes("key or click closes"), TAPE, "help closed by a click");
 			s.swb("drive", "resize", "90x30");
 			await waitDrive(s, "a narrow Deck, the roster alone", (x) => x.layout.rosterOnly && x.focus === "roster");
 			// No Stage beside the roster: the roster draws the Peek itself, at its right edge.
@@ -1454,6 +1454,33 @@ export const directors: Record<string, Director> = {
 			await Bun.sleep(1000);
 			await click("show list", 90);
 			await waitDrive(s, "the roster alone again", (x) => x.focus === "roster");
+		},
+	},
+
+	"help-scroll": {
+		setup: async (s) => {
+			await seed(
+				s,
+				{ turns: ["the parser is refactored"], title: "Refactor the parser" },
+				{ turns: ["notes drafted"], title: "Draft release notes" },
+			);
+		},
+		run: async (s) => {
+			const shows = (text: string) => s.swb("drive", "capture").includes(text);
+			await waitDrive(s, "the Deck up", (x) => x.ready);
+			await until(() => shows("j k ↑ ↓      move") && shows("a literal M-a"), TAPE, "every key on a tall Deck");
+			await until(() => !shows("any key or click closes"), TAPE, "the help closed");
+			s.swb("drive", "resize", "140x24");
+			await until(() => shows("↓ 19 · j k, wheel scroll"), TAPE, "the short Deck's help, its end below");
+			await Bun.sleep(1500);
+			for (const direction of ["down", "down", "down", "down", "up"]) {
+				s.swb("drive", "wheel", direction, "70", "12");
+				await Bun.sleep(700);
+			}
+			await until(() => shows("↑ 3 ↓ 16"), TAPE, "four turns of the wheel down, one up");
+			await until(() => shows("a literal M-a") && shows("↑ 19 ·"), TAPE, "j j and space to the end");
+			await until(() => shows("↑ 16 ↓ 3"), TAPE, "k k and ↑ back up");
+			await until(() => !shows("wheel scroll"), TAPE, "q closes it");
 		},
 	},
 

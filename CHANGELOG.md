@@ -14,6 +14,10 @@ Schema v9: update swb and the pi line together.
 - An idle session nobody is viewing now stops after an hour by default, not 30 minutes, matching Claude Code's hour-long prompt cache. `reap_after` still sets it.
 - The Deck lists its sessions sooner. It used to ask git, one directory at a time, about every directory any session ever ran in, archived ones included, before showing any; it now asks only about open sessions below their Project's root, all at once, and asks the harnesses what they offer after the list is up. A Deck opened when swb's tmux servers were down also no longer leaves its Stage blank for an extra 0.2 s.
 
+### Fixed
+
+- `?` shows every key again. Its popup had a fixed size the list outgrew, so its first keys scrolled off the top, and on a Deck under 37 rows it didn't open at all. It now fits the list, short of the Deck's own size, and when the Deck is too short it scrolls by `j`/`k`, `↑`/`↓`, `space` and PgUp/PgDn, or the wheel, saying how much lies above and below.
+
 ## [0.10.0] - 2026-11-02
 
 ### Added

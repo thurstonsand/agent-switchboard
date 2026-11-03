@@ -1,7 +1,5 @@
 import { parseArgs } from "node:util";
-import { loadConfig } from "../config.ts";
 import { fetchState, liveDecks, postCommand } from "../deck/deck.ts";
-import { bold, dim } from "../deck/style.ts";
 import { SwbError, UsageError } from "../errors.ts";
 
 /** The one Deck a command means: `--deck`, else the only live one. */
@@ -43,56 +41,4 @@ export async function deckNotify(args: string[]): Promise<void> {
 	const [deck, cmd, ...rest] = args;
 	if (!deck || !cmd) throw new UsageError("__deck: <deck> <cmd> [args…]");
 	await postCommand(deck, cmd, rest);
-}
-
-function keys(prefix: string): [string, string][] {
-	return [
-		["j k ↑ ↓", "move"],
-		["g G", "first, last"],
-		["⏎", "focus the session (wakes it)"],
-		["l →", "focus the session; expand a header or a fold"],
-		["h ←", "fold what a session started; collapse a header"],
-		["space", "toggle a header or a fold"],
-		["w", "wake without focusing"],
-		["x", "stop a running session; it stays open"],
-		["R", "reload: restart its agent on fresh config, and carry on"],
-		["n", "new session: pick a directory, and with ⇥ a preset"],
-		["N", "new session in a directory to add"],
-		["a", "archive, asking about what it started; unarchive"],
-		["p", "the session that started this one"],
-		["[ ]", "back, forward through the sessions I visited"],
-		["s", "snooze into Snoozed for a while, or until a message; unsnooze"],
-		["u", "mark Unseen until I leave it and come back; unmark"],
-		["y Y", "copy swb open <id>; @session:<id>"],
-		["m", "pick the session's Group; rename a Group"],
-		[",", "settings"],
-		["hover", "a session's Peek beside it; its buttons are these keys"],
-		["drag", "into a Group, or out onto its Project"],
-		["/", "filter; esc clears"],
-		["q", "close the Deck (sessions keep running)"],
-		["", ""],
-		["C-h j k l", "move between panes, through nvim's windows"],
-		[`${prefix} h j k l`, `the pane whose label shows that key while ${prefix} is down`],
-		[`${prefix} J K`, "the next or previous session; j k too, in the sidebar"],
-		[`${prefix} Tab`, "the sidebar, or back to the pane you left"],
-		[`${prefix} e`, "swap the agent and the editor"],
-		[`${prefix} v`, "split the editor beside the agent"],
-		[`${prefix} s`, "a shell beside, below, or in place of the agent; ctrl-d closes it"],
-		[`${prefix} z`, "hide or show the sidebar; click ◂ to show it"],
-		[`${prefix} S`, "snooze or unsnooze, as s in the sidebar"],
-		[`${prefix} <key>`, "n N w x R a p u [ ] y Y / m , as in the sidebar"],
-		[`${prefix} d`, "in the directory picker, remove the highlighted one"],
-		[`${prefix} q`, "close the Deck from anywhere"],
-		[`${prefix} ?`, "these keys"],
-		[`${prefix} ${prefix}`, `a literal ${prefix}`],
-	];
-}
-
-export async function help(): Promise<void> {
-	const lines = keys(loadConfig().prefix).map(([k, label]) => (k === "" ? "" : `  ${bold(k.padEnd(12))} ${label}`));
-	// Mouse reporting on, so a click reaches stdin like a key.
-	process.stdout.write(`\x1b[?1000h\x1b[?1006h\n${lines.join("\n")}\n\n  ${dim("any key or click closes")}`);
-	process.stdin.setRawMode(true);
-	await new Promise<void>((resolve) => process.stdin.once("data", () => resolve()));
-	process.exit(0);
 }

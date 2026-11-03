@@ -90,10 +90,10 @@ test("the mouse reaches everything the keys do: a row's Peek, the hidden or narr
 	await waitState(s, "the shell hidden", (x) => x.layout.shell === null);
 
 	await click("? keys");
-	await onScreen("any key or click closes", "the key help");
+	await onScreen("key or click closes", "the key help");
 	s.save("help.txt", s.screen());
-	await click("any key or click closes", 140);
-	await until(() => !s.screen().includes("any key or click closes"), budgets.settle, "help closed by a click");
+	await click("key or click closes", 140);
+	await until(() => !s.screen().includes("key or click closes"), budgets.settle, "help closed by a click");
 
 	s.keys("M-a", "/");
 	await waitState(s, "filtering", (x) => x.mode === "filter");
