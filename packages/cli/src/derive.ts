@@ -21,6 +21,8 @@ export type SessionState = {
 	live: boolean;
 	activity: Phase;
 	unseen: boolean;
+	/** I marked it Unseen, and haven't visited it since. */
+	markedUnseen: boolean;
 	/**
 	 * How a dormant session's process ended mid-turn, or null: its harness shut down cleanly (quit, swb quit --force,
 	 * its pane closed), it died without one (killed, crashed, its tmux server gone), or it went with the machine.
@@ -72,6 +74,7 @@ export type SessionRow = {
 	errored_at: number | null;
 	archived_at: number | null;
 	visited_at: number | null;
+	unseen_at: number | null;
 	view: View | null;
 	group_name: string | null;
 	snoozed_at: number | null;
@@ -86,7 +89,7 @@ export function sessionRows(db: Db): SessionRow[] {
 	return db
 		.all(
 			`SELECT s.session_id, s.harness, s.parent_id, coalesce(m.title, s.title) AS title, s.project_root, s.cwd, s.branch, s.transcript, s.phase, s.created_at, s.last_prompt_at, s.last_settled_at, s.errored_at,
-		        m.archived_at, m.visited_at, m.view, m.group_name, m.snoozed_at, m.snoozed_until, m.reload, r.tmux_session, r.boot_id, r.pid,
+		        m.archived_at, m.visited_at, m.unseen_at, m.view, m.group_name, m.snoozed_at, m.snoozed_until, m.reload, r.tmux_session, r.boot_id, r.pid,
 		        (SELECT max(created_at) FROM messages WHERE target_id = s.session_id AND kind = 'message') AS last_message_at
 		 FROM sessions s LEFT JOIN marks m USING (session_id) LEFT JOIN runtimes r USING (session_id)`,
 		)
@@ -106,6 +109,7 @@ export function sessionRows(db: Db): SessionRow[] {
 			errored_at: r.errored_at as number | null,
 			archived_at: r.archived_at as number | null,
 			visited_at: r.visited_at as number | null,
+			unseen_at: r.unseen_at as number | null,
 			view: r.view as View | null,
 			group_name: r.group_name as string | null,
 			snoozed_at: r.snoozed_at as number | null,
@@ -185,7 +189,9 @@ function derive(row: SessionRow, w: World): SessionState {
 	// A timed snooze running out is news: Unseen until I look, and fresh for inactive_after.
 	const woke = row.snoozed_until !== null && row.snoozed_until <= w.now ? row.snoozed_until : 0;
 	const activityAt = Math.max(row.last_prompt_at, row.last_settled_at ?? 0, woke);
-	const unseen = open && !snoozed && Math.max(row.last_settled_at ?? 0, woke) > (row.visited_at ?? 0);
+	// A mark made in the same millisecond as a Visit outlasts it.
+	const markedUnseen = open && !snoozed && row.unseen_at !== null && row.unseen_at >= (row.visited_at ?? 0);
+	const unseen = markedUnseen || (open && !snoozed && Math.max(row.last_settled_at ?? 0, woke) > (row.visited_at ?? 0));
 	const operator = row.cwd === operatorDir();
 	return {
 		id: row.session_id,
@@ -201,6 +207,7 @@ function derive(row: SessionRow, w: World): SessionState {
 		live,
 		activity,
 		unseen,
+		markedUnseen,
 		cutOff,
 		errored,
 		inactive: open && !operator && !snoozed && activityAt < w.now - w.inactiveAfterMs && activity !== "blocked" && !unseen,

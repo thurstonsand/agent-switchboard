@@ -31,7 +31,7 @@ import {
 	unarchive,
 	wake,
 } from "../sessions.ts";
-import { loadLayout, markVisited, openStore, saveLayout, setGroup, setView } from "../store.ts";
+import { loadLayout, markUnseen, markVisited, openStore, saveLayout, setGroup, setView } from "../store.ts";
 import { listSessions, SESSIONS, tmux, tmuxTry, UI } from "../tmux.ts";
 import { locateTranscript } from "../transcripts/read.ts";
 import { ensurePlaceholder, ensureUiServer, placeholderName } from "./deck.ts";
@@ -265,6 +265,7 @@ function snapshot(): Polled {
 			live: true,
 			activity: "idle",
 			unseen: false,
+			markedUnseen: false,
 			cutOff: null,
 			errored: false,
 			inactive: false,
@@ -519,6 +520,9 @@ async function handle(message: ToWorker): Promise<void> {
 			// A provisional session has no row to mark until its first prompt.
 			readDb();
 			if (rows.some((row) => row.session_id === message.id)) markVisited(db, message.id);
+			break;
+		case "markUnseen":
+			markUnseen(db, message.id, message.marked);
 			break;
 		case "archive":
 			try {

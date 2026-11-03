@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { config, cursorTo, entry, piSessions, seed, sessionRows, state, waitState } from "./harness/deck.ts";
+import { config, cursorTo, entry, piSessions, reply, seed, sessionRows, state, waitState } from "./harness/deck.ts";
 import { alive, budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -58,6 +58,40 @@ test("a session is Visited by a focused second on its pi, not by the cursor pass
 	await until(() => !entry(s, a).unseen, 3000, "a visited");
 	expect(entry(s, b).unseen).toBe(true);
 	s.save("visited.txt", `${s.screen()}\n${JSON.stringify(s.ls(), null, 2)}`);
+});
+
+test("u marks the session on view Unseen at once, through a turn and a move away, until a Visit comes back to it", async () => {
+	s = scenario("phase2", "mark-unseen");
+	const [a, b] = (await seed(s, { turns: ["a"] }, { turns: ["b"] })) as [string, string];
+	const row = (st: ReturnType<typeof state>, id: string) => sessionRows(st).find((r) => r.id === id);
+	s.swb("drive", "start");
+	await cursorTo(s, a);
+	s.keys("Enter");
+	await waitState(s, "a focused", (x) => x.staged.id === a && x.staged.kind === "live" && x.focus === "stage", budgets.piReady);
+	await until(() => !entry(s, a).unseen, 3000, "a visited");
+	s.keys("M-a", "u");
+	await waitState(s, "a marked while on view", (x) => row(x, a)?.state === "unseen" && x.focus === "stage", 1000);
+	s.save("marked-on-view.txt", s.screen());
+	await reply(s, "meanwhile");
+	await Bun.sleep(2500);
+	expect(entry(s, a)).toMatchObject({ unseen: true, markedUnseen: true });
+	expect(row(state(s), a)?.state).toBe("unseen");
+	s.keys("M-a", "h");
+	await waitState(s, "the roster", (x) => x.focus === "roster");
+	await cursorTo(s, b);
+	await waitState(s, "b staged", (x) => x.staged.id === b);
+	expect(entry(s, a).unseen).toBe(true);
+	await cursorTo(s, a);
+	s.keys("Enter");
+	await waitState(s, "a focused again", (x) => x.staged.id === a && x.focus === "stage");
+	await until(() => !entry(s, a).unseen, 3000, "coming back visits a");
+	s.keys("M-a", "u");
+	await until(() => entry(s, a).markedUnseen, 1000, "a marked again");
+	// From the roster, where no Visit can clear it instead.
+	s.keys("M-a", "h");
+	await waitState(s, "the roster", (x) => x.focus === "roster");
+	s.keys("u");
+	await until(() => !entry(s, a).unseen, 1000, "the mark taken off");
 });
 
 test("Enter, then a prompt typed in the Stage, shows working then idle in the roster", async () => {

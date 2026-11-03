@@ -126,6 +126,8 @@ const MIGRATIONS: string[] = [
 	);`,
 	// A reload waiting for the session's turn to end, and how it should come back.
 	"ALTER TABLE marks ADD COLUMN reload TEXT CHECK (reload IN ('continue','idle'))",
+	// When I marked it Unseen, holding until a Visit after it.
+	"ALTER TABLE marks ADD COLUMN unseen_at INTEGER",
 ];
 
 if (MIGRATIONS.length !== SCHEMA_VERSION) throw new Error(`${MIGRATIONS.length} migrations for schema v${SCHEMA_VERSION}`);
@@ -135,6 +137,15 @@ export function markVisited(db: Db, id: string): void {
 		"INSERT INTO marks (session_id, visited_at) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET visited_at = excluded.visited_at",
 		id,
 		Date.now(),
+	);
+}
+
+/** Marks a session Unseen until my next Visit, or (false) takes that mark off. */
+export function markUnseen(db: Db, id: string, marked: boolean): void {
+	db.run(
+		"INSERT INTO marks (session_id, unseen_at) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET unseen_at = excluded.unseen_at",
+		id,
+		marked ? Date.now() : null,
 	);
 }
 

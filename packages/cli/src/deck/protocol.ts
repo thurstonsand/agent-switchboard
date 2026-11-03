@@ -190,6 +190,7 @@ export type ToWorker =
 	| { type: "refresh"; models: boolean }
 	| NewSession
 	| { type: "visit"; id: string }
+	| { type: "markUnseen"; id: string; marked: boolean }
 	| { type: "archive"; ids: string[]; deleteWorktreeFor?: string }
 	| { type: "unarchive"; id: string }
 	| { type: "snooze"; id: string; snooze: Snooze }

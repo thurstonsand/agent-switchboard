@@ -62,7 +62,7 @@ What a live session's agent is doing right now: **working**, **blocked** on me (
 The moment I last looked at a session, by focusing its agent for a second, on the **Stage** or in any other tmux client attached to it; a timestamp watermark.
 
 **Unseen**:
-A session whose agent finished a turn after my last **Visit**.
+A session whose agent finished a turn after my last **Visit**, or one I marked Unseen. A mark made on the **Stage** holds until the Stage leaves the session and a later Visit comes back to it.
 
 ### Organization
 

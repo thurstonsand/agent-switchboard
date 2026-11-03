@@ -71,6 +71,7 @@ export type LsEntry = {
 	live: boolean;
 	activity: "idle" | "working" | "blocked";
 	unseen: boolean;
+	markedUnseen: boolean;
 	cutOff: "shutdown" | "killed" | "restart" | null;
 	errored: boolean;
 	inactive: boolean;

@@ -689,6 +689,26 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"mark-unseen": {
+		setup: async (s) => {
+			await seed(s, { title: "Port the CLI to Bun", turns: ["ported"] }, { title: "Fix the flaky test", turns: ["fixed the race"] });
+		},
+		run: async (s) => {
+			const unseen = (id: string) => s.ls().find((e) => e.id === id)?.unseen;
+			const open = await waitDeck(s, "the Deck", (x) => x.rows.filter((r) => r.kind === "session").length === 2);
+			const [first, second] = (open.rows.filter((r) => r.kind === "session") as { id: string }[]).map((r) => r.id) as [string, string];
+			await waitLs(s, "the first visited", (ls) => ls.find((e) => e.id === first)?.unseen === false);
+			await waitLs(s, "the first marked, on view", (ls) => ls.find((e) => e.id === first)?.markedUnseen === true);
+			await waitDeck(s, "the dot on the first while it has the keyboard", (x) =>
+				x.rows.some((r) => r.kind === "session" && r.id === first && r.state === "unseen" && x.focus === "stage"),
+			);
+			await waitDeck(s, "the second staged", (x) => x.staged.id === second);
+			if (!unseen(first)) throw new Error("leaving the first cleared its mark");
+			await waitDeck(s, "the first focused again", (x) => x.staged.id === first && x.focus === "stage");
+			await waitLs(s, "the visit back clears it", (ls) => ls.find((e) => e.id === first)?.unseen === false);
+		},
+	},
+
 	"editor-split": {
 		setup: async (s) => {
 			files(s);

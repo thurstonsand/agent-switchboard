@@ -390,6 +390,8 @@ const stage = {
 	cardJson: JSON.stringify({ head: [], lines: ["Deck starting…"], turns: null, tail: [], ending: null, agent: "" } satisfies Card),
 	cardChanged: Promise.withResolvers<void>(),
 	watched: null as string | null,
+	/** The session I marked Unseen while it was on the Stage: watching it is no Visit until the Stage leaves it. */
+	marked: null as string | null,
 	visited: false,
 	visitTimer: null as Timer | null,
 	highlightTimer: null as Timer | null,
@@ -810,7 +812,9 @@ function watching(): string | null {
 
 /** A Visit is pi focused on a focused Deck's Stage for 1 s; passing over a session in the roster isn't one. */
 function syncVisit(): void {
-	const id = watching();
+	if (stage.marked !== stage.applied.id) stage.marked = null;
+	const watched = watching();
+	const id = watched === stage.marked ? null : watched;
 	if (id === stage.watched) return;
 	if (stage.visitTimer) clearTimeout(stage.visitTimer);
 	stage.visitTimer = null;
@@ -1656,6 +1660,7 @@ class Roster implements Component, Focusable {
 		else if (k === "R") this.reload();
 		else if (k === "a") this.toggleArchived();
 		else if (k === "s") this.toggleSnooze();
+		else if (k === "u") this.toggleUnseen();
 		else if (k === "p") this.toParent();
 		else if (k === "[" || k === "]") goHistory(k === "[" ? -1 : 1);
 		else if (k === "y" || k === "Y") this.copy(k === "y");
@@ -1983,6 +1988,26 @@ class Roster implements Component, Focusable {
 		const parent = parentOf(row.entry);
 		if (parent) reveal(parent.id);
 		else toast(row.entry.parentId === null ? "you started this one" : "its parent is gone", "info");
+	}
+
+	/** u: marks a session Unseen until I come back to it from another, or takes that mark off. */
+	toggleUnseen(row = this.selected()): void {
+		if (row?.kind !== "session") return;
+		const e = row.entry;
+		if (!e.open) toast("archived; unarchive it first", "info");
+		else if (e.provisional) toast("nothing to mark before the first prompt", "error");
+		else if (e.snoozed) toast("snoozed; unsnooze it first", "info");
+		else {
+			if (e.markedUnseen) {
+				if (stage.marked === e.id) stage.marked = null;
+			} else if (stage.applied.id === e.id) {
+				// Looking at it until now isn't the Visit that clears the mark.
+				stage.visited = false;
+				stage.marked = e.id;
+			}
+			post({ type: "markUnseen", id: e.id, marked: !e.markedUnseen });
+			syncVisit();
+		}
 	}
 
 	/** s: unsnoozes a snoozed session, or asks how long to snooze an open one. */
@@ -3606,6 +3631,7 @@ async function prefixKey(k: string, id: string | undefined): Promise<void> {
 			await focusRoster();
 		roster.toggleArchived(row);
 	} else if (k === "p") roster.toParent(row);
+	else if (k === "u") roster.toggleUnseen(row);
 	else if (k === "[" || k === "]") goHistory(k === "[" ? -1 : 1);
 	else if (k === "s" || k === "S") {
 		// The menu takes the keyboard; unsnoozing needs none.
@@ -3639,6 +3665,7 @@ function peekButtons(row: Row): [label: string, key: string][] {
 	else {
 		items.push(e.live ? ["Stop", "x"] : ["Wake", "w"]);
 		if (!e.provisional) items.push(["Reload", "R"]);
+		if (!e.provisional && !e.snoozed) items.push(e.markedUnseen ? ["Unmark Unseen", "u"] : ["Mark Unseen", "u"]);
 		if (!e.provisional) items.push(e.snoozed ? ["Unsnooze", "s"] : ["Snooze…", "s"], ["Archive", "a"]);
 		if (!e.operator) items.push(["Group…", "m"]);
 		items.push([e.operator ? "New Operator" : "New session here", "n"]);
