@@ -284,15 +284,24 @@ export function deckEnv(): string[] {
  * A Stage pane: a nested client of the sessions server, attached first to `target`. It waits for the Deck's own client
  * first, because a nested client that attaches before the real terminal has no colors to inherit. Whenever it drops, it
  * parks on the placeholder, and the roster, hearing it land there, switches it back to what the Stage shows; a shell's
- * pane instead closes with its shell.
+ * pane instead closes with its shell. A new Deck's worker makes the placeholder only once its roster listens, so the
+ * Stage waits for that too rather than miss it and sit out a retry.
  */
 export function stageScript(deck: string, target: string, closes = false): string {
 	const ui = tmuxClient(UI).map(quote).join(" ");
 	const sessions = tmuxClient(SESSIONS).map(quote).join(" ");
-	const wait = ["unset TMUX TMUX_PANE", `until ${ui} list-clients -t ${quote(`=${deck}`)} 2>/dev/null | grep -q .; do sleep 0.05; done`];
+	const attached = `${ui} list-clients -t ${quote(`=${deck}`)} 2>/dev/null | grep -q .`;
+	const parking = `${sessions} has-session -t ${quote(`=${placeholderName(deck)}`)} 2>/dev/null`;
+	const wait = (ready: string) => ["unset TMUX TMUX_PANE", `until ${ready}; do sleep 0.02; done`];
 	const attach = (session: string) => `${sessions} attach -t ${quote(`=${session}`)} >/dev/null 2>&1`;
-	if (closes) return [...wait, `exec ${attach(target)}`].join("\n");
-	return [...wait, attach(target), "while :; do", `  ${attach(placeholderName(deck))} || sleep 0.2`, "done"].join("\n");
+	if (closes) return [...wait(attached), `exec ${attach(target)}`].join("\n");
+	return [
+		...wait(`${attached} && ${parking}`),
+		attach(target),
+		"while :; do",
+		`  ${attach(placeholderName(deck))} || sleep 0.2`,
+		"done",
+	].join("\n");
 }
 
 /** `continue`: pi takes the keyboard on the most recent session in this Project, or a new one. */
