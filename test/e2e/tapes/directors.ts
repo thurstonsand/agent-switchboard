@@ -668,6 +668,27 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	history: {
+		setup: async (s) => {
+			await seed(
+				s,
+				{ title: "Port the CLI to Bun", turns: ["ported"] },
+				{ title: "Fix the flaky test", turns: ["fixed the race"] },
+				{ title: "Write the README", turns: ["written"] },
+			);
+		},
+		run: async (s) => {
+			await waitLs(s, "all three visited", (ls) => ls.every((e) => e.live && !e.unseen));
+			const order = (deck(s).rows.filter((r) => r.kind === "session") as { id: string }[]).map((r) => r.id);
+			const [first, second, third] = order as [string, string, string];
+			await waitDeck(s, "M-a [ back to the second, pi focused", (x) => x.staged.id === second && x.focus === "stage");
+			await waitDeck(s, "M-a [ back to the first", (x) => x.staged.id === first);
+			await waitDeck(s, "] forward to the second, in the roster", (x) => x.staged.id === second && x.focus === "roster");
+			await waitDeck(s, "] forward to the third", (x) => x.staged.id === third);
+			await waitDeck(s, "] once more: nowhere later", (x) => x.toasts.some((t) => t.text === "no later visit") && x.staged.id === third);
+		},
+	},
+
 	"editor-split": {
 		setup: async (s) => {
 			files(s);

@@ -824,8 +824,45 @@ function syncVisit(): void {
 		if (stage.watched !== id) return;
 		stage.visited = true;
 		post({ type: "visit", id });
+		remember(id);
 		tui.requestRender();
 	}, VISIT_MS);
+}
+
+/** `[` and `]`: the sessions this Deck has visited, oldest first, each once, and the one it stands on. */
+const history = { ids: [] as string[], at: -1 };
+
+/** A Visit somewhere new drops what lay ahead, as a browser's history does; one where `[` or `]` landed changes nothing. */
+function remember(id: string): void {
+	if (history.ids[history.at] === id) return;
+	history.ids = history.ids.slice(0, history.at + 1).filter((other) => other !== id);
+	history.ids.push(id);
+	history.at = history.ids.length - 1;
+}
+
+/**
+ * Where `[` lands: the latest visited session at or behind my place that isn't on view, so one I've only moved off
+ * comes first; `]`: the next one past my place. Archived sessions are passed over; snoozed ones aren't.
+ */
+function historyStep(step: -1 | 1): number {
+	for (let i = step < 0 ? history.at : history.at + 1; i >= 0 && i < history.ids.length; i += step) {
+		const id = history.ids[i] as string;
+		if (id !== stage.staged && entries.get(id)?.open) return i;
+	}
+	return -1;
+}
+
+/** Shows that session as `swb show` does: from the roster the cursor goes to it, and from the Stage it's focused, waking it. */
+function goHistory(step: -1 | 1): void {
+	const i = historyStep(step);
+	if (i === -1) {
+		toast(step < 0 ? "no earlier visit" : "no later visit", "info");
+		return;
+	}
+	history.at = i;
+	const e = entries.get(history.ids[i] as string) as Entry;
+	reveal(e.id);
+	if (focus === "stage") roster.focusEntry(e);
 }
 
 function stageSession(id: string): void {
@@ -955,6 +992,12 @@ let continueTo: Entry | null = null;
  */
 function startCursor(): void {
 	started = true;
+	// `[` reaches back past this Deck, through the Visits every Deck and tmux client before it made.
+	history.ids = [...entries.values()]
+		.filter((e) => e.open && e.visitedAt !== null)
+		.sort((a, b) => (a.visitedAt ?? 0) - (b.visitedAt ?? 0))
+		.map((e) => e.id);
+	history.at = history.ids.length - 1;
 	if (args.select || args.new) return;
 	// A snoozed session is out of the way until it wakes: neither -c nor the last visit lands on one.
 	const open = [...entries.values()].filter((e) => e.open && !e.provisional && !e.snoozed);
@@ -1614,6 +1657,7 @@ class Roster implements Component, Focusable {
 		else if (k === "a") this.toggleArchived();
 		else if (k === "s") this.toggleSnooze();
 		else if (k === "p") this.toParent();
+		else if (k === "[" || k === "]") goHistory(k === "[" ? -1 : 1);
 		else if (k === "y" || k === "Y") this.copy(k === "y");
 		else if (k === "n") this.newAt();
 		else if (k === "N") this.openPicker("add", null, null);
@@ -2513,7 +2557,7 @@ class Roster implements Component, Focusable {
 			gray("─".repeat(width)),
 			...detail,
 			this.messageLine(now, this.listTop + bodyHeight + 1 + detailLines),
-			this.hints(this.listTop + bodyHeight + 1 + detailLines + 1),
+			this.hints(this.listTop + bodyHeight + 1 + detailLines + 1, width),
 		);
 		syncPeek(wantPeek(this.peekSpot(rows, index)));
 		this.place(
@@ -2685,7 +2729,7 @@ class Roster implements Component, Focusable {
 	}
 
 	/** Each key in the legend is also a button. */
-	hints(y: number): string {
+	hints(y: number, cols: number): string {
 		// The archive prompt carries its own keys.
 		if (this.archiving !== null) return "";
 		if (this.filtering) return ` ${this.filter.render(Math.max(10, rosterWidth() - 2))[0] ?? ""}`;
@@ -2742,14 +2786,21 @@ class Roster implements Component, Focusable {
 		// Settings joins the legend where it fits.
 		const settings: Hint = [",", "settings", () => openSettings()];
 		const width = (list: Hint[]) => list.reduce((n, [name, label]) => n + 1 + visibleWidth(key(name, label)), 0);
-		if (focus === "roster" && width([...hints, settings]) <= rosterWidth()) hints.push(settings);
-		return this.clickable(
-			y,
-			hints.flatMap(([name, label, act]): [string, (() => void) | null][] => [
+		// `[` and `]` as buttons, at the legend's right end, gray while there's nowhere to go.
+		const arrow = (glyph: string, step: -1 | 1): [string, (() => void) | null] =>
+			historyStep(step) === -1 ? [gray(glyph), null] : [bold(glyph), () => goHistory(step)];
+		const arrows = " ‹ › ".length;
+		if (focus === "roster" && width([...hints, settings]) + arrows <= rosterWidth()) hints.push(settings);
+		return this.clickable(y, [
+			...hints.flatMap(([name, label, act]): [string, (() => void) | null][] => [
 				[" ", null],
 				[key(name, label), act],
 			]),
-		);
+			[" ".repeat(Math.max(1, cols - width(hints) - arrows + 1)), null],
+			arrow("‹", -1),
+			[" ", null],
+			arrow("›", 1),
+		]);
 	}
 
 	invalidate(): void {}
@@ -3555,6 +3606,7 @@ async function prefixKey(k: string, id: string | undefined): Promise<void> {
 			await focusRoster();
 		roster.toggleArchived(row);
 	} else if (k === "p") roster.toParent(row);
+	else if (k === "[" || k === "]") goHistory(k === "[" ? -1 : 1);
 	else if (k === "s" || k === "S") {
 		// The menu takes the keyboard; unsnoozing needs none.
 		if (!(row?.kind === "session" && row.entry.snoozed)) await focusRoster();

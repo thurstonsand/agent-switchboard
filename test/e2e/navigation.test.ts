@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState, HeaderStateRow } from "../../packages/cli/src/deck/protocol.ts";
-import { cursorTo, headerRows, pickNew, reply, seed, sessionRows, waitState } from "./harness/deck.ts";
+import { cursorTo, entry, headerRows, pickNew, reply, seed, sessionRows, state, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -109,6 +109,87 @@ test("roster navigation: h l space and a header click fold projects; g G jump; M
 	s.keys("q");
 	await until(() => s.swbTry("drive", "state").code !== 0, budgets.settle, "the Deck closed");
 	expect(s.ls().find((e) => e.id === b)?.live).toBe(true);
+});
+
+test("[ and ] step back and forward through the sessions I visited, from the roster, the Stage, and the legend's arrows", async () => {
+	s = scenario("phase6", "history");
+	const [a, b, c, d] = (await seed(s, { turns: ["a"] }, { turns: ["b"] }, { turns: ["c"] }, { turns: ["d"] })) as [
+		string,
+		string,
+		string,
+		string,
+	];
+	// Visits an earlier Deck made, d the latest, archived since.
+	for (const [id, at] of [
+		[a, 1000],
+		[b, 2000],
+		[d, 3000],
+	] as const)
+		s.query(
+			"INSERT INTO marks (session_id, visited_at) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET visited_at = excluded.visited_at",
+			id,
+			at,
+		);
+	s.swb("archive", d);
+	s.swb("drive", "start");
+	await waitState(s, "the Deck opens on b, the latest open Visit", (x) => x.cursor === b && x.staged.id === b);
+	const noLater = (x: DeckState) => x.toasts.some((t) => t.text === "no later visit");
+
+	s.keys("[");
+	await waitState(s, "[ back past this Deck to a", (x) => x.cursor === a && x.staged.id === a && x.focus === "roster");
+	s.keys("]");
+	await waitState(s, "] forward to b", (x) => x.cursor === b && x.staged.id === b);
+	s.keys("]");
+	await waitState(s, "nothing after b: archived d is passed over", (x) => noLater(x) && x.cursor === b);
+
+	// Resting on c from the roster isn't a Visit; focusing its pi for a second is.
+	await cursorTo(s, c);
+	await Bun.sleep(1500);
+	s.keys("[");
+	await waitState(s, "[ off c, never visited, lands on b", (x) => x.cursor === b);
+	await cursorTo(s, c);
+	s.keys("Enter");
+	await waitState(
+		s,
+		"c live with the keyboard",
+		(x) => x.staged.id === c && x.staged.kind === "live" && x.focus === "stage",
+		budgets.piReady,
+	);
+	await until(() => !entry(s, c).unseen, 3000, "c visited");
+
+	s.keys("M-a", "[");
+	await waitState(
+		s,
+		"M-a [ from the Stage wakes b and keeps the keyboard",
+		(x) => x.staged.id === b && x.staged.kind === "live" && x.focus === "stage",
+		budgets.piReady,
+	);
+	expect(state(s).cursor).toBe(b);
+	const screen = s.screen().split("\n");
+	const legendY = screen.findLastIndex((line) => line.includes("‹ ›"));
+	s.save("history-legend.txt", screen[legendY] as string);
+	s.swb("drive", "click", String((screen[legendY] as string).indexOf("›")), String(legendY));
+	await waitState(s, "the legend's › forward to c", (x) => x.staged.id === c && x.cursor === c);
+
+	// A snoozed session is still somewhere I've been.
+	s.swb("snooze", a, "one_hour");
+	await waitState(s, "a snoozed", (x) => x.rows.some((r) => r.kind === "section" && r.label === "Snoozed"));
+	s.keys("M-a", "h");
+	await waitState(s, "the roster", (x) => x.focus === "roster");
+	s.keys("[");
+	await waitState(s, "[ to b", (x) => x.cursor === b);
+	s.keys("[");
+	await waitState(s, "[ to a, in Snoozed", (x) => x.cursor === a && x.staged.id === a);
+
+	// Visiting somewhere new drops what lay ahead: b, after a, leaves c behind.
+	await cursorTo(s, b);
+	s.keys("Enter");
+	await waitState(s, "b with the keyboard", (x) => x.staged.id === b && x.focus === "stage");
+	await Bun.sleep(1500);
+	s.keys("M-a", "]");
+	await waitState(s, "nothing after b now", (x) => noLater(x) && x.staged.id === b);
+	s.keys("M-a", "[");
+	await waitState(s, "M-a [ back to a", (x) => x.staged.id === a && x.focus === "stage", budgets.piReady);
 });
 
 test("n and M-a n open the picker on the highlighted session's directory, before its first prompt too, and Enter starts there", async () => {

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `[` and `]` in the roster step back and forward through the sessions you visited, as a browser's back and forward do, and `‹ ›` at the end of the legend does the same with a click. From the agent, `M-a [` and `M-a ]` focus the session there, waking it. A Visit counts as it does for Unseen, a second with the agent focused, so moving the cursor over a session doesn't. A new Deck reaches back through every earlier Visit. Archived sessions are passed over; snoozed ones aren't.
+
 ### Changed
 
 - An idle session nobody is viewing now stops after an hour by default, not 30 minutes, matching Claude Code's hour-long prompt cache. `reap_after` still sets it.
