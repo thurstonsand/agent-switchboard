@@ -11,6 +11,7 @@ import hooks from "../../lines/claude/plugin/hooks/hooks.json";
 import register from "../../lines/claude/plugin/hooks/register.js" with { type: "text" };
 import { SwbError } from "./errors.ts";
 import { lock } from "./lock.ts";
+import { quote } from "./tmux.ts";
 
 /** Replaced whole, so a harness reading it mid-write never sees half a file. */
 function write(path: string, text: string): void {
@@ -23,6 +24,8 @@ function write(path: string, text: string): void {
  * The Claude line's plugin, written from the copy this swb carries, so a session always loads its own swb's line. Its
  * coordination tools come from the plugin's swb mcp server, which marks the read-only ones so Claude runs them in
  * parallel; the mod still answers every call, since session_recall's reader is a Claude subagent only the mod can start.
+ * A title set through swb and a resume's recovery notice reach Claude Code through command hooks, the one kind an
+ * organization's cc-plugin-sec-default doesn't send on past the line.
  */
 export function writeClaudeLine(swb: string): string {
 	const dir = join(stateDir(), "lines", "claude");
@@ -30,7 +33,11 @@ export function writeClaudeLine(swb: string): string {
 	mkdirSync(join(dir, "hooks"), { recursive: true });
 	const mcpServers = { swb: { command: swb, args: ["mcp", "--harness", "claude"] } };
 	write(join(dir, ".claude-plugin", "plugin.json"), `${JSON.stringify({ ...manifest, mcpServers }, null, "\t")}\n`);
-	write(join(dir, "hooks", "hooks.json"), `${JSON.stringify(hooks, null, "\t")}\n`);
+	const commands = {
+		SessionStart: [{ matcher: "resume", hooks: [{ type: "command", command: `${quote(swb)} __claude_hook recovery` }] }],
+		UserPromptSubmit: [{ hooks: [{ type: "command", command: `${quote(swb)} __claude_hook title` }] }],
+	};
+	write(join(dir, "hooks", "hooks.json"), `${JSON.stringify({ ...hooks, hooks: commands }, null, "\t")}\n`);
 	write(join(dir, "hooks", "register.js"), register as string);
 	write(
 		join(dir, "hooks", "tools.js"),

@@ -117,8 +117,39 @@ export function record(args: string[]): void {
 }
 
 /**
- * Streams a host's incoming messages, and any title set through swb, as JSON lines, for its line to deliver, until its
- * parent process is gone.
+ * The line's command hooks, by name: the kind an organization's cc-plugin-sec-default runs, where it sends a mod's
+ * classic hooks on past the line.
+ */
+export async function claudeHook(args: string[]): Promise<void> {
+	switch (args[0]) {
+		case "title":
+			return promptTitle();
+		case "recovery":
+			return recoveryNotice();
+		default:
+			throw new UsageError(`__claude_hook: title or recovery, not ${args[0]}`);
+	}
+}
+
+/** On each prompt: hands Claude Code a title set through swb, which it takes as its own. Only a prompt hook can. */
+async function promptTitle(): Promise<void> {
+	if (!process.env.SWB_TMUX_SESSION) return;
+	const { session_id } = (await Bun.stdin.json()) as { session_id: string };
+	const title = pendingTitle(openStore(), session_id);
+	if (title === null) return;
+	console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "UserPromptSubmit", sessionTitle: title } }));
+}
+
+/** On a resume: tells the person and the model that swb resumed this conversation somewhere else, since its directory is gone. */
+function recoveryNotice(): void {
+	const notice = process.env.SWB_RECOVERY_NOTICE;
+	if (!notice) return;
+	const additional = { hookEventName: "SessionStart", additionalContext: notice };
+	console.log(JSON.stringify({ systemMessage: notice.replace(/^swb: /, ""), hookSpecificOutput: additional }));
+}
+
+/**
+ * Streams a host's incoming messages as JSON lines, for its line to deliver, until its parent process is gone.
  * Whatever was offered but never acknowledged is offered again when this starts, so a crash loses nothing.
  */
 export async function inbox(args: string[]): Promise<void> {
@@ -128,7 +159,6 @@ export async function inbox(args: string[]): Promise<void> {
 	const db = openStore();
 	const parent = process.ppid;
 	let offered = new Set<string>();
-	let offeredTitle: string | null = null;
 	let serving: string | undefined;
 	let version = -1;
 	let rang = () => {};
@@ -144,12 +174,7 @@ export async function inbox(args: string[]): Promise<void> {
 			if (session !== serving) {
 				serving = session;
 				offered = new Set();
-				offeredTitle = null;
 			}
-			// A title set through swb, which Claude Code takes as its own with the next prompt.
-			const title = session ? pendingTitle(db, session) : null;
-			if (title !== null && title !== offeredTitle) process.stdout.write(`${JSON.stringify({ kind: "title", target: session, title })}\n`);
-			offeredTitle = title;
 			for (const m of session ? pendingFor(db, session) : []) {
 				if (offered.has(m.id)) continue;
 				offered.add(m.id);

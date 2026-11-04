@@ -9,7 +9,7 @@ import { detached } from "./commands/detached.ts";
 import { dirs } from "./commands/dirs.ts";
 import { drive } from "./commands/drive.ts";
 import { gc } from "./commands/gc.ts";
-import { ack, inbox, record } from "./commands/line.ts";
+import { ack, claudeHook, inbox, record } from "./commands/line.ts";
 import { LS_HELP, ls } from "./commands/ls.ts";
 import { migrate } from "./commands/migrate.ts";
 import { models } from "./commands/models.ts";
@@ -198,6 +198,8 @@ async function main(args: string[]): Promise<void> {
 			return inbox(rest);
 		case "__ack":
 			return ack(rest);
+		case "__claude_hook":
+			return claudeHook(rest);
 		case "__help":
 			return help();
 		case "__nav":

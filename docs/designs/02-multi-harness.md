@@ -77,6 +77,7 @@ swb mcp                           the MCP server Codex's app-server runs for the
 swb __record EVENT …              the Claude line's recorder
 swb __inbox --host NAME           streams a host's incoming messages as JSON lines
 swb __ack ID                      marks a message delivered
+swb __claude_hook title|recovery  the Claude line's command hooks: a pending title on each prompt, the notice that a resumed conversation moved
 swb __codex --host NAME [--resume ID]   a Codex session's host process
 ```
 
@@ -178,7 +179,8 @@ session.end            /clear or /resume → swb __record start for the session 
 turn.start (main)      swb __record turn
 tool.check → ask with no host deciding → blocked, unless the transcript last recorded auto mode and the tool isn't AskUserQuestion; turn.step → working again
 turn.complete (main)   reason error → swb __record errored; swb __record settled   archived meanwhile → swb stops the pane
-classic.UserPromptSubmit   a title set through swb, as sessionTitle; the one classic hook, since no other event titles
+UserPromptSubmit       a command hook in hooks.json, swb __claude_hook title: a title set through swb, as sessionTitle. Only a prompt hook titles, and an organization's cc-plugin-sec-default sends a mod's classic hooks on past the line
+SessionStart (resume)  a command hook in hooks.json, swb __claude_hook recovery: SWB_RECOVERY_NOTICE, for the person and as context
 prompt.edit            remember the draft; session.end writes it to drafts/<id>
 ```
 

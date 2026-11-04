@@ -165,7 +165,6 @@ async function stopReader($, agentId) {
 const line = {
 	managed: false,
 	started: false,
-	recovered: false,
 	bin: "",
 	host: "",
 	session: "",
@@ -177,8 +176,6 @@ const line = {
 	blocked: false,
 	draft: "",
 	pending: [],
-	/** A title set through swb, { target, title }, that Claude Code takes as its own with the next prompt. */
-	title: null,
 	/** The model and effort of this session's last model request recorded, so only a change is recorded again. */
 	request: "",
 	/** The last record in flight; each waits for the one before, so swb sees them in order. */
@@ -298,8 +295,7 @@ async function drain($) {
 			buffer = buffer.slice(nl + 1);
 			if (!raw.trim()) continue;
 			const m = JSON.parse(raw);
-			if (m.kind === "title") line.title = m;
-			else if (m.kind === "cancel") {
+			if (m.kind === "cancel") {
 				if (line.busy && line.turnId) await $.turn.abort({ turnId: line.turnId });
 				await ack($, [m.id]);
 			} else {
@@ -465,16 +461,6 @@ async function saveDraft($) {
 }
 
 export function register(on) {
-	on("classic.SessionStart", async ($, e, next) => {
-		const result = await next(e);
-		if (line.recovered) return result;
-		line.recovered = true;
-		const notice = await $.env.get("SWB_RECOVERY_NOTICE");
-		if (!notice) return result;
-		$.ui.log(notice.replace(/^swb: /, ""));
-		return { ...result, additionalContext: [...(result.additionalContext ?? []), notice] };
-	});
-
 	on("session.start", async ($, e, next) => {
 		const result = await next(e);
 		await connectTools($);
@@ -493,16 +479,6 @@ export function register(on) {
 			void record($, ["turn", "--session", line.session, "--cwd", line.cwd]);
 		}
 		return next(e);
-	});
-
-	// Claude Code names a session from a prompt hook's sessionTitle, and writes it as its own custom title. No other
-	// event can, so this stays a classic hook, which an organization's cc-plugin-sec-default sends on past the line.
-	on("classic.UserPromptSubmit", async (_, e, next) => {
-		const result = await next(e);
-		const pending = line.title;
-		if (!line.managed || pending?.target !== line.session) return result;
-		line.title = null;
-		return { ...result, sessionTitle: pending.title };
 	});
 
 	// A call's ask opens the permission dialog, unless a host answers it elsewhere. In auto mode the classifier answers it

@@ -14,6 +14,7 @@ Schema v10: update swb and the pi line together.
 
 - A working session no longer moves to Inactive when its turn outlasts `inactive_after`. Resolving a long-held attention prompt could hide the session and switch the Stage away before its reply landed, leaving that reply Unseen.
 - Codex errors no longer go unmarked when its transcript writes lag behind its live status. swb records the error when Codex reports it, before settling the turn, instead of checking a history entry that may not yet contain it.
+- Claude Code on a machine with managed settings takes a title set through swb with its next prompt, as everywhere else, and a conversation swb resumed in its Project root says so, to you and to the model. Its built-in `cc-plugin-sec-default` mod skipped the line's last two classic hooks, which carried both, and posted a notice for each; the line now hands them over through command hooks, which that mod leaves alone.
 
 ## [0.11.0] - 2026-11-03
 
