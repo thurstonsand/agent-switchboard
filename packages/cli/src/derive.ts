@@ -210,7 +210,7 @@ function derive(row: SessionRow, w: World): SessionState {
 		markedUnseen,
 		cutOff,
 		errored,
-		inactive: open && !operator && !snoozed && activityAt < w.now - w.inactiveAfterMs && activity !== "blocked" && !unseen,
+		inactive: open && !operator && !snoozed && activityAt < w.now - w.inactiveAfterMs && activity === "idle" && !unseen,
 		snoozed,
 		snoozedUntil: snoozed ? row.snoozed_until : null,
 		reload: open ? row.reload : null,

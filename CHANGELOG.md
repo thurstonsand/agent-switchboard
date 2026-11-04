@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A working session no longer moves to Inactive when its turn outlasts `inactive_after`. Resolving a long-held attention prompt could hide the session and switch the Stage away before its reply landed, leaving that reply Unseen.
+
 ## [0.11.0] - 2026-11-03
 
 Schema v9: update swb and the pi line together.

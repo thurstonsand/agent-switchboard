@@ -1,4 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { DeckState } from "../../packages/cli/src/deck/protocol.ts";
 import { config, cursorTo, entry, launched, rowIndex, seed, sessionRows, state, title, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
@@ -14,7 +16,7 @@ afterEach(async () => {
 	await s.cleanup();
 });
 
-test("Inactive after inactive_after, never while blocked or unseen", async () => {
+test("Inactive after inactive_after, never while blocked or unseen or working", async () => {
 	s = scenario("phase3", "inactive");
 	const [unseen] = (await seed(s, { turns: ["unseen"] })) as [string];
 	config(s, 'inactive_after = "2s"\n');
@@ -28,7 +30,19 @@ test("Inactive after inactive_after, never while blocked or unseen", async () =>
 	await until(() => title(s) === "swb ◆1 ●1", budgets.settle, "the title counting both");
 	s.save("blocked-and-unseen.txt", s.screen());
 
+	// Resolving attention resumes the turn; it hasn't settled or refreshed activityAt yet.
+	await until(() => !entry(s, blocked).unseen, budgets.settle, "the blocked turn visited before resuming");
+	writeFileSync(join(s.home, "e2e-signals/b1.working.hold"), "");
 	release(s, "b1");
+	await until(() => entry(s, blocked).activity === "working", budgets.settle, "working again after attention");
+	expect(entry(s, blocked)).toMatchObject({ unseen: false, inactive: false });
+	const working = await waitState(s, "the resumed turn still on view", (x) =>
+		x.rows.some((r) => r.kind === "session" && r.id === blocked && r.state === "working"),
+	);
+	expect(working.staged.id).toBe(blocked);
+	expect(working.rows.some((r) => r.kind === "section" && r.label === "Inactive")).toBe(false);
+	s.save("working-after-attention.txt", s.screen());
+	release(s, "b1.working");
 	await until(() => entry(s, blocked).inactive, 8000, "the released session goes inactive once seen and quiet");
 	await until(() => title(s) === "swb ●1", budgets.settle, "the title counting only the unseen");
 	s.keys("M-a", "h");

@@ -18,7 +18,7 @@ import { agentStep, readerQuestion } from "./fakes/agent.ts";
 //   run <command>     say so, run <command> through bash, then answer "tool done <command>"
 //   fail <text>       end the turn on a provider error that isn't retried
 //   hold <name>       signal <name>.entered, wait for <name>.release, answer "released <name>"
-//   attention <name>  like hold, inside a glimpse attention span
+//   attention <name>  like hold, inside a glimpse attention span; <name>.working.hold holds it working afterwards
 //   confirm <name>    ask in pi's own confirm dialog, signalling <name>.entered, then answer "tool done <name>"
 //   both <name>       inside a glimpse attention span, ask like confirm, signal <name>.answered, then hold the span
 //                     until <name>.release
@@ -252,6 +252,7 @@ export default function (pi: ExtensionAPI) {
 			} finally {
 				pi.events.emit("glimpseui:attention:resolve", { attentionId });
 			}
+			if (existsSync(join(signals, `${params.name}.working.hold`))) await released(`${params.name}.working`, abort);
 			return { content: [{ type: "text", text: `attention ${params.name} released` }], details: undefined };
 		},
 	});
