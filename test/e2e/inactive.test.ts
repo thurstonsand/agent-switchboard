@@ -68,9 +68,11 @@ test("Inactive after inactive_after, never while blocked or unseen or working", 
 	s.keys("Enter");
 	await waitState(s, "Inactive expanded", (x) => rowIndex(x, unseen) !== -1);
 	await cursorTo(s, unseen);
+	writeFileSync(join(s.home, "e2e-signals/start.hold"), "");
 	s.keys("Enter");
 	const waking = await waitState(s, "waking", (x) => x.waking.some((w) => w.id === unseen));
 	expect(sectionOf(waking)).toBe("Inactive");
+	release(s, "start");
 	const woke = await waitState(s, "woken", (x) => x.staged.id === unseen && x.staged.kind === "live", budgets.piReady);
 	expect(sectionOf(woke)).toBe("Inactive");
 });
