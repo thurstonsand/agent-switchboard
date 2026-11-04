@@ -316,8 +316,9 @@ async function useTool($, name, e) {
 	// The caller is whoever Claude Code says this session is now, never a value cached from an event that can be missed.
 	const self = await $.session.id();
 	const from = ["--from", self];
-	// A launch carries forward the model and effort this session runs on, which swb reads from its records.
-	if (name === "session_launch") await line.recording;
+	// Every call waits for this turn's records: a snooze or archive made before its turn recorded would be undone by it,
+	// and a launch carries forward the model and effort swb reads from them.
+	await line.recording;
 	switch (name) {
 		case "session_list":
 			return swb($, ["list", ...from]);
