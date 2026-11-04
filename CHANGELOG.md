@@ -8,6 +8,7 @@ Schema v10: update swb and the pi line together.
 
 - swb's tools and their arguments take names that say what the agent is choosing, all in snake_case: `session_reachable` is `session_list`, `session_ask` is `session_recall`, and `session_schedules` splits into `session_list_schedules` and `session_unschedule`. `session_launch`'s `goal` is `briefing`; `requestResponse` is `report_back`; a schedule's `label` is `schedule_label`; `swb_update_session`'s `force` is `cancel_turns` and `deleteWorktree` is `delete_worktree`; and the reader's `recall_read` takes `tool_output: trimmed | whole` in place of `body: preview | full`.
 - The CLI follows: `swb reachable` is `swb list`, `swb schedules` is `swb list-schedules`, `--request-response` is `--report-back`, and `--label` is `--schedule-label`.
+- swb's e2e runs pi-sessions 0.23.0, which takes the same names for its own tools.
 
 ### Fixed
 

@@ -80,7 +80,7 @@ test("managed pi yields recall to swb, keeps subagents, and stays yielded after 
 	const child = JSON.parse(s.signal("child.recall.tools")) as string[];
 	s.save("child-tools.json", JSON.stringify(child, null, 2));
 	console.log(`unmanaged child: ${child.join(", ")}`);
-	for (const name of ["session_search", "session_ask", "submit_task_report"]) expect(child).toContain(name);
+	for (const name of ["session_search", "session_recall", "submit_task_report"]) expect(child).toContain(name);
 	expect(child).not.toContain("swb_update_session");
 	expect(s.ls().map((e) => e.id)).toEqual([parent]);
 	expect(sessionRows(state(s)).map((r) => r.id)).toEqual([parent]);

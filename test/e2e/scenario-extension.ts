@@ -142,8 +142,8 @@ export default function (pi: ExtensionAPI) {
 		const prompt = text(last).trim();
 		if (prompt === "Continue where you left off.") return fauxAssistantMessage("continued");
 		if (prompt.startsWith("This session was restarted to reload")) return fauxAssistantMessage("reloaded");
-		if (prompt.includes("<handoff-goal>")) {
-			return fauxAssistantMessage(fauxToolCall("create_handoff_context", { summary: "e2e", relevantFiles: [] }), {
+		if (prompt.includes("<handoff-briefing>")) {
+			return fauxAssistantMessage(fauxToolCall("create_handoff_context", { summary: "e2e", relevant_files: [] }), {
 				stopReason: "toolUse",
 			});
 		}
@@ -186,7 +186,7 @@ export default function (pi: ExtensionAPI) {
 				return fauxAssistantMessage(`released ${arg}`);
 			case "subagent":
 				return fauxAssistantMessage(
-					fauxToolCall("subagent_launch", { title: `child ${arg}`, goal: `reply child ${arg}`, requestResponse: true }),
+					fauxToolCall("subagent_launch", { title: `child ${arg}`, briefing: `reply child ${arg}`, report_back: true }),
 					{
 						stopReason: "toolUse",
 					},
