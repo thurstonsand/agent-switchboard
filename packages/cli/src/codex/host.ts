@@ -370,21 +370,14 @@ class CodexLine {
 			this.busy = false;
 			this.blocked = false;
 			this.guard(() => {
+				// The live error arrives before the rollout's turn history necessarily records it.
+				if (status.type === "systemError") turnErrored(this.db, thread.id);
 				const { quit } = settle(this.db, { host: this.host, sessionId: thread.id, cwd: thread.cwd, title: thread.name });
 				if (quit) {
 					this.stopping = true;
 					this.stop();
 				}
 			});
-			// Only the TUI's connection hears turn/completed; this one asks how the turn ended.
-			void this.client
-				.request<{ data: { status: string }[] }>("thread/turns/list", { threadId: thread.id, limit: 1, sortDirection: "desc" })
-				.then(
-					({ data }) => {
-						if (data[0]?.status === "failed") this.guard(() => turnErrored(this.db, thread.id));
-					},
-					(error: Error) => console.error(`swb: not recording: ${error.message}`),
-				);
 		}
 	}
 

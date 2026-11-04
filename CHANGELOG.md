@@ -12,6 +12,7 @@ Schema v10: update swb and the pi line together.
 ### Fixed
 
 - A working session no longer moves to Inactive when its turn outlasts `inactive_after`. Resolving a long-held attention prompt could hide the session and switch the Stage away before its reply landed, leaving that reply Unseen.
+- Codex errors no longer go unmarked when its transcript writes lag behind its live status. swb records the error when Codex reports it, before settling the turn, instead of checking a history entry that may not yet contain it.
 
 ## [0.11.0] - 2026-11-03
 
