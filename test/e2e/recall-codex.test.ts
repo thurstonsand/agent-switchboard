@@ -156,7 +156,7 @@ test("Codex's reader reads with its own shell under a read-only sandbox, with no
 	);
 	expect(String(read.toolOutput)).toContain("2:SWB-file-line");
 	expect(read.tools as string[]).toContain("list_mcp_resources");
-	expect((read.tools as string[]).filter((tool) => tool === "session_ask")).toHaveLength(2);
+	expect((read.tools as string[]).filter((tool) => tool === "session_recall")).toHaveLength(2);
 	const offered = [...new Set(readerRequests().flatMap((r) => r.tools as string[]))];
 	s.save("reader-tools.json", JSON.stringify(offered, null, 2));
 	expect(offered).toEqual(READER_OFFERED);

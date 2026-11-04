@@ -359,14 +359,14 @@ export const directors: Record<string, Director> = {
 			typeInto(
 				s,
 				parent,
-				`call session_launch ${JSON.stringify({ harness: "pi", goal: "reply Docs drafted", title: "Draft the v3 docs", requestResponse: false })}`,
+				`call session_launch ${JSON.stringify({ harness: "pi", briefing: "reply Docs drafted", title: "Draft the v3 docs", report_back: false })}`,
 			);
 			await waitLs(s, "the child idle", (ls) => ls.some((e) => e.parentId === parent && e.activity === "idle"));
 			await waitLs(s, "the parent idle", (ls) => ls.find((e) => e.id === parent)?.activity === "idle");
 		},
 	},
 
-	"session-ask": {
+	"session-recall": {
 		harnesses: ["claude", "codex"],
 		setup: async (s) => {
 			files(s);
@@ -978,8 +978,8 @@ export const directors: Record<string, Director> = {
 				});
 				if (result.exitCode !== 0) throw new Error(`swb schedule: ${result.stderr.toString()}`);
 			};
-			schedule(ci as string, "Check CI on #142; if green, merge it.", "--at", "PT2H", "--label", "Check CI on #142", "--snooze");
-			schedule(ci as string, "Post a one-line status to triage.", "--cron", "57 8 * * 1-5", "--label", "Weekdays, 8:57 AM");
+			schedule(ci as string, "Check CI on #142; if green, merge it.", "--at", "PT2H", "--schedule-label", "Check CI on #142", "--snooze");
+			schedule(ci as string, "Post a one-line status to triage.", "--cron", "57 8 * * 1-5", "--schedule-label", "Weekdays, 8:57 AM");
 			s.swb("snooze", spike as string, "next_message");
 		},
 		run: async (s) => {

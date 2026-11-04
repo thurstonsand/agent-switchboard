@@ -1,17 +1,11 @@
 import { parseArgs } from "node:util";
 import { harness, view as viewNamed } from "@swb/shared";
 import { parsed } from "@swb/shared/tools";
-import {
-	launchSession,
-	reachable as listReachable,
-	send as sendMessage,
-	show as showSession,
-	update as updateSession,
-} from "../coordinate.ts";
+import { launchSession, list as listSessions, send as sendMessage, show as showSession, update as updateSession } from "../coordinate.ts";
 import { UsageError } from "../errors.ts";
 import { recallBegin, recallRead, recallSearch } from "../recall/read.ts";
 import { search as searchSessions, syncAll } from "../recall/search.ts";
-import { unschedule as cancelSchedule, listSchedules, schedule as scheduleMessage } from "../schedules.ts";
+import { unschedule as cancelSchedule, schedule as scheduleMessage, listSchedules as schedulesOf } from "../schedules.ts";
 import { ensureSessionsServer } from "../sessions.ts";
 import { openStore } from "../store.ts";
 
@@ -21,10 +15,10 @@ function print(result: unknown): void {
 	console.log(JSON.stringify(result));
 }
 
-export function reachable(args: string[]): void {
+export function list(args: string[]): void {
 	const { values } = parseArgs({ args, options: { from: { type: "string" } } });
-	if (!values.from) throw new UsageError("reachable: --from is required");
-	print(listReachable(openStore(), values.from));
+	if (!values.from) throw new UsageError("list: --from is required");
+	print(listSessions(openStore(), values.from));
 }
 
 /** session_search, the query on stdin. */
@@ -63,7 +57,7 @@ export async function send(args: string[]): Promise<void> {
 		options: {
 			from: { type: "string" },
 			to: { type: "string" },
-			"request-response": { type: "boolean", default: false },
+			"report-back": { type: "boolean", default: false },
 			"request-id": { type: "string" },
 			cancel: { type: "boolean", default: false },
 		},
@@ -75,7 +69,7 @@ export async function send(args: string[]): Promise<void> {
 			from: values.from,
 			to: values.to,
 			body,
-			requestResponse: values["request-response"],
+			reportBack: values["report-back"],
 			requestId: values["request-id"] ?? null,
 			kind: values.cancel ? "cancel" : "message",
 		}),
@@ -95,10 +89,10 @@ export async function launch(args: string[]): Promise<void> {
 			group: { type: "string" },
 			"no-group": { type: "boolean", default: false },
 			model: { type: "string" },
-			"request-response": { type: "boolean", default: false },
+			"report-back": { type: "boolean", default: false },
 			at: { type: "string" },
 			cron: { type: "string" },
-			label: { type: "string" },
+			"schedule-label": { type: "string" },
 			"request-id": { type: "string" },
 		},
 	});
@@ -109,33 +103,34 @@ export async function launch(args: string[]): Promise<void> {
 		effort: values.effort ?? null,
 		agent: values.agent ?? null,
 	};
-	const goal = await Bun.stdin.text();
+	const briefing = await Bun.stdin.text();
 	const group = groupOf(values.group, values["no-group"]);
-	if (values.at === undefined && values.cron === undefined && values.label === undefined) {
+	if (values.at === undefined && values.cron === undefined && values["schedule-label"] === undefined) {
 		print(
 			await launchSession(db, {
 				from: values.from ?? null,
 				...preset,
-				goal,
+				briefing,
 				cwd: values.cwd ?? null,
 				title: values.title ?? null,
 				group,
-				requestResponse: values["request-response"],
+				reportBack: values["report-back"],
 				scheduled: null,
 			}),
 		);
 		return;
 	}
-	if (!values.from || values.title === undefined) throw new UsageError("launch: --at, --cron, and --label need --from and --title");
+	if (!values.from || values.title === undefined)
+		throw new UsageError("launch: --at, --cron, and --schedule-label need --from and --title");
 	const result = await scheduleMessage(db, {
 		from: values.from,
 		to: null,
 		launch: { ...preset, cwd: values.cwd ?? null, title: values.title, group },
-		body: goal,
+		body: briefing,
 		at: values.at ?? null,
 		cron: values.cron ?? null,
-		label: values.label ?? "",
-		requestResponse: values["request-response"],
+		scheduleLabel: values["schedule-label"] ?? "",
+		reportBack: values["report-back"],
 		snooze: false,
 		requestId: values["request-id"] ?? null,
 	});
@@ -152,13 +147,13 @@ export async function schedule(args: string[]): Promise<void> {
 			to: { type: "string" },
 			at: { type: "string" },
 			cron: { type: "string" },
-			label: { type: "string" },
-			"request-response": { type: "boolean", default: false },
+			"schedule-label": { type: "string" },
+			"report-back": { type: "boolean", default: false },
 			snooze: { type: "boolean", default: false },
 			"request-id": { type: "string" },
 		},
 	});
-	if (!values.from || values.label === undefined) throw new UsageError("schedule: --from and --label are required");
+	if (!values.from || values["schedule-label"] === undefined) throw new UsageError("schedule: --from and --schedule-label are required");
 	const result = await scheduleMessage(openStore(), {
 		from: values.from,
 		to: values.to ?? null,
@@ -166,8 +161,8 @@ export async function schedule(args: string[]): Promise<void> {
 		body: await Bun.stdin.text(),
 		at: values.at ?? null,
 		cron: values.cron ?? null,
-		label: values.label,
-		requestResponse: values["request-response"],
+		scheduleLabel: values["schedule-label"],
+		reportBack: values["report-back"],
 		snooze: values.snooze,
 		requestId: values["request-id"] ?? null,
 	});
@@ -182,10 +177,10 @@ function groupOf(name: string | undefined, none: boolean): string | null | undef
 	return none ? null : name;
 }
 
-export function schedules(args: string[]): void {
+export function listSchedules(args: string[]): void {
 	const { values } = parseArgs({ args, options: { from: { type: "string" } } });
-	if (!values.from) throw new UsageError("schedules: --from is required");
-	print(listSchedules(openStore(), values.from));
+	if (!values.from) throw new UsageError("list-schedules: --from is required");
+	print(schedulesOf(openStore(), values.from));
 }
 
 export async function show(args: string[]): Promise<void> {

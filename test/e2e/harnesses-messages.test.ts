@@ -93,7 +93,7 @@ test("agents use swb's tools across harnesses: list, message, launch, and cancel
 		launched(s, "codex", "reply codex up"),
 	]);
 
-	type(s, claude.id, `call session_reachable {}`);
+	type(s, claude.id, `call session_list {}`);
 	const listed = await until(
 		() => s.requests("claude").find((r) => String(r.toolOutput).includes("Open sessions")),
 		budgets.settle,
@@ -107,12 +107,12 @@ test("agents use swb's tools across harnesses: list, message, launch, and cancel
 	const names = [...String(listed.toolOutput).matchAll(/^- \S+ · [^·]+ · "([^"]+)"/gm)].map((m) => m[1] as string);
 	expect(names).toHaveLength(2);
 	await until(
-		() => / {2}Reachable sessions\s*\n\s*⎿ {2}(.*)/.exec(pane(s, claude.id))?.[1]?.trim() === names.join(", "),
+		() => / {2}Sessions\s*\n\s*⎿ {2}(.*)/.exec(pane(s, claude.id))?.[1]?.trim() === names.join(", "),
 		budgets.settle,
 		"Claude's listing row",
 	);
 
-	type(s, claude.id, `call session_send_message {"session":"${codex.id}","message":"SWB-claude-asks codex","requestResponse":false}`);
+	type(s, claude.id, `call session_send_message {"session":"${codex.id}","message":"SWB-claude-asks codex","report_back":false}`);
 	await until(() => pane(s, codex.id).includes("got SWB-claude-asks codex"), ready, "Codex answering Claude's tool call");
 	await until(
 		() => pane(s, claude.id).includes("  ⎿  Delivered to") && pane(s, claude.id).includes("  Message · SWB-claude-asks codex"),
@@ -126,7 +126,7 @@ test("agents use swb's tools across harnesses: list, message, launch, and cancel
 
 	// Codex runs swb's MCP server with only the variables it forwards; it must still find the others, in their states.
 	await settled(s, codex.id, "Codex done answering Claude");
-	type(s, codex.id, `call session_reachable {}`);
+	type(s, codex.id, `call session_list {}`);
 	const fromCodex = await until(
 		() => s.requests("codex").find((r) => String(r.toolOutput).includes('{"sessions":')),
 		budgets.settle,
@@ -140,41 +140,37 @@ test("agents use swb's tools across harnesses: list, message, launch, and cancel
 	);
 
 	await settled(s, codex.id, "Codex done listing");
-	type(s, codex.id, `call session_send_message {"session":"${pi.id}","message":"reply SWB-codex-asks-pi","requestResponse":false}`);
+	type(s, codex.id, `call session_send_message {"session":"${pi.id}","message":"reply SWB-codex-asks-pi","report_back":false}`);
 	await until(() => s.signal("replied.SWB-codex-asks-pi") !== "", ready, "pi answering Codex's tool call");
 	expect(s.query("select source_id from messages where body = 'reply SWB-codex-asks-pi'")).toEqual([{ source_id: codex.id }]);
 
-	type(s, pi.id, `call session_send_message {"session":"${claude.id}","message":"SWB-pi-asks claude","requestResponse":false}`);
+	type(s, pi.id, `call session_send_message {"session":"${claude.id}","message":"SWB-pi-asks claude","report_back":false}`);
 	await until(() => pane(s, claude.id).includes("got SWB-pi-asks claude"), ready, "Claude answering pi's tool call");
 
 	// pi's row reads as the sessions it found, not the legend over the model's list, until expanded.
-	type(s, pi.id, "call session_reachable {}");
+	type(s, pi.id, "call session_list {}");
 	await until(
 		() => {
 			const others = s.ls().filter((e) => e.id !== pi.id && e.open);
-			const row = /Reachable sessions\s*\n\s*(.*)/.exec(pane(s, pi.id))?.[1] ?? "";
+			const row = /Sessions\s*\n\s*(.*)/.exec(pane(s, pi.id))?.[1] ?? "";
 			return others.length === 2 && others.every((e) => row.includes(e.title ?? e.id)) && row.includes("more lines, ctrl+o to expand");
 		},
 		budgets.settle,
 		"pi's listing row",
 	);
 	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, pi.id)}:`, "C-o");
-	await until(
-		() => /Reachable sessions\s*\n\s*Open sessions \(/.test(pane(s, pi.id)),
-		budgets.settle,
-		"pi's expanded row, the model's text",
-	);
+	await until(() => /Sessions\s*\n\s*Open sessions \(/.test(pane(s, pi.id)), budgets.settle, "pi's expanded row, the model's text");
 	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, pi.id)}:`, "C-o");
 
 	// A launch from Claude starts a Codex session whose parent is Claude.
 	type(
 		s,
 		claude.id,
-		`call session_launch {"harness":"codex","goal":"SWB-launched do the thing","title":"launched by claude","requestResponse":false}`,
+		`call session_launch {"harness":"codex","briefing":"SWB-launched do the thing","title":"launched by claude","report_back":false}`,
 	);
 	const child = await until(() => s.ls().find((e) => e.parentId === claude.id), ready, "the launched Codex session");
 	expect(child).toMatchObject({ harness: "codex", cwd: s.project });
-	await until(() => pane(s, child.id).includes("got SWB-launched do the thing"), ready, "the launched session working on its goal");
+	await until(() => pane(s, child.id).includes("got SWB-launched do the thing"), ready, "the launched session working on its briefing");
 
 	// A failed call says why.
 	await settled(s, claude.id, "Claude done launching");
@@ -239,7 +235,7 @@ test("a message to a dormant Claude Code or Codex session wakes it on its own co
 		s.tmux(s.servers.sessions, "kill-session", "-t", `=${host(s, target.id)}`);
 		await until(() => !entry(s, target.id).live, budgets.settle, `${harness} dormant`);
 		// Whether its process runs is swb's business: an agent sees it idle, and its message delivered, nothing about waking.
-		const listed = JSON.parse(s.swb("reachable", "--from", pi.id)) as { text: string };
+		const listed = JSON.parse(s.swb("list", "--from", pi.id)) as { text: string };
 		expect(listed.text).toContain(`- ${target.id} · ${harness === "claude" ? "Claude Code" : "Codex"} · "`);
 		expect(listed.text.split("\n").find((line) => line.includes(target.id))).toContain(" · idle · ");
 		expect(listed.text).not.toMatch(/dormant|wake/);

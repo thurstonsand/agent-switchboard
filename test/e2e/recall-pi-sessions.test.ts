@@ -43,10 +43,10 @@ test("managed pi yields recall to swb, keeps subagents, and stays yielded after 
 	await reply(s, "SWB-parent-mark");
 	const parent = s.ls()[0]?.id as string;
 	const managed = await tools("managed");
-	// session_search and session_ask are swb's own, registered at load beside pi-sessions without a conflict.
-	for (const name of ["session_search", "session_ask"]) expect(managed.filter((tool) => tool === name)).toEqual([name]);
+	// session_search and session_recall are swb's own, registered at load beside pi-sessions without a conflict.
+	for (const name of ["session_search", "session_recall"]) expect(managed.filter((tool) => tool === name)).toEqual([name]);
 	for (const name of [
-		"session_reachable",
+		"session_list",
 		"session_send_message",
 		"session_launch",
 		"swb_update_session",

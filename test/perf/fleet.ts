@@ -6,19 +6,19 @@ import { budgets, type LsEntry, type Scenario, until } from "../e2e/harness/inde
 // into many dormant pi sessions across many Projects. Each clone is a copy of the real pi's own transcript with its
 // id and directory swapped, and rows like the ones its line wrote, so cards, Peeks, and wakes read real files.
 
-/** A session started through swb with `goal`, its first turn settled, and its harness stopped: dormant and Unseen. */
-export async function dormant(s: Scenario, harness: "pi" | "claude" | "codex", goal: string, cwd = s.project): Promise<string> {
-	const id = await launched(s, harness, goal, cwd);
+/** A session started through swb with `briefing`, its first turn settled, and its harness stopped: dormant and Unseen. */
+export async function dormant(s: Scenario, harness: "pi" | "claude" | "codex", briefing: string, cwd = s.project): Promise<string> {
+	const id = await launched(s, harness, briefing, cwd);
 	stop(s, id);
 	return id;
 }
 
-/** A live, idle session started through swb with `goal`. */
-export async function launched(s: Scenario, harness: "pi" | "claude" | "codex", goal: string, cwd = s.project): Promise<string> {
+/** A live, idle session started through swb with `briefing`. */
+export async function launched(s: Scenario, harness: "pi" | "claude" | "codex", briefing: string, cwd = s.project): Promise<string> {
 	const proc = Bun.spawn([`${s.bin}/swb`, "launch", "--harness", harness, "--cwd", cwd], {
 		env: s.env,
 		cwd: s.project,
-		stdin: new Blob([goal]),
+		stdin: new Blob([briefing]),
 		stdout: "pipe",
 		stderr: "pipe",
 	});

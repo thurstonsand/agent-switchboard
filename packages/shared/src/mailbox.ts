@@ -38,7 +38,7 @@ export type Message = {
 	sourceId: string;
 	targetId: string;
 	body: string;
-	requestResponse: boolean;
+	reportBack: boolean;
 	createdAt: number;
 	/** What a schedule delivers: which one, and when it was due. */
 	scheduleId: string | null;
@@ -55,7 +55,7 @@ export function harnessName(harness: Harness): string {
 export function pendingFor(db: Db, targetId: string): Message[] {
 	return db
 		.all(
-			`SELECT id, kind, source_id, target_id, body, request_response, created_at, schedule_id, scheduled_for FROM messages
+			`SELECT id, kind, source_id, target_id, body, report_back, created_at, schedule_id, scheduled_for FROM messages
 			 WHERE target_id = ? AND delivered_at IS NULL AND cancelled_at IS NULL ORDER BY created_at, rowid`,
 			targetId,
 		)
@@ -65,7 +65,7 @@ export function pendingFor(db: Db, targetId: string): Message[] {
 			sourceId: row.source_id as string,
 			targetId: row.target_id as string,
 			body: row.body as string,
-			requestResponse: row.request_response === 1,
+			reportBack: row.report_back === 1,
 			createdAt: row.created_at as number,
 			scheduleId: row.schedule_id as string | null,
 			scheduledFor: row.scheduled_for as number | null,
@@ -106,6 +106,6 @@ export function frame(db: Db, m: Message, now = Date.now()): string {
 		if (now - m.scheduledFor > LATE_MS) when += `, delivered ${clockTime(now)}`;
 		if (m.scheduleId) when += ` (schedule: ${m.scheduleId})`;
 	}
-	const reply = m.requestResponse ? `\n\nResponse requested: reply with session_send_message to session ${m.sourceId}.` : "";
+	const reply = m.reportBack ? `\n\nReport back: reply with session_send_message to session ${m.sourceId}.` : "";
 	return `Message from session "${from.title}" (session: ${m.sourceId}${who})${when}:\n\n${m.body}${reply}`;
 }

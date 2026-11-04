@@ -42,12 +42,12 @@ export const cli = suite({
 			},
 		},
 		{
-			name: "tool.reachable",
-			feels: "An agent's session_reachable call: every open session but its own, over 200.",
+			name: "tool.list",
+			feels: "An agent's session_list call: every open session but its own, over 200.",
 			primary: "exit",
 			runs: 15,
 			sample: async ({ s }, { from }) => {
-				const { t0, ms } = await exits(s, ["reachable", "--from", from]);
+				const { t0, ms } = await exits(s, ["list", "--from", from]);
 				return { t0, metrics: { exit: ms } };
 			},
 		},

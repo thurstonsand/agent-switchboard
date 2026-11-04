@@ -61,7 +61,7 @@ export function readClaude(path: string, sidechain = false): Conversation {
 	return { entries, leaf: entries.findLast((e) => !parents.has(e.ref))?.ref ?? null, subagents: sidechain ? [] : subagents(path) };
 }
 
-/** session_ask's own readers are swb's, not the session's work. */
+/** session_recall's own readers are swb's, not the session's work. */
 const READER_TYPE = "swb:reader";
 
 /** Claude Code keeps each subagent's transcript beside the session's, with its type and task in a sidecar. */

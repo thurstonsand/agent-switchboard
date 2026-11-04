@@ -198,7 +198,7 @@ test("session_launch with no preset carries the caller's harness and model forwa
 			.concat('[[presets]]\nharness = "pi"\nprovider = "faux"\nmodel = "faux-1"\neffort = "off"\nuse = "scripted"\n')
 			.join("\n"),
 	);
-	const call = (title: string) => `call session_launch {"goal":"reply ${title}","title":"${title}","requestResponse":false}`;
+	const call = (title: string) => `call session_launch {"briefing":"reply ${title}","title":"${title}","report_back":false}`;
 	/** The model of a Claude Code session's latest request, as its line saw it go out. */
 	const claudeModel = (id: string) => s.query<{ model: string }>("select model from sessions where session_id = ?", id)[0]?.model;
 	const child = (parent: string, title: string) =>
@@ -229,7 +229,7 @@ test("session_launch and a scheduled launch, from pi, Claude Code, or Codex, sta
 		for (const [name, group, expected] of cases) {
 			const title = `${parent.harness} ${name}`;
 			const asked = group === undefined ? "" : `,"group":${JSON.stringify(group)}`;
-			type(s, parent.id, `call session_launch {"harness":"pi","goal":"reply ${title}","title":"${title}"${asked},"requestResponse":false}`);
+			type(s, parent.id, `call session_launch {"harness":"pi","briefing":"reply ${title}","title":"${title}"${asked},"report_back":false}`);
 			const child = await until(
 				() => s.ls().find((e) => e.parentId === parent.id && e.title === title && e.activity === "idle"),
 				ready,
@@ -244,7 +244,7 @@ test("session_launch and a scheduled launch, from pi, Claude Code, or Codex, sta
 		type(
 			s,
 			parent.id,
-			`call session_launch {"harness":"pi","goal":"reply ${title}","title":"${title}","group":"night shift","requestResponse":false,"at":"PT1S","label":"now"}`,
+			`call session_launch {"harness":"pi","briefing":"reply ${title}","title":"${title}","group":"night shift","report_back":false,"at":"PT1S","schedule_label":"now"}`,
 		);
 		await until(() => entry(s, parent.id).activity === "idle", ready, `${parent.harness} done scheduling`);
 	}
@@ -269,7 +269,7 @@ test("on a code-mode-only model, Codex offers swb's tools directly, beside its o
 	const [first] = s.requests("codex") as { model: string; tools: string[] }[];
 	expect(first?.model).toBe("gpt-6-sol");
 	expect(first?.tools).toEqual(expect.arrayContaining(["exec", "spawn_agent", "session_launch", "session_send_message"]));
-	type(s, parent.id, `call session_launch {"harness":"pi","goal":"reply from code mode","title":"from code mode","requestResponse":false}`);
+	type(s, parent.id, `call session_launch {"harness":"pi","briefing":"reply from code mode","title":"from code mode","report_back":false}`);
 	const child = await until(
 		() => s.ls().find((e) => e.parentId === parent.id && e.title === "from code mode" && e.activity === "idle"),
 		ready,
@@ -327,7 +327,7 @@ test("a Claude Code session's effort carries into what it launches, live or dorm
 	);
 	/** The model and effort of a session's latest request, as its line saw it go out. */
 	const runs = (id: string) => s.query<{ model: string; effort: string }>("select model, effort from sessions where session_id = ?", id)[0];
-	const call = (title: string) => `call session_launch {"goal":"reply ${title}","title":"${title}","requestResponse":false}`;
+	const call = (title: string) => `call session_launch {"briefing":"reply ${title}","title":"${title}","report_back":false}`;
 
 	const opus = await launched(s, "claude", call("live"), undefined, ["--model", "opus", "--effort", "high"]);
 	expect(runs(opus.id)).toEqual({ model: expect.stringContaining("opus"), effort: "high" });

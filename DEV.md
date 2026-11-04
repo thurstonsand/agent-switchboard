@@ -67,6 +67,7 @@ Some scenarios install pi-sessions and pi-wt from `node_modules`, at the version
 ## Code style
 
 - TypeScript on Bun; use `.ts` extensions for repo-local imports
+- Name tools and args for the call you want the model to make; the name outweighs its description. snake_case for both.
 - `swb` owns all DDL and migrations through `PRAGMA user_version`; a line only asserts the exact version
 - Every line records through `@swb/shared/record` and reads messages through `@swb/shared/mailbox`; the tool contracts live once, in `@swb/shared/tools`
 - Store facts, derive states: Live, Interrupted, Unseen, Inactive, Snoozed, and Archived are computed at read time, never persisted

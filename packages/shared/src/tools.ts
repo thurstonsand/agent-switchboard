@@ -12,13 +12,13 @@ import { HARNESSES, RELOAD_MODES, SNOOZE_PRESETS, VIEWS } from "./index.ts";
 export type ToolSpec = { label: string; description: string; guidelines: string[]; parameters: TSchema; readOnly: boolean };
 
 const session = Type.String({ description: "The session's id." });
-const requestResponse = Type.Boolean({ description: "Whether it should reply to you." });
+const reportBack = Type.Boolean({ description: "Whether it should reply to you." });
 
 export const TOOLS = {
-	session_reachable: {
-		label: "Reachable sessions",
+	session_list: {
+		label: "Sessions",
 		description: "List every open session but this one, in any project or harness.",
-		guidelines: ["Call session_reachable only for an id you don't already have."],
+		guidelines: ["Call session_list only for an id you don't already have."],
 		parameters: Type.Object({}),
 		readOnly: true,
 	},
@@ -29,14 +29,14 @@ export const TOOLS = {
 		parameters: Type.Object({
 			session,
 			message: Type.String({ description: "Self-contained: the recipient doesn't see this conversation." }),
-			requestResponse,
+			report_back: reportBack,
 		}),
 		readOnly: false,
 	},
 	session_launch: {
 		label: "Launch",
 		description:
-			"Start a new session on one of the presets below. With at or cron and a label, as session_schedule takes them, launch later instead, or anew each time the cron fires.",
+			"Start a new session on one of the presets below. With at or cron and a schedule_label, as session_schedule takes them, launch later instead, or anew each time the cron fires.",
 		guidelines: [
 			"Launch a new session when the work is independent of this one, belongs to another directory, or the user asks. For part of this work you need back this turn, use your harness's own subagents, if it has them.",
 			"Omit session_launch's preset fields to run what this session runs; otherwise pass the fields of the preset whose note fits the work.",
@@ -46,8 +46,8 @@ export const TOOLS = {
 			model: Type.Optional(Type.String()),
 			effort: Type.Optional(Type.String()),
 			agent: Type.Optional(Type.String()),
-			goal: Type.String({
-				description: "Its first message: a self-contained briefing of the objective, context, constraints, and what done means.",
+			briefing: Type.String({
+				description: "Its first message, self-contained: the objective, context, constraints, and what done means.",
 			}),
 			cwd: Type.Optional(Type.String({ description: "Defaults to this session's." })),
 			title: Type.String({ description: "Short, for the roster." }),
@@ -56,10 +56,10 @@ export const TOOLS = {
 					description: "Omit for this session's Group within its Project, or pass a Group's name, in any Project; null for none.",
 				}),
 			),
-			requestResponse: Type.Boolean({ description: "Whether it reports back when done." }),
+			report_back: Type.Boolean({ description: "Whether it reports back when done." }),
 			at: Type.Optional(Type.String()),
 			cron: Type.Optional(Type.String()),
-			label: Type.Optional(Type.String()),
+			schedule_label: Type.Optional(Type.String()),
 		}),
 		readOnly: false,
 	},
@@ -67,7 +67,7 @@ export const TOOLS = {
 		label: "Schedule",
 		description: "Schedule a message, once or on a cron, to this session or another. session_launch launches on a schedule.",
 		guidelines: [
-			"Schedule only when the user asks to remind, follow up, check back, or repeat something. To wait on another session, set requestResponse on your message instead.",
+			"Schedule only when the user asks to remind, follow up, check back, or repeat something. To wait on another session, set report_back on your message instead.",
 			"Write a scheduled message as instructions for when it fires: what to check, what to do with each outcome, and, if recurring, when to unschedule.",
 		],
 		parameters: Type.Object({
@@ -78,20 +78,25 @@ export const TOOLS = {
 				}),
 			),
 			cron: Type.Optional(Type.String({ description: 'Recurring: 5-field cron in local time ("57 8 * * 1-5" is weekdays at 8:57am).' })),
-			label: Type.String({ description: 'When it runs, in plain words ("Weekdays, 8:57 AM").' }),
+			schedule_label: Type.String({ description: 'When it runs, in plain words ("Weekdays, 8:57 AM").' }),
 			session: Type.Optional(Type.String({ description: "The recipient's id; omit for this session." })),
-			requestResponse: Type.Optional(requestResponse),
+			report_back: Type.Optional(reportBack),
 			snooze: Type.Optional(Type.Boolean({ description: "Snooze the recipient until it fires; only when the user asks." })),
 		}),
 		readOnly: false,
 	},
-	session_schedules: {
+	session_list_schedules: {
 		label: "Schedules",
-		description: "List the schedules this session set or receives, or cancel one.",
+		description: "List the schedules this session set or receives.",
+		guidelines: [],
+		parameters: Type.Object({}),
+		readOnly: true,
+	},
+	session_unschedule: {
+		label: "Unschedule",
+		description: "Cancel a pending schedule set on this session.",
 		guidelines: ["Unschedule only when the user asks, or when the schedule's stated completion condition is met."],
-		parameters: Type.Object({
-			unschedule: Type.Optional(Type.String({ description: "A pending schedule's id, to cancel it." })),
-		}),
+		parameters: Type.Object({ schedule: Type.String({ description: "The schedule's id." }) }),
 		readOnly: false,
 	},
 	swb_update_session: {
@@ -99,22 +104,22 @@ export const TOOLS = {
 		description: "Archive, snooze, group, retitle, or reload a session, or cancel its turn: this one unless you name another.",
 		guidelines: [
 			"Archive a session only when the user asks or you started it and drove it to completion. Snooze or unsnooze a session, or cancel another's turn, only when the user asks.",
-			"Group sessions when the user asks or to keep sessions you started for one piece of work together, reusing a Group session_reachable lists.",
+			"Group sessions when the user asks or to keep sessions you started for one piece of work together, reusing a Group session_list lists.",
 			"Retitle a session when the user asks or its title no longer fits its work.",
 			"Reload a session when the user asks or after changing what it reads only at startup (AGENTS.md, CLAUDE.md, settings, extensions, plugins, skills, MCP servers).",
 		],
 		parameters: Type.Object({
 			session: Type.Optional(session),
 			archived: Type.Optional(Type.Boolean({ description: "false unarchives." })),
-			deleteWorktree: Type.Optional(
+			delete_worktree: Type.Optional(
 				Type.Boolean({
 					description:
 						"With archived true, for this session only: delete its linked worktree, keeping the branch and conversations. With family true, archive its descendants too, but delete only this worktree. Only when the user asks. Refuses modified or untracked files, locked worktrees, scheduled launches into it, or open/live sessions using it outside the selected family. Ignored files are deleted. Conversations whose directory is gone resume in the Project root, or fail clearly if that is gone too. Call last, then end your turn.",
 				}),
 			),
 			family: Type.Optional(Type.Boolean({ description: "With archived: every open session it started, and theirs, too." })),
-			force: Type.Optional(
-				Type.Boolean({ description: "With archived: also those mid-turn, blocked, cut off, or errored, cancelling their turns." }),
+			cancel_turns: Type.Optional(
+				Type.Boolean({ description: "With archived: also archive those mid-turn, blocked, cut off, or errored, cancelling their turns." }),
 			),
 			cancel: Type.Optional(Type.Boolean({ description: "Stop another session's running turn." })),
 			group: Type.Optional(
@@ -140,7 +145,7 @@ export const TOOLS = {
 		description: "Search other sessions' conversations, open or archived, subagents included. Lists matches best first, with passages.",
 		guidelines: [
 			'In session_search, plain words must all appear, as words or their starts; "phrases" match exactly; OR, -word, and parentheses narrow. Filters: harness:pi|claude|codex, project:NAME, file:PATH (read or changed), after: and before: (a date, an ISO 8601 time, or a duration ago like P7D), archived:yes|no. Filters alone list recent sessions.',
-			"Question a session_search hit with session_ask.",
+			"Question a session_search hit with session_recall.",
 		],
 		parameters: Type.Object({
 			query: Type.String({ description: 'Such as "redirect loop" file:src/auth.ts after:P14D.' }),
@@ -148,11 +153,11 @@ export const TOOLS = {
 		}),
 		readOnly: true,
 	},
-	session_ask: {
-		label: "Ask session",
+	session_recall: {
+		label: "Recall session",
 		description:
 			"Ask about another session's conversation, open or archived. A reader with its own context answers, keeping the transcript out of yours.",
-		guidelines: ["Ask session_ask focused questions, not for a recap. To ask a session still at work, message it instead."],
+		guidelines: ["Ask session_recall focused questions, not for a recap. To ask a session still at work, message it instead."],
 		parameters: Type.Object({ session, question: Type.String({ description: "Self-contained." }) }),
 		readOnly: true,
 	},
@@ -166,7 +171,7 @@ export const TOOLS = {
 } satisfies Record<string, ToolSpec>;
 
 /**
- * The tools session_ask's reader gets, and only it: every line runs the reader in its own harness, as a subagent
+ * The tools session_recall's reader gets, and only it: every line runs the reader in its own harness, as a subagent
  * with its own context, bound to the session asked about, and hands it these beside the harness's read-only file tools.
  */
 export const READER_TOOLS = {
@@ -186,7 +191,7 @@ export const READER_TOOLS = {
 	recall_read: {
 		label: "Read session",
 		description:
-			"Read the session's entries in order, from one ref along its branch: prompts, replies, tool calls and their results, summaries, and how a turn ended. Long results are cut in preview; full reads them whole.",
+			"Read the session's entries in order, from one ref along its branch: prompts, replies, tool calls and their results, summaries, and how a turn ended. trimmed cuts long ones short; whole reads them whole.",
 		guidelines: [],
 		parameters: Type.Object({
 			ref: Type.Optional(
@@ -197,9 +202,9 @@ export const READER_TOOLS = {
 			after: Type.Optional(
 				Type.Integer({ minimum: 0, maximum: 500, description: "Entries to read after ref; as many as fit by default." }),
 			),
-			body: Type.Optional(
-				Type.Enum(["preview", "full"], {
-					description: "preview (the default) cuts tool calls and results short; full reads them whole.",
+			tool_output: Type.Optional(
+				Type.Enum(["trimmed", "whole"], {
+					description: "trimmed (the default) cuts tool calls, their results, and harness context short; whole reads them whole.",
 				}),
 			),
 		}),
@@ -227,7 +232,7 @@ export type ToolArgs<N extends ToolName | ReaderToolName> = Static<(typeof ALL)[
 /** Main checkouts and plain directories never advertise worktree deletion. */
 export function toolParameters(name: ToolName, worktree: boolean): TSchema {
 	return name === "swb_update_session" && !worktree
-		? Type.Omit(TOOLS.swb_update_session.parameters, ["deleteWorktree"])
+		? Type.Omit(TOOLS.swb_update_session.parameters, ["delete_worktree"])
 		: TOOLS[name].parameters;
 }
 

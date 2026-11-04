@@ -1,13 +1,13 @@
 // What a scripted agent does with swb's tools, the same in every harness's fake model:
-//   tell <pi|claude|codex> <message>   find that harness's session with session_reachable, then message it
+//   tell <pi|claude|codex> <message>   find that harness's session with session_list, then message it
 //   flood <pi|claude|codex> <n>        tell it a message of <n> characters
-//   launch <pi|claude|codex> <title>   start a session there with session_launch, whose goal is the title
-//   show <title>                       find the session with that title with session_reachable, then swb_show_session it
+//   launch <pi|claude|codex> <title>   start a session there with session_launch, whose briefing is the title
+//   show <title>                       find the session with that title with session_list, then swb_show_session it
 //   update <title> <json>              find it the same way, then swb_update_session it with those arguments
-//   ask <title> :: <question>          find it the same way, then session_ask it the question; answers "asked: <result>"
-//   ask-id <id> :: <question>          session_ask that session directly, archived or not
+//   ask <title> :: <question>          find it the same way, then session_recall it the question; answers "asked: <result>"
+//   ask-id <id> :: <question>          session_recall that session directly, archived or not
 //   search <query>                     session_search the query; answers "searched"
-// session_ask's reader, whose first message is "Question about session <id>:", the question, then a map, searches the
+// session_recall's reader, whose first message is "Question about session <id>:", the question, then a map, searches the
 // session for SWB with recall_search, reads it with recall_read from before its first hit, and answers
 // "reader found: <every SWB- marker it read>", or "reader found nothing".
 // Each call gets the prompt and the output of the tool it called last (null for a fresh turn), and answers the next
@@ -25,13 +25,13 @@ export function titleOf(prompt: string): string {
 
 export type Step = { tool: string; args: Record<string, unknown> } | { text: string } | null;
 
-/** Whether a tool's output is session_reachable's. */
-function isReachable(toolOutput: string): boolean {
+/** Whether a tool's output is session_list's. */
+function isListing(toolOutput: string): boolean {
 	return /\{"sessions":/.test(toolOutput) || toolOutput.startsWith("Open sessions") || toolOutput.startsWith("No other open sessions");
 }
 
-/** The session titled `title` in session_reachable's output, structured or as text; undefined in any other tool's. */
-function reachableId(toolOutput: string, title: string): string | undefined {
+/** The session titled `title` in session_list's output, structured or as text; undefined in any other tool's. */
+function listedId(toolOutput: string, title: string): string | undefined {
 	const listed = /\{"sessions":.*\}/.exec(toolOutput)?.[0];
 	if (listed)
 		return (JSON.parse(listed) as { sessions: { id: string; title: string | null }[] }).sessions.find((session) => session.title === title)
@@ -59,20 +59,20 @@ export function agentStep(prompt: string, toolOutput: string | null): Step {
 	const asking = /^(ask|ask-id) (.+?) :: (.+)$/s.exec(prompt.trim());
 	if (asking) {
 		const [, verb, target, question] = asking as unknown as [string, string, string, string];
-		if (verb === "ask-id" || (toolOutput !== null && !isReachable(toolOutput))) {
-			if (toolOutput === null) return { tool: "session_ask", args: { session: target, question } };
+		if (verb === "ask-id" || (toolOutput !== null && !isListing(toolOutput))) {
+			if (toolOutput === null) return { tool: "session_recall", args: { session: target, question } };
 			return { text: `asked: ${toolOutput}` };
 		}
-		if (toolOutput === null) return { tool: "session_reachable", args: {} };
-		const id = reachableId(toolOutput, target);
+		if (toolOutput === null) return { tool: "session_list", args: {} };
+		const id = listedId(toolOutput, target);
 		if (!id) return { text: toolOutput };
-		return { tool: "session_ask", args: { session: id, question } };
+		return { tool: "session_recall", args: { session: id, question } };
 	}
 	const named = /^(show|update) (.+?)(?: (\{.*\}))?$/.exec(prompt.trim());
 	if (named) {
 		const [, verb, title, json] = named;
-		if (toolOutput === null) return { tool: "session_reachable", args: {} };
-		const id = reachableId(toolOutput, title as string);
+		if (toolOutput === null) return { tool: "session_list", args: {} };
+		const id = listedId(toolOutput, title as string);
 		if (!id) return { text: toolOutput };
 		if (verb === "show") return { tool: "swb_show_session", args: { session: id } };
 		return { tool: "swb_update_session", args: { ...JSON.parse(json ?? "{}"), session: id } };
@@ -82,22 +82,22 @@ export function agentStep(prompt: string, toolOutput: string | null): Step {
 	if (!name || (verb !== "tell" && verb !== "launch" && verb !== "flood")) return null;
 	const words = verb === "flood" ? "x".repeat(Number(rest[0])) : rest.join(" ");
 	if (verb === "launch") {
-		if (toolOutput === null) return { tool: "session_launch", args: { harness, title: words, goal: words, requestResponse: false } };
+		if (toolOutput === null) return { tool: "session_launch", args: { harness, title: words, briefing: words, report_back: false } };
 		return { text: toolOutput };
 	}
-	if (toolOutput === null) return { tool: "session_reachable", args: {} };
+	if (toolOutput === null) return { tool: "session_list", args: {} };
 	// Codex gives its model an MCP result's structured content; the other harnesses, its text.
 	const listed = /\{"sessions":.*\}/.exec(toolOutput)?.[0];
 	if (listed) {
 		const sessions = (JSON.parse(listed) as { sessions: { id: string; harness: string }[] }).sessions;
 		const id = sessions.find((session) => session.harness === harness)?.id;
 		if (!id) return { text: `No ${name} session is open.` };
-		return { tool: "session_send_message", args: { session: id, message: words, requestResponse: false } };
+		return { tool: "session_send_message", args: { session: id, message: words, report_back: false } };
 	}
 	if (toolOutput.includes("Open sessions") || toolOutput.includes("No other open sessions")) {
 		const id = new RegExp(`^- (\\S+) · ${name} · `, "m").exec(toolOutput)?.[1];
 		if (!id) return { text: `No ${name} session is open.` };
-		return { tool: "session_send_message", args: { session: id, message: words, requestResponse: false } };
+		return { tool: "session_send_message", args: { session: id, message: words, report_back: false } };
 	}
 	return { text: toolOutput };
 }

@@ -1,4 +1,4 @@
-# The merged tools: session_launch launches later with at, session_schedules lists, and swb_update_session cancels another session's turn.
+# The merged tools: session_launch launches later with at, session_list_schedules lists, and swb_update_session cancels another session's turn.
 Source common.tape
 
 Type "# A coordinator schedules a launch, lists it, and cancels another session's turn" Sleep 1s Enter
@@ -12,11 +12,11 @@ Sleep 600ms
 Enter
 Wait+Screen /on it/
 Sleep 1s
-Type `call session_launch {"harness":"pi","goal":"reply triaged","title":"Nightly triage","requestResponse":false,"at":"PT25S","label":"in 25 seconds"}` Sleep 400ms Enter
+Type `call session_launch {"harness":"pi","briefing":"reply triaged","title":"Nightly triage","report_back":false,"at":"PT25S","schedule_label":"in 25 seconds"}` Sleep 400ms Enter
 Wait+Screen /Scheduled for/
 Sleep 2.5s
 Screenshot ../artifacts/phase6/videos/merged-tools-launch-at.png
-Type "call session_schedules {}" Sleep 400ms Enter
+Type "call session_list_schedules {}" Sleep 400ms Enter
 Wait+Screen /in 25 seconds \(\d+ more lines?, /
 Sleep 2.5s
 Screenshot ../artifacts/phase6/videos/merged-tools-schedules.png

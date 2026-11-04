@@ -245,16 +245,16 @@ function codexVersion(): string {
 
 const UNREAD_GRACE_MS = 5000;
 
-/** The threadSource that marks a thread as session_ask's reader. */
+/** The threadSource that marks a thread as session_recall's reader. */
 export const READER_SOURCE = "swb_reader";
 
 class CodexLine {
 	/** The thread the TUI shows. */
 	bound: Thread | null = null;
 	readonly statuses = new Map<string, Status>();
-	/** Threads that are never sessions, such as session_ask's readers. */
+	/** Threads that are never sessions, such as session_recall's readers. */
 	readonly ephemeral = new Set<string>();
-	/** session_ask's readers, and whether each is mid-turn. */
+	/** session_recall's readers, and whether each is mid-turn. */
 	readonly readers = new Map<string, boolean>();
 	busy = false;
 	blocked = false;

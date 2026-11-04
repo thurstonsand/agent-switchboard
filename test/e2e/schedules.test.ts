@@ -30,7 +30,7 @@ function transcript(id: string): string {
 test("a session schedules itself a message and snoozes until then; the clock wakes it dormant, and it comes back Unseen", async () => {
 	s = scenario("schedules", "self");
 	const pi = await launched(s, "pi", "reply up");
-	type(s, pi.id, `call session_schedule {"message":"reply fired","at":"PT8S","label":"in 8 seconds","snooze":true}`);
+	type(s, pi.id, `call session_schedule {"message":"reply fired","at":"PT8S","schedule_label":"in 8 seconds","snooze":true}`);
 	await until(() => snoozeOf(s, pi.id).snoozed && entry(s, pi.id).activity === "idle", budgets.settle, "snoozed, its turn done");
 	const [row] = s.query<{ next_at: number }>("select next_at from schedules where source_id = ?", pi.id);
 	expect(snoozeOf(s, pi.id)).toMatchObject({ snoozed: true, snoozedUntil: row?.next_at, unseen: false, inactive: false });
@@ -49,7 +49,7 @@ test("a session schedules itself a message and snoozes until then; the clock wak
 	expect(s.query("select next_at, last_fired_at is not null as fired from schedules")).toEqual([{ next_at: null, fired: 1 }]);
 	expect(s.query("select count(*) as n from messages where schedule_id is not null")).toEqual([{ n: 1 }]);
 
-	type(s, pi.id, "call session_schedules {}");
+	type(s, pi.id, "call session_list_schedules {}");
 	// Collapsed, the row names the schedule; expanded, it reads as the model's listing.
 	await until(() => pane(s, pi.id).includes("Schedules in 8 seconds ("), budgets.settle, "the listing's row");
 	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, pi.id)}:`, "C-o");
@@ -60,7 +60,7 @@ test("a session schedules itself a message and snoozes until then; the clock wak
 test("a recurring schedule that missed runs while the machine slept fires once, saying when it was due", async () => {
 	s = scenario("schedules", "catch-up");
 	const pi = await launched(s, "pi", "reply up");
-	const { details } = await scheduled(s, "reply tick", "--from", pi.id, "--cron", "*/5 * * * *", "--label", "Every 5 minutes");
+	const { details } = await scheduled(s, "reply tick", "--from", pi.id, "--cron", "*/5 * * * *", "--schedule-label", "Every 5 minutes");
 	expect(details.nextAt).toBeGreaterThan(Date.now());
 	// The machine slept through a dozen runs: the schedule was due an hour ago.
 	const asleep = Date.now();
@@ -93,13 +93,13 @@ test("a schedule launches a new session, refuses what can't work, unschedules, a
 		"fresh one",
 		"--at",
 		"PT2S",
-		"--label",
+		"--schedule-label",
 		"soon",
 	);
 	expect(launching.code).toBe(0);
 	const child = await until(() => s.ls().find((e) => e.parentId === pi.id), ready, "the launched session");
 	expect(child).toMatchObject({ harness: "pi", cwd: s.project });
-	await until(() => s.signal("replied.launched") !== "", ready, "the launched session working on its goal");
+	await until(() => s.signal("replied.launched") !== "", ready, "the launched session working on its briefing");
 	await until(() => entry(s, child.id).title === "fresh one", budgets.settle, "titled");
 
 	const operatorDir = join(s.env.XDG_CONFIG_HOME as string, "agent-switchboard/operator");
@@ -109,47 +109,69 @@ test("a schedule launches a new session, refuses what can't work, unschedules, a
 		[["--at", "fri 3pm"], 'at: "fri 3pm" is neither an ISO 8601 time nor a duration like "PT2H"'],
 		[["--at", "2020-01-01T09:00:00Z"], "at: 2020-01-01T09:00:00Z has passed"],
 		[["--cron", "0 9 * *"], 'cron: "0 9 * *" needs 5 fields, "M H DoM Mon DoW"'],
-		[["--at", "PT1H", "--request-response"], "a message to this session can't request a response from it"],
+		[["--at", "PT1H", "--report-back"], "a message to this session can't ask it to report back to itself"],
 	];
 	for (const [args, error] of refusals) {
-		const result = await swbIn(s, "reply nope", "schedule", "--from", pi.id, "--label", "nope", ...args);
+		const result = await swbIn(s, "reply nope", "schedule", "--from", pi.id, "--schedule-label", "nope", ...args);
 		expect({ args, err: result.err.trim() }).toEqual({ args, err: `swb: ${error}` });
 	}
 	const launchRefusals: [string[], string][] = [
-		[["--at", "PT1H"], "the label is empty: say when it runs, in plain words"],
-		[["--at", "PT1H", "--label", "nope", "--group", " "], "a Group needs a name; null means no Group"],
-		[["--at", "PT1H", "--label", "nope", "--group", "fix;"], "a Group's name takes only letters, digits, spaces, and - _ ."],
+		[["--at", "PT1H"], "the schedule_label is empty: say when it runs, in plain words"],
+		[["--at", "PT1H", "--schedule-label", "nope", "--group", " "], "a Group needs a name; null means no Group"],
+		[["--at", "PT1H", "--schedule-label", "nope", "--group", "fix;"], "a Group's name takes only letters, digits, spaces, and - _ ."],
 		[
-			["--at", "PT1H", "--label", "nope", "--cwd", operatorDir, "--group", "lab"],
+			["--at", "PT1H", "--schedule-label", "nope", "--cwd", operatorDir, "--group", "lab"],
 			"an Operator belongs to no Project, so it takes no Group",
 		],
-		[["--at", "PT1H", "--label", "nope", "--group", "lab", "--no-group"], "--group and --no-group conflict"],
+		[["--at", "PT1H", "--schedule-label", "nope", "--group", "lab", "--no-group"], "--group and --no-group conflict"],
 	];
 	for (const [args, error] of launchRefusals) {
 		const result = await swbIn(s, "reply nope", "launch", "--from", pi.id, "--title", "x", ...args);
 		expect({ args, err: result.err.trim() }).toEqual({ args, err: `swb: ${error}` });
 	}
-	expect((await swbIn(s, "reply nope", "launch", "--from", pi.id, "--at", "PT1H", "--label", "nope")).err.trim()).toBe(
-		"swb: launch: --at, --cron, and --label need --from and --title",
+	expect((await swbIn(s, "reply nope", "launch", "--from", pi.id, "--at", "PT1H", "--schedule-label", "nope")).err.trim()).toBe(
+		"swb: launch: --at, --cron, and --schedule-label need --from and --title",
 	);
 
-	const first = await scheduled(s, "reply once", "--from", pi.id, "--at", "PT1H", "--label", "in an hour", "--request-id", "call-1");
-	const again = await scheduled(s, "reply once", "--from", pi.id, "--at", "PT1H", "--label", "in an hour", "--request-id", "call-1");
+	const first = await scheduled(
+		s,
+		"reply once",
+		"--from",
+		pi.id,
+		"--at",
+		"PT1H",
+		"--schedule-label",
+		"in an hour",
+		"--request-id",
+		"call-1",
+	);
+	const again = await scheduled(
+		s,
+		"reply once",
+		"--from",
+		pi.id,
+		"--at",
+		"PT1H",
+		"--schedule-label",
+		"in an hour",
+		"--request-id",
+		"call-1",
+	);
 	expect(again.details.id).toBe(first.details.id);
 	expect(s.query("select count(*) as n from schedules where request_id = 'call-1'")).toEqual([{ n: 1 }]);
-	type(s, pi.id, `call session_schedules {"unschedule":"${first.details.id}"}`);
+	type(s, pi.id, `call session_unschedule {"schedule":"${first.details.id}"}`);
 	const unscheduled = `Unscheduled "in an hour" (schedule: ${first.details.id}).`;
-	await until(() => pane(s, pi.id).includes(unscheduled), budgets.settle, "unscheduled through session_schedules");
+	await until(() => pane(s, pi.id).includes(unscheduled), budgets.settle, "unscheduled through session_unschedule");
 	expect(s.swbTry("unschedule", first.details.id, "--from", pi.id).err.trim()).toBe(
 		`swb: schedule ${first.details.id} is already cancelled`,
 	);
-	const listed = JSON.parse(s.swb("schedules", "--from", pi.id)) as { details: { schedules: { label: string }[] } };
-	expect(listed.details.schedules.map((x) => x.label)).toEqual(["soon"]);
+	const listed = JSON.parse(s.swb("list-schedules", "--from", pi.id)) as { details: { schedules: { scheduleLabel: string }[] } };
+	expect(listed.details.schedules.map((x) => x.scheduleLabel)).toEqual(["soon"]);
 
 	// A time without an offset is the machine's local time, as cron's are; one with an offset is that instant.
 	const year = new Date().getFullYear() + 1;
 	const inNewYork = async (at: string) => {
-		const proc = Bun.spawn([`${s.bin}/swb`, "schedule", "--from", pi.id, "--at", at, "--label", "Dec 15, 9 AM"], {
+		const proc = Bun.spawn([`${s.bin}/swb`, "schedule", "--from", pi.id, "--at", at, "--schedule-label", "Dec 15, 9 AM"], {
 			env: { ...s.env, TZ: "America/New_York" },
 			cwd: s.project,
 			stdin: new Blob(["reply local"]),

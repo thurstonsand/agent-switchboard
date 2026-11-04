@@ -10,7 +10,7 @@ import { requestedGroup } from "./groups.ts";
 import { presetLaunch } from "./harnesses.ts";
 import { randomHex } from "./sessions.ts";
 
-// Schedules deliver a message later, once or on a cron, or launch a new session with it as the goal. They wait in
+// Schedules deliver a message later, once or on a cron, or launch a new session with it as the briefing. They wait in
 // swb.db; the clock in the sessions server fires them. Snooze is a mark beside them: derive() decides when it holds.
 
 const HOUR = 3_600_000;
@@ -95,8 +95,8 @@ export type ScheduleSpec = {
 	body: string;
 	at: string | null;
 	cron: string | null;
-	label: string;
-	requestResponse: boolean;
+	scheduleLabel: string;
+	reportBack: boolean;
 	snooze: boolean;
 	requestId: string | null;
 };
@@ -107,15 +107,15 @@ type ScheduleRow = {
 	target_id: string | null;
 	launch: string | null;
 	body: string;
-	request_response: number;
-	label: string;
+	report_back: number;
+	schedule_label: string;
 	cron: string | null;
 	next_at: number | null;
 	last_fired_at: number | null;
 	cancelled_at: number | null;
 };
 
-const COLUMNS = "id, source_id, target_id, launch, body, request_response, label, cron, next_at, last_fired_at, cancelled_at";
+const COLUMNS = "id, source_id, target_id, launch, body, report_back, schedule_label, cron, next_at, last_fired_at, cancelled_at";
 
 function rowOf(db: Db, id: string): ScheduleRow | undefined {
 	return db.get(`SELECT ${COLUMNS} FROM schedules WHERE id = ?`, id) as ScheduleRow | undefined;
@@ -138,7 +138,7 @@ function scheduled(db: Db, row: ScheduleRow, from: string, snoozed: boolean): To
 	const to = recipient(db, row, from);
 	const next = clockTime(row.next_at as number);
 	const text = row.cron
-		? `Scheduled "${row.label}" (${row.cron}) to ${to} (schedule: ${row.id}); next ${next}.`
+		? `Scheduled "${row.schedule_label}" (${row.cron}) to ${to} (schedule: ${row.id}); next ${next}.`
 		: `Scheduled for ${next} to ${to} (schedule: ${row.id}).`;
 	return {
 		text: snoozed ? `${text} ${to === "this session" ? "This session is" : `${to} is`} snoozed until then.` : text,
@@ -149,10 +149,10 @@ function scheduled(db: Db, row: ScheduleRow, from: string, snoozed: boolean): To
 /** Accepts a schedule; with snooze, its recipient is snoozed until the first fire. */
 export async function schedule(db: Db, s: ScheduleSpec): Promise<ToolResult> {
 	checkBody("message", s.body);
-	if (!s.label.trim()) throw new SwbError("the label is empty: say when it runs, in plain words");
+	if (!s.scheduleLabel.trim()) throw new SwbError("the schedule_label is empty: say when it runs, in plain words");
 	if ((s.at === null) === (s.cron === null)) throw new SwbError("give at, to run once, or cron, to recur: one of them");
 	const to = s.launch ? null : (s.to ?? s.from);
-	if (to === s.from && s.requestResponse) throw new SwbError("a message to this session can't request a response from it");
+	if (to === s.from && s.reportBack) throw new SwbError("a message to this session can't ask it to report back to itself");
 	// Refused now rather than when it fires; it fires on the shortlist as it is then.
 	if (s.launch) await presetLaunch(s.launch, null);
 	// Under the write lock, so a retried call finds its first, and an archive can't land between the check and the insert.
@@ -182,15 +182,15 @@ export async function schedule(db: Db, s: ScheduleSpec): Promise<ToolResult> {
 		let id = randomHex(4);
 		while (rowOf(db, id)) id = randomHex(4);
 		db.run(
-			`INSERT INTO schedules (id, source_id, target_id, launch, body, request_response, label, cron, request_id, created_at, next_at)
+			`INSERT INTO schedules (id, source_id, target_id, launch, body, report_back, schedule_label, cron, request_id, created_at, next_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id,
 			s.from,
 			to,
 			launch,
 			s.body,
-			s.requestResponse ? 1 : 0,
-			s.label,
+			s.reportBack ? 1 : 0,
+			s.scheduleLabel,
 			s.cron,
 			s.requestId,
 			now,
@@ -215,14 +215,14 @@ export function listSchedules(db: Db, from: string): ToolResult {
 	return {
 		text,
 		details: { schedules: [...pending, ...finished].map(publicRow) },
-		summary: [...pending, ...finished].map((row) => row.label).join(", "),
+		summary: [...pending, ...finished].map((row) => row.schedule_label).join(", "),
 	};
 }
 
-/** One schedule as session_schedules lists it: id, when, its runs, who it goes to or comes from, and its message. */
+/** One schedule as session_list_schedules lists it: id, when, its runs, who it goes to or comes from, and its message. */
 function describe(db: Db, row: ScheduleRow, from: string): string {
 	const direction = row.source_id === from ? `to ${recipient(db, row, from)}` : `from ${sessionName(db, row.source_id, from)}`;
-	const when = row.cron ? `"${row.label}" (${row.cron})` : `"${row.label}"`;
+	const when = row.cron ? `"${row.schedule_label}" (${row.cron})` : `"${row.schedule_label}"`;
 	const runs = [
 		...(row.next_at !== null ? [`next ${clockTime(row.next_at)}`] : []),
 		...(row.last_fired_at !== null ? [`${row.next_at === null ? "ran" : "last ran"} ${clockTime(row.last_fired_at)}`] : []),
@@ -237,7 +237,7 @@ function publicRow(row: ScheduleRow) {
 		source: row.source_id,
 		target: row.target_id,
 		launch: row.launch ? (JSON.parse(row.launch) as Launch) : null,
-		label: row.label,
+		scheduleLabel: row.schedule_label,
 		cron: row.cron,
 		nextAt: row.next_at,
 		lastFiredAt: row.last_fired_at,
@@ -250,11 +250,11 @@ export function unschedule(db: Db, from: string, id: string): ToolResult {
 	return recordTx(db, () => {
 		const row = rowOf(db, id);
 		if (!row || (row.source_id !== from && row.target_id !== from))
-			throw new SwbError(`no schedule ${id} for this session; session_schedules lists them`);
+			throw new SwbError(`no schedule ${id} for this session; session_list_schedules lists them`);
 		if (row.cancelled_at !== null) throw new SwbError(`schedule ${id} is already cancelled`);
 		if (row.next_at === null) throw new SwbError(`schedule ${id} has already run`);
 		db.run("UPDATE schedules SET cancelled_at = ? WHERE id = ?", Date.now(), id);
-		return { text: `Unscheduled "${row.label}" (schedule: ${id}).`, details: { id } };
+		return { text: `Unscheduled "${row.schedule_label}" (schedule: ${id}).`, details: { id } };
 	});
 }
 
@@ -295,11 +295,11 @@ export function snoozeValue(text: string): Snooze {
 }
 
 /** What a session's Peek shows of the schedules aimed at it, and the launches it set: pending ones, then its last finished. */
-export type ScheduleView = { id: string; label: string; cron: string | null; nextAt: number | null; lastFiredAt: number | null };
+export type ScheduleView = { id: string; scheduleLabel: string; cron: string | null; nextAt: number | null; lastFiredAt: number | null };
 
 export function schedulesBySession(db: Db): Map<string, ScheduleView[]> {
 	const rows = db.all(
-		`SELECT id, coalesce(target_id, source_id) AS owner, label, cron, next_at, last_fired_at FROM schedules
+		`SELECT id, coalesce(target_id, source_id) AS owner, schedule_label, cron, next_at, last_fired_at FROM schedules
 		 WHERE cancelled_at IS NULL AND (next_at IS NOT NULL OR last_fired_at IS NOT NULL)
 		 ORDER BY next_at IS NULL, next_at, last_fired_at DESC`,
 	);
@@ -311,7 +311,7 @@ export function schedulesBySession(db: Db): Map<string, ScheduleView[]> {
 		if (finished && list.some((v) => v.nextAt === null)) continue;
 		list.push({
 			id: row.id as string,
-			label: row.label as string,
+			scheduleLabel: row.schedule_label as string,
 			cron: row.cron as string | null,
 			nextAt: row.next_at as number | null,
 			lastFiredAt: row.last_fired_at as number | null,
@@ -330,7 +330,7 @@ export function nextDue(db: Db): number | null {
 
 export type Fired = {
 	targets: string[];
-	launches: { scheduleId: string; scheduledFor: number; source: string; launch: Launch; body: string; requestResponse: boolean }[];
+	launches: { scheduleId: string; scheduledFor: number; source: string; launch: Launch; body: string; reportBack: boolean }[];
 };
 
 /**
@@ -354,18 +354,18 @@ export function fire(db: Db, now: number): Fired {
 					source: row.source_id,
 					launch: JSON.parse(row.launch) as Launch,
 					body: row.body,
-					requestResponse: row.request_response === 1,
+					reportBack: row.report_back === 1,
 				});
 				continue;
 			}
 			db.run(
-				`INSERT INTO messages (id, kind, source_id, target_id, body, request_response, created_at, schedule_id, scheduled_for)
+				`INSERT INTO messages (id, kind, source_id, target_id, body, report_back, created_at, schedule_id, scheduled_for)
 				 VALUES (?, 'message', ?, ?, ?, ?, ?, ?, ?)`,
 				crypto.randomUUID(),
 				row.source_id,
 				row.target_id,
 				row.body,
-				row.request_response,
+				row.report_back,
 				now,
 				row.id,
 				row.next_at,

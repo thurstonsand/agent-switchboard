@@ -7,7 +7,7 @@ export class UsageError extends Error {}
 /** In characters: room for any briefing, and far under every harness's input limit (Codex refuses a turn over 1,048,576). */
 const BODY_MAX_LENGTH = 100_000;
 
-/** A message, goal, or scheduled message, checked where it comes in, so no harness is ever handed one it refuses. */
+/** A message, briefing, or scheduled message, checked where it comes in, so no harness is ever handed one it refuses. */
 export function checkBody(what: string, text: string): void {
 	if (!text.trim()) throw new SwbError(`the ${what} is empty`);
 	if (text.length > BODY_MAX_LENGTH)

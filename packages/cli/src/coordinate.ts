@@ -28,7 +28,7 @@ function describe(s: SessionState): string {
 	return `- ${s.id} · ${harnessName(s.harness)} · "${displayName(s)}" · ${stateOf(s)} · ${s.cwd}${s.group ? ` · Group "${s.group}"` : ""}`;
 }
 
-export function reachable(db: Db, from: string): ToolResult {
+export function list(db: Db, from: string): ToolResult {
 	const open = states(db)
 		.filter((s) => s.open && s.id !== from)
 		.sort((a, b) => b.activityAt - a.activityAt);
@@ -48,14 +48,14 @@ export function reachable(db: Db, from: string): ToolResult {
 	return { text, details: { sessions }, ...(open.length > 0 ? { summary: open.map(displayName).join(", ") } : {}) };
 }
 
-export type Send = { from: string; to: string; body: string; requestResponse: boolean; requestId: string | null; kind: MessageKind };
+export type Send = { from: string; to: string; body: string; reportBack: boolean; requestId: string | null; kind: MessageKind };
 
 /** Accepts a message for a session, waking it if it's dormant, and waits a while for its line to deliver it. */
 export async function send(db: Db, m: Send): Promise<ToolResult> {
 	if (m.to === m.from) throw new SwbError("a session can't message itself");
 	if (m.kind === "message") checkBody("message", m.body);
 	const target = sessionState(db, m.to);
-	// A forced archive marks a session before it cancels the turn, so a cancel may reach one already archived.
+	// An archive with cancel_turns marks a session before it cancels the turn, so a cancel may reach one already archived.
 	if (!target.open && m.kind === "message") throw new SwbError(`"${displayName(target)}" is archived; unarchive it first`);
 	if (m.kind === "cancel" && !(target.live && target.activity !== "idle")) {
 		return {
@@ -74,14 +74,14 @@ export async function send(db: Db, m: Send): Promise<ToolResult> {
 		}
 		const id = crypto.randomUUID();
 		db.run(
-			`INSERT INTO messages (id, kind, source_id, target_id, body, request_response, request_id, created_at)
+			`INSERT INTO messages (id, kind, source_id, target_id, body, report_back, request_id, created_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 			id,
 			m.kind,
 			m.from,
 			m.to,
 			m.body,
-			m.requestResponse ? 1 : 0,
+			m.reportBack ? 1 : 0,
 			m.requestId,
 			Date.now(),
 		);
@@ -98,7 +98,7 @@ export async function send(db: Db, m: Send): Promise<ToolResult> {
 				? `Cancelled ${name}'s turn.`
 				: `${name} hasn't taken the cancel yet.`
 			: delivered
-				? `Delivered to ${name}.${m.requestResponse ? " Its reply will arrive as a message; end your turn rather than waiting." : ""}`
+				? `Delivered to ${name}.${m.reportBack ? " Its reply will arrive as a message; end your turn rather than waiting." : ""}`
 				: `Queued for ${name}.`;
 	return { text, details: { id, delivered, woke, target: { id: target.id, title: target.title, harness: target.harness } } };
 }
@@ -120,20 +120,20 @@ export type Launch = {
 	harness: Harness | null;
 	effort: string | null;
 	agent: string | null;
-	goal: string;
+	briefing: string;
 	cwd: string | null;
 	title: string | null;
 	/** The Group it starts in, null for none; undefined keeps `from`'s Group when both are in one Project. */
 	group: string | null | undefined;
-	requestResponse: boolean;
+	reportBack: boolean;
 	model: string | null;
-	/** The schedule that launches it, and when that was due, which its goal's frame says. */
+	/** The schedule that launches it, and when that was due, which its briefing's frame says. */
 	scheduled: { id: string; at: number } | null;
 };
 
-/** Starts a new managed session whose first turn is the goal, and waits until its harness has registered it. */
+/** Starts a new managed session whose first turn is the briefing, and waits until its harness has registered it. */
 export async function launchSession(db: Db, l: Launch): Promise<ToolResult> {
-	checkBody("goal", l.goal);
+	checkBody("briefing", l.briefing);
 	const cwd = l.cwd ?? (l.from ? sessionState(db, l.from).cwd : null);
 	if (!cwd) throw new SwbError("a directory is required");
 	if (!existsSync(cwd)) throw new SwbError(`no directory ${cwd}`);
@@ -154,13 +154,13 @@ export async function launchSession(db: Db, l: Launch): Promise<ToolResult> {
 				kind: "message",
 				sourceId: l.from,
 				targetId: "",
-				body: l.goal,
-				requestResponse: l.requestResponse,
+				body: l.briefing,
+				reportBack: l.reportBack,
 				createdAt: Date.now(),
 				scheduleId: l.scheduled?.id ?? null,
 				scheduledFor: l.scheduled?.at ?? null,
 			})
-		: l.goal;
+		: l.briefing;
 	ensureSessionsServer();
 	const host = db.tx(() =>
 		launch(db, {
@@ -184,7 +184,7 @@ export async function launchSession(db: Db, l: Launch): Promise<ToolResult> {
 	]
 		.filter(Boolean)
 		.join(", ");
-	const text = `Launched a ${harnessName(harness)} session${what ? ` (${what})` : ""} (session: ${id}) in ${dir}${group === null ? "" : `, in Group "${group}"`}.${l.requestResponse ? " It will report back as a message; end your turn rather than waiting." : ""}`;
+	const text = `Launched a ${harnessName(harness)} session${what ? ` (${what})` : ""} (session: ${id}) in ${dir}${group === null ? "" : `, in Group "${group}"`}.${l.reportBack ? " It will report back as a message; end your turn rather than waiting." : ""}`;
 	return { text, details: { id, harness, host, cwd: dir, group } };
 }
 
@@ -250,7 +250,7 @@ export async function show(db: Db, from: string, id: string, view: View | null):
 	const recorded = db.get("SELECT 1 FROM sessions WHERE session_id = ?", id);
 	// One launched a moment ago has its runtime before its first prompt makes its row, and the Deck lists it already.
 	if (!recorded && !db.get("SELECT 1 FROM runtimes WHERE session_id = ?", id))
-		throw new SwbError(`no session ${id}; session_reachable lists them`);
+		throw new SwbError(`no session ${id}; session_list lists them`);
 	const host = db.get("SELECT tmux_session FROM runtimes WHERE session_id = ?", from)?.tmux_session as string | undefined;
 	const showing = host === undefined ? null : deckShowing(host);
 	if (!showing) throw new SwbError(`no Deck is showing this session, so there is none to switch; \`swb open ${id}\` opens one on it`);
@@ -269,13 +269,13 @@ export type Update = Omit<ToolArgs<"swb_update_session">, "session">;
  * is checked before any is made, so a refused archive leaves the rest undone too.
  */
 export async function update(db: Db, from: string, id: string, change: Update): Promise<ToolResult> {
-	const { archived, family, force, cancel, snooze: snoozing, group, title, reload: reloading } = change;
+	const { archived, family, cancel_turns: cancelTurns, cancel, snooze: snoozing, group, title, reload: reloading } = change;
 	if ([archived, cancel || undefined, snoozing, group, title, reloading].every((value) => value === undefined))
 		throw new SwbError("nothing to change: give archived, cancel, snooze, group, title, or reload");
-	if (change.deleteWorktree && (archived !== true || id !== from))
-		throw new SwbError("deleteWorktree goes only with archived: true for this session");
-	if ((family !== undefined || force !== undefined) && archived !== true)
-		throw new SwbError("family and force go only with archived: true");
+	if (change.delete_worktree && (archived !== true || id !== from))
+		throw new SwbError("delete_worktree goes only with archived: true for this session");
+	if ((family !== undefined || cancelTurns !== undefined) && archived !== true)
+		throw new SwbError("family and cancel_turns go only with archived: true");
 	if (cancel && id === from) throw new SwbError("cancel stops another session's turn; to stop this one, end your turn");
 	if (cancel && (archived === true || reloading !== undefined))
 		throw new SwbError("cancel goes without archived or reload, which settle a running turn themselves");
@@ -293,10 +293,10 @@ export async function update(db: Db, from: string, id: string, change: Update): 
 	const trimmedTitle = title?.trim();
 	if (trimmedTitle === "") throw new SwbError("a title can't be empty");
 	const trimmedGroup = requestedGroup(group, target.cwd);
-	const archiving = archived === true ? archivePlan(all, from, target, family ?? false, force ?? false) : null;
+	const archiving = archived === true ? archivePlan(all, from, target, family ?? false, cancelTurns ?? false) : null;
 
 	const done: string[] = [];
-	const deleted = change.deleteWorktree && archiving ? await archiveRun(db, from, archiving, true, force ?? false) : null;
+	const deleted = change.delete_worktree && archiving ? await archiveRun(db, from, archiving, true, cancelTurns ?? false) : null;
 	if (archived === false) {
 		unarchive(db, id);
 		done.push(`Unarchived ${name}.`);
@@ -317,7 +317,7 @@ export async function update(db: Db, from: string, id: string, change: Update): 
 	}
 	if (snoozing !== undefined) done.push(snooze(db, from, id, snoozing).text);
 	// After snoozing, which can still refuse its time: a cancel can't be taken back.
-	if (cancel) done.push((await send(db, { from, to: id, body: "", requestResponse: false, requestId: null, kind: "cancel" })).text);
+	if (cancel) done.push((await send(db, { from, to: id, body: "", reportBack: false, requestId: null, kind: "cancel" })).text);
 	if (reloading !== undefined) done.push(reload(db, from, id, reloading));
 	if (archiving) done.push(deleted ?? (await archiveRun(db, from, archiving)));
 	return {
@@ -374,29 +374,29 @@ type ArchivePlan = { target: SessionState; members: SessionState[]; unsettled: S
 
 /**
  * What archiving a session, and with `family` every open one it started, would take. The caller may archive itself
- * mid-turn: its line quits when the turn ends. Anyone else unsettled is refused, by name, unless forced.
+ * mid-turn: its line quits when the turn ends. Anyone else unsettled is refused, by name, unless cancel_turns cancels their turns.
  */
-function archivePlan(all: SessionState[], from: string, target: SessionState, family: boolean, force: boolean): ArchivePlan {
+function archivePlan(all: SessionState[], from: string, target: SessionState, family: boolean, cancelTurns: boolean): ArchivePlan {
 	const members = [...(target.open ? [target] : []), ...(family ? openDescendants(all, target.id) : [])];
 	const refusals = members.flatMap((s) => {
 		const why = s.id === from ? null : unsettled(s);
 		return why ? [{ s, why }] : [];
 	});
-	if (refusals.length > 0 && !force)
+	if (refusals.length > 0 && !cancelTurns)
 		throw new SwbError(
-			`Nothing changed: ${refusals.map(({ s, why }) => `"${displayName(s)}" is ${why}`).join("; ")}. Archive anyway with force, which cancels their turns.`,
+			`Nothing changed: ${refusals.map(({ s, why }) => `"${displayName(s)}" is ${why}`).join("; ")}. Archive anyway with cancel_turns.`,
 		);
 	return { target, members, unsettled: refusals.map(({ s }) => s) };
 }
 
-/** Archives what the plan names. A forced session is archived, then its turn cancelled, so its line quits as the turn ends. */
-async function archiveRun(db: Db, from: string, plan: ArchivePlan, deleteWorktree = false, force = false): Promise<string> {
+/** Archives what the plan names. With cancelTurns, an unsettled session is archived, then its turn cancelled, so its line quits as the turn ends. */
+async function archiveRun(db: Db, from: string, plan: ArchivePlan, deleteWorktree = false, cancelTurns = false): Promise<string> {
 	const { target, members } = plan;
 	const name = from === target.id ? "this session" : `"${displayName(target)}"`;
 	if (members.length === 0 && !deleteWorktree) return `${name} is already archived.`;
 	const cancelling = plan.unsettled.filter((s) => s.live);
 	const cancel = async (ids: string[]) => {
-		await Promise.all(ids.map((to) => send(db, { from, to, body: "", requestResponse: false, requestId: null, kind: "cancel" })));
+		await Promise.all(ids.map((to) => send(db, { from, to, body: "", reportBack: false, requestId: null, kind: "cancel" })));
 	};
 	let deleted: string | null = null;
 	let closed = "";
@@ -406,7 +406,7 @@ async function archiveRun(db: Db, from: string, plan: ArchivePlan, deleteWorktre
 			target.id,
 			members.map((s) => s.id),
 			from,
-			force ? cancel : null,
+			cancelTurns ? cancel : null,
 		);
 	} else {
 		if (members.some((s) => s.id === from)) recordTx(db, () => markArchived(db, from));

@@ -237,7 +237,7 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
-	// Not the user message_start: a launched session's first turn starts with its goal as a message.
+	// Not the user message_start: a launched session's first turn starts with its briefing as a message.
 	// pi re-emits agent_start for retries, compaction, and queued messages within one turn; only a turn
 	// that starts from idle moves last_prompt_at, so swb_update_session can't be undone by its own turn.
 	pi.on("agent_start", (_event, ctx) => {
@@ -360,9 +360,9 @@ export default function (pi: ExtensionAPI) {
 	const titleOf = (id: unknown) => (typeof id === "string" ? (recordedTitle(connect(), id) ?? id) : "");
 
 	tool(
-		"session_reachable",
+		"session_list",
 		() => "",
-		(_args, ctx) => swb(proc.launch.bin, ["reachable", "--from", self(ctx)]),
+		(_args, ctx) => swb(proc.launch.bin, ["list", "--from", self(ctx)]),
 	);
 
 	tool(
@@ -373,11 +373,11 @@ export default function (pi: ExtensionAPI) {
 	);
 
 	tool(
-		"session_ask",
+		"session_recall",
 		(args) => titleOf(args.session),
 		async (args: { session: string; question: string }, ctx, _toolCallId, signal) => {
 			signal?.throwIfAborted();
-			if (!ctx.model) throw new Error("No active model is available for session_ask");
+			if (!ctx.model) throw new Error("No active model is available for session_recall");
 			const first = await swb(proc.launch.bin, ["recall", "begin", args.session], JSON.stringify({ question: args.question }), signal);
 			const { createAgentSession, DefaultResourceLoader, defineTool, getAgentDir, ModelRuntime, SessionManager } = await import(
 				"@earendil-works/pi-coding-agent"
@@ -456,19 +456,10 @@ export default function (pi: ExtensionAPI) {
 	tool(
 		"session_send_message",
 		(args) => titleOf(args.session),
-		(args: { session: string; message: string; requestResponse: boolean }, ctx, toolCallId) =>
+		(args: { session: string; message: string; report_back: boolean }, ctx, toolCallId) =>
 			swb(
 				proc.launch.bin,
-				[
-					"send",
-					"--from",
-					self(ctx),
-					"--to",
-					args.session,
-					"--request-id",
-					toolCallId,
-					...(args.requestResponse ? ["--request-response"] : []),
-				],
+				["send", "--from", self(ctx), "--to", args.session, "--request-id", toolCallId, ...(args.report_back ? ["--report-back"] : [])],
 				args.message,
 			),
 	);
@@ -476,21 +467,21 @@ export default function (pi: ExtensionAPI) {
 	tool(
 		"session_launch",
 		(args) =>
-			`${[args.harness, args.agent, args.model].filter(Boolean).join(" ") || "default"} · ${args.title}${args.label ? ` · ${args.label}` : ""}`,
+			`${[args.harness, args.agent, args.model].filter(Boolean).join(" ") || "default"} · ${args.title}${args.schedule_label ? ` · ${args.schedule_label}` : ""}`,
 		(
 			args: {
 				harness?: string;
 				model?: string;
 				effort?: string;
 				agent?: string;
-				goal: string;
+				briefing: string;
 				cwd?: string;
 				title: string;
 				group?: string | null;
-				requestResponse: boolean;
+				report_back: boolean;
 				at?: string;
 				cron?: string;
-				label?: string;
+				schedule_label?: string;
 			},
 			ctx,
 			toolCallId,
@@ -507,26 +498,28 @@ export default function (pi: ExtensionAPI) {
 					"--title",
 					args.title,
 					...groupFlags(args.group),
-					...(args.requestResponse ? ["--request-response"] : []),
-					...(["at", "cron", "label"] as const).flatMap((k) => (args[k] !== undefined ? [`--${k}`, args[k]] : [])),
+					...(args.report_back ? ["--report-back"] : []),
+					...(args.at !== undefined ? ["--at", args.at] : []),
+					...(args.cron !== undefined ? ["--cron", args.cron] : []),
+					...(args.schedule_label !== undefined ? ["--schedule-label", args.schedule_label] : []),
 					"--request-id",
 					toolCallId,
 				],
-				args.goal,
+				args.briefing,
 			),
 	);
 
 	tool(
 		"session_schedule",
-		(args) => `${args.session ? titleOf(args.session) : "this session"} · ${args.label}${args.snooze ? " · snooze" : ""}`,
+		(args) => `${args.session ? titleOf(args.session) : "this session"} · ${args.schedule_label}${args.snooze ? " · snooze" : ""}`,
 		(
 			args: {
 				message: string;
 				at?: string;
 				cron?: string;
-				label: string;
+				schedule_label: string;
 				session?: string;
-				requestResponse?: boolean;
+				report_back?: boolean;
 				snooze?: boolean;
 			},
 			ctx,
@@ -538,14 +531,14 @@ export default function (pi: ExtensionAPI) {
 					"schedule",
 					"--from",
 					self(ctx),
-					"--label",
-					args.label,
+					"--schedule-label",
+					args.schedule_label,
 					"--request-id",
 					toolCallId,
 					...(args.at !== undefined ? ["--at", args.at] : []),
 					...(args.cron !== undefined ? ["--cron", args.cron] : []),
 					...(args.session !== undefined ? ["--to", args.session] : []),
-					...(args.requestResponse ? ["--request-response"] : []),
+					...(args.report_back ? ["--report-back"] : []),
 					...(args.snooze ? ["--snooze"] : []),
 				],
 				args.message,
@@ -553,10 +546,15 @@ export default function (pi: ExtensionAPI) {
 	);
 
 	tool(
-		"session_schedules",
-		(args) => (args.unschedule ? `unschedule ${args.unschedule}` : ""),
-		(args: { unschedule?: string }, ctx) =>
-			swb(proc.launch.bin, args.unschedule ? ["unschedule", args.unschedule, "--from", self(ctx)] : ["schedules", "--from", self(ctx)]),
+		"session_list_schedules",
+		() => "",
+		(_args, ctx) => swb(proc.launch.bin, ["list-schedules", "--from", self(ctx)]),
+	);
+
+	tool(
+		"session_unschedule",
+		(args) => String(args.schedule ?? ""),
+		(args: { schedule: string }, ctx) => swb(proc.launch.bin, ["unschedule", args.schedule, "--from", self(ctx)]),
 	);
 
 	tool(
@@ -573,7 +571,7 @@ export default function (pi: ExtensionAPI) {
 		"swb_update_session",
 		(args) => {
 			const parts = [
-				args.archived === true ? `archive${args.family ? " family" : ""}${args.force ? " · force" : ""}` : "",
+				args.archived === true ? `archive${args.family ? " family" : ""}${args.cancel_turns ? " · cancel turns" : ""}` : "",
 				args.archived === false ? "unarchive" : "",
 				args.cancel ? "cancel turn" : "",
 				args.snooze !== undefined ? `snooze ${snoozeText(args.snooze as Snooze)}` : "",

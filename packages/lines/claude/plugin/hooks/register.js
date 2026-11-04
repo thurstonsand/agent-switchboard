@@ -13,21 +13,21 @@ function target(name, args) {
 	switch (name) {
 		case "session_search":
 			return args.query;
-		case "session_ask":
+		case "session_recall":
 			return args.question;
 		case "session_send_message":
 			return args.message;
 		case "session_launch":
-			return `${[args.harness, args.agent, args.model].filter(Boolean).join(" ") || "default"} · ${args.title}${args.label ? ` · ${args.label}` : ""}`;
+			return `${[args.harness, args.agent, args.model].filter(Boolean).join(" ") || "default"} · ${args.title}${args.schedule_label ? ` · ${args.schedule_label}` : ""}`;
 		case "session_schedule":
-			return `${args.session ? "another session" : "this session"} · ${args.label}${args.snooze ? " · snooze" : ""}`;
-		case "session_schedules":
-			return args.unschedule ? `unschedule ${args.unschedule}` : "";
+			return `${args.session ? "another session" : "this session"} · ${args.schedule_label}${args.snooze ? " · snooze" : ""}`;
+		case "session_unschedule":
+			return args.schedule;
 		case "swb_show_session":
 			return args.view ?? "";
 		case "swb_update_session":
 			return [
-				args.archived === true ? `archive${args.family ? " family" : ""}${args.force ? " · force" : ""}` : "",
+				args.archived === true ? `archive${args.family ? " family" : ""}${args.cancel_turns ? " · cancel turns" : ""}` : "",
 				args.archived === false ? "unarchive" : "",
 				args.cancel ? "cancel turn" : "",
 				args.snooze !== undefined ? `snooze ${typeof args.snooze === "string" ? args.snooze : args.snooze.until}` : "",
@@ -106,7 +106,7 @@ async function registerReader($) {
 	});
 }
 
-// Readers session_ask started, by agentId, each with the session it reads: only they may read transcripts, and each
+// Readers session_recall started, by agentId, each with the session it reads: only they may read transcripts, and each
 // one's turn.complete ends its wait.
 const readers = new Map();
 
@@ -137,14 +137,14 @@ async function ask($, e) {
 		// Esc leaves a spawned agent running, and denies a tool call from the aborted hook; a timer's isn't the hook's.
 		if (reader.answer === undefined) $.clock.after(0, () => stopReader($, agentId));
 	}
-	if (reader.answer === undefined) throw new Error("session_ask's reader stopped waiting");
+	if (reader.answer === undefined) throw new Error("session_recall's reader stopped waiting");
 	return reader.answer;
 }
 
 /** A reader's tool, on the session it reads, with the arguments its schema names. */
 async function readerTool($, tool, e) {
 	const reader = readers.get(e.agentId);
-	if (!reader) return { deny: `${tool.name} is only available to session_ask's reader` };
+	if (!reader) return { deny: `${tool.name} is only available to session_recall's reader` };
 	const args = Object.fromEntries(Object.keys(tool.inputSchema.properties).flatMap((key) => (e[key] === undefined ? [] : [[key, e[key]]])));
 	try {
 		return { result: JSON.parse(await swb($, ["recall", tool.name.replace("recall_", ""), reader.session], JSON.stringify(args))).text };
@@ -158,7 +158,7 @@ async function stopReader($, agentId) {
 		const stopped = await $.tool.call({ tool: "TaskStop", task_id: agentId });
 		if (stopped.deny || stopped.isError) throw new Error(stopped.deny ?? stopped.text);
 	} catch (error) {
-		$.ui.log(`swb: session_ask's reader didn't stop: ${error.message}`);
+		$.ui.log(`swb: session_recall's reader didn't stop: ${error.message}`);
 	}
 }
 
@@ -323,14 +323,14 @@ async function useTool($, name, e) {
 	// A launch carries forward the model and effort this session runs on, which swb reads from its records.
 	if (name === "session_launch") await line.recording;
 	switch (name) {
-		case "session_reachable":
-			return swb($, ["reachable", ...from]);
+		case "session_list":
+			return swb($, ["list", ...from]);
 		case "session_search":
 			return swb($, ["search", ...from, ...(e.limit ? ["--limit", String(e.limit)] : [])], e.query);
 		case "session_send_message":
 			return swb(
 				$,
-				["send", ...from, "--to", e.session, "--request-id", e.tool_use_id, ...(e.requestResponse ? ["--request-response"] : [])],
+				["send", ...from, "--to", e.session, "--request-id", e.tool_use_id, ...(e.report_back ? ["--report-back"] : [])],
 				e.message,
 			);
 		case "session_launch":
@@ -345,12 +345,14 @@ async function useTool($, name, e) {
 					"--title",
 					e.title,
 					...groupFlags(e.group),
-					...(e.requestResponse ? ["--request-response"] : []),
-					...["at", "cron", "label"].flatMap((k) => (e[k] !== undefined ? [`--${k}`, e[k]] : [])),
+					...(e.report_back ? ["--report-back"] : []),
+					...(e.at !== undefined ? ["--at", e.at] : []),
+					...(e.cron !== undefined ? ["--cron", e.cron] : []),
+					...(e.schedule_label !== undefined ? ["--schedule-label", e.schedule_label] : []),
 					"--request-id",
 					e.tool_use_id,
 				],
-				e.goal,
+				e.briefing,
 			);
 		case "session_schedule":
 			return swb(
@@ -358,20 +360,22 @@ async function useTool($, name, e) {
 				[
 					"schedule",
 					...from,
-					"--label",
-					e.label,
+					"--schedule-label",
+					e.schedule_label,
 					"--request-id",
 					e.tool_use_id,
 					...(e.at !== undefined ? ["--at", e.at] : []),
 					...(e.cron !== undefined ? ["--cron", e.cron] : []),
 					...(e.session !== undefined ? ["--to", e.session] : []),
-					...(e.requestResponse ? ["--request-response"] : []),
+					...(e.report_back ? ["--report-back"] : []),
 					...(e.snooze ? ["--snooze"] : []),
 				],
 				e.message,
 			);
-		case "session_schedules":
-			return swb($, e.unschedule ? ["unschedule", e.unschedule, ...from] : ["schedules", ...from]);
+		case "session_list_schedules":
+			return swb($, ["list-schedules", ...from]);
+		case "session_unschedule":
+			return swb($, ["unschedule", e.schedule, ...from]);
 		case "swb_show_session":
 			return swb($, ["show", e.session, ...from, ...(e.view ? ["--view", e.view] : [])]);
 		case "swb_update_session": {
@@ -566,7 +570,7 @@ export function register(on) {
 			await init($);
 			if (!line.managed) return { deny: "this Claude Code session isn't on the switchboard: swb didn't start it" };
 			try {
-				if (tool.name === "session_ask") return { result: await ask($, e) };
+				if (tool.name === "session_recall") return { result: await ask($, e) };
 				const { text, summary } = JSON.parse(await useTool($, tool.name, e));
 				if (summary !== undefined) summaries.set(e.tool_use_id, summary);
 				return { result: text };

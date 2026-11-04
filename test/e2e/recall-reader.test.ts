@@ -6,7 +6,7 @@ import { host, launched, pane, recalled, subagentDone, type } from "./harness/ag
 import { cursorTo, entry } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
-// session_ask's reader works from a map of the session in its first message, then finds and reads entries by ref:
+// session_recall's reader works from a map of the session in its first message, then finds and reads entries by ref:
 // through a compaction, and into a subagent's own conversation.
 
 let s: Scenario;
@@ -27,7 +27,7 @@ function recall(op: "begin" | "search", id: string, args: Record<string, unknown
 	return (JSON.parse(run.stdout.toString()) as { text: string }).text;
 }
 
-/** What session_ask returned to a pi caller's model, from the faux provider's log. */
+/** What session_recall returned to a pi caller's model, from the faux provider's log. */
 async function ask(caller: string, target: string, question: string): Promise<string> {
 	const prompt = `ask-id ${target} :: ${question}`;
 	type(s, caller, prompt);

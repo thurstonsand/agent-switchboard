@@ -3433,10 +3433,10 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 		for (const v of shown) {
 			const line =
 				v.nextAt === null
-					? `${green("✓")} ${v.label}${gray(` · ran ${ago(v.lastFiredAt as number, now)}`)}`
+					? `${green("✓")} ${v.scheduleLabel}${gray(` · ran ${ago(v.lastFiredAt as number, now)}`)}`
 					: v.cron
-						? `${cyan("↻")} ${v.label}${gray(` · next ${wakeAt(v.nextAt, now)}${v.lastFiredAt === null ? "" : ` · last ${ago(v.lastFiredAt, now)}`}`)}`
-						: `${gray("◷")} ${v.label}${gray(` · ${wakeAt(v.nextAt, now)}`)}`;
+						? `${cyan("↻")} ${v.scheduleLabel}${gray(` · next ${wakeAt(v.nextAt, now)}${v.lastFiredAt === null ? "" : ` · last ${ago(v.lastFiredAt, now)}`}`)}`
+						: `${gray("◷")} ${v.scheduleLabel}${gray(` · ${wakeAt(v.nextAt, now)}`)}`;
 			head.push(truncateToWidth(` ${line}`, inner, "…"));
 		}
 	}

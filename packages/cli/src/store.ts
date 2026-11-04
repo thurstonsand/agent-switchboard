@@ -128,6 +128,10 @@ const MIGRATIONS: string[] = [
 	"ALTER TABLE marks ADD COLUMN reload TEXT CHECK (reload IN ('continue','idle'))",
 	// When I marked it Unseen, holding until a Visit after it.
 	"ALTER TABLE marks ADD COLUMN unseen_at INTEGER",
+	// The names swb's tools give them.
+	`ALTER TABLE messages RENAME COLUMN request_response TO report_back;
+	ALTER TABLE schedules RENAME COLUMN request_response TO report_back;
+	ALTER TABLE schedules RENAME COLUMN label TO schedule_label;`,
 ];
 
 if (MIGRATIONS.length !== SCHEMA_VERSION) throw new Error(`${MIGRATIONS.length} migrations for schema v${SCHEMA_VERSION}`);

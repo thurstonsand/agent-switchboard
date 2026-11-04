@@ -87,7 +87,7 @@ export async function clock(): Promise<void> {
 		log(`launching "${l.launch.title}" failed: ${error.message}`);
 		recordTx(db, () =>
 			db.run(
-				`INSERT INTO messages (id, kind, source_id, target_id, body, request_response, created_at, schedule_id, scheduled_for)
+				`INSERT INTO messages (id, kind, source_id, target_id, body, report_back, created_at, schedule_id, scheduled_for)
 				 VALUES (?, 'message', ?, ?, ?, 0, ?, ?, ?)`,
 				crypto.randomUUID(),
 				l.source,
@@ -137,11 +137,11 @@ export async function clock(): Promise<void> {
 					model: l.launch.model,
 					effort: l.launch.effort,
 					agent: l.launch.agent,
-					goal: l.body,
+					briefing: l.body,
 					cwd: l.launch.cwd,
 					title: l.launch.title,
 					group: l.launch.group,
-					requestResponse: l.requestResponse,
+					reportBack: l.reportBack,
 					scheduled: { id: l.scheduleId, at: l.scheduledFor },
 				}).then(
 					(result) => log(result.text),

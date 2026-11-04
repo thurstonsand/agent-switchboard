@@ -44,14 +44,14 @@ async function ask(caller: string, prompt: string, answer: string): Promise<void
 	await until(
 		() => requests().some((request) => request.prompt === prompt && request.role === "toolResult" && request.text === answer),
 		ready,
-		"this question's session_ask result",
+		"this question's session_recall result",
 	);
 	await until(() => pane(s, caller).includes(`asked: ${answer}`), ready, `answer: ${answer}`);
 	await until(() => entry(s, caller).activity === "idle", budgets.settle, "caller idle");
 	expect(pane(s, caller)).toContain(`asked: ${answer}`);
 }
 
-test("pi session_ask reads a live and archived pi conversation in an isolated reader on the caller's model", async () => {
+test("pi session_recall reads a live and archived pi conversation in an isolated reader on the caller's model", async () => {
 	s = scenario("recall", "pi", { packages: [], recorder: true });
 	writeFileSync(join(s.home, "e2e-signals", "recall.reasoning"), "");
 	const target = await launched(s, "pi", "reply SWB-pi-history", undefined, ["--title", "Pi history"]);
@@ -91,7 +91,7 @@ test("pi session_ask reads a live and archived pi conversation in an isolated re
 	expect(entry(s, target.id)).toMatchObject({ open: false, live: false });
 });
 
-test("pi session_ask reads a Claude Code conversation across harnesses", async () => {
+test("pi session_recall reads a Claude Code conversation across harnesses", async () => {
 	s = scenario("recall", "pi-claude", { packages: [], recorder: true, harnesses: ["claude"] });
 	const target = await launched(s, "claude", "reply SWB-claude-history", undefined, ["--title", "Claude history"]);
 	const caller = await launched(s, "pi", "reply caller");

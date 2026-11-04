@@ -1,6 +1,6 @@
 import type { Db } from "@swb/shared";
 import { parsed, READER_PROMPT, readerToolsAsJson, type ToolName, type ToolResult } from "@swb/shared/tools";
-import { launchSession, reachable, send, show, update } from "../coordinate.ts";
+import { launchSession, list, send, show, update } from "../coordinate.ts";
 import { SwbError } from "../errors.ts";
 import { recallBegin, recallRead, recallSearch } from "../recall/read.ts";
 import { search } from "../recall/search.ts";
@@ -21,23 +21,23 @@ export async function callTool(
 ): Promise<ToolResult> {
 	const db = openStore();
 	switch (name) {
-		case "session_reachable":
+		case "session_list":
 			parsed(name, args);
-			return reachable(db, from);
+			return list(db, from);
 		case "session_send_message": {
 			const a = parsed(name, args);
 			return send(db, {
 				from,
 				to: a.session,
 				body: a.message,
-				requestResponse: a.requestResponse,
+				reportBack: a.report_back,
 				requestId: callId,
 				kind: "message",
 			});
 		}
 		case "session_launch": {
 			const a = parsed(name, args);
-			if (a.at !== undefined || a.cron !== undefined || a.label !== undefined)
+			if (a.at !== undefined || a.cron !== undefined || a.schedule_label !== undefined)
 				return schedule(db, {
 					from,
 					to: null,
@@ -50,11 +50,11 @@ export async function callTool(
 						title: a.title,
 						group: a.group,
 					},
-					body: a.goal,
+					body: a.briefing,
 					at: a.at ?? null,
 					cron: a.cron ?? null,
-					label: a.label ?? "",
-					requestResponse: a.requestResponse,
+					scheduleLabel: a.schedule_label ?? "",
+					reportBack: a.report_back,
 					snooze: false,
 					requestId: callerId(callId),
 				});
@@ -64,11 +64,11 @@ export async function callTool(
 				model: a.model ?? null,
 				effort: a.effort ?? null,
 				agent: a.agent ?? null,
-				goal: a.goal,
+				briefing: a.briefing,
 				cwd: a.cwd ?? null,
 				title: a.title,
 				group: a.group,
-				requestResponse: a.requestResponse,
+				reportBack: a.report_back,
 				scheduled: null,
 			});
 		}
@@ -81,16 +81,17 @@ export async function callTool(
 				body: a.message,
 				at: a.at ?? null,
 				cron: a.cron ?? null,
-				label: a.label,
-				requestResponse: a.requestResponse ?? false,
+				scheduleLabel: a.schedule_label,
+				reportBack: a.report_back ?? false,
 				snooze: a.snooze ?? false,
 				requestId: callerId(callId),
 			});
 		}
-		case "session_schedules": {
-			const a = parsed(name, args);
-			return a.unschedule ? unschedule(db, from, a.unschedule) : listSchedules(db, from);
-		}
+		case "session_list_schedules":
+			parsed(name, args);
+			return listSchedules(db, from);
+		case "session_unschedule":
+			return unschedule(db, from, parsed(name, args).schedule);
 		case "swb_show_session": {
 			const a = parsed(name, args);
 			return show(db, from, a.session, a.view ?? null);
@@ -99,7 +100,7 @@ export async function callTool(
 			const a = parsed(name, args);
 			return search(db, from, a.query, a.limit);
 		}
-		case "session_ask": {
+		case "session_recall": {
 			const a = parsed(name, args);
 			return ask(db, from, a.session, a.question, signal);
 		}
@@ -141,7 +142,7 @@ const READER_CONFIG = {
  */
 async function ask(db: Db, from: string, session: string, question: string, cancelled: AbortSignal): Promise<ToolResult> {
 	const row = db.get("SELECT tmux_session FROM runtimes WHERE session_id = ?", from);
-	if (!row) throw new SwbError("session_ask: the caller has no running Codex host");
+	if (!row) throw new SwbError("session_recall: the caller has no running Codex host");
 	const client = await CodexClient.connect(codexSocket(row.tmux_session as string), "swb-reader");
 	let threadId: string | null = null;
 	let turnId: string | null = null;
@@ -149,7 +150,7 @@ async function ask(db: Db, from: string, session: string, question: string, canc
 	const completed = Promise.withResolvers<string>();
 	// A startup failure or closed socket must not leave the eventual completion unhandled.
 	void completed.promise.catch(() => {});
-	const stop = (why: string) => completed.reject(new SwbError(`session_ask: ${why}`));
+	const stop = (why: string) => completed.reject(new SwbError(`session_recall: ${why}`));
 	client.onClose(() => stop("the caller's app-server closed"));
 	cancelled.addEventListener("abort", () => stop("cancelled"), { once: true });
 	client.onRequest(({ method, params }) => {
@@ -190,7 +191,7 @@ async function ask(db: Db, from: string, session: string, question: string, canc
 		const { thread: caller } = await request<{
 			thread: { cwd: string; model: string | null; modelProvider: string; status: { type: string } };
 		}>("thread/read", { threadId: from });
-		if (!caller.model) throw new SwbError("session_ask: the caller's model is unknown");
+		if (!caller.model) throw new SwbError("session_recall: the caller's model is unknown");
 		if (caller.status.type !== "active") stop("the caller's turn ended");
 		const cwd = caller.cwd;
 		// Tables merge across config layers, so each of the person's MCP servers is switched off by name.
@@ -215,7 +216,7 @@ async function ask(db: Db, from: string, session: string, question: string, canc
 		});
 		turnId = turn.id;
 		const text = await completed.promise;
-		if (!text) throw new SwbError("session_ask: reader returned no final message");
+		if (!text) throw new SwbError("session_recall: reader returned no final message");
 		return { text, details: { answer: text } };
 	} finally {
 		try {

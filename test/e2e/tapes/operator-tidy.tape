@@ -22,7 +22,7 @@ Type `update Rotate the staging certs {"archived":true,"family":true}` Sleep 400
 Wait+Screen /Nothing changed/
 Sleep 3s
 Screenshot ../artifacts/phase6/videos/operator-tidy-refused.png
-Type `update Rotate the staging certs {"archived":true,"family":true,"force":true}` Sleep 400ms Enter
+Type `update Rotate the staging certs {"archived":true,"family":true,"cancel_turns":true}` Sleep 400ms Enter
 Wait+Screen /Archived \(2\)/
 Wait+Screen /Cancelled the turns of/
 Sleep 2s

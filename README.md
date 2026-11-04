@@ -39,8 +39,8 @@ swb quit [--force]           stop every session, Deck, and swb's clock; sessions
 swb wake ID                  start a dormant session in the background
 swb reload ID [--idle]       restart a session's agent on fresh config and have it carry on; --idle waits for its turn to end and leaves it waiting
 swb models [--harness H] [QUERY]   list every model and agent the harnesses offer
-swb launch [--harness H] [--model M] [--effort E] [--agent A] [--cwd DIR] [--from ID] [--title T]   start a new session in the background on a preset; naming none, the one nearest what --from runs, else the default; its goal on stdin
-swb send --from ID --to ID [--request-response] [--cancel]   message a session; the body on stdin
+swb launch [--harness H] [--model M] [--effort E] [--agent A] [--cwd DIR] [--from ID] [--title T]   start a new session in the background on a preset; naming none, the one nearest what --from runs, else the default; its briefing on stdin
+swb send --from ID --to ID [--report-back] [--cancel]   message a session; the body on stdin
 ```
 
 ### Harnesses
@@ -49,19 +49,20 @@ swb runs Claude Code (2.1.300 or later) and Codex CLI (0.149 or later) the way i
 
 Every managed session's agent gets the same tools, whatever its harness:
 
-- `session_reachable`: every other open session, in any harness or project, with its state and Group
+- `session_list`: every other open session, in any harness or project, with its state and Group
 - `session_search`: every other session's conversation, open or archived, its subagents' included, searched by words, "phrases", and filters (`harness:`, `project:`, `file:`, `after:`, `before:`, `archived:`), best match first with the passages that matched
-- `session_ask`: a question about another session's conversation, answered by a reader with its own context, run in the asker's own harness, so the transcript never fills the asker's
+- `session_recall`: a question about another session's conversation, answered by a reader with its own context, run in the asker's own harness, so the transcript never fills the asker's
 - `session_send_message`: a message to one of them, arriving mid-turn when it's working, or starting a turn when it's idle
-- `session_launch`: starts a new session in any harness, whose first turn is the goal it's given, in the launcher's Group when both are in one Project; `group` names another, or `null` none. With `at` or `cron` and a `label`, as `session_schedule` takes them, it launches one later, or a new one each time the cron fires
+- `session_launch`: starts a new session in any harness, whose first turn is the briefing it's given, in the launcher's Group when both are in one Project; `group` names another, or `null` none. With `at` or `cron` and a `schedule_label`, as `session_schedule` takes them, it launches one later, or a new one each time the cron fires
 - `session_schedule`: a message for later, once (`at`: an ISO 8601 time or duration) or on a 5-field cron, to this session or another; `snooze` snoozes the recipient until then
-- `session_schedules`: the schedules a session set or receives; `unschedule` cancels one
-- `swb_update_session`: archives, unarchives, snoozes, or unsnoozes a session, moves it into a Group, retitles it, reloads it, or cancels its turn, any of them in one call. `family` archives everything it started too; a member mid-turn, blocked, cut off, or errored refuses the whole call by name, changing nothing, until `force` archives it anyway and cancels the turn. A new title becomes the harness's own name: pi and Codex take it at once, and Claude Code with its next prompt. Renaming the session in its harness later wins
+- `session_list_schedules`: the schedules a session set or receives
+- `session_unschedule`: cancels one of them
+- `swb_update_session`: archives, unarchives, snoozes, or unsnoozes a session, moves it into a Group, retitles it, reloads it, or cancels its turn, any of them in one call. `family` archives everything it started too; a member mid-turn, blocked, cut off, or errored refuses the whole call by name, changing nothing, until `cancel_turns` archives it anyway and cancels the turn. A new title becomes the harness's own name: pi and Codex take it at once, and Claude Code with its next prompt. Renaming the session in its harness later wins
 - `swb_show_session`: takes you to another session, moving the Deck you're watching this one in onto it as clicking its row would; `view` (`agent`, `editor`, or `split`) opens it in a given view instead of the one it was last left in
 
 Messages wait in swb's db until their session takes them, so one sent to a session that's starting, or whose sender has quit, still arrives. Claude Code takes a message at its next tool call, or as a new turn when idle; pi and Codex steer the running turn. Codex's own `/archive` archives the session in swb too.
 
-In a linked worktree, `swb_update_session` also offers `deleteWorktree: true` with `archived: true`, for the calling session only. Add `family: true` to archive its descendants too, deleting only this worktree. The Deck's archive prompt offers clickable `d archive + delete worktree` and `D all + delete this worktree` choices; `a` and `A` still archive without deleting. Neither offers deletion in the main checkout or outside Git. Deletion keeps the branch and conversations, but removes ignored files too. It refuses modified or untracked files, locked worktrees, scheduled launches into the directory, and other open or live sessions using it outside the selected family. Forced family deletion waits for cancelled turns to stop before removing anything.
+In a linked worktree, `swb_update_session` also offers `delete_worktree: true` with `archived: true`, for the calling session only. Add `family: true` to archive its descendants too, deleting only this worktree. The Deck's archive prompt offers clickable `d archive + delete worktree` and `D all + delete this worktree` choices; `a` and `A` still archive without deleting. Neither offers deletion in the main checkout or outside Git. Deletion keeps the branch and conversations, but removes ignored files too. It refuses modified or untracked files, locked worktrees, scheduled launches into the directory, and other open or live sessions using it outside the selected family. Forced family deletion waits for cancelled turns to stop before removing anything.
 
 Unarchiving does not recreate a deleted worktree. A conversation whose directory is gone resumes in its recorded Project root, with the same id and history and a notice that the files and branch may differ. This includes previously archived sessions that shared the worktree, in all three harnesses. If the Project root is gone too—or a non-Git session's only directory is gone—waking fails explicitly until a directory is restored; it never starts in `$HOME` instead.
 

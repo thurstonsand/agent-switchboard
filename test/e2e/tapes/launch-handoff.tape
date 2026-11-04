@@ -47,7 +47,7 @@ Escape
 Sleep 800ms
 Enter
 Sleep 2s
-Type `call session_launch {"harness":"pi","goal":"reply child","title":"child","requestResponse":false}` Sleep 600ms Enter
+Type `call session_launch {"harness":"pi","briefing":"reply child","title":"child","report_back":false}` Sleep 600ms Enter
 Wait+Screen /lab \(3\)/
 Sleep 3s
 Screenshot ../artifacts/phase6/videos/launch-handoff-child.png

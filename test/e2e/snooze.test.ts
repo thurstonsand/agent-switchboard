@@ -48,7 +48,7 @@ test("a timed snooze holds through a conversation and shows while blocked or cut
 	s.swb("snooze", pi.id, "next_message");
 	expect(snoozeOf(s, pi.id)).toMatchObject({ snoozed: true, snoozedUntil: null });
 	// A message scheduled for later is no message yet.
-	const later = await scheduled(s, "reply later", "--from", other.id, "--to", pi.id, "--at", "PT1H", "--label", "in an hour");
+	const later = await scheduled(s, "reply later", "--from", other.id, "--to", pi.id, "--at", "PT1H", "--schedule-label", "in an hour");
 	expect(snoozeOf(s, pi.id).snoozed).toBe(true);
 	expect((await swbIn(s, "reply two", "send", "--from", other.id, "--to", pi.id)).code).toBe(0);
 	expect(snoozeOf(s, pi.id).snoozed).toBe(false);
@@ -161,7 +161,7 @@ test("the Deck's Snoozed section: s snoozes from the roster, the row says when i
 	expect(sessionRows(folded).map((r) => r.id)).not.toContain(id);
 
 	// A schedule aimed at it shows in its Peek.
-	await scheduled(s, "reply peeked", "--from", id, "--at", "PT2H", "--label", "SWB check later");
+	await scheduled(s, "reply peeked", "--from", id, "--at", "PT2H", "--schedule-label", "SWB check later");
 	const section = folded.rows.findIndex((r) => r.kind === "section" && r.label === "Snoozed");
 	while (state(s).cursorRow !== section) s.keys(state(s).cursorRow < section ? "j" : "k");
 	s.keys("Enter");
@@ -183,7 +183,7 @@ test("the Deck's Snoozed section: s snoozes from the roster, the row says when i
 	await waitState(s, "Snoozed gone", (x) => !x.rows.some((r) => r.kind === "section" && r.label === "Snoozed"));
 
 	// A schedule that has run stays in the Peek, saying when.
-	await scheduled(s, "reply ran", "--from", id, "--at", "PT1S", "--label", "SWB soon");
+	await scheduled(s, "reply ran", "--from", id, "--at", "PT1S", "--schedule-label", "SWB soon");
 	await until(() => s.signal("replied.ran") !== "", ready, "the schedule run");
 	s.keys("M-a", "h");
 	await waitState(s, "roster focus", (x) => x.focus === "roster");

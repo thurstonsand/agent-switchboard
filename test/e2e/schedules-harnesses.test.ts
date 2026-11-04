@@ -29,7 +29,7 @@ test("Claude Code and Codex schedule and snooze through swb's tools, and Claude 
 		[claude.id, "SWB-claude-later"],
 		[codex.id, "SWB-codex-later"],
 	] as const) {
-		type(s, id, `call session_schedule {"message":"${marker}","at":"PT6S","label":"in 6 seconds","snooze":true}`);
+		type(s, id, `call session_schedule {"message":"${marker}","at":"PT6S","schedule_label":"in 6 seconds","snooze":true}`);
 		await until(() => snoozeOf(s, id).snoozed, budgets.settle, `${marker} snoozed`);
 	}
 	await until(() => pane(s, claude.id).includes("got SWB-claude-later"), ready, "Claude answering its own schedule");
@@ -40,19 +40,19 @@ test("Claude Code and Codex schedule and snooze through swb's tools, and Claude 
 
 	type(s, claude.id, `call swb_update_session {"snooze":"next_message"}`);
 	await until(() => snoozeOf(s, claude.id).snoozed, budgets.settle, "Claude snoozed until a message");
-	type(s, codex.id, `call session_send_message {"session":"${claude.id}","message":"SWB-wake-claude","requestResponse":false}`);
+	type(s, codex.id, `call session_send_message {"session":"${claude.id}","message":"SWB-wake-claude","report_back":false}`);
 	await until(() => pane(s, claude.id).includes("got SWB-wake-claude"), ready, "Claude woken by Codex's message");
 	expect(snoozeOf(s, claude.id).snoozed).toBe(false);
 
 	for (const id of [claude.id, codex.id]) {
-		type(s, id, `call session_schedule {"message":"SWB-never","at":"PT1H","label":"in an hour"}`);
+		type(s, id, `call session_schedule {"message":"SWB-never","at":"PT1H","schedule_label":"in an hour"}`);
 		const pending = () =>
 			s.query<{ id: string; cancelled: number }>(
 				"select id, cancelled_at is not null as cancelled from schedules where source_id = ? and body = 'SWB-never'",
 				id,
 			)[0];
 		const schedule = await until(() => pending()?.id, budgets.settle, "the schedule to unschedule");
-		type(s, id, `call session_schedules {"unschedule":"${schedule}"}`);
-		await until(() => pending()?.cancelled === 1, budgets.settle, "unscheduled through session_schedules");
+		type(s, id, `call session_unschedule {"schedule":"${schedule}"}`);
+		await until(() => pending()?.cancelled === 1, budgets.settle, "unscheduled through session_unschedule");
 	}
 });

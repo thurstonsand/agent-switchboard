@@ -736,10 +736,11 @@ export async function archiveWorktree(
 				throw new SwbError(`worktree is still used by session ${r.session_id}; stop it first`);
 		}
 		for (const schedule of db.all(
-			"SELECT id, label, launch FROM schedules WHERE cancelled_at IS NULL AND next_at IS NOT NULL AND launch IS NOT NULL",
+			"SELECT id, schedule_label, launch FROM schedules WHERE cancelled_at IS NULL AND next_at IS NOT NULL AND launch IS NOT NULL",
 		)) {
 			const launch = JSON.parse(schedule.launch as string) as { cwd: string };
-			if (inside(launch.cwd)) throw new SwbError(`worktree is used by schedule "${schedule.label}" (${schedule.id}); unschedule it first`);
+			if (inside(launch.cwd))
+				throw new SwbError(`worktree is used by schedule "${schedule.schedule_label}" (${schedule.id}); unschedule it first`);
 		}
 		for (const s of db.all("SELECT transcript FROM sessions WHERE transcript IS NOT NULL")) {
 			if (inside(s.transcript as string))

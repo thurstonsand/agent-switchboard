@@ -157,7 +157,7 @@ test("Claude's native reader answers about live, archived, and pi conversations 
 				.some(
 					(r) =>
 						String(r.prompt).startsWith("call mcp__plugin_swb_swb__recall_read") &&
-						String(r.toolOutput).includes("only available to session_ask's reader"),
+						String(r.toolOutput).includes("only available to session_recall's reader"),
 				),
 		10000,
 		"reader-only tool denied in main loop",
@@ -174,7 +174,7 @@ test("Claude's native reader answers about live, archived, and pi conversations 
 			s
 				.requests("claude")
 				.some(
-					(r) => r.prompt === subagent.prompt && String(r.toolOutput).includes("recall_read is only available to session_ask's reader"),
+					(r) => r.prompt === subagent.prompt && String(r.toolOutput).includes("recall_read is only available to session_recall's reader"),
 				),
 		30000,
 		"reader-only tool denied to another subagent",
@@ -221,7 +221,7 @@ test("Esc during a reader stops it, leaves the caller usable, and adds no Sessio
 	s.save("reader-after-cancel.json", JSON.stringify(readerRequests()));
 });
 
-test("two session_asks in one response run their readers at once", async () => {
+test("two session_recalls in one response run their readers at once", async () => {
 	s = scenario("recall-claude", "parallel", { packages: [], recorder: true, harnesses: ["claude"] });
 	const [a, b, caller] = await Promise.all([
 		launched(s, "claude", "reply SWB-parallel-a"),

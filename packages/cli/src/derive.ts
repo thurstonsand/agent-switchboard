@@ -230,7 +230,7 @@ export function states(db: Db): SessionState[] {
 /** One Session as of now, for a tool that names it. */
 export function sessionState(db: Db, id: string): SessionState {
 	const found = states(db).find((s) => s.id === id);
-	if (!found) throw new SwbError(`no session ${id}; session_reachable lists them`);
+	if (!found) throw new SwbError(`no session ${id}; session_list lists them`);
 	return found;
 }
 

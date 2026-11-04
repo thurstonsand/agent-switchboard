@@ -127,7 +127,7 @@ test("each harness's session_search finds the others' conversations, filters the
 	expect(malformed).toContain("harness:gemini: pi, claude, or codex");
 });
 
-test("a Claude Code subagent's transcript is its parent's evidence, and session_ask's readers are never indexed", async () => {
+test("a Claude Code subagent's transcript is its parent's evidence, and session_recall's readers are never indexed", async () => {
 	s = scenario("search", "claude-subagents", { packages: [], recorder: true, harnesses: ["claude"] });
 	const target = await launched(s, "claude", "reply SWB-subagent-target");
 	const parent = { ...(await launched(s, "claude", "reply parent ready")), harness: "claude" as const };

@@ -3,12 +3,12 @@ import { type LsEntry, type Scenario, until } from "./index.ts";
 
 export const ready = 60_000;
 
-export async function launched(s: Scenario, harness: "pi" | "claude" | "codex", goal: string): Promise<LsEntry> {
+export async function launched(s: Scenario, harness: "pi" | "claude" | "codex", briefing: string): Promise<LsEntry> {
 	const out = JSON.parse(
 		await Bun.spawn([`${s.bin}/swb`, "launch", "--harness", harness, "--cwd", s.project], {
 			env: s.env,
 			cwd: s.project,
-			stdin: new Blob([goal]),
+			stdin: new Blob([briefing]),
 			stdout: "pipe",
 			stderr: "inherit",
 		}).stdout.text(),

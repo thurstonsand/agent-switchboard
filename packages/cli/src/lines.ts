@@ -22,7 +22,7 @@ function write(path: string, text: string): void {
 /**
  * The Claude line's plugin, written from the copy this swb carries, so a session always loads its own swb's line. Its
  * coordination tools come from the plugin's swb mcp server, which marks the read-only ones so Claude runs them in
- * parallel; the mod still answers every call, since session_ask's reader is a Claude subagent only the mod can start.
+ * parallel; the mod still answers every call, since session_recall's reader is a Claude subagent only the mod can start.
  */
 export function writeClaudeLine(swb: string): string {
 	const dir = join(stateDir(), "lines", "claude");
@@ -93,9 +93,9 @@ export function codexServerOverrides(swb: string): string[] {
 		// Straight into the model's tool list, so the agent sees them like its own: not behind tool search, and not
 		// only inside code mode's exec, where a code-mode-only model such as gpt-6-sol reaches for spawn_agent instead.
 		omit_tools_from: ["deferred", "code_mode"],
-		// session_ask waits as long as its reader works, which Codex's 300 s default would cut short.
+		// session_recall waits as long as its reader works, which Codex's 300 s default would cut short.
 		tool_timeout_sec: 3600,
-		// swb mcp answers each call independently, so several session_ask readers can work at once.
+		// swb mcp answers each call independently, so several session_recall readers can work at once.
 		supports_parallel_tool_calls: true,
 	};
 	// Each value as JSON, which is TOML too.

@@ -67,7 +67,7 @@ test("a on a session that started others still open asks first: esc keeps them, 
 	s.save("archived-all.txt", s.screen());
 });
 
-test("swb_update_session archives a whole family; one member mid-turn refuses the whole call by name until force, which cancels that turn", async () => {
+test("swb_update_session archives a whole family; one member mid-turn refuses the whole call by name until cancel_turns cancels that turn", async () => {
 	s = scenario("phase3", "archive-family");
 	const root = await launched(s, "reply root", { cwd: s.project, title: "Root" });
 	const one = await launched(s, "reply one", { from: root, title: "One" });
@@ -85,7 +85,7 @@ test("swb_update_session archives a whole family; one member mid-turn refuses th
 	expect(entry(s, root).title).toBe("Root");
 	s.save("refused.txt", s.screen());
 
-	s.keys("-l", `call swb_update_session {"session":"${root}","archived":true,"family":true,"force":true}`, "Enter");
+	s.keys("-l", `call swb_update_session {"session":"${root}","archived":true,"family":true,"cancel_turns":true}`, "Enter");
 	await until(() => family.every((id) => !entry(s, id).open && !entry(s, id).live), budgets.settle, "the family archived and stopped");
 	expect(entry(s, heldId).cutOff).toBeNull();
 	expect(entry(s, caller)).toMatchObject({ open: true, live: true });

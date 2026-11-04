@@ -101,6 +101,9 @@ const argsOf = (args: unknown): Record<string, unknown> => {
 type Search = { key: string; from: string; harness: string; query: string; limit: number; at: number | null; turn: number; shown: string };
 type Pick = { search: Search; target: string } | { search: Search; target: null };
 
+/** Names swb's tools had when older transcripts were written: those calls still say which session an agent picked. */
+const PAST_NAMES = new Set(["session_ask"]);
+
 /** Each session_search in a session's transcript, with the session the agent acted on next, if it did in time. */
 function searches(s: SessionState, transcript: string): Pick[] {
 	const conversation = readConversation(locateTranscript(transcript, s.harness), s.harness);
@@ -135,7 +138,7 @@ function searches(s: SessionState, transcript: string): Pick[] {
 					turn,
 					shown: part.id ? (results.get(part.id) ?? "") : "",
 				};
-			} else if (pending && name in TOOLS && typeof args.session === "string") {
+			} else if (pending && (name in TOOLS || PAST_NAMES.has(name)) && typeof args.session === "string") {
 				picks.push({ search: pending, target: args.session });
 				pending = null;
 			}

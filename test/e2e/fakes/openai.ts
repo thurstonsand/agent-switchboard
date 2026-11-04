@@ -7,7 +7,7 @@
 //   fail <text>          fail the request with a 400, which isn't retried
 //   hold-compact <name>  the next /compact signals <name>.entered and waits for <name>.release before it summarizes
 // A message from another session (it starts "Message from session") is answered "got <its last line>", a multi-agent
-// v2 subagent's task is its prompt, and session_ask's reader follows readerStep.
+// v2 subagent's task is its prompt, and session_recall's reader follows readerStep.
 // Every request is appended to $FAKE_LOG as one JSON line: the user texts it saw, the tools it was offered, and its
 // whole input, instructions included.
 import { appendFileSync, existsSync, writeFileSync } from "node:fs";
@@ -62,7 +62,7 @@ function shell(names: string[], command: string): { name: string; args: object }
 }
 
 /**
- * session_ask's reader, whose prompt is "Question about session <id>:" and one of:
+ * session_recall's reader, whose prompt is "Question about session <id>:" and one of:
  *   reader-hold         signal reader-hold.entered, then run `true` through the shell once a second until reader-hold.release exists
  *   reader-shell <file> read <file> through the shell, then answer with what it printed
  *   reader-exec <path>  write <path> through the shell and through apply_patch, then answer with what each returned

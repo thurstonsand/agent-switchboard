@@ -3,7 +3,7 @@ import { codexHost } from "./codex/host.ts";
 import { adopt } from "./commands/adopt.ts";
 import { archive } from "./commands/archive.ts";
 import { clock } from "./commands/clock.ts";
-import { launch, reachable, recall, schedule, schedules, search, send, show, unschedule, update } from "./commands/coordinate.ts";
+import { launch, list, listSchedules, recall, schedule, search, send, show, unschedule, update } from "./commands/coordinate.ts";
 import { deckCommand, deckNotify } from "./commands/deck.ts";
 import { detached } from "./commands/detached.ts";
 import { dirs } from "./commands/dirs.ts";
@@ -48,24 +48,25 @@ const USAGE = `swb: Agent Switchboard
   swb reload ID [--idle]       restart a session's agent on fresh config and have it carry on; --idle waits for its turn to end
                                and leaves it waiting for a prompt
   swb launch [--harness H] [--model M] [--effort E] [--agent A] [--cwd DIR] [--from ID] [--title T]
-             [--group NAME | --no-group] [--request-response] [(--at WHEN | --cron EXPR) --label TEXT [--request-id KEY]]
+             [--group NAME | --no-group] [--report-back] [(--at WHEN | --cron EXPR) --schedule-label TEXT [--request-id KEY]]
                                start a new session in the background on the shortlist's preset matching those; naming none, the
-                               preset nearest what --from runs now, else the default; its goal on stdin. It starts in --from's
+                               preset nearest what --from runs now, else the default; its briefing on stdin. It starts in --from's
                                Group when both are in one Project, unless --group or --no-group says otherwise. With --at or
                                --cron, as swb schedule takes them, it launches then instead, or anew each time the cron fires
-  swb send --from ID --to ID [--request-response] [--request-id KEY] [--cancel]
+  swb send --from ID --to ID [--report-back] [--request-id KEY] [--cancel]
                                message a session; the body on stdin
-  swb reachable --from ID      every open session but the caller, as a line's tool reads it
+  swb list --from ID           every open session but the caller, as a line's tool reads it
   swb search --from ID [--limit N]
                                every session's conversation but the caller's, searched, as session_search reads it; the query on stdin
   swb recall begin|search|read ID
-                               session_ask's reader, bound to a session: its first message from {"question"}, then its tools,
+                               session_recall's reader, bound to a session: its first message from {"question"}, then its tools,
                                each taking its arguments as JSON on stdin
   swb recall sync              bring the search index up to date with every session's transcripts
-  swb schedule --from ID [--to ID] (--at WHEN | --cron EXPR) --label TEXT [--request-response] [--snooze] [--request-id KEY]
+  swb schedule --from ID [--to ID] (--at WHEN | --cron EXPR) --schedule-label TEXT [--report-back] [--snooze] [--request-id KEY]
                                message a session later; the body on stdin. WHEN is ISO 8601: a time, local unless it has an
                                offset, or a duration (PT2H); EXPR is 5-field cron in local time
-  swb schedules --from ID      the schedules a session set or receives
+  swb list-schedules --from ID
+                               the schedules a session set or receives
   swb unschedule ID --from ID  cancel a pending schedule
   swb show ID --from ID [--view agent|editor|split]
                                switch the Deck showing the caller to a session, and start it
@@ -94,7 +95,7 @@ const CHECKS_CONFIG = new Set([
 	"unarchive",
 	"launch",
 	"send",
-	"reachable",
+	"list",
 	"wake",
 	"reload",
 ]);
@@ -142,8 +143,8 @@ async function main(args: string[]): Promise<void> {
 			return quit(rest);
 		case "schedule":
 			return schedule(rest);
-		case "schedules":
-			return schedules(rest);
+		case "list-schedules":
+			return listSchedules(rest);
 		case "unschedule":
 			return unschedule(rest);
 		case "show":
@@ -154,8 +155,8 @@ async function main(args: string[]): Promise<void> {
 			return launch(rest);
 		case "send":
 			return send(rest);
-		case "reachable":
-			return reachable(rest);
+		case "list":
+			return list(rest);
 		case "search":
 			return search(rest);
 		case "recall":

@@ -26,7 +26,7 @@ export function claudeAutoMode(s: Scenario): void {
 export async function launched(
 	s: Scenario,
 	harness: "pi" | "claude" | "codex" | null,
-	goal: string,
+	briefing: string,
 	from?: string,
 	flags: string[] = [],
 ): Promise<LsEntry> {
@@ -44,7 +44,7 @@ export async function launched(
 			{
 				env: s.env,
 				cwd: s.project,
-				stdin: new Blob([goal]),
+				stdin: new Blob([briefing]),
 				stdout: "pipe",
 				stderr: "inherit",
 			},
@@ -220,7 +220,7 @@ export async function cardEndings(s: Scenario, harness: "pi" | "claude" | "codex
 	expect(entry(s, failed.id).errored).toBe(false);
 }
 
-/** A session's conversation as session_ask's reader reads it: from its first entry, or as `args` say. */
+/** A session's conversation as session_recall's reader reads it: from its first entry, or as `args` say. */
 export function recalled(s: Scenario, id: string, args: Record<string, unknown> = {}): string {
 	const run = Bun.spawnSync([`${s.bin}/swb`, "recall", "read", id], {
 		env: s.env,

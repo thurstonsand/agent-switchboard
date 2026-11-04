@@ -24,9 +24,9 @@ import { agentStep, readerQuestion } from "./fakes/agent.ts";
 //                     until <name>.release
 //   subagent <name>   launch a real pi-sessions subagent whose task is `reply child <name>`; the child holds like
 //                     `hold child.<name>` before answering, signalling its active tools as `child.<name>.tools`
-//   handoff <name>    launch a new pi session through swb's session_launch, with the goal `reply child <name>`
+//   handoff <name>    launch a new pi session through swb's session_launch, with the briefing `reply child <name>`
 //   message <id> <n>  send session <id> a message with swb's session_send_message, which it answers like `reply <n>`
-//   reach <n>         find the first session session_reachable lists and message it like `message`
+//   reach <n>         find the first session session_list lists and message it like `message`
 //   call <tool> <json>  call any tool with those arguments, then answer "tool done call"
 //   tools [name]      signal the active tool names as `tools` or `tools.<name>`, and answer "tools listed"
 //   tell <harness> <m>, launch <harness> <title>, show <title>, update <title> <json>   use swb's tools as fakes/agent.ts scripts them
@@ -121,14 +121,14 @@ export default function (pi: ExtensionAPI) {
 		if (step) return fauxAssistantMessage(step.text);
 		if (last.role === "toolResult") {
 			const prompt = text(context.messages.findLast((message) => message.role === "user") as Message);
-			if (prompt.startsWith("reach ") && (last as { toolName?: string }).toolName === "session_reachable") {
+			if (prompt.startsWith("reach ") && (last as { toolName?: string }).toolName === "session_list") {
 				const first = /^- (\S+) · /m.exec(text(last))?.[1];
 				if (!first) throw new Error(`scenario: nothing to reach in ${text(last)}`);
 				return fauxAssistantMessage(
 					fauxToolCall("session_send_message", {
 						session: first,
 						message: `wake-reply ${prompt.split(" ")[1]}`,
-						requestResponse: false,
+						report_back: false,
 					}),
 					{ stopReason: "toolUse" },
 				);
@@ -193,7 +193,7 @@ export default function (pi: ExtensionAPI) {
 				);
 			case "handoff":
 				return fauxAssistantMessage(
-					fauxToolCall("session_launch", { harness: "pi", title: `child ${arg}`, goal: `reply child ${arg}`, requestResponse: false }),
+					fauxToolCall("session_launch", { harness: "pi", title: `child ${arg}`, briefing: `reply child ${arg}`, report_back: false }),
 					{
 						stopReason: "toolUse",
 					},
@@ -209,13 +209,13 @@ export default function (pi: ExtensionAPI) {
 				return fauxAssistantMessage("tools listed");
 			case "message":
 				return fauxAssistantMessage(
-					fauxToolCall("session_send_message", { session: rest[0] as string, message: `wake-reply ${rest[1]}`, requestResponse: false }),
+					fauxToolCall("session_send_message", { session: rest[0] as string, message: `wake-reply ${rest[1]}`, report_back: false }),
 					{
 						stopReason: "toolUse",
 					},
 				);
 			case "reach":
-				return fauxAssistantMessage(fauxToolCall("session_reachable", {}), { stopReason: "toolUse" });
+				return fauxAssistantMessage(fauxToolCall("session_list", {}), { stopReason: "toolUse" });
 			case "archive":
 				return fauxAssistantMessage(fauxToolCall("swb_update_session", { archived: true }), { stopReason: "toolUse" });
 			case "attention":
@@ -232,7 +232,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerProvider(faux.provider);
 
 	const askTiming = (data: { type: string; toolName: string; toolCallId: string }) => {
-		if (data.toolName !== "session_ask") return;
+		if (data.toolName !== "session_recall") return;
 		appendFileSync(join(signals, "ask-timing.jsonl"), `${JSON.stringify({ event: data.type, at: Date.now(), id: data.toolCallId })}\n`);
 	};
 	pi.on("tool_execution_start", askTiming);

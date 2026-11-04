@@ -10,7 +10,7 @@ import { filePatterns, stamp as localStamp, matches } from "./search.ts";
 import { openRecall } from "./store.ts";
 import { syncSessions } from "./sync.ts";
 
-// What session_ask's reader works with, the same in every harness: a map of the session it was asked about, search
+// What session_recall's reader works with, the same in every harness: a map of the session it was asked about, search
 // within it, and reading it by ref. Search goes through the index; reading, straight to the transcript.
 
 const TURNS_HEAD = 20;
@@ -18,7 +18,7 @@ const TURNS_TAIL = 50;
 const EXCERPT = 160;
 const PAGE_MAX = 50_000;
 const ENTRY_MAX = 12_000;
-const PREVIEW_MAX = 300;
+const TRIMMED_MAX = 300;
 const HITS = 20;
 
 type Target = { id: string; harness: Harness; cwd: string; title: string; conversation: Conversation };
@@ -61,7 +61,7 @@ const textOf = (e: Entry) =>
 		.join("\n")
 		.trim();
 const isPrompt = (e: Entry) => e.role === "user" && textOf(e) !== "";
-const size = (e: Entry) => render(e, "full").length;
+const size = (e: Entry) => render(e, "whole").length;
 
 /** The session's turns as its prompts start them, compactions where they fall, then where it ends. */
 function turns(path: Entry[], prefix: string): string[] {
@@ -122,7 +122,7 @@ function abandoned(c: Conversation): string[] {
 		});
 }
 
-/** session_ask's first message to its reader: the question, then a map of the session it's about. */
+/** session_recall's first message to its reader: the question, then a map of the session it's about. */
 export function recallBegin(db: Db, id: string, question: string): ToolResult {
 	const t = target(db, id);
 	const path = activePath(t.conversation);
@@ -216,9 +216,9 @@ export function recallSearch(db: Db, id: string, args: ToolArgs<"recall_search">
 	}
 }
 
-function render(e: Entry, body: "preview" | "full"): string {
+function render(e: Entry, toolOutput: "trimmed" | "whole"): string {
 	const cut = (text: string, max: number) =>
-		text.length > max ? `${text.slice(0, max)}… (${text.length.toLocaleString("en-US")} chars; body "full" reads it all)` : text;
+		text.length > max ? `${text.slice(0, max)}… (${text.length.toLocaleString("en-US")} chars; tool_output "whole" reads it all)` : text;
 	const who = {
 		user: "user",
 		agent: "agent",
@@ -229,11 +229,11 @@ function render(e: Entry, body: "preview" | "full"): string {
 	}[e.role];
 	const lines: string[] = [`[${e.ref} · ${who}${e.at ? ` · ${stamp(e.at)}` : ""}]`];
 	for (const p of e.parts) {
-		if (p.type === "text") lines.push(e.role === "context" && body === "preview" ? cut(p.text, PREVIEW_MAX) : p.text);
+		if (p.type === "text") lines.push(e.role === "context" && toolOutput === "trimmed" ? cut(p.text, TRIMMED_MAX) : p.text);
 		else if (p.type === "call") {
 			const args = typeof p.args === "string" ? p.args : JSON.stringify(p.args ?? {});
-			lines.push(`→ ${p.name} ${body === "preview" ? cut(args, PREVIEW_MAX) : args}`);
-		} else lines.push(`← ${body === "preview" ? cut(p.text, PREVIEW_MAX) : p.text}`);
+			lines.push(`→ ${p.name} ${toolOutput === "trimmed" ? cut(args, TRIMMED_MAX) : args}`);
+		} else lines.push(`← ${toolOutput === "trimmed" ? cut(p.text, TRIMMED_MAX) : p.text}`);
 	}
 	if (e.ending) lines.push(e.ending.kind === "stopped" ? "[the turn was stopped]" : `[the turn failed: ${e.ending.message}]`);
 	const text = lines.join("\n");
@@ -275,7 +275,7 @@ export function recallRead(db: Db, id: string, args: ToolArgs<"recall_read">): T
 	let next: string | null = null;
 	for (const e of path.slice(from, end + 1)) {
 		if (e.parts.length === 0 && !e.ending) continue;
-		const text = render(e, args.body ?? "preview");
+		const text = render(e, args.tool_output ?? "trimmed");
 		if (out.length > 0 && used + text.length > PAGE_MAX) {
 			next = e.ref;
 			break;

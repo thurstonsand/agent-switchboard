@@ -51,8 +51,8 @@ for (const harness of ["pi", "claude", "codex"] as const) {
 					);
 		const main = await start(s.project, "main");
 		expect(specs("main")).toContain("swb_update_session");
-		expect(specs("main")).not.toContain("deleteWorktree");
-		type(s, main, 'call swb_update_session {"archived":true,"deleteWorktree":true}');
+		expect(specs("main")).not.toContain("delete_worktree");
+		type(s, main, 'call swb_update_session {"archived":true,"delete_worktree":true}');
 		await until(
 			() => (harness === "pi" ? pane(s, main) : JSON.stringify(s.requests(harness))).includes("main checkout cannot be deleted"),
 			ready,
@@ -61,11 +61,11 @@ for (const harness of ["pi", "claude", "codex"] as const) {
 		expect(entry(s, main).open).toBe(true);
 		expect(existsSync(s.project)).toBe(true);
 		const id = await start(subdir, "linked");
-		expect(specs("linked")).toContain("deleteWorktree");
+		expect(specs("linked")).toContain("delete_worktree");
 		const peer = await start(tree, "archived-peer");
 		s.swb("archive", peer);
 		const child = await start(tree, "child", id);
-		type(s, id, 'call swb_update_session {"archived":true,"family":true,"deleteWorktree":true}');
+		type(s, id, 'call swb_update_session {"archived":true,"family":true,"delete_worktree":true}');
 		await until(() => !entry(s, id).open && !entry(s, id).live, ready, "archived and quit");
 		expect(entry(s, child)).toMatchObject({ open: false, live: false });
 		expect(entry(s, id)).toMatchObject({ cutOff: null, project: s.project, branch: "feature", cwd: subdir });
@@ -200,7 +200,7 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 		tree,
 		"--at",
 		"PT1H",
-		"--label",
+		"--schedule-label",
 		"Check feature",
 	);
 	expect(scheduling.code).toBe(0);
@@ -231,18 +231,18 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 });
 
 test("family deletion cancels a running child before removal, and missing Project roots never launch in HOME", async () => {
-	s = scenario("archive-worktree", "force-and-missing");
+	s = scenario("archive-worktree", "cancel-turns-and-missing");
 	gitRepo(s, s.project);
 	const tree = gitWorktree(s, s.project, "feature");
 	const id = await launched(s, "reply root", { cwd: tree });
 	const child = await launched(s, "reply child", { cwd: tree, from: id });
 	type(s, child, "hold still-working");
 	await until(() => s.signal("still-working.entered") !== "", ready, "child running");
-	const refused = await swbIn(s, '{"archived":true,"family":true,"deleteWorktree":true}', "update", "--from", id);
+	const refused = await swbIn(s, '{"archived":true,"family":true,"delete_worktree":true}', "update", "--from", id);
 	expect(refused.code).not.toBe(0);
 	expect(existsSync(tree)).toBe(true);
 	writeFileSync(join(s.home, "e2e-signals/cancel.hold"), "");
-	const archiving = swbIn(s, '{"archived":true,"family":true,"deleteWorktree":true,"force":true}', "update", "--from", id);
+	const archiving = swbIn(s, '{"archived":true,"family":true,"delete_worktree":true,"cancel_turns":true}', "update", "--from", id);
 	await until(() => s.signal("cancel.entered") !== "", ready, "child cancellation in progress");
 	expect(existsSync(tree)).toBe(true);
 	expect(entry(s, id).open).toBe(true);

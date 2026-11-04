@@ -9,7 +9,7 @@ import { UsageError } from "./errors.ts";
 import { VERSION } from "./version.ts";
 
 // `swb mcp --harness claude|codex`: swb's tools as an MCP server, which Claude Code's and Codex's lines list them
-// through. Codex calls them here. Claude Code's line answers every call in its mod, since session_ask's reader is a
+// through. Codex calls them here. Claude Code's line answers every call in its mod, since session_recall's reader is a
 // Claude subagent only the mod can start, so a Claude call that reaches this server is one the mod missed.
 
 type McpHarness = "claude" | "codex";
