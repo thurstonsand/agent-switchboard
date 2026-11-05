@@ -180,47 +180,57 @@ export type ShellAt = "below" | "beside" | "replace";
 export type TerminalProfile = { foreground: string; background: string; palette: string[] | null; scheme: "light" | "dark" };
 
 /** A new session on `target`, or, with none, on `harness`'s first preset or the default, once the harnesses are found. */
-export type NewSession = { type: "new"; cwd: string; group: string | null; target: LaunchTarget | null; harness: Harness | null };
+export type NewSession = {
+	type: "new";
+	req: number;
+	cwd: string;
+	group: string | null;
+	target: LaunchTarget | null;
+	harness: Harness | null;
+};
 
 export type ToWorker =
 	| { type: "init"; deck: string; config: Config; here: string }
 	| { type: "layout"; layout: DeckLayout }
-	| { type: "wake"; id: string }
+	| { type: "wake"; req: number; id: string }
 	| { type: "config"; config: Config }
 	| { type: "refresh"; models: boolean }
 	| NewSession
 	| { type: "visit"; id: string }
 	| { type: "markUnseen"; id: string; marked: boolean }
-	| { type: "archive"; ids: string[]; deleteWorktreeFor?: string }
-	| { type: "unarchive"; id: string }
-	| { type: "snooze"; id: string; snooze: Snooze }
-	| { type: "stop"; id: string }
-	| { type: "reload"; id: string }
+	| { type: "archive"; req: number; ids: string[]; deleteWorktreeFor?: string }
+	| { type: "unarchive"; req: number; id: string }
+	| { type: "snooze"; req: number; id: string; snooze: Snooze }
+	| { type: "stop"; req: number; id: string }
+	| { type: "reload"; req: number; id: string }
 	| { type: "transcript"; id: string; path: string; harness: Harness }
 	| { type: "peek"; id: string; cwd: string; transcript: string | null; harness: Harness }
 	| { type: "colors"; colors: TerminalProfile }
-	| { type: "view"; id: string; view: View }
-	| { type: "group"; ids: string[]; name: string | null }
+	| { type: "view"; req: number; id: string; view: View }
+	| { type: "group"; req: number; ids: string[]; name: string | null }
 	| { type: "editor"; dir: string }
 	| { type: "shell"; dir: string }
 	| { type: "dirs" }
 	| { type: "addDir"; path: string }
 	| { type: "removeDir"; path: string };
 
+/**
+ * What the worker sends back. A request that carries `req` gets exactly one reply carrying it: `launched` or
+ * `launchFailed` for wake, reload, and new, and `done` for the rest. The roster applies a reply only where it still holds
+ * that `req`, so one for a request it has since moved past changes nothing but its error.
+ */
 export type FromWorker =
 	| { type: "restore"; root: string; layout: DeckLayout | null }
 	| { type: "snapshot"; snapshot: Snapshot }
-	| { type: "woke"; id: string; host: string }
-	| { type: "created"; host: string }
+	| { type: "launched"; req: number; host: string }
+	| { type: "launchFailed"; req: number; text: string }
+	| { type: "done"; req: number; error: string | null }
+	/** An archive's stop, which runs on after its `done`, failed. */
+	| { type: "stopFailed"; text: string }
 	| { type: "transcript"; id: string; transcript: Transcript | null; error: string | null }
 	| { type: "peek"; id: string; info: PeekInfo }
-	| { type: "launchFailed"; id: string | null; text: string }
-	| { type: "toggled"; error: string | null }
-	| { type: "stopped"; error: string | null }
 	| { type: "editor"; dir: string; name: string | null; text: string | null }
 	| { type: "shell"; dir: string; name: string | null; text: string | null }
-	| { type: "viewFailed"; id: string; text: string }
-	| { type: "groupFailed"; text: string }
 	| { type: "dirs"; trees: TargetTree[] }
 	| { type: "catalog"; catalog: Catalog }
 	| { type: "error"; text: string };

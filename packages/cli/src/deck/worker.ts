@@ -78,6 +78,10 @@ const { promise: found, resolve: foundNow } = Promise.withResolvers<void>();
 /** Settles once the roster has its first snapshot. */
 const { promise: posted, resolve: postedNow } = Promise.withResolvers<void>();
 
+function done(req: number, error: string | null): void {
+	post({ type: "done", req, error });
+}
+
 /** Tells the roster, and every line's session_launch, what the shortlist now holds. */
 function announce(): void {
 	if (!catalog) return;
@@ -85,8 +89,14 @@ function announce(): void {
 	writeGuide(shortlist(config, catalog));
 }
 
+/** The model lists asked for while a refresh runs that may not fetch them: they're fetched once it ends. */
+let modelsAgain = false;
+
 function refresh(models: boolean): void {
-	if (discovering) return;
+	if (discovering) {
+		modelsAgain ||= models;
+		return;
+	}
 	discovering = true;
 	const stale = catalog === null || Date.now() - catalog.at > MODELS_STALE_MS;
 	// With no catalog yet, the provisional one has no model lists, so a launch waits for the lists.
@@ -104,6 +114,10 @@ function refresh(models: boolean): void {
 		.finally(() => {
 			discovering = false;
 			foundNow();
+			if (modelsAgain) {
+				modelsAgain = false;
+				refresh(true);
+			}
 		});
 }
 
@@ -129,9 +143,9 @@ async function startNew(message: NewSession): Promise<void> {
 		ensureSessionsServer();
 		const host = db.tx(() => launch(db, { ...launchFlags(target), cwd: message.cwd, resume: null, group: message.group }));
 		launched.add(host);
-		post({ type: "created", host });
+		post({ type: "launched", req: message.req, host });
 	} catch (error) {
-		post({ type: "launchFailed", id: null, text: (error as Error).message });
+		post({ type: "launchFailed", req: message.req, text: (error as Error).message });
 	}
 	lastJson = "";
 	dataVersion = -1;
@@ -490,18 +504,18 @@ async function handle(message: ToWorker): Promise<void> {
 			try {
 				const host = wake(db, message.id, "resume");
 				launched.add(host);
-				post({ type: "woke", id: message.id, host });
+				post({ type: "launched", req: message.req, host });
 			} catch (error) {
-				post({ type: "launchFailed", id: message.id, text: (error as Error).message });
+				post({ type: "launchFailed", req: message.req, text: (error as Error).message });
 			}
 			break;
 		case "reload":
 			try {
 				const host = restart(db, message.id, "continue");
 				launched.add(host);
-				post({ type: "woke", id: message.id, host });
+				post({ type: "launched", req: message.req, host });
 			} catch (error) {
-				post({ type: "launchFailed", id: message.id, text: (error as Error).message });
+				post({ type: "launchFailed", req: message.req, text: (error as Error).message });
 			}
 			break;
 		case "new":
@@ -520,39 +534,39 @@ async function handle(message: ToWorker): Promise<void> {
 				if (message.deleteWorktreeFor) {
 					await archiveWorktree(db, message.deleteWorktreeFor, message.ids, null);
 					worktrees.clear();
-					post({ type: "toggled", error: null });
+					done(message.req, null);
 				} else {
 					const { refused, stopped } = archive(db, message.ids);
-					post({ type: "toggled", error: refused?.message ?? null });
-					stopped.catch((error: Error) => post({ type: "stopped", error: error.message }));
+					done(message.req, refused?.message ?? null);
+					stopped.catch((error: Error) => post({ type: "stopFailed", text: error.message }));
 				}
 			} catch (error) {
-				post({ type: "toggled", error: (error as Error).message });
+				done(message.req, (error as Error).message);
 			}
 			break;
 		case "unarchive":
 			if (afterStop(message)) return;
 			try {
 				unarchive(db, message.id);
-				post({ type: "toggled", error: null });
+				done(message.req, null);
 			} catch (error) {
-				post({ type: "toggled", error: (error as Error).message });
+				done(message.req, (error as Error).message);
 			}
 			break;
 		case "snooze":
 			try {
 				snooze(db, null, message.id, message.snooze);
-				post({ type: "toggled", error: null });
+				done(message.req, null);
 			} catch (error) {
-				post({ type: "toggled", error: (error as Error).message });
+				done(message.req, (error as Error).message);
 			}
 			break;
 		case "stop":
 			try {
 				stop(db, message.id);
-				post({ type: "stopped", error: null });
+				done(message.req, null);
 			} catch (error) {
-				post({ type: "stopped", error: (error as Error).message });
+				done(message.req, (error as Error).message);
 			}
 			break;
 		case "transcript":
@@ -571,8 +585,9 @@ async function handle(message: ToWorker): Promise<void> {
 				readDb();
 				if (rows.some((row) => row.session_id === message.id)) setView(db, message.id, message.view);
 				else pendingViews.set(message.id, message.view);
+				done(message.req, null);
 			} catch (error) {
-				post({ type: "viewFailed", id: message.id, text: (error as Error).message });
+				done(message.req, `view: ${(error as Error).message}`);
 			}
 			break;
 		case "group":
@@ -585,8 +600,9 @@ async function handle(message: ToWorker): Promise<void> {
 					message.name,
 				);
 				for (const id of message.ids) if (!known.has(id)) pendingGroups.set(id, message.name);
+				done(message.req, null);
 			} catch (error) {
-				post({ type: "groupFailed", text: (error as Error).message });
+				done(message.req, `group: ${(error as Error).message}`);
 			}
 			break;
 		case "editor": {
@@ -640,7 +656,7 @@ async function handle(message: ToWorker): Promise<void> {
  * Puts off a wake or an unarchive while its session's harness is quitting, whichever swb stops it, and does it once
  * the harness is gone or its stopper's deadline passes. Waiting here keeps the worker free meanwhile.
  */
-function afterStop(message: { type: "wake"; id: string } | { type: "unarchive"; id: string }): boolean {
+function afterStop(message: { type: "wake"; req: number; id: string } | { type: "unarchive"; req: number; id: string }): boolean {
 	const stop = beingStopped(db, message.id);
 	// Past its deadline, the wake closes what its stopper didn't.
 	if (!stop || Date.now() >= stop.deadline) return false;

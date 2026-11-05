@@ -162,8 +162,12 @@ let snapshot: Snapshot | null = null;
 let entries = new Map<string, Entry>();
 
 /** A wake or new-session request: it resolves once a live entry is hosted by its tmux session. */
-type Launch = { id: string | null; host: string | null; since: number; keyboard: boolean };
+type Launch = { req: number; id: string | null; host: string | null; since: number; keyboard: boolean };
 const launches: Launch[] = [];
+
+/** The last request id handed out; see FromWorker. */
+let lastReq = 0;
+const nextReq = () => ++lastReq;
 
 let focus: "roster" | "stage" = "roster";
 // No focus event has arrived when the Deck starts; the terminal that just launched it is assumed focused.
@@ -222,26 +226,27 @@ function isUnseen(e: Entry): boolean {
 	return e.unseen && stage.watched !== e.id;
 }
 
-/** Views chosen in this Deck that the db doesn't reflect yet. */
-const localViews = new Map<string, View>();
+/** Views chosen in this Deck that the db doesn't reflect yet, each with the request that writes it. */
+const localViews = new Map<string, { view: View; req: number }>();
 
 function viewOf(e: Entry): View {
-	return localViews.get(e.id) ?? e.view;
+	return localViews.get(e.id)?.view ?? e.view;
 }
 
-/** Groups set here and not yet back in a snapshot; null is ungrouped. */
-const localGroups = new Map<string, string | null>();
+/** Groups set here and not yet back in a snapshot, each with the request that writes it; null is ungrouped. */
+const localGroups = new Map<string, { name: string | null; req: number }>();
 
 /** The Group a session carries, as set here or in the db; Operators take none. */
 function groupOf(e: Entry): string | null {
 	if (e.operator) return null;
 	const local = localGroups.get(e.id);
-	return local !== undefined ? local : e.group;
+	return local ? local.name : e.group;
 }
 
 function setGroup(ids: string[], name: string | null): void {
-	for (const id of ids) localGroups.set(id, name);
-	post({ type: "group", ids, name });
+	const req = nextReq();
+	for (const id of ids) localGroups.set(id, { name, req });
+	post({ type: "group", req, ids, name });
 }
 
 /** Where a session is listed: Archived, Operators, Inactive, or open beneath its Project. */
@@ -907,8 +912,9 @@ function wake(id: string, keyboard: boolean): void {
 		return;
 	}
 	if (entries.get(id)?.live) return;
-	launches.push({ id, host: null, since: Date.now(), keyboard });
-	post({ type: "wake", id });
+	const req = nextReq();
+	launches.push({ req, id, host: null, since: Date.now(), keyboard });
+	post({ type: "wake", req, id });
 	apply();
 }
 
@@ -916,8 +922,9 @@ function wake(id: string, keyboard: boolean): void {
 function reload(id: string): void {
 	if (stage.ended?.id === id) stage.ended = null;
 	if (launchFor(id)) return;
-	launches.push({ id, host: null, since: Date.now(), keyboard: focus === "stage" });
-	post({ type: "reload", id });
+	const req = nextReq();
+	launches.push({ req, id, host: null, since: Date.now(), keyboard: focus === "stage" });
+	post({ type: "reload", req, id });
 	apply();
 }
 
@@ -927,11 +934,12 @@ function newSession(cwd: string, group: string | null, target: LaunchTarget | nu
 		toast("a new session is already starting", "info");
 		return;
 	}
-	launches.push({ id: null, host: null, since: Date.now(), keyboard: true });
+	const req = nextReq();
+	launches.push({ req, id: null, host: null, since: Date.now(), keyboard: true });
 	stage.holdForNew = true;
 	stage.staged = null;
 	stage.ended = null;
-	post({ type: "new", cwd, group, target, harness });
+	post({ type: "new", req, cwd, group, target, harness });
 	apply();
 	void focusStage();
 }
@@ -1062,8 +1070,8 @@ function onSnapshot(next: Snapshot): void {
 	if (snapshot === null) mark("roster.first-snapshot");
 	snapshot = next;
 	entries = new Map(next.entries.map((e) => [e.id, e]));
-	for (const [id, view] of localViews) if (entries.get(id)?.view === view) localViews.delete(id);
-	for (const [id, name] of localGroups) {
+	for (const [id, { view }] of localViews) if (entries.get(id)?.view === view) localViews.delete(id);
+	for (const [id, { name }] of localGroups) {
 		const e = entries.get(id);
 		if (!e || e.group === name) localGroups.delete(id);
 	}
@@ -1114,14 +1122,8 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
 		case "snapshot":
 			onSnapshot(message.snapshot);
 			break;
-		case "woke": {
-			const launch = launchFor(message.id);
-			if (launch) launch.host = message.host;
-			apply();
-			break;
-		}
-		case "created": {
-			const launch = newLaunch();
+		case "launched": {
+			const launch = launches.find((l) => l.req === message.req);
 			if (launch) launch.host = message.host;
 			apply();
 			break;
@@ -1133,20 +1135,27 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
 		case "peek":
 			onPeekInfo(message.id, message.info);
 			break;
-		case "toggled":
-			if (message.error === null) {
-				if (roster.pin) roster.pin.answered = true;
-				break;
+		case "done": {
+			const { req, error } = message;
+			if (roster.pin?.req === req) {
+				if (error === null) roster.pin.answered = true;
+				else {
+					roster.pin = null;
+					roster.lingering = null;
+				}
 			}
-			roster.pin = null;
-			roster.lingering = null;
-			toast(message.error, "error");
+			if (error === null) break;
+			for (const [id, local] of localViews) if (local.req === req) localViews.delete(id);
+			for (const [id, local] of localGroups) if (local.req === req) localGroups.delete(id);
+			toast(error, "error");
+			apply();
 			break;
-		case "stopped":
-			if (message.error !== null) toast(message.error, "error");
+		}
+		case "stopFailed":
+			toast(message.text, "error");
 			break;
 		case "launchFailed": {
-			const index = launches.findIndex((launch) => launch.id === message.id && launch.host === null);
+			const index = launches.findIndex((launch) => launch.req === message.req);
 			if (index !== -1) launches.splice(index, 1);
 			toast(message.text, "error");
 			apply();
@@ -1175,16 +1184,6 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
 			tui.requestRender();
 			break;
 		}
-		case "groupFailed":
-			localGroups.clear();
-			toast(`group: ${message.text}`, "error");
-			apply();
-			break;
-		case "viewFailed":
-			localViews.delete(message.id);
-			toast(`view: ${message.text}`, "error");
-			apply();
-			break;
 		case "catalog":
 			catalog = message.catalog;
 			tui.requestRender();
@@ -1328,8 +1327,11 @@ const ARCHIVE_PROMPT_LINES = 4;
 class Roster implements Component, Focusable {
 	selectedKey = "";
 	lastIndex = 0;
-	/** After `a`, the cursor keeps its index instead of chasing the session into its new section. */
-	pin: { index: number; answered: boolean } | null = null;
+	/**
+	 * After `a`, the cursor keeps its index instead of chasing the session into its new section: until the reply to
+	 * `req` lands, and the snapshot after it.
+	 */
+	pin: { index: number; req: number; answered: boolean } | null = null;
 	/**
 	 * The session the cursor archived here, which keeps its row where it was, marked archived, for one last look, until
 	 * the cursor leaves it. Only the cursor's own row lingers, so leaving it by any means sends it to Archived.
@@ -1939,7 +1941,7 @@ class Roster implements Component, Focusable {
 		const e = row?.kind === "session" ? row.entry : null;
 		if (!e) return;
 		if (!e.live) toast("not running", "info");
-		else post({ type: "stop", id: e.id });
+		else post({ type: "stop", req: nextReq(), id: e.id });
 	}
 
 	/** a: archives or unarchives the session; one that started others still open asks first whether they go too. */
@@ -1957,11 +1959,12 @@ class Roster implements Component, Focusable {
 			return;
 		}
 		// Only the cursor's own row moving takes the cursor along; archived, it lingers where it is.
+		const req = nextReq();
 		if (row.key === this.selected()?.key) {
-			this.pin = { index: this.resolveCursor(this.rows()), answered: false };
+			this.pin = { index: this.resolveCursor(this.rows()), req, answered: false };
 			if (e.open) this.lingering = e.id;
 		}
-		post(e.open ? { type: "archive", ids: [e.id] } : { type: "unarchive", id: e.id });
+		post(e.open ? { type: "archive", req, ids: [e.id] } : { type: "unarchive", req, id: e.id });
 	}
 
 	/** The archive prompt's answer: the session alone, all it started besides, or (null) neither. */
@@ -1969,10 +1972,12 @@ class Roster implements Component, Focusable {
 		const e = this.archiving === null ? undefined : entries.get(this.archiving);
 		this.archiving = null;
 		if (!e || all === null) return;
-		this.pin = { index: this.resolveCursor(this.rows()), answered: false };
+		const req = nextReq();
+		this.pin = { index: this.resolveCursor(this.rows()), req, answered: false };
 		this.lingering = e.id;
 		post({
 			type: "archive",
+			req,
 			ids: [e.id, ...(all ? openDescendants(entries.values(), e.id).map((d) => d.id) : [])],
 			...(deleteWorktree ? { deleteWorktreeFor: e.id } : {}),
 		});
@@ -2020,8 +2025,9 @@ class Roster implements Component, Focusable {
 		if (!e.open) toast("archived; unarchive it first", "info");
 		else if (e.provisional) toast("nothing to snooze before the first prompt", "error");
 		else if (e.snoozed) {
-			if (row.key === this.selected()?.key) this.pin = { index: this.resolveCursor(this.rows()), answered: false };
-			post({ type: "snooze", id: e.id, snooze: "off" });
+			const req = nextReq();
+			if (row.key === this.selected()?.key) this.pin = { index: this.resolveCursor(this.rows()), req, answered: false };
+			post({ type: "snooze", req, id: e.id, snooze: "off" });
 		} else {
 			this.filtering = false;
 			this.naming = null;
@@ -2034,8 +2040,9 @@ class Roster implements Component, Focusable {
 		this.snoozing = null;
 		if (!snoozing) return;
 		// As with archive, the cursor keeps its place rather than following the row into Snoozed.
-		if (this.selected()?.key === snoozing.id) this.pin = { index: this.resolveCursor(this.rows()), answered: false };
-		post({ type: "snooze", id: snoozing.id, snooze });
+		const req = nextReq();
+		if (this.selected()?.key === snoozing.id) this.pin = { index: this.resolveCursor(this.rows()), req, answered: false };
+		post({ type: "snooze", req, id: snoozing.id, snooze });
 	}
 
 	/** Runs on every snapshot; the one that answers `a` puts the cursor back on its row's index. */
@@ -3967,8 +3974,9 @@ async function showView(e: Entry, next: View): Promise<void> {
 	if (next === "split" && deckWidth < SPLIT_FROM) toast(`split needs ${SPLIT_FROM} columns; showing ${harnessName(e.harness)}`, "info");
 	// Leaving split from a shell replacing pi keeps the keyboard in the shell, wherever it lands.
 	const inShell = next !== "split" && focus === "stage" && focusedPane === shellShownIn();
-	localViews.set(e.id, next);
-	post({ type: "view", id: e.id, view: next });
+	const req = nextReq();
+	localViews.set(e.id, { view: next, req });
+	post({ type: "view", req, id: e.id, view: next });
 	apply();
 	await stageOps;
 	await tmuxAsync(UI, "select-pane", ...(narrow ? ["-Z"] : []), "-t", (inShell && shellShownIn()) || stagePane);
