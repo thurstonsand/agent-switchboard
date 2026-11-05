@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-05
+
 Schema v10: update swb and the pi line together.
 
 ### Changed
