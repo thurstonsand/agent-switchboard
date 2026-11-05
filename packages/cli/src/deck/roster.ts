@@ -2273,7 +2273,7 @@ class Roster implements Component, Focusable {
 				group,
 				pin: from,
 				confirm: null,
-				preset: 0,
+				preset: null,
 				menu: null,
 			},
 		});
@@ -2398,12 +2398,13 @@ class Roster implements Component, Focusable {
 	toggleMenu(): void {
 		const choosing = this.choosing as Choosing;
 		if (choosing.menu) choosing.menu = null;
-		else if (pickerPresets().length > 0) choosing.menu = { query: "", cursor: Math.max(0, menuPresets("").indexOf(choosing.preset)) };
+		else if (pickerPresets().length > 0)
+			choosing.menu = { query: "", cursor: Math.max(0, menuPresets("").indexOf(chosenPreset(choosing))) };
 	}
 
 	choosePreset(index: number): void {
 		const choosing = this.choosing as Choosing;
-		choosing.preset = index;
+		choosing.preset = presetLabels(pickerPresets().map((c) => c.preset))[index] ?? null;
 		choosing.menu = null;
 	}
 
@@ -2896,8 +2897,11 @@ type Choosing = {
 	/** The directory it opened on, offered whether or not it's listed, until I remove it. */
 	pin: string | null;
 	confirm: { name: string; worktrees: number; path: string; covers: string[] } | null;
-	/** What the new session runs in: an index into pickerPresets. */
-	preset: number;
+	/**
+	 * What the new session runs in, by its label, so it stays the same preset as the shortlist changes beneath it; null
+	 * for the first, the default's, and so is one whose label is gone.
+	 */
+	preset: string | null;
 	menu: Menu | null;
 };
 
@@ -2907,6 +2911,12 @@ type Menu = { query: string; cursor: number };
 /** Every preset that can start, from the default. */
 function pickerPresets(): Choice[] {
 	return fromDefault(shortlist(config, catalog) ?? []).filter((c) => c.reason === null);
+}
+
+/** The chosen preset's index into pickerPresets, as long as there are any. */
+function chosenPreset(choosing: Choosing): number {
+	if (choosing.preset === null) return 0;
+	return Math.max(0, presetLabels(pickerPresets().map((c) => c.preset)).indexOf(choosing.preset));
 }
 
 /** What the menu shows, as indexes into pickerPresets: a harness at a time, in the order they first appear, narrowed by `query`. */
@@ -2928,8 +2938,7 @@ function menuPresets(query: string): number[] {
  * defaults. Null until the harnesses are found, when the worker decides; a string says why nothing can start.
  */
 function pickerTarget(choosing: Choosing): LaunchTarget | string | null {
-	const presets = pickerPresets();
-	const chosen = presets[Math.min(choosing.preset, presets.length - 1)];
+	const chosen = pickerPresets()[chosenPreset(choosing)];
 	if (chosen) return chosen.launch;
 	if (catalog === null && config.presets === null) return null;
 	return defaultLaunch(config, catalog, shortlist(config, catalog) ?? []);
@@ -3336,7 +3345,7 @@ function presetField(c: Choice): string {
 function launchCard(choosing: Choosing, width: number, open: "left" | "right"): OverlayView {
 	const inner = width - 3;
 	const presets = pickerPresets();
-	const chosen = presets[Math.min(choosing.preset, presets.length - 1)];
+	const chosen = presets[chosenPreset(choosing)];
 	const menu = choosing.menu;
 	let value: string;
 	if (menu && menu.query !== "") value = `${menu.query}▌`;
@@ -3379,6 +3388,7 @@ function launchMenu(choosing: Choosing, width: number, maxHeight: number): Overl
 	const menu = choosing.menu as Menu;
 	const inner = width - 4;
 	const presets = pickerPresets();
+	const chosen = chosenPreset(choosing);
 	const shown = menuPresets(menu.query);
 	const items: string[] = [];
 	const itemAt: number[] = [];
@@ -3394,7 +3404,7 @@ function launchMenu(choosing: Choosing, width: number, maxHeight: number): Overl
 		const effort = (p.agent ? "agent" : (p.effort ?? "default")).padEnd(8);
 		itemAt.push(items.length);
 		items.push(
-			`${menu.query === "" && n < 9 ? cyan(String(n + 1)) : " "} ${p.default ? "★" : " "} ${index === choosing.preset ? cyan(name) : name}${pad}${gray(effort)}${gray(p.provider ?? "")}`,
+			`${menu.query === "" && n < 9 ? cyan(String(n + 1)) : " "} ${p.default ? "★" : " "} ${index === chosen ? cyan(name) : name}${pad}${gray(effort)}${gray(p.provider ?? "")}`,
 		);
 	});
 	if (shown.length === 0) items.push(gray("nothing matches"));
@@ -4182,10 +4192,9 @@ function pickerState(): PickerState | null {
 			const presets = pickerPresets();
 			const labels = presetLabels(presets.map((c) => c.preset));
 			const target = pickerTarget(choosing);
-			const at = Math.min(choosing.preset, labels.length - 1);
 			const menu = choosing.menu;
 			return {
-				preset: labels[at] ?? null,
+				preset: labels[chosenPreset(choosing)] ?? null,
 				harness: target !== null && typeof target !== "string" ? target.harness : null,
 				presets: menuPresets("").map((i) => labels[i] as string),
 				menu: menu && { query: menu.query, cursor: menu.cursor, shown: menuPresets(menu.query).map((i) => labels[i] as string) },

@@ -183,6 +183,32 @@ test("a title set through swb_update_session becomes Codex's own name at once, a
 	expect(s.query("select title from marks where session_id = ?", claude.id)).toEqual([{ title: null }]);
 });
 
+test("the picker keeps the preset I chose when the shortlist is reordered beneath it", async () => {
+	s = scenario("harnesses", "picker-reorder", { packages: [], recorder: true, harnesses: ["claude"] });
+	const pi = '[[presets]]\nharness = "pi"\nprovider = "faux"\nmodel = "faux-1"\neffort = "off"\n';
+	const shortlist = (models: string[]) =>
+		models
+			.map((model, i) => `[[presets]]\nharness = "claude"\nmodel = "${model}"\n${i === 0 ? "default = true\n" : ""}`)
+			.concat(pi)
+			.join("\n");
+	config(s, shortlist(["sonnet", "opus", "haiku"]));
+	const [first] = (await seed(s, { turns: ["first"] })) as [string];
+	s.swb("drive", "start", "--size", "160x40");
+	await waitState(s, "ready", (x) => x.ready);
+	await cursorTo(s, first);
+	s.keys("n");
+	await waitState(s, "the picker on the default", (x) => x.picker?.preset === "sonnet");
+	s.keys("Tab");
+	await waitState(s, "the menu", (x) => x.picker?.menu !== null);
+	s.keys("2");
+	await waitState(s, "opus chosen", (x) => x.picker?.preset === "opus" && x.picker.menu === null);
+	config(s, shortlist(["sonnet", "haiku", "opus"]));
+	await waitState(s, "the new order in the picker", (x) => x.picker?.presets.slice(0, 3).join() === "sonnet,haiku,opus");
+	const st = state(s);
+	expect(st.picker?.preset).toBe("opus");
+	expect(st.launch?.card?.[1]).toMatch(/Claude Code {2}opus/);
+});
+
 test("session_launch with no preset carries the caller's harness and model forward, not the default", async () => {
 	s = scenario("harnesses", "carry-forward", { packages: [], recorder: true, harnesses: ["claude"] });
 	config(
