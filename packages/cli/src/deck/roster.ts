@@ -3795,8 +3795,27 @@ function peekButtons(row: Row): [label: string, key: string][] {
 	return items;
 }
 
-/** Below NARROW_BELOW columns the roster stands alone, and focus moves zoom along. */
+let layouts = Promise.resolve();
+/** A layout waiting for the one running to finish; every call meanwhile shares it. */
+let layoutQueued: Promise<void> | null = null;
+
+/**
+ * Below NARROW_BELOW columns the roster stands alone, and focus moves zoom along. One pass at a time, each reading the
+ * window afresh: two at once would each zoom or unzoom from what the window was before the other.
+ */
 function layout(): Promise<void> {
+	if (!layoutQueued) {
+		const pass = layouts.then(() => {
+			layoutQueued = null;
+			return layoutOnce();
+		});
+		layoutQueued = pass;
+		layouts = pass.catch(() => {});
+	}
+	return layoutQueued;
+}
+
+function layoutOnce(): Promise<void> {
 	return sizingRoster(async () => {
 		const size = await tmuxAsync(
 			UI,
