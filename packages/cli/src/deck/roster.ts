@@ -4063,13 +4063,22 @@ let focusMoves = 0;
 
 /**
  * Puts the keyboard on a pane once the Stage's pending changes have placed it, unless the keyboard moved meanwhile: a
- * key that went elsewhere after asking for this wins.
+ * key that went elsewhere after asking for this wins. Off a pane those changes closed, tmux moved it, not a key.
  */
 function focusOnceShown(pane: () => string | null): void {
 	const asked = focusMoves;
+	const from = focusedPane;
 	stageOps = stageOps.then(async () => {
 		const target = pane();
-		if (asked !== focusMoves || !target) return;
+		if (!target) return;
+		if (
+			asked !== focusMoves &&
+			(await tmuxAsync(UI, "display", "-p", "-t", from, "#{pane_id}").then(
+				() => true,
+				() => false,
+			))
+		)
+			return;
 		await tmuxAsync(UI, "select-pane", ...(narrow ? ["-Z"] : []), "-t", target).catch((error: Error) =>
 			toast(`focus: ${error.message}`, "error"),
 		);
