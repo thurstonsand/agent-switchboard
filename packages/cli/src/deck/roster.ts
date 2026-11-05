@@ -170,6 +170,8 @@ let focus: "roster" | "stage" = "roster";
 let terminalFocused = true;
 /** A wide Deck's roster, broken out of the Stage's window so the Stage fills the terminal. */
 let rosterHidden = false;
+/** Whether the roster should be hidden, which syncRoster makes so; rosterHidden is what tmux shows. */
+let hideWanted = false;
 let narrow = false;
 /** `narrow` as the screen shows it, once a layout has put the zoom in place; what `deck state` reports. */
 let shownNarrow = false;
@@ -3517,26 +3519,26 @@ async function focusStage(): Promise<void> {
 }
 
 async function focusRoster(): Promise<void> {
-	await tmuxAsync(UI, "set", "-u", "-t", deck, "@swb_hidden");
+	hideWanted = false;
 	await syncRoster(true);
 }
 
 async function setRosterHidden(hidden: boolean): Promise<void> {
-	await tmuxAsync(UI, "set", ...(hidden ? [] : ["-u"]), "-t", deck, "@swb_hidden", ...(hidden ? ["1"] : []));
+	hideWanted = hidden;
 	await syncRoster(false);
 }
 
 /**
- * Brings the roster in line with @swb_hidden. Hiding breaks it out to a window of its own; showing joins the Stage's
- * panes back into that window, because join-pane appends to the pane list and the bindings count on the roster being
- * pane 0.
+ * Brings the roster in line with hideWanted, and @swb_hidden, which the bindings read, with it. Hiding breaks it out to
+ * a window of its own; showing joins the Stage's panes back into that window, because join-pane appends to the pane list
+ * and the bindings count on the roster being pane 0. A narrow Deck has no hidden roster.
  */
 function syncRoster(toRoster: boolean): Promise<void> {
 	stageOps = stageOps.then(() =>
 		sizingRoster(async () => {
-			const raw = await tmuxAsync(UI, "show", "-qv", "-t", deck, "@swb_hidden");
-			if (narrow && raw === "1") await tmuxAsync(UI, "set", "-u", "-t", deck, "@swb_hidden");
-			const want = !narrow && raw === "1";
+			if (narrow) hideWanted = false;
+			const want = hideWanted;
+			let failed = false;
 			if (want === rosterHidden) {
 				if (toRoster && !want) await tmuxAsync(UI, "select-pane", ...(narrow ? ["-Z"] : []), "-t", rosterPane);
 				return;
@@ -3546,7 +3548,7 @@ function syncRoster(toRoster: boolean): Promise<void> {
 					// Focus moves first: breaking the active roster away hands focus to the window's last pane, and that pane's
 					// focus hook can land after pi's.
 					const focusPi = focusedPane === rosterPane ? ["select-pane", "-t", side?.pane ?? stagePane, ";"] : [];
-					await tmuxAsync(UI, ...focusPi, "break-pane", "-d", "-s", rosterPane);
+					await tmuxAsync(UI, ...focusPi, "set", "-t", deck, "@swb_hidden", "1", ";", "break-pane", "-d", "-s", rosterPane);
 				} else {
 					const active = await tmuxAsync(UI, "list-panes", "-t", stagePane, "-f", "#{pane_active}", "-F", "#{pane_id}");
 					const join = [
@@ -3573,16 +3575,38 @@ function syncRoster(toRoster: boolean): Promise<void> {
 					// The roster's window began empty when it broke away, so it has no last pane: the Stage pane goes first, for
 					// l and Tab to return to.
 					const back = toRoster ? [";", "select-pane", "-t", rosterPane] : [];
-					await tmuxAsync(UI, ...join, ";", "select-window", "-t", rosterPane, ";", "select-pane", "-t", active, ...back);
+					await tmuxAsync(
+						UI,
+						"set",
+						"-u",
+						"-t",
+						deck,
+						"@swb_hidden",
+						";",
+						...join,
+						";",
+						"select-window",
+						"-t",
+						rosterPane,
+						";",
+						"select-pane",
+						"-t",
+						active,
+						...back,
+					);
 				}
 			} catch (error) {
+				failed = true;
 				toast(`roster: ${(error as Error).message}`, "error");
 			} finally {
-				// A tmux sequence can fail halfway, so the windows say whether the roster is hidden.
+				// A tmux sequence can fail halfway, so the windows say whether the roster is hidden, and the option follows them.
 				const [rosterWindow, stageWindow] = await Promise.all(
 					[rosterPane, stagePane].map((pane) => tmuxAsync(UI, "display", "-p", "-t", pane, "#{window_id}")),
 				);
 				rosterHidden = rosterWindow !== stageWindow;
+				// What failed isn't still wanted; a toggle queued behind this one keeps its own.
+				if (failed) hideWanted = rosterHidden;
+				await tmuxAsync(UI, "set", ...(rosterHidden ? ["-t", deck, "@swb_hidden", "1"] : ["-u", "-t", deck, "@swb_hidden"]));
 				syncStatus();
 				// The card carries the title and state only while the roster is off-screen.
 				setStageCard(desired());
@@ -3835,7 +3859,11 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 			if (!roster.settings) await changeView(cmd === "view-swap");
 			break;
 		case "roster":
-			if (!roster.settings || argv[0] === "focus") await syncRoster(argv[0] === "focus");
+			// Settings holds the roster beside the Stage; showing it, and with it the keyboard, still goes.
+			if (argv[0] === "show") await focusRoster();
+			else if (argv[0] === "toggle") {
+				if (!roster.settings) await setRosterHidden(!hideWanted);
+			} else throw new Error(`roster: ${argv[0]}?`);
 			break;
 		case "stage":
 			await focusStage();

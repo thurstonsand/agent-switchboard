@@ -13,6 +13,25 @@ afterEach(async () => {
 	await s.cleanup();
 });
 
+test("M-a z inside Settings leaves the roster shown, and Tab afterwards still takes the keyboard to the Stage", async () => {
+	s = scenario("phase5", "hide-in-settings");
+	await seed(s, { turns: ["here"] });
+	s.swb("drive", "start");
+	await waitState(s, "the Deck up", (x) => x.ready && x.focus === "roster" && x.staged.id !== null);
+	s.keys(",");
+	await waitState(s, "Settings open", (x) => x.mode === "settings");
+	// Settings holds the roster beside the Stage: hiding it there does nothing, and says nothing to tmux either.
+	s.keys("M-a", "z");
+	await Bun.sleep(500);
+	s.keys("Escape");
+	await waitState(s, "Settings closed", (x) => x.mode === "roster");
+	const after = state(s);
+	expect(after.layout.rosterHidden).toBe(false);
+	expect(s.tmux(s.servers.ui, "show", "-qv", "-t", after.deck, "@swb_hidden")).toBe("");
+	s.keys("M-a", "Tab");
+	await waitState(s, "the keyboard on the Stage", (x) => x.focus === "stage");
+});
+
 test("roster navigation: h l space and a header click fold projects; g G jump; M-a Tab z ? and q", async () => {
 	s = scenario("phase5", "navigation");
 	const [here] = (await seed(s, { turns: ["here"] })) as [string];

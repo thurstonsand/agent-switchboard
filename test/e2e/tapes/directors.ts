@@ -561,6 +561,18 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"roster-hide": {
+		setup: async (s) => {
+			await seed(s, { turns: ["plan the v3 migration"], title: "Plan the v3 migration" });
+		},
+		run: async (s) => {
+			await waitDeck(s, "Settings", (x) => x.mode === "settings");
+			await waitDeck(s, "Settings closed, the list still shown", (x) => x.mode === "roster" && !x.layout.rosterHidden);
+			await waitDeck(s, "the keyboard on the Stage", (x) => x.focus === "stage");
+			await waitDeck(s, "the list hidden", (x) => x.layout.rosterHidden);
+		},
+	},
+
 	"db-busy": {
 		run: async (s) => {
 			await waitLs(s, "the first turn done", (ls) => ls[0]?.activity === "idle");
