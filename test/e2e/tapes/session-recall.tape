@@ -25,7 +25,7 @@ Enter
 Wait+Screen /Claude Code v/
 Sleep 1s
 Type "ask Document the v3 endpoints :: where does /login go now?" Sleep 400ms Enter
-Wait+Screen /asked: reader found: SWB-v3-home/
+Wait+Screen /recalled: reader found: SWB-v3-home/
 Sleep 2s
 Screenshot ../artifacts/phase6/videos/session-recall-claude.png
 Alt+a

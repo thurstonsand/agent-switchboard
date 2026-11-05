@@ -106,18 +106,16 @@ async function registerReader($) {
 	});
 }
 
-// Readers session_recall started, by agentId, each with the session it reads: only they may read transcripts, and each
-// one's turn.complete ends its wait.
+/**
+ * Readers session_recall started, by agentId: the session each reads, and the caller and question its answer goes back
+ * to. Only they may read transcripts, until their turn.complete.
+ */
 const readers = new Map();
 
 /**
- * Starts a reader and returns its final answer. $.tool.call refuses the Agent tool, and $.agent.spawn resolves once the
- * reader starts. A hook's 10s budget stops only while a $ call is in flight, so the hook waits on a child that writes
- * nothing: the reader's turn.complete ends it, and Esc kills it.
- *
- * HACK: the idle child, and the timer that stops a reader after Esc, stand in for an API the mods SDK lacks: a way to
- * await a spawned agent's answer and stop it from the hook that spawned it. Replace both once Claude Code offers one,
- * such as $.agent.wait, or lets $.tool.call run the Agent tool.
+ * Starts a reader in the background and returns at once, as the Agent tool does; the answer arrives as a message once
+ * the reader is done. In auto mode Claude Code delivers it, since it makes a subagent report through SubagentHandback;
+ * otherwise a mod's agent answers only to the mod, so the line delivers it as it does a message from another session.
  */
 async function ask($, e) {
 	const first = JSON.parse(await swb($, ["recall", "begin", e.session], JSON.stringify({ question: e.question })));
@@ -128,17 +126,9 @@ async function ask($, e) {
 	});
 	if (deny) throw new Error(deny);
 	if (!agentId) throw new Error("Claude did not start a reader");
-	const reader = { session: e.session, answer: undefined, wait: $.process.spawn({ argv: ["tail", "-f", "/dev/null"] }) };
-	readers.set(agentId, reader);
-	try {
-		for await (const _ of reader.wait);
-	} finally {
-		readers.delete(agentId);
-		// Esc leaves a spawned agent running, and denies a tool call from the aborted hook; a timer's isn't the hook's.
-		if (reader.answer === undefined) $.clock.after(0, () => stopReader($, agentId));
-	}
-	if (reader.answer === undefined) throw new Error("session_recall's reader stopped waiting");
-	return reader.answer;
+	readers.set(agentId, { session: e.session, question: e.question, caller: await $.session.id(), handedBack: false });
+	// Worded after the Agent tool's own result for a background agent, which Claude models already know how to wait on.
+	return `The reader started (agent ${agentId}) in the background. Its answer arrives in a later message once it's done. You know nothing about it until then: don't report, assume, or predict it, and don't ask again; continue other work or respond to the user in the meantime.`;
 }
 
 /** A reader's tool, on the session it reads, with the arguments its schema names. */
@@ -150,15 +140,6 @@ async function readerTool($, tool, e) {
 		return { result: JSON.parse(await swb($, ["recall", tool.name.replace("recall_", ""), reader.session], JSON.stringify(args))).text };
 	} catch (error) {
 		return { deny: error.message };
-	}
-}
-
-async function stopReader($, agentId) {
-	try {
-		const stopped = await $.tool.call({ tool: "TaskStop", task_id: agentId });
-		if (stopped.deny || stopped.isError) throw new Error(stopped.deny ?? stopped.text);
-	} catch (error) {
-		$.ui.log(`swb: session_recall's reader didn't stop: ${error.message}`);
 	}
 }
 
@@ -220,7 +201,9 @@ async function recordNow($, args) {
 	}
 }
 
-async function ack($, ids) {
+/** Acknowledges the delivered messages that came from swb's inbox; a reader's answer never went through it. */
+async function ack($, batch) {
+	const ids = batch.flatMap((m) => (m.id ? [m.id] : []));
 	if (ids.length > 0) await swb($, ["__ack", ...ids]);
 }
 
@@ -256,10 +239,7 @@ async function submitPending($) {
 		$.ui.log(`swb: couldn't start a turn for ${batch.length} message(s): ${error.message}`);
 		return;
 	}
-	await ack(
-		$,
-		batch.map((m) => m.id),
-	);
+	await ack($, batch);
 }
 
 /** Keeps swb's inbox for this session running for the session's life, and says so when it fails. */
@@ -297,7 +277,7 @@ async function drain($) {
 			const m = JSON.parse(raw);
 			if (m.kind === "cancel") {
 				if (line.busy && line.turnId) await $.turn.abort({ turnId: line.turnId });
-				await ack($, [m.id]);
+				await ack($, [m]);
 			} else {
 				line.pending.push(m);
 				void submitPending($);
@@ -524,8 +504,17 @@ export function register(on) {
 		const result = await next(e);
 		const reader = e.agentId && readers.get(e.agentId);
 		if (reader) {
-			reader.answer = e.answer ?? "The reader stopped without an answer.";
-			await reader.wait.return();
+			readers.delete(e.agentId);
+			if (!reader.handedBack) {
+				// Worded after the Agent tool's own notification for a background agent.
+				const about = `"${reader.question}" about session ${reader.session}`;
+				const body = e.answer ?? "";
+				const text = body
+					? `session_recall's reader (agent ${e.agentId}) finished. Its answer to ${about}:\n\n${body}`
+					: `session_recall's reader (agent ${e.agentId}) stopped without an answer to ${about}.`;
+				line.pending.push({ target: reader.caller, title: "session_recall's answer", body: body || text, text });
+				void submitPending($);
+			}
 		}
 		if (line.managed && !e.agentId) {
 			line.busy = false;
@@ -538,7 +527,14 @@ export function register(on) {
 		return result;
 	});
 
-	// Separate from the spawning hook: Claude skips that hook in the nested agent to prevent re-entry.
+	// A reader's SubagentHandback, in auto mode, delivers its answer itself.
+	on("tool.call", { tool: "SubagentHandback" }, async (_$, e, next) => {
+		const result = await next(e);
+		const reader = readers.get(e.agentId);
+		if (reader && result.result?.success) reader.handedBack = true;
+		return result;
+	});
+
 	for (const tool of READER_TOOLS) on("tool.call", { tool: `${PREFIX}${tool.name}` }, ($, e) => readerTool($, tool, e));
 
 	on("tool.call", async ($, e, next) => {
@@ -561,10 +557,7 @@ export function register(on) {
 		const batch = take();
 		if (batch.length === 0) return result;
 		for (const m of batch) receipt($, m);
-		await ack(
-			$,
-			batch.map((m) => m.id),
-		);
+		await ack($, batch);
 		return { ...result, context: [...(result.context ?? []), ...batch.map((m) => m.text)] };
 	});
 

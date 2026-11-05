@@ -136,7 +136,7 @@ test("a Claude Code subagent's transcript is its parent's evidence, and session_
 	type(s, parent.id, `call Agent ${JSON.stringify(subagent)}`);
 	await subagentDone(s, parent.id, subagent.description);
 	type(s, parent.id, `ask-id ${target.id} :: Which marker?`);
-	await until(() => pane(s, parent.id).includes("asked: reader found: SWB-subagent-target"), budgets.piReady, "the reader's answer");
+	await until(() => pane(s, parent.id).includes("recalled: reader found: SWB-subagent-target"), budgets.piReady, "the reader's answer");
 	await until(() => entry(s, parent.id).activity === "idle", budgets.settle, "parent idle");
 
 	const found = await searched(searcher, "SWB-subagent-beacon");

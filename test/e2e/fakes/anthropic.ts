@@ -6,11 +6,11 @@
 //   fail <text>          fail the request with a 400, which isn't retried
 //   ask-both <id> <id> :: <question>  session_recall both sessions the question in one response, then answer "asked both"
 // A message from another session (its text contains 'Message from session "', which swb mcp's instructions only name)
-// is answered "got <its last line>".
+// is answered "got <its last line>", and session_recall's answer arriving as a message "recalled: <the reader's answer>".
 // Requests without tools (titles) get a short reply, auto mode's classifier allows every action, and prompt suggestions none. Every request is appended to $FAKE_LOG as one
 // JSON line: the latest prompt, whether it carried a tool result, the tools offered, every swb message marker seen, and
 // the conversation as sent, instructions included.
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync } from "node:fs";
 import { agentStep, readerQuestion, titleOf } from "./agent.ts";
 
 const port = Number(process.env.FAKE_PORT ?? 0);
@@ -92,7 +92,6 @@ const server = Bun.serve({
 		// A slow model response keeps the native reader alive without giving it a write-capable holding tool.
 		const hold = /^reader-hold (\d+)/.exec(readerQuestion(lastTyped) ?? "");
 		if (hold && !toolResult) {
-			req.signal.addEventListener("abort", () => writeFileSync(`${signals}/reader.aborted`, "aborted\n"), { once: true });
 			await Bun.sleep(Number(hold[1]));
 		}
 
@@ -120,6 +119,9 @@ const server = Bun.serve({
 		} else if (step && "tool" in step) {
 			const name = tools.find((candidate) => candidate.endsWith(`__${step.tool}`)) ?? step.tool;
 			content = [{ type: "tool_use", id: `toolu_${requestN}`, name, input: step.args }];
+		} else if (step && readerQuestion(lastTyped) !== null && tools.includes("SubagentHandback")) {
+			// In auto mode Claude Code makes a subagent report through SubagentHandback, as a real reader then does.
+			content = [{ type: "tool_use", id: `toolu_${requestN}`, name: "SubagentHandback", input: { message: step.text } }];
 		} else if (step) {
 			content = [{ type: "text", text: step.text }];
 		} else if (tools.length > 0 && !toolResult && !answered && verb === "hold") {
@@ -138,24 +140,27 @@ const server = Bun.serve({
 			content = [{ type: "tool_use", id: `toolu_${requestN}`, name, input: JSON.parse(json.join(" ") || "{}") }];
 		} else {
 			const header = 'Message from session "';
+			const recall = [lastTyped, lastText].find((t) => t.includes("session_recall's reader (agent") || t.includes("[Subagent hand-back]"));
 			const inbound = lastText.includes(header) ? lastText : lastTyped.includes(header) ? lastTyped : "";
-			const text = inbound
-				? `got ${lastLine(inbound, header)}`
-				: lastTyped.startsWith("[SUGGESTION MODE")
-					? ""
-					: tools.length === 0 && lastTyped.startsWith("<session>")
-						? JSON.stringify({ title: title(lastTyped) })
-						: tools.length === 0 && lastTyped.startsWith("<transcript>")
-							? "<severity>10</severity>"
-							: tools.length === 0
-								? "ok"
-								: verb === "hold"
-									? `released ${rest.join(" ")}`
-									: verb === "reply"
-										? rest.join(" ")
-										: toolResult
-											? "tool done"
-											: `ack ${lastTyped.slice(0, 60)}`;
+			const text = recall
+				? `recalled: ${/reader found[^\n]*/.exec(recall)?.[0] ?? recall.slice(0, 80)}`
+				: inbound
+					? `got ${lastLine(inbound, header)}`
+					: lastTyped.startsWith("[SUGGESTION MODE")
+						? ""
+						: tools.length === 0 && lastTyped.startsWith("<session>")
+							? JSON.stringify({ title: title(lastTyped) })
+							: tools.length === 0 && lastTyped.startsWith("<transcript>")
+								? "<severity>10</severity>"
+								: tools.length === 0
+									? "ok"
+									: verb === "hold"
+										? `released ${rest.join(" ")}`
+										: verb === "reply"
+											? rest.join(" ")
+											: toolResult
+												? "tool done"
+												: `ack ${lastTyped.slice(0, 60)}`;
 			content = [{ type: "text", text }];
 		}
 		const stop = content.some((c) => (c as { type: string }).type === "tool_use") ? "tool_use" : "end_turn";

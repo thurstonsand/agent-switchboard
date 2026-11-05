@@ -1,8 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { host, launched, pane, ready, recalled, type } from "./harness/agents.ts";
-import { type Scenario, scenario, until } from "./harness/index.ts";
+import { claudeAutoMode, host, launched, pane, ready, recalled, type } from "./harness/agents.ts";
+import { entry } from "./harness/deck.ts";
+import { release, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
 
@@ -33,7 +34,7 @@ async function screenshot(id: string): Promise<void> {
 		host(s, id),
 	);
 	try {
-		await cli("wait", "asked: reader found:", "--timeout", "10000");
+		await cli("wait", "recalled: reader found:", "--timeout", "10000");
 		s.save("screenshot.txt", await cli("snapshot", "--trim"));
 		await cli(
 			"screenshot",
@@ -96,11 +97,11 @@ test("Claude's native reader answers about live, archived, and pi conversations 
 	await until(() => recalled(s, target.id).includes("SWB-target-secret"), 15000, "target transcript on disk");
 	const start = Date.now();
 	type(s, caller.id, `ask ${target.title} :: What markers did it mention?`);
-	await until(() => pane(s, caller.id).includes("asked: reader found: SWB-target-secret"), 30000, "reader answer in caller TUI");
+	await until(() => pane(s, caller.id).includes("recalled: reader found: SWB-target-secret"), 30000, "reader answer in caller TUI");
 	s.save("latency.json", JSON.stringify({ elapsedMs: Date.now() - start }));
 	await until(() => s.ls().find((row) => row.id === caller.id)?.activity === "idle", 10000, "live answer settled");
 	type(s, caller.id, `ask-id ${pi.id} :: What markers did the pi session mention?`);
-	await until(() => pane(s, caller.id).includes("asked: reader found: SWB-pi-target"), 30000, "pi reader answer in caller TUI");
+	await until(() => pane(s, caller.id).includes("recalled: reader found: SWB-pi-target"), 30000, "pi reader answer in caller TUI");
 	await until(() => s.ls().find((row) => row.id === caller.id)?.activity === "idle", 10000, "pi answer settled");
 	s.swb("archive", target.id);
 	type(s, caller.id, `ask-id ${target.id} :: What markers were in the archived session?`);
@@ -109,7 +110,9 @@ test("Claude's native reader answers about live, archived, and pi conversations 
 			s
 				.requests("claude")
 				.some(
-					(r) => String(r.prompt).startsWith(`ask-id ${target.id}`) && String(r.toolOutput).includes("reader found: SWB-target-secret"),
+					(r) =>
+						String(r.prompt).includes('Its answer to "What markers were in the archived session?"') &&
+						String(r.prompt).includes("reader found: SWB-target-secret"),
 				),
 		30000,
 		"archived reader result",
@@ -181,44 +184,71 @@ test("Claude's native reader answers about live, archived, and pi conversations 
 	);
 });
 
-test("a reader that takes eleven seconds returns its answer, past the hook's 10s budget", async () => {
-	s = scenario("recall-claude", "slow", { packages: [], recorder: true, harnesses: ["claude"] });
+/** The caller's last request to its model: its whole conversation as the model reads it. */
+const callerContext = () =>
+	String(
+		s
+			.requests("claude")
+			.filter((r) => !String(r.prompt).startsWith("Question about session") && (r.tools as string[]).length > 0)
+			.at(-1)?.context,
+	);
+
+const count = (text: string, part: string) => text.split(part).length - 1;
+
+/**
+ * Whether any request to Claude carried a task-notification for a reader. The Agent tool's background agents notify the
+ * model when they finish; one a mod spawns, as session_recall's reader is, doesn't in Claude Code 2.1.316 or 2.1.318, so the line
+ * delivers its answer instead.
+ */
+const readerNotified = () => s.requests("claude").some((r) => String(r.context).includes("<task-notification>"));
+
+test("session_recall returns once its reader starts, and the answer reaches the caller mid-turn, once", async () => {
+	s = scenario("recall-claude", "background", { packages: [], recorder: true, harnesses: ["claude"] });
 	const [target, caller] = await Promise.all([launched(s, "pi", "reply SWB-slow-target"), launched(s, "claude", "reply caller ready")]);
-	type(s, caller.id, `ask-id ${target.id} :: reader-hold 11000 What markers?`);
-	// Its row says so while the reader works, though Claude Code calls the call done once the hook holds it.
-	await until(() => pane(s, caller.id).includes("  ⎿  Running…"), 15000, "the ask's row running");
-	await until(() => pane(s, caller.id).includes("asked: reader found: SWB-slow-target"), 60000, "slow answer rendered");
-	const requests = s.requests("claude");
-	const start = requests.find((r) => String(r.prompt).startsWith("ask-id") && !r.toolResult);
-	const end = requests.find((r) => String(r.prompt).startsWith("ask-id") && r.toolResult);
-	const elapsedMs = Number(end?.at) - Number(start?.at);
-	s.save("latency.json", JSON.stringify({ elapsedMs }));
-	expect(elapsedMs).toBeGreaterThan(10000);
-	expect(end?.toolOutput).toBe("reader found: SWB-slow-target");
-	expect(pane(s, caller.id)).not.toContain("ran past its");
-	expect(transcripts().find((f) => f.path.endsWith(`/${caller.id}.jsonl`))?.text).not.toContain("ran past its");
+	type(s, caller.id, `ask-id ${target.id} :: reader-hold 6000 What markers?`);
+	await until(() => /[●⏺] asked: The reader started/.test(pane(s, caller.id)), 10000, "the ask answered at once");
+	await until(() => entry(s, caller.id).activity === "idle", 10000, "caller idle while the reader works");
+	expect(readerRequests().some((r) => r.toolResult)).toBe(false);
+	// A turn the caller starts meanwhile gets the answer on its tool's result.
+	type(s, caller.id, "hold meanwhile");
+	await until(() => s.signal("meanwhile.entered"), 10000, "the caller's next turn running");
+	await until(() => readerRequests().filter((r) => r.toolResult).length >= 2, 15000, "the reader done");
+	await Bun.sleep(1000);
+	release(s, "meanwhile");
+	await until(() => pane(s, caller.id).includes("recalled: reader found: SWB-slow-target"), 15000, "the answer delivered");
+	const delivered = s.requests("claude").find((r) => String(r.lastText).includes("session_recall's reader (agent"));
+	expect(delivered?.prompt).toBe("hold meanwhile");
+	expect(delivered?.toolResult).toBe(true);
+	expect(count(callerContext(), "session_recall's reader (agent")).toBe(1);
+	const ask = s.requests("claude").find((r) => String(r.prompt).startsWith("ask-id") && r.toolResult);
+	expect(String(ask?.toolOutput)).toStartWith("The reader started (agent ");
+	// Pins Claude Code: a mod's agent finishing doesn't notify the model. Should this fail, Claude Code now delivers the
+	// answer itself, and the model reads it twice: drop the line's own delivery in turn.complete, then this check.
+	await Bun.sleep(2000);
+	expect(readerNotified()).toBe(false);
 });
 
-test("Esc during a reader stops it, leaves the caller usable, and adds no Session", async () => {
-	s = scenario("recall-claude", "cancel", { packages: [], recorder: true, harnesses: ["claude"] });
-	const [target, caller] = await Promise.all([
-		launched(s, "claude", "reply SWB-cancel-target"),
-		launched(s, "claude", "reply caller ready"),
-	]);
-	type(s, caller.id, `ask-id ${target.id} :: reader-hold 15000 Cancel this reader`);
-	await until(() => readerRequests().length > 0, 10000, "reader started");
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, caller.id)}:`, "Escape");
-	await until(() => s.signal("reader.aborted"), 5000, "the reader's model request aborted before its delayed answer");
-	await until(() => s.ls().find((row) => row.id === caller.id)?.activity === "idle", 15000, "caller idle after Esc");
-	type(s, caller.id, "reply after cancel");
-	// Claude Code marks its reply ⏺ on macOS and ● elsewhere.
-	await until(() => /[●⏺] after cancel/.test(pane(s, caller.id)), 10000, "caller usable");
-	expect(s.ls()).toHaveLength(2);
-	expect(readerRequests()).toHaveLength(1);
-	expect(pane(s, caller.id)).not.toContain("didn't stop");
-	expect(pane(s, caller.id)).not.toContain("did not stop within 5s");
-	expect(pane(s, caller.id)).not.toContain("Waiting for 1 background agent");
-	s.save("reader-after-cancel.json", JSON.stringify(readerRequests()));
+test("in auto mode, Claude Code's handback delivers the reader's answer, and swb doesn't again", async () => {
+	s = scenario("recall-claude", "auto", { packages: [], recorder: true, harnesses: ["claude"] });
+	claudeAutoMode(s);
+	const [target, caller] = await Promise.all([launched(s, "pi", "reply SWB-auto-target"), launched(s, "claude", "reply caller ready")]);
+	type(s, caller.id, `ask-id ${target.id} :: What markers?`);
+	await until(() => pane(s, caller.id).includes("recalled: reader found: SWB-auto-target"), 30000, "the answer delivered");
+	await until(() => entry(s, caller.id).activity === "idle", 10000, "caller idle");
+	type(s, caller.id, "reply after the ask");
+	await until(() => /[●⏺] after the ask/.test(pane(s, caller.id)), 30000, "the next turn");
+	await screenshot(caller.id);
+	// Pins Claude Code: in auto mode a mod's agent, too, must report through SubagentHandback. Should this fail, the reader
+	// answers in plain text and the line delivers it, as in default mode: the SubagentHandback hook and handedBack can go,
+	// with this check.
+	expect(readerRequests().some((r) => (r.tools as string[]).includes("SubagentHandback"))).toBe(true);
+	// Pins Claude Code: the handback reaches the model as a message. Should this fail while the check above passes, the
+	// handback no longer delivers, and the answer is lost: the line must deliver it even after a handback.
+	expect(count(callerContext(), "[Subagent hand-back]")).toBe(1);
+	expect(callerContext()).not.toContain("session_recall's reader (agent");
+	expect(readerNotified()).toBe(false);
+	expect(pane(s, caller.id)).not.toContain("Prompt dropped");
+	expect(pane(s, caller.id)).not.toContain("Prompt not submitted");
 });
 
 test("two session_recalls in one response run their readers at once", async () => {
@@ -234,7 +264,12 @@ test("two session_recalls in one response run their readers at once", async () =
 		"target transcripts on disk",
 	);
 	type(s, caller.id, `ask-both ${a.id} ${b.id} :: reader-hold 4000 What markers?`);
-	await until(() => /[●⏺] asked both/.test(pane(s, caller.id)), 30000, "both answers");
+	await until(() => /[●⏺] asked both/.test(pane(s, caller.id)), 10000, "both readers started");
+	await until(
+		() => ["SWB-parallel-a", "SWB-parallel-b"].every((marker) => callerContext().includes(`reader found: ${marker}`)),
+		30000,
+		"both answers delivered",
+	);
 	const starts = readerRequests()
 		.filter((r) => !r.toolResult)
 		.map((r) => Number(r.at));
@@ -242,7 +277,5 @@ test("two session_recalls in one response run their readers at once", async () =
 	expect(starts).toHaveLength(2);
 	// Run one after the other, the second reader would start once the first's 4 s request returned.
 	expect(Math.abs((starts[1] as number) - (starts[0] as number))).toBeLessThan(1000);
-	const answers = s.requests("claude").find((r) => String(r.prompt).startsWith("ask-both") && r.toolResult)?.toolOutput;
-	expect(answers).toContain("reader found: SWB-parallel-a");
-	expect(answers).toContain("reader found: SWB-parallel-b");
+	for (const id of [a.id, b.id]) expect(count(callerContext(), `about session ${id}:`)).toBe(1);
 });
