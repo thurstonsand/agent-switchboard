@@ -2825,7 +2825,8 @@ function showShell(dir: string): void {
 
 /**
  * Puts the keyboard on a pane once the Stage's pending changes have placed it, unless the keyboard moved meanwhile: a
- * key that went elsewhere after asking for this wins. Off a pane those changes closed, tmux moved it, not a key.
+ * key that went elsewhere after asking for this wins, whether the Deck has heard of the move yet or only tmux has. Off a
+ * pane those changes closed, tmux moved it, not a key.
  */
 function focusOnceShown(pane: () => string | null): void {
 	const asked = m.focusMoves;
@@ -2834,18 +2835,18 @@ function focusOnceShown(pane: () => string | null): void {
 		panes.queue(async () => {
 			const target = pane();
 			if (!target) return;
-			if (
-				asked !== m.focusMoves &&
+			try {
 				// tmux answers a pane id that's gone with an empty line, not an error.
-				(await tmuxAsync(UI, "display", "-p", "-t", from, "#{pane_id}").then(
-					(id) => id === from,
-					() => false,
-				))
-			)
-				return;
-			await tmuxAsync(UI, "select-pane", ...(panes.narrow ? ["-Z"] : []), "-t", target).catch((error: Error) =>
-				toast(`focus: ${error.message}`, "error"),
-			);
+				const [now, still] = (
+					await tmuxAsync(UI, "display", "-p", "-t", deck, "#{pane_id}", ";", "display", "-p", "-t", from, "#{pane_id}")
+				).split("\n");
+				if ((asked !== m.focusMoves || now !== from) && still === from) return;
+				// A key can still move it between that read and this move, so tmux checks again as it moves.
+				const select = `select-pane ${panes.narrow ? "-Z " : ""}-t ${target}`;
+				await tmuxAsync(UI, "if", "-F", "-t", deck, `#{==:#{pane_id},${now}}`, select);
+			} catch (error) {
+				toast(`focus: ${(error as Error).message}`, "error");
+			}
 		}),
 	);
 }
