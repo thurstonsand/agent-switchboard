@@ -3159,7 +3159,9 @@ function pointerOut(): void {
 	roster.hover = null;
 	roster.pointer = null;
 	peek.byKeys = false;
+	// LEAVE unset both options as it ran.
 	peek.watching = false;
+	overlays.disarmed();
 }
 
 /**

@@ -69,6 +69,8 @@ export class Overlays {
 	private dirty = false;
 	/** The kill-pane commands in @swb_leave, as last set. */
 	private leave = "";
+	/** Bumped when everything shown is forgotten, so a pass that awaited across it knows its view of tmux is stale. */
+	private generation = 0;
 
 	constructor(private readonly host: OverlayHost) {
 		// A roster that died left its overlays behind; this one starts with none.
@@ -97,6 +99,11 @@ export class Overlays {
 	painted(id: string): { about: string; lines: string[] } | null {
 		const s = this.shown.get(id);
 		return s && s.painted !== "" ? { about: s.overlay.about, lines: s.overlay.view.lines.map((line) => Bun.stripANSI(line)) } : null;
+	}
+
+	/** The UI server ran @swb_leave, which killed what leaves with the pointer and unset the option. */
+	disarmed(): void {
+		this.leave = "";
 	}
 
 	/** The pointer is on the roster, so no button of an overlay is under it. */
@@ -131,6 +138,7 @@ export class Overlays {
 		});
 		this.shown.clear();
 		this.leave = "";
+		this.generation++;
 		return [...commands, ["set", "-u", "-t", this.host.deck, "@swb_leave"]];
 	}
 
@@ -148,27 +156,31 @@ export class Overlays {
 
 	private async run(): Promise<void> {
 		this.running = true;
-		let failures = 0;
-		while (this.dirty) {
-			this.dirty = false;
-			try {
-				await this.place(this.want);
-				failures = 0;
-			} catch (error) {
-				// A float the UI server killed a moment ago fails a move in the same breath; the next pass knows it's gone.
-				await this.forgetDead();
-				if (++failures > 1) {
-					this.host.failed(`overlay: ${(error as Error).message}`);
-					break;
+		try {
+			let failures = 0;
+			while (this.dirty) {
+				this.dirty = false;
+				try {
+					await this.place(this.want);
+					failures = 0;
+				} catch (error) {
+					// A float the UI server killed a moment ago fails a move in the same breath; the next pass knows it's gone.
+					await this.forgetDead();
+					if (++failures > 1) {
+						this.host.failed(`overlay: ${(error as Error).message}`);
+						break;
+					}
+					this.dirty = true;
 				}
-				this.dirty = true;
 			}
+		} finally {
+			this.running = false;
 		}
-		this.running = false;
 	}
 
 	/** One tmux command that kills, moves, resizes, makes, and stacks the floats to match `want`. */
 	private async place(want: Overlay[]): Promise<void> {
+		const generation = this.generation;
 		const commands: string[][] = [];
 		for (const s of [...this.shown.values()]) {
 			if (want.some((o) => o.id === s.overlay.id)) continue;
@@ -187,8 +199,17 @@ export class Overlays {
 						const [left, top] = out.split(" ").map(Number) as [number, number];
 						return { left, top };
 					});
+		// What went while this awaited, killed by the UI server or forgotten by closeAll, is the next pass's to place.
+		if (this.generation !== generation) {
+			this.dirty = true;
+			return;
+		}
 		for (const o of moving) {
-			const s = this.shown.get(o.id) as Shown;
+			const s = this.shown.get(o.id);
+			if (!s) {
+				this.dirty = true;
+				return;
+			}
 			if (s.x !== o.x || s.y !== o.y) commands.push(["move-pane", "-t", s.pane, "-X", `${origin.left + o.x}`, "-Y", `${origin.top + o.y}`]);
 			if (s.width !== o.width || s.height !== o.view.lines.length)
 				commands.push(["resize-pane", "-t", s.pane, "-x", `${o.width}`, "-y", `${o.view.lines.length}`]);
@@ -219,23 +240,44 @@ export class Overlays {
 		// A new float is on top; any wanted above one that's new is raised again, in order.
 		const first = want.findIndex((o) => making.includes(o));
 		const raise = first === -1 ? [] : want.slice(first + 1).filter((o) => !making.includes(o));
-		for (const o of raise) commands.push(["move-pane", "-t", (this.shown.get(o.id) as Shown).pane, "-z", "0"]);
+		for (const o of raise) {
+			const s = this.shown.get(o.id);
+			if (!s) {
+				this.dirty = true;
+				return;
+			}
+			commands.push(["move-pane", "-t", s.pane, "-z", "0"]);
+		}
 		if (commands.length > 0) {
 			const out = await tmuxAsync(UI, ...commands.flatMap((command, i) => (i === 0 ? command : [";", ...command])));
-			const made = out.split("\n").filter(Boolean);
+			const made = out
+				.split("\n")
+				.filter(Boolean)
+				.map((line) => line.split(" ") as [string, string]);
+			// Forgotten meanwhile: what this pass made is no one's, so it goes too.
+			if (this.generation !== generation) {
+				this.dirty = true;
+				await Promise.allSettled(made.map(([pane]) => tmuxAsync(UI, "kill-pane", "-t", pane)));
+				return;
+			}
 			making.forEach((o, i) => {
-				const [pane, path] = (made[i] as string).split(" ") as [string, string];
+				const [pane, path] = made[i] as [string, string];
 				this.open(o, pane, path);
 			});
 		}
 		for (const o of moving) {
-			const s = this.shown.get(o.id) as Shown;
+			const s = this.shown.get(o.id);
+			if (!s) {
+				this.dirty = true;
+				continue;
+			}
 			Object.assign(s, { x: o.x, y: o.y, width: o.width, height: o.view.lines.length, painted: "" });
 			this.paint(s);
 		}
 		// Map order is stacking order.
 		for (const o of want) {
-			const s = this.shown.get(o.id) as Shown;
+			const s = this.shown.get(o.id);
+			if (!s) continue;
 			this.shown.delete(o.id);
 			this.shown.set(o.id, s);
 		}
