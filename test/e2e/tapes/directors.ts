@@ -561,6 +561,20 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	modes: {
+		setup: async (s) => {
+			const root = await launched(s, "reply planned", { cwd: s.project, title: "Plan the v3 migration" });
+			await launched(s, "reply drafted", { from: root, title: "Draft the schema" });
+		},
+		run: async (s) => {
+			await waitDeck(s, "the archive prompt", (x) => x.mode === "archive");
+			await waitDeck(s, "snooze in its place", (x) => x.mode === "snooze" && x.archive === null);
+			await waitDeck(s, "the filter", (x) => x.mode === "filter" && x.filter === "plan");
+			await waitDeck(s, "back to the roster", (x) => x.mode === "roster");
+			expect(s.ls().every((e) => e.open)).toBe(true);
+		},
+	},
+
 	"roster-hide": {
 		setup: async (s) => {
 			await seed(s, { turns: ["plan the v3 migration"], title: "Plan the v3 migration" });

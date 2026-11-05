@@ -1322,6 +1322,30 @@ function hoverLine(line: string): string {
 
 type ClickTarget = { y: number; from: number; to: number; act: () => void };
 
+/** `m`'s picker: the sessions it moves, the Group it renames when it started on one's header, and the highlighted choice. */
+type NameMode = {
+	kind: "name";
+	ids: string[];
+	renaming: { projectKey: string } | null;
+	project: string;
+	title: string;
+	choice: number;
+	input: Input;
+};
+/** `s`'s menu for a session: how long to snooze it. */
+type SnoozeMode = { kind: "snooze"; id: string; title: string; choice: number };
+/** Named as `deck state` reports them. */
+type Mode =
+	| { kind: "roster" }
+	| { kind: "filter" }
+	| NameMode
+	| SnoozeMode
+	| { kind: "archive"; id: string }
+	/** The directory picker, `n` and `N`, which takes over the whole roster while it's open. */
+	| { kind: "picker"; picker: Choosing }
+	/** Settings, which takes over the whole Deck while it's open. */
+	| { kind: "settings"; pane: SettingsPane };
+
 const ARCHIVE_PROMPT_LINES = 4;
 
 class Roster implements Component, Focusable {
@@ -1337,8 +1361,6 @@ class Roster implements Component, Focusable {
 	 * the cursor leaves it. Only the cursor's own row lingers, so leaving it by any means sends it to Archived.
 	 */
 	lingering: string | null = null;
-	/** The session whose archive prompt offers its family or linked worktree. */
-	archiving: string | null = null;
 	scrollTop = 0;
 	collapsed = new Set<string>();
 	expanded = new Set<SectionKey>(["operators"]);
@@ -1350,19 +1372,51 @@ class Roster implements Component, Focusable {
 		return this.filter.focused;
 	}
 	set focused(on: boolean) {
-		for (const input of [this.filter, this.name, this.search, this.path]) input.focused = on;
+		for (const input of [this.filter, this.search, this.path]) input.focused = on;
+		if (this.naming) this.naming.input.focused = on;
 	}
+	/** The filter's query, which stays applied after the filter mode ends. */
 	filter = new Input({ prompt: "/ " });
-	filtering = false;
-	name = new Input({ prompt: "> " });
-	/** `m`'s picker: the sessions it moves, the Group header it started on, and the highlighted choice. */
-	naming: { ids: string[]; header: HeaderRow | null; project: string; title: string; choice: number } | null = null;
-	/** `s`'s menu for a session: how long to snooze it. */
-	snoozing: { id: string; title: string; choice: number } | null = null;
-	/** The directory picker, `n` and `N`, which takes over the whole roster while it's open. */
-	choosing: Choosing | null = null;
-	/** Settings, which takes over the whole Deck while it's open. */
-	settings: SettingsPane | null = null;
+	/** What the keyboard and pointer are doing. One mode at a time, so entering one leaves the last. */
+	mode: Mode = { kind: "roster" };
+	get filtering(): boolean {
+		return this.mode.kind === "filter";
+	}
+	get naming(): NameMode | null {
+		return this.mode.kind === "name" ? this.mode : null;
+	}
+	get snoozing(): SnoozeMode | null {
+		return this.mode.kind === "snooze" ? this.mode : null;
+	}
+	/** The session whose archive prompt offers its family or linked worktree. */
+	get archiving(): string | null {
+		return this.mode.kind === "archive" ? this.mode.id : null;
+	}
+	get choosing(): Choosing | null {
+		return this.mode.kind === "picker" ? this.mode.picker : null;
+	}
+	get settings(): SettingsPane | null {
+		return this.mode.kind === "settings" ? this.mode.pane : null;
+	}
+
+	/** Leaves the mode it's in for `next`. */
+	enter(next: Mode): void {
+		this.leave();
+		this.mode = next;
+	}
+
+	/**
+	 * Back to the roster, abandoning what the mode was doing: the filter keeps its query, a prompt or picker closes
+	 * unanswered, and Settings saves what its editor holds.
+	 */
+	leave(): void {
+		const was = this.mode;
+		this.mode = { kind: "roster" };
+		if (was.kind === "settings") {
+			was.pane.saveProse();
+			zoomRoster(false);
+		}
+	}
 	search = new Input({ prompt: "/ " });
 	pickerTop = 0;
 	/** The picker's first list row, under its title, a narrow Deck's launch card, its input, and a rule. */
@@ -1384,19 +1438,6 @@ class Roster implements Component, Focusable {
 	/** What a click does, by row and column range, as of the last render. */
 	targets: ClickTarget[] = [];
 	pressed: ClickTarget | null = null;
-
-	constructor() {
-		this.filter.onSubmit = () => {
-			this.filtering = false;
-		};
-		this.filter.onEscape = () => {
-			this.filter.setValue("");
-			this.filtering = false;
-		};
-		this.name.onEscape = () => {
-			this.naming = null;
-		};
-	}
 
 	query(): string {
 		return this.filter.getValue().trim().toLowerCase();
@@ -1597,7 +1638,7 @@ class Roster implements Component, Focusable {
 			if (matchesKey(data, "up") || k === "k") this.snoozing.choice = Math.max(0, this.snoozing.choice - 1);
 			else if (matchesKey(data, "down") || k === "j") this.snoozing.choice = Math.min(SNOOZE_CHOICES.length - 1, this.snoozing.choice + 1);
 			else if (matchesKey(data, "enter")) this.finishSnooze((SNOOZE_CHOICES[this.snoozing.choice] as { snooze: SnoozePreset }).snooze);
-			else if (matchesKey(data, "escape") || k === "q" || k === "s") this.snoozing = null;
+			else if (matchesKey(data, "escape") || k === "q" || k === "s") this.leave();
 			stage.keyAt = 0;
 			tui.requestRender();
 			return;
@@ -1613,22 +1654,24 @@ class Roster implements Component, Focusable {
 			return;
 		}
 		if (this.naming) {
+			const naming = this.naming;
 			const choices = this.choices();
 			if (matchesKey(data, "up") || matchesKey(data, "down")) {
 				const step = matchesKey(data, "up") ? -1 : 1;
-				this.naming.choice = Math.max(0, Math.min(choices.length - 1, this.naming.choice + step));
+				naming.choice = Math.max(0, Math.min(choices.length - 1, naming.choice + step));
 			} else if (matchesKey(data, "enter")) {
-				const choice = choices[this.naming.choice];
+				const choice = choices[naming.choice];
 				if (choice) this.finishNaming(choice.name);
-			} else {
-				const before = this.name.getValue();
-				this.name.handleInput(data);
-				const refused = unnameable(this.name.getValue());
+			} else if (matchesKey(data, "escape")) this.leave();
+			else {
+				const before = naming.input.getValue();
+				naming.input.handleInput(data);
+				const refused = unnameable(naming.input.getValue());
 				if (refused.length > 0) {
-					this.name.setValue(before);
+					naming.input.setValue(before);
 					toast(`a Group's name can't hold ${refused.map((char) => JSON.stringify(char)).join(" ")}`, "info");
 				}
-				if (this.naming) this.naming.choice = 0;
+				naming.choice = 0;
 			}
 			stage.keyAt = 0;
 			tui.requestRender();
@@ -1636,7 +1679,11 @@ class Roster implements Component, Focusable {
 		}
 		if (this.filtering) {
 			if (matchesKey(data, "up") || matchesKey(data, "down")) this.move(matchesKey(data, "up") ? -1 : 1);
-			else {
+			else if (matchesKey(data, "enter")) this.leave();
+			else if (matchesKey(data, "escape")) {
+				this.filter.setValue("");
+				this.leave();
+			} else {
 				this.filter.handleInput(data);
 				const rows = this.rows();
 				const first = rows.find((r) => r.kind === "session");
@@ -1671,7 +1718,7 @@ class Roster implements Component, Focusable {
 		else if (k === "y" || k === "Y") this.copy(k === "y");
 		else if (k === "n") this.newAt();
 		else if (k === "N") this.openPicker("add", null, null);
-		else if (k === "/") this.filtering = true;
+		else if (k === "/") this.enter({ kind: "filter" });
 		else if (k === "m") this.startNaming();
 		else if (k === ",") openSettings();
 		else if (k === "O" && configError) openConfig(configError.line);
@@ -1780,7 +1827,7 @@ class Roster implements Component, Focusable {
 		const row = this.rowAt(event.y);
 		if (!row) return undefined;
 		// Picking a row is done filtering, as ⏎ is; the filter stays applied.
-		this.filtering = false;
+		if (this.filtering) this.leave();
 		this.selectedKey = row.key;
 		this.lastIndex = this.scrollTop + (event.y - this.listTop);
 		stage.holdForNew = false;
@@ -1955,7 +2002,7 @@ class Roster implements Component, Focusable {
 		if (e.open && (e.worktree || openDescendants(entries.values(), e.id).length > 0)) {
 			this.selectedKey = e.id;
 			this.hover = null;
-			this.archiving = e.id;
+			this.enter({ kind: "archive", id: e.id });
 			return;
 		}
 		// Only the cursor's own row moving takes the cursor along; archived, it lingers where it is.
@@ -1970,7 +2017,7 @@ class Roster implements Component, Focusable {
 	/** The archive prompt's answer: the session alone, all it started besides, or (null) neither. */
 	finishArchiving(all: boolean | null, deleteWorktree = false): void {
 		const e = this.archiving === null ? undefined : entries.get(this.archiving);
-		this.archiving = null;
+		this.leave();
 		if (!e || all === null) return;
 		const req = nextReq();
 		this.pin = { index: this.resolveCursor(this.rows()), req, answered: false };
@@ -2028,16 +2075,12 @@ class Roster implements Component, Focusable {
 			const req = nextReq();
 			if (row.key === this.selected()?.key) this.pin = { index: this.resolveCursor(this.rows()), req, answered: false };
 			post({ type: "snooze", req, id: e.id, snooze: "off" });
-		} else {
-			this.filtering = false;
-			this.naming = null;
-			this.snoozing = { id: e.id, title: displayName(e), choice: 0 };
-		}
+		} else this.enter({ kind: "snooze", id: e.id, title: displayName(e), choice: 0 });
 	}
 
 	finishSnooze(snooze: SnoozePreset): void {
 		const snoozing = this.snoozing;
-		this.snoozing = null;
+		this.leave();
 		if (!snoozing) return;
 		// As with archive, the cursor keeps its place rather than following the row into Snoozed.
 		const req = nextReq();
@@ -2090,22 +2133,24 @@ class Roster implements Component, Focusable {
 	 * merges into an existing Group or renames to a new one.
 	 */
 	startNaming(row = this.selected()): void {
-		this.filtering = false;
-		this.name.setValue("");
+		const input = new Input({ prompt: "> " });
+		input.focused = this.focused;
 		if (row?.kind === "session" && row.entry.operator) toast("Operators don't take Groups", "info");
 		else if (row?.kind === "session") {
 			const group = groupOf(row.entry);
 			const project = row.entry.project;
-			this.naming = { ids: [row.entry.id], header: null, project, title: displayName(row.entry), choice: 0 };
-			this.naming.choice = Math.max(
+			this.enter({ kind: "name", ids: [row.entry.id], renaming: null, project, title: displayName(row.entry), choice: 0, input });
+			const naming = this.naming as NameMode;
+			naming.choice = Math.max(
 				0,
 				this.choices().findIndex((c) => c.name === group),
 			);
 		} else if (row?.kind === "header" && row.group !== null) {
 			const name = row.group;
 			const ids = [...entries.values()].filter((e) => e.project === row.project && groupOf(e) === name).map((e) => e.id);
-			this.naming = { ids, header: row, project: row.project, title: name, choice: 0 };
-			this.naming.choice = Math.max(
+			this.enter({ kind: "name", ids, renaming: { projectKey: row.projectKey }, project: row.project, title: name, choice: 0, input });
+			const naming = this.naming as NameMode;
+			naming.choice = Math.max(
 				0,
 				this.choices().findIndex((c) => c.name === name),
 			);
@@ -2116,7 +2161,7 @@ class Roster implements Component, Focusable {
 	choices(): { label: string; name: string | null }[] {
 		const naming = this.naming;
 		if (!naming) return [];
-		const typed = this.name.getValue().trim();
+		const typed = naming.input.getValue().trim();
 		const groups = new Set<string>();
 		for (const e of entries.values()) {
 			const group = groupOf(e);
@@ -2137,7 +2182,7 @@ class Roster implements Component, Focusable {
 		const choices = this.choices();
 		const shown = Math.max(1, Math.min(choices.length, height - 4));
 		const from = Math.max(0, Math.min(naming.choice - shown + 1, choices.length - shown));
-		const title = ` ${naming.header ? "rename" : "Group for"} ${naming.title} `;
+		const title = ` ${naming.renaming ? "rename" : "Group for"} ${naming.title} `;
 		const out: [string, (() => void) | null][] = [
 			[`${gray(`─${truncateToWidth(title, width - 5, "…")}${"─".repeat(Math.max(0, width - 4 - visibleWidth(title)))}`)} ✕ `, null],
 		];
@@ -2170,11 +2215,11 @@ class Roster implements Component, Focusable {
 
 	finishNaming(name: string | null): void {
 		const naming = this.naming;
-		this.naming = null;
+		this.leave();
 		if (!naming) return;
 		setGroup(naming.ids, name);
 		// A renamed Group's header moves to its new key, and the cursor goes with it.
-		if (naming.header) this.selectedKey = name === null ? naming.header.projectKey : `${naming.header.projectKey}:g:${name}`;
+		if (naming.renaming) this.selectedKey = name === null ? naming.renaming.projectKey : `${naming.renaming.projectKey}:g:${name}`;
 	}
 
 	dropAt(y: number, e: Entry): Drop {
@@ -2214,26 +2259,28 @@ class Roster implements Component, Focusable {
 
 	/** Opens the directory picker: on the directory `from`, or straight into adding one. */
 	openPicker(mode: "pick" | "add", from: string | null, group: string | null): void {
-		this.filtering = false;
 		this.search.setValue("");
 		this.path.setValue("");
 		this.pickerTop = 0;
 		this.completed = null;
-		this.choosing = {
-			mode,
-			opened: mode,
-			choice: mode === "add" ? typedChoice("") : 0,
-			from,
-			group,
-			pin: from,
-			confirm: null,
-			preset: 0,
-			menu: null,
-		};
+		this.enter({
+			kind: "picker",
+			picker: {
+				mode,
+				opened: mode,
+				choice: mode === "add" ? typedChoice("") : 0,
+				from,
+				group,
+				pin: from,
+				confirm: null,
+				preset: 0,
+				menu: null,
+			},
+		});
 		// The last list shows at once; the worker's fresh one replaces it when its scan lands.
 		post({ type: "dirs" });
 		if (mode === "pick")
-			this.choosing.choice = Math.max(
+			(this.choosing as Choosing).choice = Math.max(
 				0,
 				this.pickRows().findIndex((r) => r.kind === "target" && r.target.path === from),
 			);
@@ -2344,7 +2391,7 @@ class Roster implements Component, Focusable {
 	}
 
 	closePicker(): void {
-		this.choosing = null;
+		this.leave();
 	}
 
 	/** Opens the launch card's menu on the chosen preset, or closes it keeping that one. */
@@ -2632,14 +2679,11 @@ class Roster implements Component, Focusable {
 				y: this.listTop + height,
 				from: width - 3,
 				to: width,
-				act: () => {
-					this.naming = null;
-					this.snoozing = null;
-				},
+				act: () => this.leave(),
 			});
 		// The archive prompt opens beneath its row, pushing the rows after it down; its row is the cursor's.
 		const asking = this.archiving === null ? -1 : rows.findIndex((r) => r.key === this.archiving);
-		if (asking === -1) this.archiving = null;
+		if (asking === -1 && this.archiving !== null) this.leave();
 		const archiveEntry = this.archiving === null ? undefined : entries.get(this.archiving);
 		const prompt =
 			asking === -1
@@ -2768,18 +2812,13 @@ class Roster implements Component, Focusable {
 		// The archive prompt carries its own keys.
 		if (this.archiving !== null) return "";
 		if (this.filtering) return ` ${this.filter.render(Math.max(10, rosterWidth() - 2))[0] ?? ""}`;
-		if (this.naming) return ` ${this.name.render(Math.max(10, rosterWidth() - 2))[0] ?? ""}`;
+		if (this.naming) return ` ${this.naming.input.render(Math.max(10, rosterWidth() - 2))[0] ?? ""}`;
 		if (this.snoozing)
 			return this.clickable(y, [
 				[" ", null],
 				[key("⏎", "snooze"), () => this.finishSnooze((SNOOZE_CHOICES[this.snoozing?.choice ?? 0] as { snooze: SnoozePreset }).snooze)],
 				[" ", null],
-				[
-					key("esc", "cancel"),
-					() => {
-						this.snoozing = null;
-					},
-				],
+				[key("esc", "cancel"), () => this.leave()],
 			]);
 		const drag = this.dragging;
 		if (drag?.moved) {
@@ -3637,9 +3676,15 @@ async function prefixKey(k: string, id: string | undefined): Promise<void> {
 	}
 	// Session commands wait while Settings is open.
 	if (roster.settings) return;
+	if (k === "d") {
+		roster.askRemove();
+		return;
+	}
+	// Any other command abandons a prompt or picker left open, which would otherwise take the keys it brings back.
+	roster.leave();
 	if (k === "/") {
 		await focusRoster();
-		roster.filtering = true;
+		roster.enter({ kind: "filter" });
 	} else if (k === "m") {
 		await focusRoster();
 		roster.startNaming(row);
@@ -3650,8 +3695,7 @@ async function prefixKey(k: string, id: string | undefined): Promise<void> {
 	} else if (k === "N") {
 		await focusRoster();
 		roster.openPicker("add", null, null);
-	} else if (k === "d") roster.askRemove();
-	else if (k === "w") roster.wake(row);
+	} else if (k === "w") roster.wake(row);
 	else if (k === "x") roster.stop(row);
 	else if (k === "R") roster.reload(row);
 	else if (k === "a") {
@@ -4081,13 +4125,10 @@ const settingsHost = {
 /** Settings fills the Deck: the roster zooms its own pane over the Stage, which keeps running underneath. */
 function openSettings(): void {
 	if (roster.settings) return;
-	roster.choosing = null;
-	roster.naming = null;
-	roster.filtering = false;
 	roster.dragging = null;
 	if (stage.highlightTimer) clearTimeout(stage.highlightTimer);
 	stage.highlightTimer = null;
-	roster.settings = new SettingsPane(settingsHost);
+	roster.enter({ kind: "settings", pane: new SettingsPane(settingsHost) });
 	post({ type: "refresh", models: false });
 	zoomRoster(true);
 	tui.requestRender();
@@ -4095,9 +4136,7 @@ function openSettings(): void {
 
 function closeSettings(): void {
 	if (!roster.settings) return;
-	roster.settings.saveProse();
-	roster.settings = null;
-	zoomRoster(false);
+	roster.leave();
 	tui.requestRender();
 }
 
@@ -4175,19 +4214,7 @@ function viewState(): DeckState {
 		terminalFocused,
 		cursor: cursorRow?.kind === "session" ? cursorRow.entry.id : null,
 		cursorRow: index,
-		mode: roster.settings
-			? "settings"
-			: roster.choosing
-				? "picker"
-				: roster.archiving !== null
-					? "archive"
-					: roster.filtering
-						? "filter"
-						: roster.naming
-							? "name"
-							: roster.snoozing
-								? "snooze"
-								: "roster",
+		mode: roster.mode.kind,
 		picker: pickerState(),
 		archive: (() => {
 			const e = roster.archiving === null ? undefined : entries.get(roster.archiving);

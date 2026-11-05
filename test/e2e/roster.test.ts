@@ -135,6 +135,24 @@ function lineOf(st: DeckState, probe: (row: DeckState["rows"][number]) => boolea
 	return 1 + st.rows.findIndex(probe);
 }
 
+test("M-a / from the Group picker leaves it for the filter: what's typed filters, and the Group stays as it was", async () => {
+	s = scenario("phase4", "name-then-filter");
+	const [a] = (await seed(s, { turns: ["alpha"], title: "alpha" })) as [string];
+	s.swb("drive", "start");
+	await waitState(s, "the Deck up", (x) => x.ready);
+	await cursorTo(s, a);
+	s.keys("m");
+	await waitState(s, "the Group picker", (x) => x.mode === "name");
+	s.keys("M-a", "/");
+	await waitState(s, "the filter", (x) => x.mode === "filter");
+	s.keys("-l", "x");
+	const st = await waitState(s, "x in the filter", (x) => x.filter === "x");
+	expect(st.mode).toBe("filter");
+	s.keys("Escape");
+	await waitState(s, "the filter cleared", (x) => x.mode === "roster" && x.filter === "");
+	expect(entry(s, a).group).toBeNull();
+});
+
 test("m names a session's Group, n joins it; dragging moves it between Groups, and a Group lives only as long as its sessions", async () => {
 	s = scenario("phase4", "groups");
 	const worktree = join(s.root, "project-wt");

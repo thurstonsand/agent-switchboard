@@ -67,6 +67,41 @@ test("a on a session that started others still open asks first: esc keeps them, 
 	s.save("archived-all.txt", s.screen());
 });
 
+test("a prefix key on the archive prompt leaves it unanswered: M-a S opens snooze in its place, and M-a n the picker", async () => {
+	s = scenario("phase8", "archive-prompt-left");
+	const root = await launched(s, "reply root", { cwd: s.project, title: "root" });
+	const child = await launched(s, "reply child", { from: root, title: "child" });
+	const snoozedAt = (id: string) =>
+		s.query<{ at: number | null }>("SELECT snoozed_at AS at FROM marks WHERE session_id = ?", id)[0]?.at ?? null;
+	const settled = () => [root, child].map((id) => ({ open: entry(s, id).open, snoozed: snoozedAt(id) !== null }));
+	s.swb("drive", "start");
+	await waitState(s, "the family on the roster", (x) => x.ready && rowIndex(x, child) !== -1);
+	await cursorTo(s, root);
+
+	s.keys("a");
+	await waitState(s, "the archive prompt", (x) => x.mode === "archive");
+	s.keys("M-a", "S");
+	const snoozing = await waitState(s, "snooze in its place", (x) => x.mode === "snooze");
+	expect(snoozing.archive).toBeNull();
+	s.keys("Escape");
+	await waitState(s, "back to the roster", (x) => x.mode === "roster" && x.archive === null);
+
+	s.keys("a");
+	await waitState(s, "the archive prompt again", (x) => x.mode === "archive");
+	s.keys("M-a", "n");
+	const picking = await waitState(s, "the picker in its place", (x) => x.mode === "picker" && (x.picker?.rows.length ?? 0) > 1);
+	expect(picking.archive).toBeNull();
+	s.keys("Down");
+	await waitState(s, "the picker's keys reach it", (x) => x.picker?.choice === 1);
+	s.keys("Escape");
+	await waitState(s, "back to the roster, not the prompt", (x) => x.mode === "roster" && x.archive === null);
+	await Bun.sleep(500);
+	expect(settled()).toEqual([
+		{ open: true, snoozed: false },
+		{ open: true, snoozed: false },
+	]);
+});
+
 test("swb_update_session archives a whole family; one member mid-turn refuses the whole call by name until cancel_turns cancels that turn", async () => {
 	s = scenario("phase3", "archive-family");
 	const root = await launched(s, "reply root", { cwd: s.project, title: "Root" });
