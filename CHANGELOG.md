@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+Schema v11: update swb and the pi line together.
+
+### Fixed
+
+- A message reaches its session once while swb's database is busy for longer than five seconds. Claude Code could take it twice, Codex was steered with it again every few seconds until the database freed up, and pi stopped recording altogether: its session read as working for good, and took the message a second time once it restarted. Every line now marks a message delivered before handing it over, and holds its records until the database takes them, saying so meanwhile.
+- `swb_update_session` that refuses one change makes none. Retitling and snoozing an archived session in one call used to keep the new title while refusing the snooze.
+
 ## [0.12.0] - 2026-11-05
 
 Schema v10: update swb and the pi line together.

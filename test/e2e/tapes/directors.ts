@@ -561,6 +561,21 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"db-busy": {
+		run: async (s) => {
+			await waitLs(s, "the first turn done", (ls) => ls[0]?.activity === "idle");
+			const prompted = () => s.query<{ at: number }>("select last_prompt_at as at from sessions")[0]?.at ?? 0;
+			const first = prompted();
+			// Past two of pi's tries at busy_timeout, so its record of the next turn waits, and says so, for a while.
+			const db = s.db();
+			db.exec("BEGIN IMMEDIATE");
+			await Bun.sleep(16_000);
+			db.exec("COMMIT");
+			db.close();
+			await waitLs(s, "the busy turn recorded", (ls) => prompted() > first && ls[0]?.activity === "idle");
+		},
+	},
+
 	"blocked-release": {
 		run: async (s) => {
 			await entered(s, "deploy-approval");

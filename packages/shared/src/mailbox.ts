@@ -72,12 +72,17 @@ export function pendingFor(db: Db, targetId: string): Message[] {
 		}));
 }
 
-export function markOffered(db: Db, id: string): void {
-	db.run("UPDATE messages SET offered_at = coalesce(offered_at, ?) WHERE id = ?", Date.now(), id);
-}
-
+/**
+ * Every line marks a message delivered before it hands the message to its harness, and unmarks it when the harness
+ * refuses it. A write that fails then never follows a handover, so no failure can hand a message over twice.
+ */
 export function markDelivered(db: Db, id: string): void {
 	db.run("UPDATE messages SET delivered_at = coalesce(delivered_at, ?) WHERE id = ?", Date.now(), id);
+}
+
+/** The harness refused a message just marked delivered: it waits for the next try. */
+export function unmarkDelivered(db: Db, id: string): void {
+	db.run("UPDATE messages SET delivered_at = NULL WHERE id = ?", id);
 }
 
 /** Who a message is from, as the recipient's model reads it. */

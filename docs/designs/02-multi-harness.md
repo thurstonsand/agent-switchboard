@@ -107,7 +107,6 @@ CREATE TABLE messages (
   request_response INTEGER NOT NULL,
   request_id       TEXT,              -- the caller's retry key, unique per source
   created_at       INTEGER NOT NULL,
-  offered_at       INTEGER,           -- handed to the target's line
   delivered_at     INTEGER,           -- the line put it in front of the model
   cancelled_at     INTEGER,           -- the target was archived first
   UNIQUE (source_id, request_id)
@@ -129,10 +128,11 @@ tool session_send_message (any line)
     wait ≤ 15 s (≤ 60 s if woken) for delivered_at, then print { text, details: { id, delivered, woke, target } }
 B's line, every 250 ms while live, when data_version moved:
   pending = messages for B's current session, undelivered, uncancelled
-  pi      idle → sendMessage(triggerTurn); busy → sendMessage(steer); mark delivered
-  claude  swb __inbox prints it, marks offered; the mod injects it, then swb __ack marks delivered
-            busy → context on the next main-loop tool result; idle → $.prompt.submit
-  codex   turn/start (it steers a running turn); mark delivered
+  each line marks it delivered first, then hands it over; a refused handover unmarks it
+  pi      mark delivered; idle → sendMessage(triggerTurn); busy → sendMessage(steer)
+  claude  swb __inbox prints it; the mod holds it once by id, swb __ack marks it delivered, then it goes in
+            busy → context on the next main-loop tool result; idle → $.prompt.submit (swb __unack if refused)
+  codex   mark delivered; turn/start (it steers a running turn)
   cancel  pi ctx.abort(); claude $.turn.abort; codex turn/interrupt
 ```
 

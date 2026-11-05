@@ -852,16 +852,22 @@ export function stop(db: Db, id: string): void {
 
 /** Back to open; nothing restarts. */
 export function unarchive(db: Db, id: string): void {
+	unarchiveInCodex(db, id);
+	db.tx(() => markUnarchived(db, id));
+}
+
+/** A thread Codex archived itself is unarchived there too, so Codex's own picker lists it again. */
+export function unarchiveInCodex(db: Db, id: string): void {
 	const session = db.get("SELECT harness, transcript FROM sessions WHERE session_id = ?", id);
 	if (!session) throw new SwbError(`no session ${id}`);
-	// A thread Codex archived itself is unarchived there too, so Codex's own picker lists it again.
 	if (session.harness === "codex" && archivedInCodex(session.transcript as string)) {
 		const result = Bun.spawnSync(["codex", "unarchive", id], { stdout: "pipe", stderr: "pipe" });
 		if (result.exitCode !== 0) throw new SwbError(`codex unarchive ${id}: ${result.stderr.toString().trim()}`);
 	}
-	db.tx(() => {
-		db.run("INSERT INTO marks (session_id, archived_at) VALUES (?, NULL) ON CONFLICT (session_id) DO UPDATE SET archived_at = NULL", id);
-	});
+}
+
+export function markUnarchived(db: Db, id: string): void {
+	db.run("INSERT INTO marks (session_id, archived_at) VALUES (?, NULL) ON CONFLICT (session_id) DO UPDATE SET archived_at = NULL", id);
 }
 
 /** Drops the launch rows of tmux sessions that are gone, and kills each Editor and shell no open session uses any more. */

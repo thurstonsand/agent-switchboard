@@ -217,6 +217,25 @@ test("/archive archives and quits; before the first prompt it refuses", async ()
 	s.save("pi-archived.txt", `${s.screen()}\n${JSON.stringify(s.ls(), null, 2)}`);
 });
 
+test("swb_update_session refused for an archived session changes none of what it was given", async () => {
+	s = scenario("phase3", "update-refused");
+	const [id, from] = (await seed(s, { turns: ["before"] }, { turns: ["other"] })) as [string, string];
+	s.swb("archive", id);
+	const update = (args: Record<string, unknown>) =>
+		Bun.spawnSync([`${s.bin}/swb`, "update", "--from", from], { env: s.env, stdin: Buffer.from(JSON.stringify({ session: id, ...args })) });
+	const marks = () => s.query("SELECT title, group_name, snoozed_at FROM marks WHERE session_id = ?", id);
+	const before = marks();
+
+	const refused = update({ title: "retitled", group: "elsewhere", snooze: "one_hour" });
+	expect(refused.exitCode).toBe(1);
+	expect(refused.stderr.toString()).toContain("is archived; unarchive it first");
+	expect(marks()).toEqual(before);
+
+	// Unarchived in the same call, it all goes through.
+	expect(update({ archived: false, title: "retitled", snooze: "one_hour" }).exitCode).toBe(0);
+	expect(entry(s, id)).toMatchObject({ open: true, title: "retitled", snoozed: true });
+});
+
 test("a new prompt in an archived session unarchives it", async () => {
 	s = scenario("phase3", "prompt-unarchives");
 	const [id] = (await seed(s, { turns: ["before"] })) as [string];

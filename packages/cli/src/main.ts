@@ -1,3 +1,4 @@
+import { BUSY_EXIT, isBusy } from "@swb/shared";
 import { booted, span } from "@swb/shared/trace";
 import { codexHost } from "./codex/host.ts";
 import { adopt } from "./commands/adopt.ts";
@@ -9,7 +10,7 @@ import { detached } from "./commands/detached.ts";
 import { dirs } from "./commands/dirs.ts";
 import { drive } from "./commands/drive.ts";
 import { gc } from "./commands/gc.ts";
-import { ack, claudeHook, inbox, record } from "./commands/line.ts";
+import { ack, claudeHook, inbox, record, unack } from "./commands/line.ts";
 import { LS_HELP, ls } from "./commands/ls.ts";
 import { migrate } from "./commands/migrate.ts";
 import { models } from "./commands/models.ts";
@@ -198,6 +199,8 @@ async function main(args: string[]): Promise<void> {
 			return inbox(rest);
 		case "__ack":
 			return ack(rest);
+		case "__unack":
+			return unack(rest);
 		case "__claude_hook":
 			return claudeHook(rest);
 		case "__help":
@@ -220,6 +223,10 @@ try {
 	if (error instanceof SwbError) {
 		console.error(`swb: ${error.message}`);
 		process.exit(1);
+	}
+	if (isBusy(error)) {
+		console.error(`swb: ${(error as Error).message}`);
+		process.exit(BUSY_EXIT);
 	}
 	throw error;
 }

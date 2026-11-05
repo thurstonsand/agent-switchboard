@@ -2,11 +2,12 @@ import { existsSync, mkdirSync, openSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { type Db, stateDir } from "@swb/shared";
-import { frame, listen, markDelivered, pendingFor } from "@swb/shared/mailbox";
+import { frame, listen, type Message, markDelivered, pendingFor, unmarkDelivered } from "@swb/shared/mailbox";
 import {
 	endHosting,
 	markArchived,
 	pendingTitle,
+	Recorder,
 	recordTx,
 	setPhase,
 	setTitle,
@@ -216,6 +217,7 @@ export async function codexHost(args: string[], updated = false): Promise<void> 
 		stopTui();
 		await tui.exited;
 	} else line.end();
+	line.recorder.flush();
 	client.close();
 	server.stdin.end();
 	await server.exited;
@@ -393,12 +395,14 @@ class CodexLine {
 	}
 
 	/** Recording failures show in the pane's title-less log; the session carries on. */
+	readonly recorder = new Recorder(
+		(error) => console.error(`swb: not recording: ${(error as Error).message}`),
+		(waiting) => console.error(waiting > 0 ? `swb: db busy, ${waiting} record(s) waiting` : "swb: recording again"),
+	);
+
+	/** Records in order; a busy db holds a record, and those after it, for a later try. */
 	guard(body: () => void): void {
-		try {
-			body();
-		} catch (error) {
-			console.error(`swb: not recording: ${(error as Error).message}`);
-		}
+		this.recorder.write(body);
 	}
 
 	async poll(): Promise<void> {
@@ -444,52 +448,65 @@ class CodexLine {
 		this.seenVersion = -1;
 		const bound = this.bound;
 		mark("codex.bound");
-		this.guard(() => {
-			startHosting(this.db, {
-				host: this.host,
-				harness: "codex",
-				sessionId: bound.id,
-				cwd: bound.cwd,
-				transcript: bound.path ?? "",
-				pid: process.pid,
-				idle: true,
-			});
-			// A turn that ran before the title named its thread still makes the session's row.
-			if (!this.db.get("SELECT 1 FROM sessions WHERE session_id = ?", bound.id) && bound.path && hasTurns(bound.path)) {
-				this.startTurn(bound);
-				settle(this.db, { host: this.host, sessionId: bound.id, cwd: bound.cwd, title: bound.name });
-			}
-		});
+		// One write, so a busy db retries all of it: a retry after startTurn alone would find the row and never settle it.
+		this.guard(() =>
+			recordTx(this.db, () => {
+				startHosting(this.db, {
+					host: this.host,
+					harness: "codex",
+					sessionId: bound.id,
+					cwd: bound.cwd,
+					transcript: bound.path ?? "",
+					pid: process.pid,
+					idle: true,
+				});
+				// A turn that ran before the title named its thread still makes the session's row.
+				if (!this.db.get("SELECT 1 FROM sessions WHERE session_id = ?", bound.id) && bound.path && hasTurns(bound.path)) {
+					this.startTurn(bound);
+					settle(this.db, { host: this.host, sessionId: bound.id, cwd: bound.cwd, title: bound.name });
+				}
+			}),
+		);
 		const status = this.statuses.get(bound.id);
 		if (status) this.apply(status);
 	}
 
-	/** Messages for the shown thread: turn/start starts an idle thread's turn and steers a running one. */
+	/** Messages for the shown thread, each marked delivered just before Codex has it. */
 	async deliver(): Promise<void> {
 		const thread = this.bound;
-		if (!thread) return;
+		if (!thread || this.recorder.waiting > 0) return;
 		const version = this.db.dataVersion();
 		if (version === this.seenVersion) return;
 		for (const m of pendingFor(this.db, thread.id)) {
-			if (m.kind === "cancel") {
-				// Only the TUI is subscribed to its turns, so the running one is looked up.
-				const { data } = await this.client.request<{ data: { id: string; status: string }[] }>("thread/turns/list", {
-					threadId: thread.id,
-					limit: 5,
-					sortDirection: "desc",
-				});
-				const running = data.find((turn) => turn.status === "inProgress");
-				if (running) await this.client.request("turn/interrupt", { threadId: thread.id, turnId: running.id });
-			} else {
-				await this.client.request("turn/start", { threadId: thread.id, input: [{ type: "text", text: frame(this.db, m) }] });
-			}
 			recordTx(this.db, () => markDelivered(this.db, m.id));
+			try {
+				await this.handOver(thread, m);
+			} catch (error) {
+				recordTx(this.db, () => unmarkDelivered(this.db, m.id));
+				throw error;
+			}
 		}
 		// A title set through swb becomes the thread's own name, which thread/name/updated records back.
 		const title = pendingTitle(this.db, thread.id);
 		if (title !== null && title !== thread.name) await this.client.request("thread/name/set", { threadId: thread.id, name: title });
 		// Seen only once all of it went through: a turn/start Codex refuses, as mid-compaction, retries on the next poll instead of waiting for another write.
 		this.seenVersion = version;
+	}
+
+	/** A message for Codex: turn/start starts an idle thread's turn and steers a running one; a cancel interrupts it. */
+	async handOver(thread: Thread, m: Message): Promise<void> {
+		if (m.kind !== "cancel") {
+			await this.client.request("turn/start", { threadId: thread.id, input: [{ type: "text", text: frame(this.db, m) }] });
+			return;
+		}
+		// Only the TUI is subscribed to its turns, so the running one is looked up.
+		const { data } = await this.client.request<{ data: { id: string; status: string }[] }>("thread/turns/list", {
+			threadId: thread.id,
+			limit: 5,
+			sortDirection: "desc",
+		});
+		const running = data.find((turn) => turn.status === "inProgress");
+		if (running) await this.client.request("turn/interrupt", { threadId: thread.id, turnId: running.id });
 	}
 
 	end(): void {

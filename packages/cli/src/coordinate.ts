@@ -1,7 +1,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { type Db, type Harness, operatorDir, projectRoot, type ReloadMode, type View } from "@swb/shared";
 import { frame, harnessName, type MessageKind, ring } from "@swb/shared/mailbox";
-import { markArchived, recordTx, titleOf } from "@swb/shared/record";
+import { isArchived, markArchived, recordTx, titleOf } from "@swb/shared/record";
 import type { ToolArgs, ToolResult } from "@swb/shared/tools";
 import { CodexClient } from "./codex/client.ts";
 import { codexSocket } from "./codex/host.ts";
@@ -10,8 +10,18 @@ import { displayName, openDescendants, projectName, type SessionState, sessionSt
 import { checkBody, SwbError } from "./errors.ts";
 import { requestedGroup } from "./groups.ts";
 import { type Caller, launchFlags, presetLaunch } from "./harnesses.ts";
-import { snooze } from "./schedules.ts";
-import { archive, archiveWorktree, ensureSessionsServer, lastWords, launch, restart, unarchive, wake } from "./sessions.ts";
+import { markSnoozed, snoozeChange } from "./schedules.ts";
+import {
+	archive,
+	archiveWorktree,
+	ensureSessionsServer,
+	lastWords,
+	launch,
+	markUnarchived,
+	restart,
+	unarchiveInCodex,
+	wake,
+} from "./sessions.ts";
 import { rename, setGroup, setReload } from "./store.ts";
 import { SESSIONS, tmuxTry } from "./tmux.ts";
 import { inUse } from "./transcripts/read.ts";
@@ -55,8 +65,6 @@ export async function send(db: Db, m: Send): Promise<ToolResult> {
 	if (m.to === m.from) throw new SwbError("a session can't message itself");
 	if (m.kind === "message") checkBody("message", m.body);
 	const target = sessionState(db, m.to);
-	// An archive with cancel_turns marks a session before it cancels the turn, so a cancel may reach one already archived.
-	if (!target.open && m.kind === "message") throw new SwbError(`"${displayName(target)}" is archived; unarchive it first`);
 	if (m.kind === "cancel" && !(target.live && target.activity !== "idle")) {
 		return {
 			text: `"${displayName(target)}" has no running turn to cancel.`,
@@ -64,6 +72,9 @@ export async function send(db: Db, m: Send): Promise<ToolResult> {
 		};
 	}
 	const id = recordTx(db, () => {
+		// Checked with the write, so an archive can't land between them and leave this waiting on an archived session. An
+		// archive with cancel_turns marks a session before it cancels the turn, so a cancel may reach one already archived.
+		if (m.kind === "message" && isArchived(db, m.to)) throw new SwbError(`"${displayName(target)}" is archived; unarchive it first`);
 		if (m.requestId) {
 			const existing = db.get("SELECT id, target_id, body FROM messages WHERE source_id = ? AND request_id = ?", m.from, m.requestId);
 			if (existing) {
@@ -266,7 +277,7 @@ export type Update = Omit<ToolArgs<"swb_update_session">, "session">;
 
 /**
  * Applies any combination of changes to a session: unarchiving first, cancelling after snoozing, reloading and then archiving last. Every change
- * is checked before any is made, so a refused archive leaves the rest undone too.
+ * is checked before any is made, and the unarchive, title, Group, and snooze are written together, so a refusal leaves everything as it was.
  */
 export async function update(db: Db, from: string, id: string, change: Update): Promise<ToolResult> {
 	const { archived, family, cancel_turns: cancelTurns, cancel, snooze: snoozing, group, title, reload: reloading } = change;
@@ -295,28 +306,36 @@ export async function update(db: Db, from: string, id: string, change: Update): 
 	const trimmedGroup = requestedGroup(group, target.cwd);
 	const archiving = archived === true ? archivePlan(all, from, target, family ?? false, cancelTurns ?? false) : null;
 
+	// Unarchiving comes first, so what follows it applies to an open session.
+	const reopened = { ...target, open: target.open || archived === false };
+	const snoozed = snoozing === undefined ? null : snoozeChange(reopened, from, snoozing, Date.now());
+	if (reloading !== undefined && !reopened.open) throw new SwbError(`${name} is archived; unarchive it first`);
+
 	const done: string[] = [];
 	const deleted = change.delete_worktree && archiving ? await archiveRun(db, from, archiving, true, cancelTurns ?? false) : null;
-	if (archived === false) {
-		unarchive(db, id);
-		done.push(`Unarchived ${name}.`);
-	}
+	if (archived === false) unarchiveInCodex(db, id);
+	recordTx(db, () => {
+		if (archived === false) markUnarchived(db, id);
+		else if (snoozed && isArchived(db, id)) throw new SwbError(`${name} is archived; unarchive it first`);
+		if (trimmedTitle !== undefined) rename(db, id, trimmedTitle);
+		if (trimmedGroup !== undefined) setGroup(db, [id], trimmedGroup);
+		if (snoozed) markSnoozed(db, id, snoozed.at, snoozed.until);
+	});
+	if (archived === false) done.push(`Unarchived ${name}.`);
 	if (trimmedTitle !== undefined) {
-		recordTx(db, () => rename(db, id, trimmedTitle));
 		ring(db, id);
 		done.push(`Retitled ${name} as "${trimmedTitle}".`);
 	}
 	if (trimmedGroup !== undefined) {
 		const existing = all.some((s) => s.open && s.id !== id && s.project === target.project && s.group === trimmedGroup);
-		setGroup(db, [id], trimmedGroup);
 		done.push(
 			trimmedGroup === null
 				? `Took ${name} out of its Group.`
 				: `Moved ${name} into ${existing ? "" : "a new Group, "}"${trimmedGroup}", in ${projectName(target.project)}.`,
 		);
 	}
-	if (snoozing !== undefined) done.push(snooze(db, from, id, snoozing).text);
-	// After snoozing, which can still refuse its time: a cancel can't be taken back.
+	if (snoozed) done.push(snoozed.result.text);
+	// After the writes, which can still be refused: a cancel can't be taken back.
 	if (cancel) done.push((await send(db, { from, to: id, body: "", reportBack: false, requestId: null, kind: "cancel" })).text);
 	if (reloading !== undefined) done.push(reload(db, from, id, reloading));
 	if (archiving) done.push(deleted ?? (await archiveRun(db, from, archiving)));

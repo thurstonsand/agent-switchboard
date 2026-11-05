@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import type { Db, Row } from "./db.ts";
-import { bootId, branch, type Harness, pidAlive, projectRoot, SCHEMA_VERSION } from "./index.ts";
+import { bootId, branch, type Harness, isBusy, pidAlive, projectRoot, SCHEMA_VERSION } from "./index.ts";
 
 // Every line records a session's lifecycle through these, so pi, Claude Code, and Codex rows mean the same thing.
 // Each call is one write transaction that first asserts the schema it writes.
@@ -12,6 +12,73 @@ export function recordTx<T>(db: Db, body: () => T): T {
 		if (version !== SCHEMA_VERSION) throw new Error(`db schema is v${version}, this line writes v${SCHEMA_VERSION}`);
 		return body();
 	});
+}
+
+const RETRY_MS = 1000;
+const FLUSH_MS = 10_000;
+
+/**
+ * A line's writes, in the order its harness made them. One the db is too busy for waits, with every write after it,
+ * and is tried again, while the session carries on; `behind` says how many wait, then 0 once they're through. Any
+ * other failure goes to `failed`, and that write is dropped.
+ */
+export class Recorder {
+	readonly #queue: (() => void)[] = [];
+	#retry: ReturnType<typeof setTimeout> | undefined;
+	// A write can set off another: a message handed to pi can start its turn on the spot.
+	#draining = false;
+
+	constructor(
+		private readonly failed: (error: unknown) => void,
+		private readonly behind: (waiting: number) => void,
+	) {}
+
+	/** Writes waiting on a busy db. */
+	get waiting(): number {
+		return this.#queue.length;
+	}
+
+	write(body: () => void): void {
+		this.#queue.push(body);
+		if (this.#retry === undefined && !this.#draining) this.#drain();
+	}
+
+	/** For a process about to exit, which has no later: what still waits is tried until it gets through or FLUSH_MS passes. */
+	flush(): void {
+		this.#until = Date.now() + FLUSH_MS;
+		if (!this.#draining) this.#drain();
+	}
+	#until: number | undefined;
+
+	#drain(): void {
+		const wasBehind = this.#retry !== undefined;
+		clearTimeout(this.#retry);
+		this.#retry = undefined;
+		this.#draining = true;
+		try {
+			while (this.#queue.length > 0) {
+				try {
+					(this.#queue[0] as () => void)();
+				} catch (error) {
+					if (isBusy(error)) {
+						if (this.#until === undefined) {
+							this.behind(this.#queue.length);
+							this.#retry = setTimeout(() => this.#drain(), RETRY_MS);
+							this.#retry.unref?.();
+							return;
+						}
+						// Each try already waits out busy_timeout.
+						if (Date.now() < this.#until) continue;
+					}
+					this.failed(error);
+				}
+				this.#queue.shift();
+			}
+		} finally {
+			this.#draining = false;
+		}
+		if (wasBehind) this.behind(0);
+	}
 }
 
 /** Another process in this boot already hosts the session: two writers on one transcript would corrupt it. */

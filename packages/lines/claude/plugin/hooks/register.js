@@ -153,10 +153,14 @@ const line = {
 	/** The session whose start swb has recorded, so a late environment records it once. */
 	recorded: "",
 	busy: false,
+	/** A turn for held messages is being started: they're marked delivered, and Claude Code hasn't begun it yet. */
+	submitting: false,
 	turnId: "",
 	blocked: false,
 	draft: "",
 	pending: [],
+	/** Every message this process took from pending, whether marked delivered or still being marked, so a re-offer is dropped. */
+	taken: new Set(),
 	/** The model and effort of this session's last model request recorded, so only a change is recorded again. */
 	request: "",
 	/** The last record in flight; each waits for the one before, so swb sees them in order. */
@@ -169,7 +173,11 @@ async function env($, name) {
 	return (await $.env.get("SWB_DB")) ?? "";
 }
 
-/** Runs swb; a failure carries its stderr, which is what the model or the person should read. */
+// What swb exits with when its db stayed locked past busy_timeout (BUSY_EXIT): worth trying again.
+const BUSY_EXIT = 75;
+const RETRY_MS = 1000;
+
+/** Runs swb; a failure carries its stderr, which is what the model or the person should read, and swb's exit code. */
 async function swb($, args, stdin) {
 	// The last turn still has to settle after archive-and-delete removes the session's directory.
 	const result = await $.process.run([line.bin, ...args], {
@@ -177,7 +185,10 @@ async function swb($, args, stdin) {
 		...(stdin === undefined ? {} : { stdin }),
 		timeoutMs: 90000,
 	});
-	if (result.exitCode !== 0) throw new Error(result.stderr.trim().replace(/^swb: /, "") || `swb ${args[0]} exited ${result.exitCode}`);
+	if (result.exitCode !== 0)
+		throw Object.assign(new Error(result.stderr.trim().replace(/^swb: /, "") || `swb ${args[0]} exited ${result.exitCode}`), {
+			exitCode: result.exitCode,
+		});
 	return result.stdout;
 }
 
@@ -190,20 +201,35 @@ function record($, args) {
 	return line.recording;
 }
 
-/** Recording never fails a hook: it says so where the person looks, and Claude carries on. */
+/**
+ * Recording never fails a hook: it says so where the person looks, and Claude carries on. A busy db holds this record,
+ * and every one queued after it, until it gets through.
+ */
 async function recordNow($, args) {
-	try {
-		return await swb($, ["__record", ...args, "--host", line.host]);
-	} catch (error) {
-		$.ui.toast(`swb: not recording: ${error.message}`);
-		$.ui.log(`swb: not recording: ${error.message}`, { to: "debug" });
-		return "";
+	for (let said = false; ; said = true) {
+		try {
+			return await swb($, ["__record", ...args, "--host", line.host]);
+		} catch (error) {
+			if (error.exitCode === BUSY_EXIT) {
+				if (!said) $.ui.toast(`swb: recording waits for a busy db: ${error.message}`);
+				await $.clock.sleep(RETRY_MS);
+				continue;
+			}
+			$.ui.toast(`swb: not recording: ${error.message}`);
+			$.ui.log(`swb: not recording: ${error.message}`, { to: "debug" });
+			return "";
+		}
 	}
 }
 
-/** Acknowledges the delivered messages that came from swb's inbox; a reader's answer never went through it. */
+/** The ids of a batch's messages that came through swb's inbox. */
+function inboxIds(batch) {
+	return batch.flatMap((m) => (m.id ? [m.id] : []));
+}
+
+/** Marks a batch delivered, just before it's handed to Claude Code. A reader's answer never went through swb's inbox. */
 async function ack($, batch) {
-	const ids = batch.flatMap((m) => (m.id ? [m.id] : []));
+	const ids = inboxIds(batch);
 	if (ids.length > 0) await swb($, ["__ack", ...ids]);
 }
 
@@ -221,25 +247,54 @@ function receipt($, m) {
 function take() {
 	const batch = line.pending.filter((m) => m.target === line.session);
 	line.pending = line.pending.filter((m) => m.target !== line.session);
+	for (const m of batch) line.taken.add(m.id);
 	return batch;
 }
 
+/** A batch that wasn't handed over after all: held again, ahead of anything newer. */
+function putBack(batch) {
+	for (const m of batch) line.taken.delete(m.id);
+	line.pending.unshift(...batch);
+}
+
+/** Marks a taken batch delivered before it's handed over; on failure it's held again, and false says not to hand it over. */
+async function delivering($, batch) {
+	try {
+		await ack($, batch);
+		return true;
+	} catch (error) {
+		putBack(batch);
+		$.ui.log(`swb: holding ${batch.length} message(s): ${error.message}`, { to: "debug" });
+		// Mid-turn the next tool result tries again; idle, nothing would.
+		if (error.exitCode === BUSY_EXIT) $.clock.after(RETRY_MS, () => void submitPending($));
+		return false;
+	}
+}
+
 /**
- * Starts a turn with what arrived while idle. submit resolves once that turn starts, which is when the batch is
- * delivered; awaited inside a hook that runs while Claude works, it never would, so callers don't await this.
+ * Starts a turn with what arrived while idle. submit resolves once that turn starts; awaited inside a hook that runs
+ * while Claude works, it never would, so callers don't await this.
  */
 async function submitPending($) {
-	if (line.busy || !line.session) return;
+	if (line.busy || line.submitting || !line.session) return;
 	const batch = take();
 	if (batch.length === 0) return;
+	line.submitting = true;
 	try {
+		if (!(await delivering($, batch))) return;
 		await $.prompt.submit({ text: batch.map((m) => m.text).join("\n\n---\n\n") });
 	} catch (error) {
-		line.pending.unshift(...batch);
 		$.ui.log(`swb: couldn't start a turn for ${batch.length} message(s): ${error.message}`);
-		return;
+		// Unmarked before it's held again: a tool result could otherwise take and deliver it, and the unmark land after.
+		const ids = inboxIds(batch);
+		if (ids.length > 0)
+			await swb($, ["__unack", ...ids]).catch((unacked) =>
+				$.ui.log(`swb: ${batch.length} held message(s) stay marked delivered: ${unacked.message}`, { to: "debug" }),
+			);
+		putBack(batch);
+	} finally {
+		line.submitting = false;
 	}
-	await ack($, batch);
 }
 
 /** Keeps swb's inbox for this session running for the session's life, and says so when it fails. */
@@ -275,9 +330,23 @@ async function drain($) {
 			buffer = buffer.slice(nl + 1);
 			if (!raw.trim()) continue;
 			const m = JSON.parse(raw);
+			if (line.taken.has(m.id) || line.pending.some((held) => held.id === m.id)) continue;
 			if (m.kind === "cancel") {
-				if (line.busy && line.turnId) await $.turn.abort({ turnId: line.turnId });
-				await ack($, [m]);
+				line.taken.add(m.id);
+				try {
+					await ack($, [m]);
+				} catch (error) {
+					// The inbox restarts on this, and offers the cancel again.
+					line.taken.delete(m.id);
+					throw error;
+				}
+				try {
+					if (line.busy && line.turnId) await $.turn.abort({ turnId: line.turnId });
+				} catch (error) {
+					await swb($, ["__unack", m.id]);
+					line.taken.delete(m.id);
+					throw error;
+				}
 			} else {
 				line.pending.push(m);
 				void submitPending($);
@@ -555,9 +624,8 @@ export function register(on) {
 		// Messages that arrived mid-turn ride on the next main-loop tool result, which Claude reads before going on.
 		if (!line.managed || e.agentId || next.origin.plugin !== "engine" || !("result" in result)) return result;
 		const batch = take();
-		if (batch.length === 0) return result;
+		if (batch.length === 0 || !(await delivering($, batch))) return result;
 		for (const m of batch) receipt($, m);
-		await ack($, batch);
 		return { ...result, context: [...(result.context ?? []), ...batch.map((m) => m.text)] };
 	});
 

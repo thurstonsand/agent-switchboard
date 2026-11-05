@@ -5,12 +5,13 @@ import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Db, describeTool, launchGuide, linkedWorktree, operatorDir } from "@swb/shared";
-import { frame, listen, markDelivered, pendingFor, sender } from "@swb/shared/mailbox";
+import { frame, listen, markDelivered, pendingFor, sender, unmarkDelivered } from "@swb/shared/mailbox";
 import {
 	markArchived as archiveMark,
 	endHosting,
 	hostOfTranscript,
 	pendingTitle,
+	Recorder,
 	titleOf as recordedTitle,
 	recordTx,
 	setPhase,
@@ -117,16 +118,20 @@ export default function (pi: ExtensionAPI) {
 		ui?.notify(`swb: not recording: ${proc.failure}`, "error");
 	};
 
+	// A busy db holds pi's writes for a later try, and says so; any other failure stops the line recording.
+	const recorder = new Recorder(fail, (waiting) => {
+		if (proc.failure) return;
+		ui?.setStatus("swb", waiting > 0 ? ui.theme.fg("warning", `swb: db busy, ${waiting} record(s) waiting`) : undefined);
+	});
+
 	const write = (sessionId: string, body: (db: Db, sessionId: string) => void): void => {
 		if (proc.failure) {
 			showFailure();
 			return;
 		}
-		try {
-			body(connect(), sessionId);
-		} catch (error) {
-			fail(error);
-		}
+		recorder.write(() => {
+			if (!proc.failure) body(connect(), sessionId);
+		});
 	};
 
 	const writeFor = (ctx: ExtensionContext, body: (db: Db, sessionId: string) => void): void => {
@@ -166,34 +171,39 @@ export default function (pi: ExtensionAPI) {
 		rmSync(draftPath(id));
 	};
 
-	// Messages from other sessions: steered into a running turn, or starting one when idle.
+	// Messages from other sessions: steered into a running turn, or starting one when idle. A pass waits behind any
+	// write a busy db holds, and the version counts as seen only once the whole pass went through.
 	let seenVersion = -1;
 	const deliver = () => {
 		const ctx = ctxNow;
-		if (!ctx || !current || proc.failure) return;
-		try {
-			const db = connect();
+		const session = current;
+		if (!ctx || !session || proc.failure || recorder.waiting > 0) return;
+		write(session, (db) => {
+			if (ctxNow !== ctx || current !== session) return;
 			const version = db.dataVersion();
 			if (version === seenVersion) return;
-			seenVersion = version;
-			for (const m of pendingFor(db, current)) {
-				if (m.kind === "cancel") {
-					if (!ctx.isIdle()) ctx.abort();
-				} else {
-					const details: IncomingDetails = { from: m.sourceId, title: sender(db, m.sourceId).title, body: m.body };
-					pi.sendMessage(
-						{ customType: MESSAGE, content: frame(db, m), display: true, details },
-						ctx.isIdle() ? { triggerTurn: true } : { deliverAs: "steer" },
-					);
+			for (const m of pendingFor(db, session)) {
+				recordTx(db, () => markDelivered(db, m.id));
+				try {
+					if (m.kind === "cancel") {
+						if (!ctx.isIdle()) ctx.abort();
+					} else {
+						const details: IncomingDetails = { from: m.sourceId, title: sender(db, m.sourceId).title, body: m.body };
+						pi.sendMessage(
+							{ customType: MESSAGE, content: frame(db, m), display: true, details },
+							ctx.isIdle() ? { triggerTurn: true } : { deliverAs: "steer" },
+						);
+					}
+				} catch (error) {
+					recordTx(db, () => unmarkDelivered(db, m.id));
+					throw error;
 				}
-				markDelivered(db, m.id);
 			}
 			// A title set through swb becomes pi's own name, which session_info_changed records back.
-			const title = pendingTitle(db, current);
+			const title = pendingTitle(db, session);
 			if (title !== null && title !== ctx.sessionManager.getSessionName()) pi.setSessionName(title);
-		} catch (error) {
-			fail(error);
-		}
+			seenVersion = version;
+		});
 	};
 
 	pi.registerMessageRenderer(MESSAGE, (message, _options, theme) => {
@@ -294,14 +304,6 @@ export default function (pi: ExtensionAPI) {
 		writeFor(ctx, (db, id) => setTitle(db, id, event.name ?? null));
 	});
 
-	const markArchived = (ctx: ExtensionContext): boolean => {
-		let archived = false;
-		writeFor(ctx, (db, id) => {
-			archived = recordTx(db, () => archiveMark(db, id));
-		});
-		return archived;
-	};
-
 	pi.registerCommand("archive", {
 		description: "Archive this session in swb and quit",
 		handler: async (_args, ctx) => {
@@ -309,8 +311,10 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify("swb: turn running: wait for it to complete", "error");
 				return;
 			}
-			if (markArchived(ctx)) ctx.shutdown();
-			else if (!proc.failure) ctx.ui.notify("swb: nothing to archive before the first prompt", "error");
+			writeFor(ctx, (db, id) => {
+				if (recordTx(db, () => archiveMark(db, id))) ctx.shutdown();
+				else ctx.ui.notify("swb: nothing to archive before the first prompt", "error");
+			});
 		},
 	});
 
@@ -601,5 +605,6 @@ export default function (pi: ExtensionAPI) {
 			writeFileSync(path, draft, { mode: 0o600 });
 		}
 		writeFor(ctx, (db) => endHosting(db, proc.launch.tmuxSession));
+		recorder.flush();
 	});
 }

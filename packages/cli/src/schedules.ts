@@ -1,10 +1,10 @@
 import { existsSync, realpathSync } from "node:fs";
 import { type Db, type Harness, SNOOZE_PRESETS, type Snooze, type SnoozePreset } from "@swb/shared";
 import { clockTime, harnessName } from "@swb/shared/mailbox";
-import { recordTx, titleOf } from "@swb/shared/record";
+import { isArchived, recordTx, titleOf } from "@swb/shared/record";
 import type { ToolResult } from "@swb/shared/tools";
 import { Cron } from "croner";
-import { displayName, sessionState, states } from "./derive.ts";
+import { displayName, type SessionState, sessionState, states } from "./derive.ts";
 import { checkBody, SwbError } from "./errors.ts";
 import { requestedGroup } from "./groups.ts";
 import { presetLaunch } from "./harnesses.ts";
@@ -258,7 +258,7 @@ export function unschedule(db: Db, from: string, id: string): ToolResult {
 	});
 }
 
-function markSnoozed(db: Db, id: string, at: number | null, until: number | null): void {
+export function markSnoozed(db: Db, id: string, at: number | null, until: number | null): void {
 	db.run(
 		`INSERT INTO marks (session_id, snoozed_at, snoozed_until) VALUES (?, ?, ?)
 		 ON CONFLICT (session_id) DO UPDATE SET snoozed_at = excluded.snoozed_at, snoozed_until = excluded.snoozed_until`,
@@ -275,17 +275,31 @@ export function snooze(db: Db, from: string | null, id: string, value: Snooze): 
 		throw new SwbError(
 			db.get("SELECT 1 FROM runtimes WHERE session_id = ?", id) ? "nothing to snooze before the first prompt" : `no session ${id}`,
 		);
+	const change = snoozeChange(target, from, value, Date.now());
+	recordTx(db, () => {
+		if (isArchived(db, id)) throw new SwbError(`${change.name} is archived; unarchive it first`);
+		markSnoozed(db, id, change.at, change.until);
+	});
+	return change.result;
+}
+
+/** What snoozing an open session writes and says; refused when it's archived or the time can't be. */
+export function snoozeChange(
+	target: SessionState,
+	from: string | null,
+	value: Snooze,
+	now: number,
+): { name: string; at: number | null; until: number | null; result: ToolResult } {
+	const id = target.id;
 	const name = from === id ? "this session" : `"${displayName(target)}"`;
 	if (!target.open) throw new SwbError(`${name} is archived; unarchive it first`);
-	const now = Date.now();
 	if (value === "off") {
-		recordTx(db, () => markSnoozed(db, id, null, null));
-		return { text: target.snoozed ? `Unsnoozed ${name}.` : `${name} wasn't snoozed.`, details: { id, snoozed: false } };
+		const text = target.snoozed ? `Unsnoozed ${name}.` : `${name} wasn't snoozed.`;
+		return { name, at: null, until: null, result: { text, details: { id, snoozed: false } } };
 	}
 	const until = typeof value === "string" ? presetUntil(value, now) : when(value.until, now, "snooze until");
-	recordTx(db, () => markSnoozed(db, id, now, until));
 	const text = `Snoozed ${name} until ${until === null ? "its next message" : clockTime(until)}.`;
-	return { text, details: { id, snoozed: true, until } };
+	return { name, at: now, until, result: { text, details: { id, snoozed: true, until } } };
 }
 
 /** `swb snooze`'s value, as the tool's: a preset, off, or a time. */

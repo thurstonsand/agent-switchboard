@@ -46,6 +46,14 @@ function make(path: string): void {
 	}
 }
 
+/** The db stayed locked past busy_timeout: another connection held its write lock, and a later try may get through. */
+export function isBusy(error: unknown): boolean {
+	const { code, errcode } = error as { code?: unknown; errcode?: number };
+	// node:sqlite carries SQLite's result code apart; bun:sqlite names it.
+	if (code === "ERR_SQLITE_ERROR") return ((errcode ?? 0) & 0xff) === 5;
+	return typeof code === "string" && code.startsWith("SQLITE_BUSY");
+}
+
 export class Db {
 	readonly #driver: Driver;
 
@@ -83,9 +91,11 @@ export class Db {
 		return Number(this.get("PRAGMA data_version")?.data_version);
 	}
 
-	/** A read-then-write transaction: takes the write lock up front. */
+	/** A read-then-write transaction: takes the write lock up front. One begun inside another is part of it. */
 	tx<T>(body: () => T): T {
+		if (this.#inTx) return body();
 		this.#driver.exec("BEGIN IMMEDIATE");
+		this.#inTx = true;
 		try {
 			const result = body();
 			this.#driver.exec("COMMIT");
@@ -93,8 +103,11 @@ export class Db {
 		} catch (error) {
 			this.#driver.exec("ROLLBACK");
 			throw error;
+		} finally {
+			this.#inTx = false;
 		}
 	}
+	#inTx = false;
 
 	close(): void {
 		this.#driver.close();

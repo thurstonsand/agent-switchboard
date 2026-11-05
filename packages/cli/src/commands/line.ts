@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { pidAlive } from "@swb/shared";
-import { frame, listen, markDelivered, markOffered, pendingFor, sender } from "@swb/shared/mailbox";
+import { frame, listen, markDelivered, pendingFor, sender, unmarkDelivered } from "@swb/shared/mailbox";
 import { endHosting, pendingTitle, recordTx, sawRequest, setPhase, settle, startHosting, startTurn, turnErrored } from "@swb/shared/record";
 import { UsageError } from "../errors.ts";
 import { openStore } from "../store.ts";
@@ -149,8 +149,10 @@ function recoveryNotice(): void {
 }
 
 /**
- * Streams a host's incoming messages as JSON lines, for its line to deliver, until its parent process is gone.
- * Whatever was offered but never acknowledged is offered again when this starts, so a crash loses nothing.
+ * Streams a host's incoming messages as JSON lines, for its line to deliver, until its parent process is gone. It only
+ * reads, so a busy db can't stop it. Whatever was offered but never acknowledged is offered again when this starts, and
+ * the line drops what it already holds. The line acknowledges a message just before handing it over, so a crash
+ * between the two loses that one message rather than delivering it twice.
  */
 export async function inbox(args: string[]): Promise<void> {
 	const { values } = parseArgs({ args, options: { host: { type: "string" } } });
@@ -178,7 +180,6 @@ export async function inbox(args: string[]): Promise<void> {
 			for (const m of session ? pendingFor(db, session) : []) {
 				if (offered.has(m.id)) continue;
 				offered.add(m.id);
-				recordTx(db, () => markOffered(db, m.id));
 				const line = { id: m.id, kind: m.kind, target: m.targetId, title: sender(db, m.sourceId).title, body: m.body, text: frame(db, m) };
 				process.stdout.write(`${JSON.stringify(line)}\n`);
 			}
@@ -190,10 +191,20 @@ export async function inbox(args: string[]): Promise<void> {
 	}
 }
 
+/** Marks messages delivered, which the line does just before it hands them to Claude Code. */
 export function ack(ids: string[]): void {
 	if (ids.length === 0) throw new UsageError("__ack: a message id is required");
 	const db = openStore();
 	recordTx(db, () => {
 		for (const id of ids) markDelivered(db, id);
+	});
+}
+
+/** Claude Code refused messages the line had marked delivered: they wait for its next try. */
+export function unack(ids: string[]): void {
+	if (ids.length === 0) throw new UsageError("__unack: a message id is required");
+	const db = openStore();
+	recordTx(db, () => {
+		for (const id of ids) unmarkDelivered(db, id);
 	});
 }

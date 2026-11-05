@@ -132,6 +132,8 @@ const MIGRATIONS: string[] = [
 	`ALTER TABLE messages RENAME COLUMN request_response TO report_back;
 	ALTER TABLE schedules RENAME COLUMN request_response TO report_back;
 	ALTER TABLE schedules RENAME COLUMN label TO schedule_label;`,
+	// Lines mark a message delivered before handing it over, so being offered is no state of its own.
+	"ALTER TABLE messages DROP COLUMN offered_at",
 ];
 
 if (MIGRATIONS.length !== SCHEMA_VERSION) throw new Error(`${MIGRATIONS.length} migrations for schema v${SCHEMA_VERSION}`);

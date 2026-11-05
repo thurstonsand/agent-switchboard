@@ -85,6 +85,113 @@ test("a message Codex refuses mid-compaction is delivered once the compaction en
 	s.save("compact.txt", pane(s, codex.id));
 });
 
+/** The db's write lock held for `ms`, past every connection's busy_timeout, while `during` runs. */
+async function locked(ms: number, during: () => Promise<unknown> = async () => {}): Promise<void> {
+	const db = s.db();
+	db.exec("PRAGMA busy_timeout = 5000");
+	db.exec("BEGIN IMMEDIATE");
+	const end = Date.now() + ms;
+	try {
+		await during();
+		await Bun.sleep(Math.max(0, end - Date.now()));
+	} finally {
+		db.exec("COMMIT");
+		db.close();
+	}
+}
+
+/** A message as send() writes it, then the db locked for `ms`. */
+async function busyAfter(from: string, to: string, body: string, ms: number): Promise<string> {
+	const id = crypto.randomUUID();
+	const db = s.db();
+	db.prepare(
+		"INSERT INTO messages (id, kind, source_id, target_id, body, report_back, request_id, created_at) VALUES (?, 'message', ?, ?, ?, 0, NULL, ?)",
+	).run(id, from, to, body, Date.now());
+	db.close();
+	await locked(ms);
+	return id;
+}
+
+const times = (text: unknown, marker: string) => String(text).split(marker).length - 1;
+
+test("a db busy past busy_timeout while messages are in flight delivers each once, and every line keeps recording", async () => {
+	s = scenario("harnesses", "busy", { packages: [], recorder: true, harnesses: ["claude", "codex"] });
+	const [pi, claude, codex] = await Promise.all([
+		launched(s, "pi", "reply pi-up"),
+		launched(s, "claude", "reply claude up"),
+		launched(s, "codex", "reply codex up"),
+	]);
+	const delivered = (id: string) => s.query<{ at: number | null }>("select delivered_at as at from messages where id = ?", id)[0]?.at;
+
+	// Claude holds one message for its next tool result; the second arrives as the db stays busy.
+	type(s, claude.id, "hold c1");
+	await until(() => s.signal("c1.entered") !== "", ready, "Claude holding");
+	await busyAfter(pi.id, claude.id, "SWB-busy-first change course", 0);
+	await Bun.sleep(1000);
+	await busyAfter(pi.id, claude.id, "SWB-busy-second also this", 6000);
+	await Bun.sleep(1500);
+	release(s, "c1");
+	// The first request that carries them: later ones also quote the model's answer.
+	const toClaude = await until(
+		() => s.requests("claude").find((r) => String(r.context).includes("SWB-busy-second")),
+		budgets.settle,
+		"Claude's request carrying both messages",
+	);
+	expect([times(toClaude.context, "SWB-busy-first"), times(toClaude.context, "SWB-busy-second")]).toEqual([1, 1]);
+	await until(() => entry(s, claude.id).activity === "idle", budgets.settle, "Claude's turn recorded as settled");
+
+	// Codex is steered, and the steer is recorded, once.
+	type(s, codex.id, "hold x1");
+	await until(() => s.signal("x1.entered") !== "", ready, "Codex holding");
+	const toCodex = await busyAfter(pi.id, codex.id, "SWB-busy-steer change course", 6000);
+	await until(() => delivered(toCodex), budgets.settle, "the steer marked delivered");
+	release(s, "x1");
+	const steered = await until(
+		() => s.requests("codex").find((r) => String(r.context).includes("SWB-busy-steer")),
+		budgets.settle,
+		"Codex's request carrying the steer",
+	);
+	expect(times(steered.context, "SWB-busy-steer")).toBe(1);
+	await until(() => entry(s, codex.id).activity === "idle", budgets.settle, "Codex's turn recorded as settled");
+
+	// pi takes the steer and goes on recording: its turn settles in swb too.
+	type(s, pi.id, "hold p1");
+	await until(() => s.signal("p1.entered") !== "", ready, "pi holding");
+	const toPi = await busyAfter(claude.id, pi.id, "reply SWB-busy-pi", 6000);
+	release(s, "p1");
+	await until(() => s.signal("replied.SWB-busy-pi") !== "", budgets.settle, "pi answering the steer");
+	await until(() => entry(s, pi.id).activity === "idle", budgets.settle, "pi's turn recorded as settled");
+	expect(delivered(toPi)).toEqual(expect.any(Number));
+	expect(pane(s, pi.id)).not.toContain("not recording");
+	s.save("busy.txt", [pane(s, pi.id), pane(s, claude.id), pane(s, codex.id)].join("\n=====\n"));
+});
+
+test("a turn that starts while the db is busy past busy_timeout is recorded once it lets go, in every line", async () => {
+	s = scenario("harnesses", "busy-records", { packages: [], recorder: true, harnesses: ["claude", "codex"] });
+	const [pi, claude, codex] = await Promise.all([
+		launched(s, "pi", "reply pi-up"),
+		launched(s, "claude", "reply claude up"),
+		launched(s, "codex", "reply codex up"),
+	]);
+	const all = { pi, claude, codex };
+	const prompted = (id: string) => s.query<{ at: number }>("select last_prompt_at as at from sessions where session_id = ?", id)[0]?.at;
+	const before = Date.now();
+	// Long enough that each line's first try at its turn's record waits out busy_timeout and fails, with time to show it.
+	await locked(9000, async () => {
+		for (const [harness, e] of Object.entries(all)) type(s, e.id, `reply SWB-rec-${harness}`);
+		await until(() => pane(s, pi.id).includes("swb: db busy"), 8500, "pi saying its records wait");
+		s.save("busy-records.txt", pane(s, pi.id));
+	});
+	for (const [harness, e] of Object.entries(all))
+		await until(
+			() => (prompted(e.id) ?? 0) >= before && entry(s, e.id).activity === "idle",
+			budgets.settle,
+			`${harness}'s turn recorded, start and settle`,
+		);
+	for (const e of Object.values(all)) expect(pane(s, e.id)).not.toContain("not recording");
+	expect(pane(s, pi.id)).not.toContain("swb: db busy");
+});
+
 test("agents use swb's tools across harnesses: list, message, launch, and cancel, with the caller as the sender", async () => {
 	s = scenario("harnesses", "agents", { packages: [], recorder: true, harnesses: ["claude", "codex"] });
 	const [pi, claude, codex] = await Promise.all([

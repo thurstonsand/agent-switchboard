@@ -4,9 +4,12 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
-export { Db, type Param, type Row } from "./db.ts";
+export { Db, isBusy, type Param, type Row } from "./db.ts";
 
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
+
+/** How swb exits when its db stayed locked past busy_timeout, EX_TEMPFAIL: a caller may try again. */
+export const BUSY_EXIT = 75;
 
 export type Phase = "idle" | "working" | "blocked";
 /** The Stage's views of a session: its own agent, whichever harness runs it, its Editor, or both. */
