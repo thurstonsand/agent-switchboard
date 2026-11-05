@@ -635,13 +635,13 @@ async function handle(message: ToWorker): Promise<void> {
 			try {
 				name = ensureShell(db, message.dir);
 			} catch (error) {
-				post({ type: "shell", dir: message.dir, name: null, text: (error as Error).message });
+				post({ type: "shell", req: message.req, dir: message.dir, name: null, text: (error as Error).message });
 				break;
 			}
 			lastJson = "";
 			dataVersion = -1;
 			const up = tick().has(name);
-			post({ type: "shell", dir: message.dir, name: up ? name : null, text: up ? null : "the shell exited at once" });
+			post({ type: "shell", req: message.req, dir: message.dir, name: up ? name : null, text: up ? null : "the shell exited at once" });
 			return;
 		}
 	}

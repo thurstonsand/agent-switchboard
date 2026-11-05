@@ -59,6 +59,21 @@ test("swb_show_session moves the Deck showing its caller onto the session it nam
 	expect(other.state().cursor).toBe(b);
 });
 
+test("a session woken from its card and stopped again shows the turns it took meanwhile", async () => {
+	s = scenario("phase2", "card-after-wake");
+	const [id] = (await seed(s, { turns: ["before"] })) as [string];
+	s.swb("drive", "start");
+	await cursorTo(s, id);
+	await until(() => s.screen().includes("before"), budgets.settle, "the dormant card");
+	s.keys("Enter");
+	await waitState(s, "its pi up", (x) => x.staged.kind === "live" && x.focus === "stage", budgets.piReady);
+	await reply(s, "meanwhile");
+	await until(() => entry(s, id).activity === "idle", budgets.settle, "the turn settled");
+	s.keys("M-a", "x");
+	await waitState(s, "stopped, on its card", (x) => x.staged.id === id && x.staged.kind !== "live");
+	await until(() => s.screen().includes("reply meanwhile"), budgets.settle, "the new turn on its card");
+});
+
 test("a dormant card shows the whole conversation, newest at the bottom, cropped from the top", async () => {
 	s = scenario("phase2", "dormant-card");
 	const turns = Array.from({ length: 12 }, (_, i) => `turn-${i}-${"lorem ipsum dolor sit amet ".repeat(4).trim().replaceAll(" ", "_")}`);

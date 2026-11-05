@@ -209,7 +209,7 @@ export type ToWorker =
 	| { type: "view"; req: number; id: string; view: View }
 	| { type: "group"; req: number; ids: string[]; name: string | null }
 	| { type: "editor"; dir: string }
-	| { type: "shell"; dir: string }
+	| { type: "shell"; req: number; dir: string }
 	| { type: "dirs" }
 	| { type: "addDir"; path: string }
 	| { type: "removeDir"; path: string };
@@ -230,7 +230,7 @@ export type FromWorker =
 	| { type: "transcript"; id: string; transcript: Transcript | null; error: string | null }
 	| { type: "peek"; id: string; info: PeekInfo }
 	| { type: "editor"; dir: string; name: string | null; text: string | null }
-	| { type: "shell"; dir: string; name: string | null; text: string | null }
+	| { type: "shell"; req: number; dir: string; name: string | null; text: string | null }
 	| { type: "dirs"; trees: TargetTree[] }
 	| { type: "catalog"; catalog: Catalog }
 	| { type: "error"; text: string };

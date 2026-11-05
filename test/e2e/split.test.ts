@@ -192,6 +192,20 @@ test("split shows pi below 160 columns and returns on widening, survives reopeni
 	s.save("hidden-then-40-cols.txt", s.screen());
 });
 
+test("two M-a s before the shell is up take each other back, and neither waits forever", async () => {
+	s = scenario("phase7", "shell-twice");
+	await started(s, "--", "new");
+	const { deck } = state(s);
+	const toggle = () => Bun.spawn([`${s.bin}/swb`, "__deck", deck, "shell"], { env: s.env, stdout: "ignore", stderr: "pipe" });
+	const both = [toggle(), toggle()];
+	const exited = await Promise.race([Promise.all(both.map((p) => p.exited)), Bun.sleep(budgets.settle).then(() => null)]);
+	for (const p of both) p.kill();
+	expect(exited).toEqual([0, 0]);
+	await Bun.sleep(1000);
+	expect(state(s).layout.shell).toBeNull();
+	await prefixKeys(s, "M-a", "s", "a third shows it", (x) => x.layout.shell !== null && x.focus === "shell");
+});
+
 test("M-a s puts the directory's shell under pi, right of the split editor; ctrl-hjkl walk the panes; M-a s and ctrl-d close it", async () => {
 	s = scenario("phase7", "shell");
 	config(s, 'editor = "cat -v"');

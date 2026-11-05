@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState, SessionStateRow } from "../../packages/cli/src/deck/protocol.ts";
 import { type } from "./harness/agents.ts";
@@ -130,6 +130,38 @@ test("moving the cursor while n's pi starts stages that row, and the pi landing 
 	);
 	expect(landed).toMatchObject({ cursor: b, staged: { id: b } });
 	s.save("landed.txt", s.screen());
+});
+
+test("a new session whose directory is gone before Enter fails back to the roster, with the cursor's session on the Stage", async () => {
+	s = scenario("phase5", "new-gone");
+	const [a] = (await seed(s, { turns: ["alpha"] })) as [string];
+	const doomed = join(s.root, "doomed");
+	mkdirSync(doomed);
+	s.swb("drive", "start", "--", "new", "--cwd", doomed);
+	await waitState(s, "the doomed pi up", (x) => x.staged.kind === "live" && x.focus === "stage", budgets.piReady);
+	// A first turn records it, so the picker lists its directory.
+	await reply(s, "doomed");
+	s.swb("quit");
+	await until(() => s.ls().every((e) => !e.live), budgets.settle, "every session stopped");
+	s.swb("drive", "start");
+	await waitState(s, "the Deck up", (x) => x.ready);
+	await cursorTo(s, a);
+	s.keys("n");
+	await waitState(s, "the picker", (x) => x.picker !== null);
+	s.keys("-l", "doomed");
+	await waitState(s, "doomed highlighted", (x) => x.picker?.rows[x.picker.choice]?.path === doomed);
+	rmSync(doomed, { recursive: true });
+	s.keys("Enter");
+	const st = await waitState(
+		s,
+		"back in the roster",
+		(x) => x.picker === null && x.waking.length === 0 && x.toasts.some((t) => t.level === "error"),
+	);
+	await waitState(s, "the keyboard on the roster, a session on the Stage", (x) => x.focus === "roster" && x.staged.id === a);
+	// The keyboard passing over it on the way back didn't wake it.
+	await Bun.sleep(1000);
+	expect(state(s)).toMatchObject({ focus: "roster", staged: { id: a, kind: "dormant" } });
+	expect(st.toasts.map((t) => t.text).join()).toContain("doomed");
 });
 
 test("n and swb new show the new pi as a provisional row before any prompt; /new inside it moves the selection", async () => {

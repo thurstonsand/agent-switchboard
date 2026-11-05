@@ -217,6 +217,14 @@ function toast(text: string, level: Toast["level"]): void {
 }
 
 const transcripts = new Map<string, { transcript: Transcript | null; error: string | null }>();
+/** The activity each dormant session's transcript was last asked for at; one that moved on since is read again. */
+const transcriptsAsked = new Map<string, number>();
+
+function readTranscript(e: Entry): void {
+	if (e.live || !e.transcript || transcriptsAsked.get(e.id) === e.activityAt) return;
+	transcriptsAsked.set(e.id, e.activityAt);
+	post({ type: "transcript", id: e.id, path: e.transcript, harness: e.harness });
+}
 
 function launchFor(id: string): Launch | undefined {
 	return launches.find((launch) => launch.id === id);
@@ -536,16 +544,8 @@ function shellAt(d: Applied, target: string): ShellAt {
 
 /** Directories whose shell this Deck shows; a shell that exits leaves the set. */
 const shellsShown = new Set<string>();
-const shellWaits = new Map<string, (name: string | null) => void>();
-
-function requestShell(dir: string): Promise<string | null> {
-	const existing = snapshot?.shells[dir];
-	if (existing) return Promise.resolve(existing);
-	return new Promise((resolve) => {
-		shellWaits.set(dir, resolve);
-		post({ type: "shell", dir });
-	});
-}
+/** Directories whose shell this Deck asked the worker to start, by the request; toggling again takes the ask back. */
+const shellsAsked = new Map<string, number>();
 
 /** Split needs pi live and a wide Deck, and both need the Editor. */
 function viewed(): Applied {
@@ -885,7 +885,7 @@ function stageSession(id: string): void {
 	editorsAsked.clear();
 	editorsLost.clear();
 	const e = entries.get(id);
-	if (e && !e.live && e.transcript) post({ type: "transcript", id, path: e.transcript, harness: e.harness });
+	if (e) readTranscript(e);
 	scheduleHighlightWake();
 	apply();
 }
@@ -941,7 +941,7 @@ function newSession(cwd: string, group: string | null, target: LaunchTarget | nu
 	stage.ended = null;
 	post({ type: "new", req, cwd, group, target, harness });
 	apply();
-	void focusStage();
+	focusOnceShown(() => side?.pane ?? stagePane);
 }
 
 /** Launches whose host is now live resolve; one whose host vanished first failed to start. */
@@ -960,14 +960,40 @@ function settleLaunches(): void {
 			continue;
 		}
 		if (hosts.has(launch.host)) continue;
-		launches.splice(launches.indexOf(launch), 1);
 		const lastWords = snapshot.died[launch.host] ?? [];
-		if (launch.id !== null && stage.staged === launch.id) stage.ended = { id: launch.id, failed: true, lines: lastWords };
-		else toast(lastWords.length > 0 ? `the session failed to start: ${lastWords.at(-1)}` : "the session failed to start", "error");
-		if (launch.id === null && stage.staged === null) stage.staged = roster.cursorEntry()?.id ?? null;
-		if (focus === "stage") void focusRoster();
+		launchEnded(
+			launch,
+			lastWords,
+			lastWords.length > 0 ? `the session failed to start: ${lastWords.at(-1)}` : "the session failed to start",
+		);
 	}
 }
+
+/**
+ * A launch that won't come up, whether its host died or it never got one. On view, its session's card says why; a new
+ * session's Stage goes back to the cursor's. The keyboard comes back to the roster either way, from a Stage with
+ * nothing on it to type into.
+ */
+function launchEnded(launch: Launch, lines: string[], text: string): void {
+	launches.splice(launches.indexOf(launch), 1);
+	if (launch.id !== null && stage.staged === launch.id) stage.ended = { id: launch.id, failed: true, lines };
+	else toast(text, "error");
+	if (launch.id === null && stage.staged === null) {
+		stage.holdForNew = false;
+		const e = roster.cursorEntry();
+		if (e) stageSession(e.id);
+	}
+	if (launch.keyboard || focus === "stage") {
+		// The keyboard may still be on its way to the launch: that move is called off, and if it already went, its arrival
+		// isn't a move onto what's staged now.
+		focusMoves++;
+		returning = true;
+		void focusRoster();
+	}
+}
+
+/** The keyboard is coming back to the roster from a launch that failed; landing on the Stage meanwhile wakes nothing. */
+let returning = false;
 
 /** Whatever the Stage's host now runs is what's selected: `/new` or `/resume` inside pi moves the selection with it. */
 function followHost(): void {
@@ -1082,8 +1108,7 @@ function onSnapshot(next: Snapshot): void {
 	roster.settlePin();
 	if (!started) startCursor();
 	const e = stage.staged === null ? undefined : entries.get(stage.staged);
-	if (e && !e.live && e.transcript && !transcripts.has(e.id))
-		post({ type: "transcript", id: e.id, path: e.transcript, harness: e.harness });
+	if (e) readTranscript(e);
 	apply();
 	roster.syncStage(false);
 	// A turn that lands while I'm already watching is seen as it lands.
@@ -1155,9 +1180,9 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
 			toast(message.text, "error");
 			break;
 		case "launchFailed": {
-			const index = launches.findIndex((launch) => launch.req === message.req);
-			if (index !== -1) launches.splice(index, 1);
-			toast(message.text, "error");
+			const launch = launches.find((l) => l.req === message.req);
+			if (launch) launchEnded(launch, [message.text], message.text);
+			else toast(message.text, "error");
 			apply();
 			break;
 		}
@@ -1166,9 +1191,10 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
 			if (message.text) toast(`editor: ${message.text}`, "error");
 			break;
 		case "shell":
-			shellWaits.get(message.dir)?.(message.name);
-			shellWaits.delete(message.dir);
 			if (message.text) toast(`shell: ${message.text}`, "error");
+			if (shellsAsked.get(message.dir) !== message.req) break;
+			shellsAsked.delete(message.dir);
+			if (message.name) showShell(message.dir);
 			break;
 		case "dirs": {
 			// The highlight stays on its directory through a fresh list.
@@ -3874,7 +3900,9 @@ process.stdin.on("error", (error: NodeJS.ErrnoException) => {
  */
 async function syncFocus(): Promise<void> {
 	focusReads = focusReads.then(async () => {
-		focusedPane = await tmuxAsync(UI, "display", "-p", "-t", deck, "#{pane_id}");
+		const pane = await tmuxAsync(UI, "display", "-p", "-t", deck, "#{pane_id}");
+		if (pane !== focusedPane) focusMoves++;
+		focusedPane = pane;
 	});
 	await focusReads;
 	const was = focus;
@@ -3886,7 +3914,8 @@ async function syncFocus(): Promise<void> {
 	else roster.dragging = null;
 	// Moving onto a dormant session, by click or key, means to use it.
 	const onView = stage.staged === null ? undefined : entries.get(stage.staged);
-	if (was === "roster" && focus === "stage" && onView?.open && !onView.live) wake(onView.id, true);
+	if (focus === "roster") returning = false;
+	if (was === "roster" && focus === "stage" && !returning && onView?.open && !onView.live) wake(onView.id, true);
 	// Going to the Stage, by click or key, puts the Peek away: the pointer may still rest on the row it came from.
 	if (was === "roster" && focus === "stage") {
 		peek.dismissed = peek.spot?.id ?? null;
@@ -3983,18 +4012,44 @@ async function toggleShell(): Promise<void> {
 		toast("no open session on view", "info");
 		return;
 	}
+	if (shellsAsked.delete(e.cwd)) return;
 	if (shellsShown.delete(e.cwd)) {
 		const inShell = focus === "stage" && focusedPane === shellShownIn();
 		apply();
 		if (inShell) await focusStage();
 		return;
 	}
-	if ((await requestShell(e.cwd)) === null) return;
-	shellsShown.add(e.cwd);
+	if (snapshot?.shells[e.cwd]) showShell(e.cwd);
+	else {
+		const req = nextReq();
+		shellsAsked.set(e.cwd, req);
+		post({ type: "shell", req, dir: e.cwd });
+	}
+}
+
+/** Shows a directory's shell, once it runs, with the keyboard in it. */
+function showShell(dir: string): void {
+	shellsShown.add(dir);
 	apply();
-	await stageOps;
-	const pane = shellShownIn();
-	if (pane) await tmuxAsync(UI, "select-pane", ...(narrow ? ["-Z"] : []), "-t", pane);
+	focusOnceShown(() => shellShownIn());
+}
+
+/** How many times the keyboard moved panes; a move asked for before the latest one is abandoned. */
+let focusMoves = 0;
+
+/**
+ * Puts the keyboard on a pane once the Stage's pending changes have placed it, unless the keyboard moved meanwhile: a
+ * key that went elsewhere after asking for this wins.
+ */
+function focusOnceShown(pane: () => string | null): void {
+	const asked = focusMoves;
+	stageOps = stageOps.then(async () => {
+		const target = pane();
+		if (asked !== focusMoves || !target) return;
+		await tmuxAsync(UI, "select-pane", ...(narrow ? ["-Z"] : []), "-t", target).catch((error: Error) =>
+			toast(`focus: ${error.message}`, "error"),
+		);
+	});
 }
 
 /**
@@ -4032,8 +4087,7 @@ async function showView(e: Entry, next: View): Promise<void> {
 	localViews.set(e.id, { view: next, req });
 	post({ type: "view", req, id: e.id, view: next });
 	apply();
-	await stageOps;
-	await tmuxAsync(UI, "select-pane", ...(narrow ? ["-Z"] : []), "-t", (inShell && shellShownIn()) || stagePane);
+	focusOnceShown(() => (inShell && shellShownIn()) || stagePane);
 }
 
 // ── settings ────────────────────────────────────────────────────────────
