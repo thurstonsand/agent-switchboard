@@ -3973,9 +3973,10 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 			break;
 		case "roster":
 			// Settings holds the roster beside the Stage; showing it, and with it the keyboard, still goes.
-			if (argv[0] === "show") await focusRoster();
-			else if (argv[0] === "toggle") {
-				if (!roster.settings) await setRosterHidden(!hideWanted);
+			if (argv[0] === "focus") await focusRoster();
+			else if (argv[0] === "show") await setRosterHidden(false);
+			else if (argv[0] === "hide") {
+				if (!roster.settings) await setRosterHidden(true);
 			} else throw new Error(`roster: ${argv[0]}?`);
 			break;
 		case "stage":

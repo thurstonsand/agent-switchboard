@@ -47,7 +47,7 @@ export function nav(k: "h" | "j" | "k" | "l"): string {
 	const narrow = k === "h" ? "select-pane -Z -t :.0" : k === "l" ? "select-pane -Z -t :.1" : "";
 	const [edge, flag] = { h: ["left", "L"], j: ["bottom", "D"], k: ["top", "U"], l: ["right", "R"] }[k];
 	// Past the left edge is always the roster: hidden, or still joining back after M-a z, the roster queues the move behind that.
-	const off = k === "h" ? roster("show") : "";
+	const off = k === "h" ? roster("focus") : "";
 	return `if -F '#{@swb_narrow}' { ${narrow} } { if -F '#{pane_at_${edge}}' { ${off} } { select-pane -${flag} } }`;
 }
 
@@ -155,7 +155,7 @@ function uiConf(config: Config): string {
 		"set -g status-position top",
 		"set -g status-style default",
 		`set -g status-format[0] "#[range=user|roster] #[bold]◂ ${prefix} z#[nobold] #[dim]show list#[nodim] #[norange]"`,
-		`bind -n MouseDown1Status if -F '#{==:#{mouse_status_range},roster}' { if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { ${roster("show")} } }`,
+		`bind -n MouseDown1Status if -F '#{==:#{mouse_status_range},roster}' { if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { ${roster("focus")} } }`,
 		"set -g mouse on",
 		`bind -n Any if -F '#{mouse_pane}' { if -F '${POINTER_AWAY}' { ${LEAVE} } ; send-keys -M } { if -F '${KEY_AWAY}' { ${LEAVE} } ; send-keys }`,
 		// A card's own process hears Esc, but a harness starting on the Stage would take it as typeahead; the roster tags its pane.
@@ -194,14 +194,15 @@ function uiConf(config: Config): string {
 		"unbind -aq -T prefix",
 		// The roster is pane 0 while it shows; the Stage's panes follow, and overlays after them. A narrow Deck shows one pane
 		// at a time and never splits, so its moves carry the zoom along. @swb_hidden mirrors whether the wide Deck's roster is hidden; only the roster sets it.
-		`bind Tab if -F '#{@swb_narrow}' { if -F '#{pane_index}' { select-pane -Z -t :.0 } { select-pane -Z -t :.1 } } { if -F '#{@swb_hidden}' { ${roster("show")} } { if -F '#{pane_index}' { select-pane -t :.0 } { ${backToStage} } } }`,
+		`bind Tab if -F '#{@swb_narrow}' { if -F '#{pane_index}' { select-pane -Z -t :.0 } { select-pane -Z -t :.1 } } { if -F '#{@swb_hidden}' { ${roster("focus")} } { if -F '#{pane_index}' { select-pane -t :.0 } { ${backToStage} } } }`,
 		`bind h ${nav("h")}`,
 		// j and k move between panes on the Stage; the roster has none above or below, so there they move between sessions.
 		`bind j if -F '${IN_ROSTER}' { ${notify("__deck #{session_name} key J")} } { ${nav("j")} }`,
 		`bind k if -F '${IN_ROSTER}' { ${notify("__deck #{session_name} key K")} } { ${nav("k")} }`,
 		`bind l if -F '#{||:#{@swb_narrow},#{||:#{pane_index},#{@swb_hidden}}}' { ${nav("l")} } { ${backToStage} }`,
 		...(["h", "j", "k", "l"] as const).map((k) => `bind -n C-${k} if -F '#{@swb_editor}' { send-keys C-${k} } { ${nav(k)} }`),
-		`bind z if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { ${roster("toggle")} }`,
+		// z says which it means as it's pressed, so it lands the same whichever order it and an h just after reach the roster.
+		`bind z if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { if -F '#{@swb_hidden}' { ${roster("show")} } { ${roster("hide")} } }`,
 		...[..."nNawxRyY/JKmdSpu,[]"].map((k) => `bind ${k} ${notify(`__deck #{session_name} key ${k}`)}`),
 		`bind e ${notify("__deck #{session_name} view-swap")}`,
 		`bind v ${notify("__deck #{session_name} view-split")}`,
