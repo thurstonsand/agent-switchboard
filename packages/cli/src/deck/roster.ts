@@ -220,8 +220,12 @@ const transcripts = new Map<string, { transcript: Transcript | null; error: stri
 /** The activity each dormant session's transcript was last asked for at; one that moved on since is read again. */
 const transcriptsAsked = new Map<string, number>();
 
-function readTranscript(e: Entry): void {
-	if (e.live || !e.transcript || transcriptsAsked.get(e.id) === e.activityAt) return;
+/**
+ * Reads a dormant session's transcript for its card when its activity moved since the last read, or always when staged:
+ * the file can change with nothing in swb seeing it, as when the session is resumed outside swb.
+ */
+function readTranscript(e: Entry, staged: boolean): void {
+	if (e.live || !e.transcript || (!staged && transcriptsAsked.get(e.id) === e.activityAt)) return;
 	transcriptsAsked.set(e.id, e.activityAt);
 	post({ type: "transcript", id: e.id, path: e.transcript, harness: e.harness });
 }
@@ -885,7 +889,7 @@ function stageSession(id: string): void {
 	editorsAsked.clear();
 	editorsLost.clear();
 	const e = entries.get(id);
-	if (e) readTranscript(e);
+	if (e) readTranscript(e, true);
 	scheduleHighlightWake();
 	apply();
 }
@@ -1108,7 +1112,7 @@ function onSnapshot(next: Snapshot): void {
 	roster.settlePin();
 	if (!started) startCursor();
 	const e = stage.staged === null ? undefined : entries.get(stage.staged);
-	if (e) readTranscript(e);
+	if (e) readTranscript(e, false);
 	apply();
 	roster.syncStage(false);
 	// A turn that lands while I'm already watching is seen as it lands.

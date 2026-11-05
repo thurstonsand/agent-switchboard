@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { appendFileSync, readFileSync } from "node:fs";
 import { config, cursorTo, entry, reply, seed, state, terminal, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
@@ -72,6 +73,28 @@ test("a session woken from its card and stopped again shows the turns it took me
 	s.keys("M-a", "x");
 	await waitState(s, "stopped, on its card", (x) => x.staged.id === id && x.staged.kind !== "live");
 	await until(() => s.screen().includes("reply meanwhile"), budgets.settle, "the new turn on its card");
+});
+
+test("a dormant session's card shows a turn its transcript took while the cursor was away, with no activity in swb", async () => {
+	s = scenario("phase2", "card-outside-turn");
+	const [a, b] = (await seed(s, { turns: ["before"] }, { turns: ["other"] })) as [string, string];
+	s.swb("drive", "start");
+	await cursorTo(s, a);
+	await until(() => s.screen().includes("before"), budgets.settle, "a's dormant card");
+	await cursorTo(s, b);
+	// As a pi resumed outside swb would write it.
+	const [{ transcript }] = s.query<{ transcript: string }>("select transcript from sessions where session_id = ?", a) as [
+		{ transcript: string },
+	];
+	const parentId = (JSON.parse(readFileSync(transcript, "utf8").trim().split("\n").at(-1) as string) as { id: string }).id;
+	const turn = (id: string, parent: string, role: string, text: string) =>
+		JSON.stringify({ type: "message", id, parentId: parent, message: { role, content: [{ type: "text", text }] } });
+	appendFileSync(
+		transcript,
+		`${turn("outside1", parentId, "user", "asked outside")}\n${turn("outside2", "outside1", "assistant", "answered outside")}\n`,
+	);
+	await cursorTo(s, a);
+	await until(() => s.screen().includes("answered outside"), budgets.settle, "the outside turn on a's card");
 });
 
 test("a dormant card shows the whole conversation, newest at the bottom, cropped from the top", async () => {
