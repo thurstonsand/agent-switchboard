@@ -153,7 +153,7 @@ const perf = { render: new Stat(), switchClient: new Stat(), keyToSwitch: new St
 const ctl = new Control((line) => {
 	const [kind, tty, , session] = line.split(" ");
 	if (kind !== "%client-session-changed" || !tty) return;
-	stageUp([tty]);
+	dispatch(() => stageUp([tty]));
 	if (session === placeholder) panes.parked(tty, placeholder);
 });
 
@@ -359,11 +359,8 @@ const panes = new StagePanes(
 			perf.switchClient.add(ms);
 			if (keyAt > 0) perf.keyToSwitch.add(performance.now() - keyAt);
 		},
-		resized: () => apply(),
-		rosterPlaced: () => {
-			syncStatus();
-			setStageCard(desired());
-		},
+		resized: () => commit(),
+		rosterPlaced: () => commit(),
 	},
 	onCard("empty", null, EMPTY),
 );
@@ -598,6 +595,37 @@ function cardStream(): Response {
 	return new Response(body, { headers: { "content-type": "application/x-ndjson" } });
 }
 
+let dispatching = false;
+
+/** Runs a change to the Deck's state, one at a time: a change that starts another inside it is a bug. */
+function transition<T>(change: () => T): T {
+	if (dispatching) throw new Error("a Deck change started inside another");
+	dispatching = true;
+	try {
+		return change();
+	} finally {
+		dispatching = false;
+	}
+}
+
+/**
+ * Every change to the Deck's state comes in here, or ends in commit when it waits on tmux on the way: a key, a click, a
+ * prefix key, a worker's reply, a timer, a config edit.
+ */
+function dispatch<T>(change: () => T): T {
+	const result = transition(change);
+	commit();
+	return result;
+}
+
+/** Settles what a change left: the roster's cursor and mode first, then the Stage, the status line, and the screen. */
+function commit(): void {
+	if (dispatching) throw new Error("a Deck commit inside a change");
+	roster.normalize();
+	apply();
+	syncStatus();
+}
+
 function apply(): void {
 	const d = desired();
 	span("roster.card", () => setStageCard(d));
@@ -661,14 +689,17 @@ function syncVisit(): void {
 	stage.visited = false;
 	stage.watched = id;
 	if (id === null) return;
-	stage.visitTimer = setTimeout(() => {
-		stage.visitTimer = null;
-		if (stage.watched !== id) return;
-		stage.visited = true;
-		post({ type: "visit", id });
-		remember(id);
-		tui.requestRender();
-	}, VISIT_MS);
+	stage.visitTimer = setTimeout(
+		() =>
+			dispatch(() => {
+				stage.visitTimer = null;
+				if (stage.watched !== id) return;
+				stage.visited = true;
+				post({ type: "visit", id });
+				remember(id);
+			}),
+		VISIT_MS,
+	);
 }
 
 /** `[` and `]`: the sessions this Deck has visited, oldest first, each once, and the one it stands on. */
@@ -727,10 +758,14 @@ function scheduleHighlightWake(): void {
 	// A snoozed session is out of the way: looking at it doesn't start it.
 	if (!config.wakeOnHighlight || !e?.open || e.snoozed || e.live || launchFor(e.id) || stage.ended?.id === e.id) return;
 	const id = e.id;
-	stage.highlightTimer = setTimeout(() => {
-		stage.highlightTimer = null;
-		if (stage.staged === id) wake(id, false);
-	}, HIGHLIGHT_MS);
+	stage.highlightTimer = setTimeout(
+		() =>
+			dispatch(() => {
+				stage.highlightTimer = null;
+				if (stage.staged === id) wake(id, false);
+			}),
+		HIGHLIGHT_MS,
+	);
 }
 
 function wake(id: string, keyboard: boolean): void {
@@ -961,8 +996,9 @@ worker.onerror = (event: ErrorEvent) => {
 	toasts.push({ text: `worker died: ${event.message}`, level: "error", until: Number.POSITIVE_INFINITY });
 	tui.requestRender();
 };
-worker.onmessage = (event: MessageEvent<FromWorker>) => {
-	const message = event.data;
+worker.onmessage = (event: MessageEvent<FromWorker>) => dispatch(() => onWorker(event.data));
+
+function onWorker(message: FromWorker): void {
 	switch (message.type) {
 		case "restore":
 			hereRoot = message.root;
@@ -1048,7 +1084,7 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
 			toast(message.text, "error");
 			break;
 	}
-};
+}
 
 // ── roster ──────────────────────────────────────────────────────────────
 
@@ -1217,6 +1253,11 @@ class Roster implements Component, Focusable {
 	 * the cursor leaves it. Only the cursor's own row lingers, so leaving it by any means sends it to Archived.
 	 */
 	lingering: string | null = null;
+	/**
+	 * The frame cache, which only render writes: where it scrolled to and drew things, for the mouse to hit-test and the
+	 * next frame to scroll from. Here and below: scrollTop, pickerTop, pickerListY, card, over, wanted, listTop,
+	 * listHeight, and targets. Everything else changes only in a dispatch.
+	 */
 	scrollTop = 0;
 	collapsed = new Set<string>();
 	expanded = new Set<SectionKey>(["operators"]);
@@ -1289,6 +1330,9 @@ class Roster implements Component, Focusable {
 	card: string[] | null = null;
 	/** The overlays over the roster's own lines, as the last render drew them. */
 	over: Overlay[] = [];
+	/** What the last frame wants put in place once it's out; see afterFrame. */
+	wanted: { floats: Overlay[]; leaves: boolean; spot: PeekSpot | null } = { floats: [], leaves: false, spot: null };
+	frameQueued = false;
 	listTop = 0;
 	listHeight = 0;
 	/** What a click does, by row and column range, as of the last render. */
@@ -1429,7 +1473,8 @@ class Roster implements Component, Focusable {
 	}
 
 	/** The cursor follows the selected key through reorders; if that row vanished, it stays at the same index. */
-	resolveCursor(rows: Row[]): number {
+	/** The cursor's index in rows, without moving anything: what a frame and `deck state` show. */
+	cursorIndex(rows: Row[]): number {
 		if (rows.length === 0) return -1;
 		let index = rows.findIndex((r) => r.key === this.selectedKey);
 		if (index === -1 && this.selectedKey === "") {
@@ -1444,11 +1489,26 @@ class Roster implements Component, Focusable {
 				);
 		}
 		if (index === -1) index = Math.min(this.lastIndex, rows.length - 1);
+		return index;
+	}
+
+	/** Settles the cursor on a row of rows, once there are sessions to settle on, and returns its index. */
+	resolveCursor(rows: Row[]): number {
+		const index = this.cursorIndex(rows);
+		if (!rows.some((r) => r.kind === "session") && this.selectedKey === "") return index;
 		this.selectedKey = (rows[index] as Row).key;
 		this.lastIndex = index;
 		// Left by any means, a lingering row is in Archived for good, even when the cursor comes back to it there.
 		if (this.lingering !== this.selectedKey) this.lingering = null;
 		return index;
+	}
+
+	/** What a change leaves to settle: the cursor on a row, a prompt whose row is gone put away, a typed path's completions read. */
+	normalize(): void {
+		const rows = this.rows();
+		this.resolveCursor(rows);
+		if (this.archiving !== null && !rows.some((r) => r.key === this.archiving)) this.leave();
+		if (this.choosing?.mode === "add") this.addRows();
 	}
 
 	selected(): Row | undefined {
@@ -1470,6 +1530,17 @@ class Roster implements Component, Focusable {
 	}
 
 	handleInput(data: string): void {
+		dispatch(() => this.input(data));
+	}
+
+	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+		const result = transition(() => this.mouse(event));
+		// Pointer motion that lights nothing new changes nothing, and skips the commit as it skips the render.
+		if (result?.render !== false) commit();
+		return result;
+	}
+
+	input(data: string): void {
 		if (isKeyRelease(data)) return;
 		this.hover = null;
 		this.pointer = null;
@@ -1589,7 +1660,7 @@ class Roster implements Component, Focusable {
 		return p ? this.targets.find((t) => t.y === p.y && p.x >= t.from && p.x < t.to) : undefined;
 	}
 
-	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+	mouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
 		// A control under the pointer lights up, wherever it is.
 		let relit = false;
 		if (this.settings) return this.settings.handleMouse(event);
@@ -1722,12 +1793,30 @@ class Roster implements Component, Focusable {
 		return peek.byKeys && focus === "roster" ? spot(index, "cursor") : null;
 	}
 
-	/** Puts these overlays on screen: the roster draws those over its own lines, and the rest float over the Stage. */
-	place(lines: string[], want: Overlay[], width: number): void {
+	/**
+	 * Draws the overlays that go over the roster's own lines into them. The rest float over the Stage, which afterFrame sees
+	 * to once the frame is out, with the Peek wanted at spot.
+	 */
+	place(lines: string[], want: Overlay[], width: number, spot: PeekSpot | null): void {
 		this.over = want.filter((o) => o.x + o.width <= width);
 		for (const o of this.over) this.drawOver(lines, o, width);
-		syncWatch(this.pointer !== null || peek.spot !== null || want.some((o) => o.leaves));
-		overlays.sync(want.filter((o) => !this.over.includes(o)));
+		this.wanted = { floats: want.filter((o) => !this.over.includes(o)), leaves: want.some((o) => o.leaves), spot };
+		if (this.frameQueued) return;
+		this.frameQueued = true;
+		queueMicrotask(() => this.afterFrame());
+	}
+
+	/** Puts in place what the last frame wants: the Peek, the UI server's pointer watch, and what floats over the Stage. */
+	afterFrame(): void {
+		this.frameQueued = false;
+		const { floats, leaves, spot } = this.wanted;
+		const settled = spotKey(peek.settled);
+		syncPeek(wantPeek(spot));
+		syncWatch(this.pointer !== null || peek.spot !== null || leaves);
+		// A Peek that closed or moved floats in this frame as it was; the next frame draws it as it is now.
+		const moved = spotKey(peek.settled) !== settled;
+		overlays.sync(moved ? floats.filter((o) => o.id !== "peek") : floats);
+		if (moved) tui.requestRender();
 	}
 
 	/**
@@ -2186,9 +2275,14 @@ class Roster implements Component, Focusable {
 		return best;
 	}
 
+	/** The completions of the path typed, which render and `deck state` read as the last change left them. */
+	completedRows(): string[] {
+		return this.completed?.rows ?? [];
+	}
+
 	addRows(): string[] {
 		const typed = this.path.getValue();
-		// Asked for on every render, hover, and state read; the disk is read once per keystroke.
+		// The disk is read once per path typed.
 		// biome-ignore lint/plugin: the directory typed is the one read, as each key types it.
 		if (this.completed?.typed !== typed) this.completed = { typed, rows: completions(typed, scanBase()) };
 		return this.completed.rows;
@@ -2398,7 +2492,7 @@ class Roster implements Component, Focusable {
 			detail = row?.kind === "target" ? ` ${gray(shortPath(row.target.path))}` : dirTrees === null ? ` ${dim("finding directories…")}` : "";
 		} else {
 			const listed = this.listed();
-			const matches = this.addRows();
+			const matches = this.completedRows();
 			body = matches.map((path, i): [string, (() => void) | null] => {
 				const name = `${basename(path)}/`;
 				const line = truncateToWidth(`   ${listed.has(path) ? dim(name) : name}`, width, "…", true);
@@ -2469,20 +2563,18 @@ class Roster implements Component, Focusable {
 		const t0 = performance.now();
 		const height = tui.terminal.rows;
 		if (this.settings) {
-			syncPeek(wantPeek(null));
 			const lines = this.settings.render(width, height);
-			this.place(lines, [], width);
+			this.place(lines, [], width, null);
 			return lines;
 		}
 		if (this.choosing) {
-			syncPeek(wantPeek(null));
 			const lines = this.renderPicker(width, height);
-			this.place(lines, launchOverlays(this.choosing, width, height), width);
+			this.place(lines, launchOverlays(this.choosing, width, height), width, null);
 			return lines;
 		}
 		const now = Date.now();
 		const rows = this.rows();
-		const index = this.resolveCursor(rows);
+		const index = this.cursorIndex(rows);
 		this.targets = [];
 		// A wide Deck's Peek says what the session is; the narrow one's roster has no Stage beside it to show one.
 		const detailLines = panes.narrow ? 3 : 1;
@@ -2498,11 +2590,11 @@ class Roster implements Component, Focusable {
 			this.messageLine(now, this.listTop + bodyHeight + 1 + detailLines),
 			this.hints(this.listTop + bodyHeight + 1 + detailLines + 1, width),
 		);
-		syncPeek(wantPeek(this.peekSpot(rows, index)));
 		this.place(
 			lines,
 			[...peekOverlays(rows, width, height), ...toastOverlay(now, width, this.listTop + bodyHeight + 1 + detailLines)],
 			width,
+			this.peekSpot(rows, index),
 		);
 		const out = lines.map((line) => truncateToWidth(line, width, "…", true));
 		if (perf.render.n === 0) mark("roster.first-frame");
@@ -2540,7 +2632,6 @@ class Roster implements Component, Focusable {
 			});
 		// The archive prompt opens beneath its row, pushing the rows after it down; its row is the cursor's.
 		const asking = this.archiving === null ? -1 : rows.findIndex((r) => r.key === this.archiving);
-		if (asking === -1 && this.archiving !== null) this.leave();
 		const archiveEntry = this.archiving === null ? undefined : entries.get(this.archiving);
 		const prompt =
 			asking === -1
@@ -2647,8 +2738,7 @@ class Roster implements Component, Focusable {
 
 	/** A toast, else the config error, which stays until the file is fixed and opens it on a click; y makes it clickable. */
 	messageLine(now: number, y: number | null = null, withConfigError = true): string {
-		toasts = toasts.filter((t) => t.until > now);
-		const t = toasts.at(-1);
+		const t = toasts.filter((t) => t.until > now).at(-1);
 		if (!t && configError && withConfigError) {
 			const error = configError;
 			// Like a legend entry: the key that acts on it, then what's wrong.
@@ -3091,9 +3181,9 @@ function peekOverlays(rows: Row[], width: number, height: number): Overlay[] {
 	const view = peekView(row, w, height, panes.narrow ? "right" : "left");
 	const pointer = () => {
 		cancelPendingPeek();
-		if (roster.hover === spot.id) return;
+		if (roster.hover === spot.id) return false;
 		roster.hover = spot.id;
-		tui.requestRender();
+		return true;
 	};
 	return [
 		{
@@ -3820,7 +3910,7 @@ watch(configDir(), (_event, file) => {
 	if (reloadTimer) clearTimeout(reloadTimer);
 	reloadTimer = setTimeout(() => {
 		reloadTimer = null;
-		reloadConfig();
+		dispatch(reloadConfig);
 	}, 100);
 });
 
@@ -3906,7 +3996,7 @@ function pickerState(): PickerState | null {
 							? { name: "+ add a directory…", path: null, worktree: false, dim: false }
 							: { name: targetName(row.target), path: row.target.path, worktree: row.target.repo !== null, dim: row.context },
 					)
-			: roster.addRows().map((path) => ({ name: `${basename(path)}/`, path, worktree: false, dim: listed.has(path) }));
+			: roster.completedRows().map((path) => ({ name: `${basename(path)}/`, path, worktree: false, dim: listed.has(path) }));
 	return {
 		mode: choosing.mode,
 		input: (choosing.mode === "pick" ? roster.search : roster.path).getValue(),
@@ -3937,7 +4027,7 @@ function overlayShown(id: string): { about: string; lines: string[] } | null {
 function viewState(): DeckState {
 	const rows = roster.rows();
 	const labels = new Map(rows.flatMap((row) => (row.kind === "header" && row.group !== null ? [[row.key, row.group]] : [])));
-	const index = roster.resolveCursor(rows);
+	const index = roster.cursorIndex(rows);
 	const cursorRow = rows[index];
 	const drop = roster.dragging?.moved ? roster.dragging.drop : null;
 	const applied = panes.applied;
@@ -4037,11 +4127,9 @@ const overlays = new Overlays({
 	pane: rosterPane,
 	deck,
 	failed: (message) => toast(message, "error"),
-	left: () => {
-		pointerOut();
-		tui.requestRender();
-	},
-	changed: () => tui.requestRender(),
+	left: () => dispatch(pointerOut),
+	// After a click on one of its buttons, or the pointer lighting something in it, each in the overlay's own input.
+	changed: () => commit(),
 });
 tui.setFocus(roster);
 tui.start();
@@ -4078,7 +4166,7 @@ async function queryColors(scheme: "light" | "dark" | null): Promise<void> {
 		};
 		post({ type: "colors", colors: profile });
 	}
-	tui.requestRender();
+	commit();
 }
 tui.onTerminalColorSchemeChange((scheme) => void queryColors(scheme));
 tui.setTerminalColorSchemeNotifications(true);
@@ -4108,6 +4196,8 @@ Bun.serve({
 				await handleCommand(cmd, argv);
 			} catch (error) {
 				return new Response((error as Error).message, { status: 400 });
+			} finally {
+				commit();
 			}
 			return new Response("ok");
 		}
@@ -4136,7 +4226,7 @@ function checkReady(): void {
 
 // Attached before it lists them, the control client hears every client that attaches after the list.
 void ctl.run("list-clients -F '#{client_tty}'").then(
-	(out) => stageUp(out.split("\n")),
+	(out) => dispatch(() => stageUp(out.split("\n"))),
 	(error: Error) => toast(`stage: ${error.message}`, "error"),
 );
 
@@ -4148,7 +4238,7 @@ setInterval(() => {
 		void ctl
 			.run("list-clients -F '#{client_tty}'")
 			.then(
-				(out) => stageUp(out.split("\n")),
+				(out) => dispatch(() => stageUp(out.split("\n"))),
 				() => {},
 			)
 			.finally(() => {
@@ -4158,10 +4248,10 @@ setInterval(() => {
 	const now = Date.now();
 	keepLayout(now);
 	syncTitle();
-	if (
-		toasts.some((t) => t.until <= now) ||
-		launches.length > 0 ||
-		[...entries.values()].some((e) => e.activity === "blocked" || e.activity === "working")
-	)
+	if (toasts.some((t) => t.until <= now))
+		dispatch(() => {
+			toasts = toasts.filter((t) => t.until > now);
+		});
+	else if (launches.length > 0 || [...entries.values()].some((e) => e.activity === "blocked" || e.activity === "working"))
 		tui.requestRender();
 }, 100);

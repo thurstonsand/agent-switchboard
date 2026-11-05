@@ -231,7 +231,14 @@ function prefill(input: Input, value: string): void {
 
 export class SettingsPane {
 	section = 0;
-	area: "rail" | "list" = "list";
+	/** The rail or the list, as last chosen; a narrow pane, which has no rail, keeps the keyboard in the list. */
+	private chosenArea: "rail" | "list" = "list";
+	get area(): "rail" | "list" {
+		return this.narrow ? "list" : this.chosenArea;
+	}
+	set area(area: "rail" | "list") {
+		this.chosenArea = area;
+	}
 	search = new Input({ prompt: "" });
 	changedOnly = false;
 	cursor = 0;
@@ -1131,7 +1138,6 @@ export class SettingsPane {
 	render(width: number, height: number): string[] {
 		this.targets = [];
 		this.narrow = width < NARROW_BELOW;
-		if (this.narrow) this.area = "list";
 		const now = Date.now();
 		const lines: string[] = [this.header(width)];
 		const bodyHeight = Math.max(3, height - 7);

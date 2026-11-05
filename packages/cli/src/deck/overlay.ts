@@ -29,8 +29,8 @@ export type Overlay = {
 	width: number;
 	view: OverlayView;
 	leaves: boolean;
-	/** The pointer moving over it. */
-	pointer: (() => void) | null;
+	/** The pointer moving over it; true when that changed what the roster shows. */
+	pointer: (() => boolean) | null;
 };
 
 type Shown = {
@@ -58,7 +58,7 @@ export type OverlayHost = {
 	failed: (message: string) => void;
 	/** One that `leaves` went without the roster: the UI server saw the pointer or a key go elsewhere. */
 	left: () => void;
-	/** Something shown changed by itself: a click ran, or one went. */
+	/** Something shown changed by itself: a click ran, the pointer lit something, or one went. */
 	changed: () => void;
 };
 
@@ -319,7 +319,7 @@ export class Overlays {
 			// 32 and up is motion; 35, with no button held.
 			if (button >= 32 && button < 64) {
 				s.at = at;
-				s.overlay.pointer?.();
+				if (s.overlay.pointer?.()) this.host.changed();
 				this.paint(s);
 			} else if (button === 0 && kind === "M") {
 				const hit = s.overlay.view.buttons.find((b) => b.y === at.y && at.x >= b.from && at.x < b.to);
