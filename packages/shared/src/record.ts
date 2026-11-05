@@ -4,7 +4,9 @@ import { bootId, branch, type Harness, isBusy, pidAlive, projectRoot, SCHEMA_VER
 import { ARCHIVED, PENDING_MESSAGE, PENDING_SCHEDULE } from "./states.ts";
 
 // Every line records a session's lifecycle through these, so pi, Claude Code, and Codex rows mean the same thing.
-// Each call is one write transaction that first asserts the schema it writes.
+// Each call is one write transaction that first asserts the schema it writes. Git facts are read before it, since every
+// other line and swb command waits on the write lock; the directory check stays inside, where archiveWorktree's own
+// transaction removes a checkout.
 
 /** One write, refused when the db is on another schema: a line older or newer than swb must not write an old shape. */
 export function recordTx<T>(db: Db, body: () => T): T {
@@ -108,6 +110,8 @@ export type Hosting = { host: string; harness: Harness; sessionId: string; cwd: 
 
 /** A process starts hosting a session: its runtime row, keyed by its tmux session, now names it. */
 export function startHosting(db: Db, h: Hosting): void {
+	const project = projectRoot(h.cwd);
+	const head = branch(h.cwd);
 	recordTx(db, () => {
 		if (!existsSync(h.cwd)) throw new Error(`session directory no longer exists: ${h.cwd}`);
 		const other = hostOfSession(db, h.sessionId, h.host);
@@ -121,7 +125,7 @@ export function startHosting(db: Db, h: Hosting): void {
 			h.sessionId,
 			h.harness,
 			h.cwd,
-			projectRoot(h.cwd),
+			project,
 			bootId(),
 			h.pid,
 			Date.now(),
@@ -132,8 +136,8 @@ export function startHosting(db: Db, h: Hosting): void {
 			"UPDATE sessions SET phase = CASE WHEN ? THEN 'idle' ELSE phase END, cwd = ?, project_root = ?, branch = ?, transcript = ? WHERE session_id = ?",
 			h.idle ? 1 : 0,
 			h.cwd,
-			projectRoot(h.cwd),
-			branch(h.cwd),
+			project,
+			head,
 			h.transcript,
 			h.sessionId,
 		);
@@ -151,6 +155,8 @@ export type Turn = { harness: Harness; host: string; sessionId: string; cwd: str
  * row goes with it; a session after that one, from a /new or /clear, takes neither. Returns the parent it took.
  */
 export function startTurn(db: Db, t: Turn): string | null {
+	const project = projectRoot(t.cwd);
+	const head = branch(t.cwd);
 	return recordTx(db, () => {
 		const phase = db.get("SELECT phase FROM sessions WHERE session_id = ?", t.sessionId)?.phase;
 		if ((!phase || phase === "idle") && !existsSync(t.cwd)) throw new Error(`session directory no longer exists: ${t.cwd}`);
@@ -168,10 +174,10 @@ export function startTurn(db: Db, t: Turn): string | null {
 			t.harness,
 			parentId,
 			t.cwd,
-			projectRoot(t.cwd),
+			project,
 			t.transcript,
 			t.title,
-			branch(t.cwd),
+			head,
 			now,
 			now,
 		);
@@ -209,6 +215,8 @@ export type Settle = { host: string; sessionId: string; cwd: string; title: stri
  * or a reload waits for it, which the clock starts again.
  */
 export function settle(db: Db, s: Settle): { quit: boolean } {
+	const project = projectRoot(s.cwd);
+	const head = branch(s.cwd);
 	return recordTx(db, () => {
 		harnessTitled(db, s.sessionId, s.title);
 		db.run(
@@ -219,8 +227,7 @@ export function settle(db: Db, s: Settle): { quit: boolean } {
 		);
 		// An archive-and-delete turn keeps the checkout's last recorded Project and branch.
 		if (existsSync(s.cwd)) {
-			const project = projectRoot(s.cwd);
-			db.run("UPDATE sessions SET cwd = ?, project_root = ?, branch = ? WHERE session_id = ?", s.cwd, project, branch(s.cwd), s.sessionId);
+			db.run("UPDATE sessions SET cwd = ?, project_root = ?, branch = ? WHERE session_id = ?", s.cwd, project, head, s.sessionId);
 			db.run("UPDATE runtimes SET cwd = ?, project_root = ? WHERE tmux_session = ?", s.cwd, project, s.host);
 		}
 		const reloading = db.get("SELECT 1 FROM marks WHERE session_id = ? AND reload IS NOT NULL", s.sessionId);

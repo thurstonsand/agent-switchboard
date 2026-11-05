@@ -164,8 +164,9 @@ export function targetName(t: Target): string {
 
 /** Adding a directory brings back its repository, if that was removed. */
 export function addDir(db: Db, path: string): void {
+	const repo = projectRoot(path);
 	db.tx(() => {
-		db.run("DELETE FROM dirs WHERE path = ? AND state = 'removed'", projectRoot(path));
+		db.run("DELETE FROM dirs WHERE path = ? AND state = 'removed'", repo);
 		db.run("INSERT INTO dirs (path, state) VALUES (?, 'added') ON CONFLICT (path) DO UPDATE SET state = 'added'", path);
 	});
 }
