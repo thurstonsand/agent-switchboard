@@ -2,6 +2,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { type Db, type Harness, SNOOZE_PRESETS, type Snooze, type SnoozePreset } from "@swb/shared";
 import { clockTime, harnessName } from "@swb/shared/mailbox";
 import { isArchived, recordTx, titleOf } from "@swb/shared/record";
+import { PENDING_SCHEDULE } from "@swb/shared/states";
 import type { ToolResult } from "@swb/shared/tools";
 import { Cron } from "croner";
 import { displayName, type SessionState, sessionState, states } from "./derive.ts";
@@ -203,10 +204,10 @@ export async function schedule(db: Db, s: ScheduleSpec): Promise<ToolResult> {
 
 /** The schedules a session set or receives: pending first, soonest first, then the last ten finished. */
 export function listSchedules(db: Db, from: string): ToolResult {
-	const mine = "(source_id = ?1 OR target_id = ?1) AND cancelled_at IS NULL";
-	const pending = db.all(`SELECT ${COLUMNS} FROM schedules WHERE ${mine} AND next_at IS NOT NULL ORDER BY next_at`, from) as ScheduleRow[];
+	const mine = "(source_id = ?1 OR target_id = ?1)";
+	const pending = db.all(`SELECT ${COLUMNS} FROM schedules WHERE ${mine} AND ${PENDING_SCHEDULE} ORDER BY next_at`, from) as ScheduleRow[];
 	const finished = db.all(
-		`SELECT ${COLUMNS} FROM schedules WHERE ${mine} AND next_at IS NULL ORDER BY last_fired_at DESC LIMIT 10`,
+		`SELECT ${COLUMNS} FROM schedules WHERE ${mine} AND cancelled_at IS NULL AND next_at IS NULL ORDER BY last_fired_at DESC LIMIT 10`,
 		from,
 	) as ScheduleRow[];
 	if (pending.length + finished.length === 0) return { text: "No schedules.", details: { schedules: [] } };
@@ -337,9 +338,7 @@ export function schedulesBySession(db: Db): Map<string, ScheduleView[]> {
 
 /** When the next schedule is due, if any is. */
 export function nextDue(db: Db): number | null {
-	return (
-		(db.get("SELECT min(next_at) AS at FROM schedules WHERE next_at IS NOT NULL AND cancelled_at IS NULL")?.at as number | null) ?? null
-	);
+	return (db.get(`SELECT min(next_at) AS at FROM schedules WHERE ${PENDING_SCHEDULE}`)?.at as number | null) ?? null;
 }
 
 export type Fired = {
@@ -354,7 +353,7 @@ export type Fired = {
 export function fire(db: Db, now: number): Fired {
 	return recordTx(db, () => {
 		const due = db.all(
-			`SELECT ${COLUMNS} FROM schedules WHERE next_at IS NOT NULL AND cancelled_at IS NULL AND next_at <= ? ORDER BY next_at`,
+			`SELECT ${COLUMNS} FROM schedules WHERE ${PENDING_SCHEDULE} AND next_at <= ? ORDER BY next_at`,
 			now,
 		) as ScheduleRow[];
 		const fired: Fired = { targets: [], launches: [] };

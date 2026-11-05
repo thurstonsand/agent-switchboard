@@ -3,16 +3,7 @@ import { statSync } from "node:fs";
 import { bootId, type Harness, linkedWorktreeAsync, operatorDir, projectRoot, type View } from "@swb/shared";
 import { span } from "@swb/shared/trace";
 import type { Config } from "../config.ts";
-import {
-	deriveSessions,
-	isOpen,
-	type RuntimeRecord,
-	runtimeLive,
-	runtimeRecords,
-	type SessionRow,
-	sessionRows,
-	type World,
-} from "../derive.ts";
+import { deriveSessions, type RuntimeRecord, runtimeLive, runtimeRecords, type SessionRow, sessionRows, type World } from "../derive.ts";
 import { addDir, removeDir, targets } from "../dirs.ts";
 import { type Catalog, discover, launchFlags, readCatalog, resolveLaunch, shortlist, writeGuide } from "../harnesses.ts";
 import { type ScheduleView, schedulesBySession, snooze } from "../schedules.ts";
@@ -185,7 +176,7 @@ function readDb(): void {
 /** At its Project's root, an open session is in the main checkout or no repository at all; only one below it asks git. */
 function worktreeOf(row: SessionRow): string | null {
 	const { cwd } = row;
-	if (!isOpen(row) || cwd === row.project_root) return null;
+	if (!row.open || cwd === row.project_root) return null;
 	if (!worktrees.has(cwd) && !asking.has(cwd)) {
 		asking.add(cwd);
 		void linkedWorktreeAsync(cwd).then((tree) => {

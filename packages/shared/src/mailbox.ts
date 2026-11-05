@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import type { Db } from "./db.ts";
 import type { Harness } from "./index.ts";
 import { titleOf } from "./record.ts";
+import { PENDING_MESSAGE } from "./states.ts";
 
 // Messages between sessions wait in swb.db until the target's line takes them. A sender rings the target's doorbell
 // once its message commits, and every live line listens for its own, polling as well for a sender that didn't ring.
@@ -56,7 +57,7 @@ export function pendingFor(db: Db, targetId: string): Message[] {
 	return db
 		.all(
 			`SELECT id, kind, source_id, target_id, body, report_back, created_at, schedule_id, scheduled_for FROM messages
-			 WHERE target_id = ? AND delivered_at IS NULL AND cancelled_at IS NULL ORDER BY created_at, rowid`,
+			 WHERE target_id = ? AND ${PENDING_MESSAGE} ORDER BY created_at, rowid`,
 			targetId,
 		)
 		.map((row) => ({

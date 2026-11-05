@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "no
 import { basename, dirname, join, sep } from "node:path";
 import { bootId, type Db, dbPath, type Harness, linkedWorktree, operatorDir, projectRoot, stateDir } from "@swb/shared";
 import { isArchived, markArchived, recordTx, titleOf } from "@swb/shared/record";
+import { OPEN, PENDING_SCHEDULE } from "@swb/shared/states";
 import { now, since } from "@swb/shared/trace";
 import { type Effort, HARNESS_EFFORTS } from "./config.ts";
 import { displayName, type RuntimeRow, runtimeLive, states } from "./derive.ts";
@@ -735,9 +736,7 @@ export async function archiveWorktree(
 			if (!selected.has(r.session_id as string) && inside(r.cwd as string) && liveRuntime(db, r.session_id as string, hosts))
 				throw new SwbError(`worktree is still used by session ${r.session_id}; stop it first`);
 		}
-		for (const schedule of db.all(
-			"SELECT id, schedule_label, launch FROM schedules WHERE cancelled_at IS NULL AND next_at IS NOT NULL AND launch IS NOT NULL",
-		)) {
+		for (const schedule of db.all(`SELECT id, schedule_label, launch FROM schedules WHERE ${PENDING_SCHEDULE} AND launch IS NOT NULL`)) {
 			const launch = JSON.parse(schedule.launch as string) as { cwd: string };
 			if (inside(launch.cwd))
 				throw new SwbError(`worktree is used by schedule "${schedule.schedule_label}" (${schedule.id}); unschedule it first`);
@@ -882,10 +881,7 @@ export function gc(db: Db): void {
 	const owned = listed.filter(([, kind]) => kind === "editor" || kind === "shell");
 	if (owned.length === 0) return;
 	const hosts = new Set(listed.map(([name]) => name as string));
-	const open = db.all(
-		`SELECT s.cwd FROM sessions s LEFT JOIN marks m USING (session_id)
-		 WHERE m.archived_at IS NULL OR m.archived_at < s.last_prompt_at`,
-	);
+	const open = db.all(`SELECT s.cwd FROM sessions s LEFT JOIN marks m USING (session_id) WHERE ${OPEN}`);
 	const provisional = db
 		.all("SELECT cwd, tmux_session FROM runtimes WHERE session_id NOT IN (SELECT session_id FROM sessions)")
 		.filter((row) => hosts.has(row.tmux_session as string));

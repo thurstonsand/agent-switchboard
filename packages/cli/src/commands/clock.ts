@@ -1,4 +1,5 @@
 import { recordTx } from "@swb/shared/record";
+import { PENDING_MESSAGE } from "@swb/shared/states";
 import { launchSession } from "../coordinate.ts";
 import { states } from "../derive.ts";
 import { type Fired, fire, newSessionName, nextDue } from "../schedules.ts";
@@ -53,7 +54,7 @@ export async function clock(): Promise<void> {
 		const waiting = new Set(
 			db
 				.all(
-					`SELECT DISTINCT target_id AS id FROM messages WHERE delivered_at IS NULL AND cancelled_at IS NULL AND kind = 'message'
+					`SELECT DISTINCT target_id AS id FROM messages WHERE ${PENDING_MESSAGE} AND kind = 'message'
 					 UNION SELECT session_id FROM marks WHERE reload IS NOT NULL`,
 				)
 				.map((row) => row.id as string),

@@ -70,7 +70,7 @@ Some scenarios install pi-sessions and pi-wt from `node_modules`, at the version
 - Name tools and args for the call you want the model to make; the name outweighs its description. snake_case for both.
 - `swb` owns all DDL and migrations through `PRAGMA user_version`; a line only asserts the exact version
 - Every line records through `@swb/shared/record` and reads messages through `@swb/shared/mailbox`; the tool contracts live once, in `@swb/shared/tools`
-- Store facts, derive states: Live, Interrupted, Unseen, Inactive, Snoozed, and Archived are computed at read time, never persisted
+- Store facts, derive states: Live, Interrupted, Unseen, Inactive, Snoozed, and Archived are computed at read time, never persisted. A state a SQL query asks about (archived, open, a pending message or schedule) is defined once in `@swb/shared/states`; queries use that, never their own copy
 - The roster's thread never waits on the disk or a process: it uses `tmuxAsync`, its control client, async fs, or the worker. `packages/cli/src/deck/main-thread.grit` fails the lint on a `*Sync` call or a synchronous tmux, config, or directory helper there; each exception carries a `biome-ignore lint/plugin` saying why
 
 ## Testing

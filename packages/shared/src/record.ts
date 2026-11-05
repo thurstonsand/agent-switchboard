@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import type { Db, Row } from "./db.ts";
 import { bootId, branch, type Harness, isBusy, pidAlive, projectRoot, SCHEMA_VERSION } from "./index.ts";
+import { ARCHIVED, PENDING_MESSAGE, PENDING_SCHEDULE } from "./states.ts";
 
 // Every line records a session's lifecycle through these, so pi, Claude Code, and Codex rows mean the same thing.
 // Each call is one write transaction that first asserts the schema it writes.
@@ -283,12 +284,7 @@ export function endHosting(db: Db, host: string): void {
 }
 
 export function isArchived(db: Db, sessionId: string): boolean {
-	return Boolean(
-		db.get(
-			"SELECT 1 FROM sessions s JOIN marks m USING (session_id) WHERE s.session_id = ? AND m.archived_at >= s.last_prompt_at",
-			sessionId,
-		),
-	);
+	return Boolean(db.get(`SELECT 1 FROM sessions s JOIN marks m USING (session_id) WHERE s.session_id = ? AND ${ARCHIVED}`, sessionId));
 }
 
 /**
@@ -304,7 +300,7 @@ export function markArchived(db: Db, sessionId: string): boolean {
 		sessionId,
 		now,
 	);
-	db.run("UPDATE messages SET cancelled_at = ? WHERE target_id = ? AND delivered_at IS NULL AND cancelled_at IS NULL", now, sessionId);
-	db.run("UPDATE schedules SET cancelled_at = ? WHERE target_id = ? AND next_at IS NOT NULL AND cancelled_at IS NULL", now, sessionId);
+	db.run(`UPDATE messages SET cancelled_at = ? WHERE target_id = ? AND ${PENDING_MESSAGE}`, now, sessionId);
+	db.run(`UPDATE schedules SET cancelled_at = ? WHERE target_id = ? AND ${PENDING_SCHEDULE}`, now, sessionId);
 	return true;
 }

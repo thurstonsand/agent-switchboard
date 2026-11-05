@@ -1,5 +1,6 @@
 import { basename } from "node:path";
 import { bootId, type Db, type Harness, operatorDir, type Phase, pidAlive, type ReloadMode, type View } from "@swb/shared";
+import { OPEN } from "@swb/shared/states";
 import { loadConfig } from "./config.ts";
 import { SwbError } from "./errors.ts";
 import { listSessions, SESSIONS } from "./tmux.ts";
@@ -73,6 +74,8 @@ export type SessionRow = {
 	last_settled_at: number | null;
 	errored_at: number | null;
 	archived_at: number | null;
+	/** Never archived, or prompted since: `OPEN`. */
+	open: boolean;
 	visited_at: number | null;
 	unseen_at: number | null;
 	view: View | null;
@@ -90,7 +93,7 @@ export function sessionRows(db: Db): SessionRow[] {
 		.all(
 			`SELECT s.session_id, s.harness, s.parent_id, coalesce(m.title, s.title) AS title, s.project_root, s.cwd, s.branch, s.transcript, s.phase, s.created_at, s.last_prompt_at, s.last_settled_at, s.errored_at,
 		        m.archived_at, m.visited_at, m.unseen_at, m.view, m.group_name, m.snoozed_at, m.snoozed_until, m.reload, r.tmux_session, r.boot_id, r.pid,
-		        (SELECT max(created_at) FROM messages WHERE target_id = s.session_id AND kind = 'message') AS last_message_at
+		        ${OPEN} AS open, (SELECT max(created_at) FROM messages WHERE target_id = s.session_id AND kind = 'message') AS last_message_at
 		 FROM sessions s LEFT JOIN marks m USING (session_id) LEFT JOIN runtimes r USING (session_id)`,
 		)
 		.map((r) => ({
@@ -108,6 +111,7 @@ export function sessionRows(db: Db): SessionRow[] {
 			last_settled_at: r.last_settled_at as number | null,
 			errored_at: r.errored_at as number | null,
 			archived_at: r.archived_at as number | null,
+			open: Boolean(r.open),
 			visited_at: r.visited_at as number | null,
 			unseen_at: r.unseen_at as number | null,
 			view: r.view as View | null,
@@ -166,14 +170,9 @@ export function deriveSessions(rows: SessionRow[], w: World): SessionState[] {
 	return states;
 }
 
-/** Never archived, or prompted since. */
-export function isOpen(row: SessionRow): boolean {
-	return row.archived_at === null || row.archived_at < row.last_prompt_at;
-}
-
 function derive(row: SessionRow, w: World): SessionState {
 	const live = row.runtime !== null && runtimeLive(row.runtime, w.bootId, w.hosts);
-	const open = isOpen(row);
+	const { open } = row;
 	const activity: Phase = live ? row.phase : "idle";
 	// A clean shutdown takes its runtime row with it; a killed process leaves one behind, from this boot or an earlier one.
 	const cutOff: CutOff | null =
