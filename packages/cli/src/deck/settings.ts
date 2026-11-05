@@ -110,6 +110,8 @@ type AddRow = { kind: "group"; text: string; depth: number } | { kind: "model"; 
 
 type ClickTarget = { y: number; from: number; to: number; act: () => void };
 
+type SettingsMode = { kind: "browse" } | { kind: "search" } | { kind: "edit"; edit: Editing } | { kind: "add"; add: Adding };
+
 const RAIL = 18;
 const NARROW_BELOW = 100;
 const LONG_LIST = 10;
@@ -230,13 +232,23 @@ function prefill(input: Input, value: string): void {
 export class SettingsPane {
 	section = 0;
 	area: "rail" | "list" = "list";
-	searching = false;
 	search = new Input({ prompt: "" });
 	changedOnly = false;
 	cursor = 0;
 	scroll = 0;
-	editing: Editing | null = null;
-	adding: Adding | null = null;
+	/** What the keyboard is doing. One mode at a time: an edit, an add, and the search can't stack. */
+	mode: SettingsMode = { kind: "browse" };
+	get searching(): boolean {
+		return this.mode.kind === "search";
+	}
+	get editing(): Editing | null {
+		return this.mode.kind === "edit" ? this.mode.edit : null;
+	}
+	get adding(): Adding | null {
+		return this.mode.kind === "add" ? this.mode.add : null;
+	}
+	/** The wheel scrolled the list during an edit, which stays on its item; the next key brings it back into view. */
+	scrolledAway = false;
 	prose: Prose | null = null;
 	/** The list row under the pointer; null once a key is pressed or the pointer leaves. */
 	hover: number | null = null;
@@ -254,6 +266,11 @@ export class SettingsPane {
 
 	constructor(readonly host: SettingsHost) {
 		this.cursor = this.firstSelectable(this.items());
+	}
+
+	setMode(next: SettingsMode): void {
+		this.mode = next;
+		this.scrolledAway = false;
 	}
 
 	// ── model ──────────────────────────────────────────────────────────
@@ -409,7 +426,7 @@ export class SettingsPane {
 				const c = item.s.control;
 				if (c.kind === "bool") this.set(item.s, !this.valueOf(item.s));
 				else if (c.kind === "enum") this.cycle(item.s, 1);
-				else if (c.kind === "chord") this.editing = { kind: "chord", captured: null, error: null };
+				else if (c.kind === "chord") this.setMode({ kind: "edit", edit: { kind: "chord", captured: null, error: null } });
 				else if (c.kind === "paths") this.startText({ kind: "addEntry", s: item.s }, "");
 				else if (c.kind === "prose") {
 					this.setSection(SECTIONS.indexOf(item.s.section));
@@ -526,7 +543,7 @@ export class SettingsPane {
 	startText(target: TextTarget, value: string): void {
 		const input = new Input({ prompt: "" });
 		prefill(input, value);
-		this.editing = { kind: "text", target, input, error: null };
+		this.setMode({ kind: "edit", edit: { kind: "text", target, input, error: null } });
 	}
 
 	commitText(): void {
@@ -543,7 +560,7 @@ export class SettingsPane {
 		} else if (t.kind === "entry" || t.kind === "addEntry") {
 			const list = [...(this.valueOf(t.s) as string[])];
 			if (t.kind === "addEntry" && text === "") {
-				this.editing = null;
+				this.setMode({ kind: "browse" });
 				return;
 			}
 			if (t.kind === "entry" && text === "") list.splice(t.index, 1);
@@ -555,7 +572,7 @@ export class SettingsPane {
 			const value = (c === "int" || c === "width") && /^\d+$/.test(text) ? Number(text) : text;
 			error = this.set(t.s, value);
 		}
-		if (error === null) this.editing = null;
+		if (error === null) this.setMode({ kind: "browse" });
 		else editing.error = error;
 	}
 
@@ -691,7 +708,7 @@ export class SettingsPane {
 
 	startAdding(): void {
 		this.host.refresh(false);
-		this.adding = {
+		const add: Adding = {
 			step: "search",
 			query: new Input({ prompt: "" }),
 			choice: 0,
@@ -701,7 +718,8 @@ export class SettingsPane {
 			note: new Input({ prompt: "" }),
 			error: null,
 		};
-		this.adding.choice = this.firstModel();
+		this.setMode({ kind: "add", add });
+		add.choice = this.firstModel();
 	}
 
 	/** Matches grouped by harness, then provider or kind; typing a full id also offers it as one. */
@@ -800,7 +818,7 @@ export class SettingsPane {
 			adding.error = error;
 			return;
 		}
-		this.adding = null;
+		this.setMode({ kind: "browse" });
 		const items = this.items();
 		this.cursor = items.findIndex((i) => i.kind === "preset" && i.index === this.presets().length - 1);
 	}
@@ -809,7 +827,7 @@ export class SettingsPane {
 		const adding = this.adding as Adding;
 		adding.error = null;
 		if (matchesKey(data, "escape")) {
-			if (adding.step === "search") this.adding = null;
+			if (adding.step === "search") this.setMode({ kind: "browse" });
 			else if (adding.step === "effort") adding.step = "search";
 			else adding.step = adding.picked?.agent ? "search" : "effort";
 			return;
@@ -857,7 +875,7 @@ export class SettingsPane {
 		if (this.prose) this.prose.typed = false;
 		this.section = (index + SECTIONS.length) % SECTIONS.length;
 		this.search.setValue("");
-		this.searching = false;
+		if (this.searching) this.setMode({ kind: "browse" });
 		this.changedOnly = false;
 		this.cursor = this.firstSelectable(this.items());
 		this.scroll = 0;
@@ -866,6 +884,7 @@ export class SettingsPane {
 	handleInput(data: string): void {
 		this.hover = null;
 		this.pointer = null;
+		this.scrolledAway = false;
 		if (this.host.error()) {
 			const k = decodeKittyPrintable(data) ?? data;
 			if (k === "O" || matchesKey(data, "enter")) this.host.open(this.host.error()?.line ?? null);
@@ -878,7 +897,7 @@ export class SettingsPane {
 		}
 		const editing = this.editing;
 		if (editing?.kind === "text") {
-			if (matchesKey(data, "escape")) this.editing = null;
+			if (matchesKey(data, "escape")) this.setMode({ kind: "browse" });
 			else if (matchesKey(data, "enter")) this.commitText();
 			else {
 				editing.input.handleInput(data);
@@ -887,10 +906,10 @@ export class SettingsPane {
 			return;
 		}
 		if (editing?.kind === "chord") {
-			if (matchesKey(data, "escape")) this.editing = null;
+			if (matchesKey(data, "escape")) this.setMode({ kind: "browse" });
 			else if (matchesKey(data, "enter") && editing.captured) {
 				const error = this.set(setting("keys.prefix"), editing.captured);
-				if (error === null) this.editing = null;
+				if (error === null) this.setMode({ kind: "browse" });
 				else editing.error = error;
 			} else {
 				const name = tmuxKey(data);
@@ -901,20 +920,20 @@ export class SettingsPane {
 		}
 		if (editing?.kind === "choices") {
 			const choices = editing.s.control.kind === "enum" ? editing.s.control.choices : [];
-			if (matchesKey(data, "escape")) this.editing = null;
+			if (matchesKey(data, "escape")) this.setMode({ kind: "browse" });
 			else if (matchesKey(data, "up") || matchesKey(data, "down"))
 				editing.choice = Math.max(0, Math.min(choices.length - 1, editing.choice + (matchesKey(data, "up") ? -1 : 1)));
 			else if (matchesKey(data, "enter")) {
 				this.set(editing.s, choices[editing.choice]?.value);
-				this.editing = null;
+				this.setMode({ kind: "browse" });
 			}
 			return;
 		}
 		if (this.searching) {
 			if (matchesKey(data, "escape")) {
 				this.search.setValue("");
-				this.searching = false;
-			} else if (matchesKey(data, "enter") || matchesKey(data, "down")) this.searching = false;
+				this.setMode({ kind: "browse" });
+			} else if (matchesKey(data, "enter") || matchesKey(data, "down")) this.setMode({ kind: "browse" });
 			else {
 				this.search.handleInput(data);
 				this.cursor = this.firstSelectable(this.items());
@@ -945,7 +964,7 @@ export class SettingsPane {
 			return;
 		}
 		if (k === "/") {
-			this.searching = true;
+			this.setMode({ kind: "search" });
 			this.area = "list";
 			return;
 		}
@@ -985,7 +1004,10 @@ export class SettingsPane {
 			if (item?.kind === "setting" || item?.kind === "preset") this.step(1, item);
 		} else if (k === "e" && item?.kind === "setting" && item.s.control.kind === "enum") {
 			const values = item.s.control.choices.map((c) => c.value);
-			this.editing = { kind: "choices", s: item.s, choice: Math.max(0, values.indexOf(String(this.valueOf(item.s)))) };
+			this.setMode({
+				kind: "edit",
+				edit: { kind: "choices", s: item.s, choice: Math.max(0, values.indexOf(String(this.valueOf(item.s)))) },
+			});
 		} else if (k === "r") this.reset(item);
 		else if (k === "a") {
 			const s = this.settingOf(item);
@@ -1025,7 +1047,11 @@ export class SettingsPane {
 			const delta = Math.sign(event.wheelDelta ?? 0);
 			if (inEditor) this.proseFor(prose).editor.handleInput(delta < 0 ? "\x1b[A" : "\x1b[B");
 			else if (this.adding?.step === "search") this.moveAdd(delta);
-			else this.move(delta);
+			else if (this.editing) {
+				// What's being edited stays on its item; the list scrolls under it.
+				this.scroll = Math.max(0, this.scroll + delta);
+				this.scrolledAway = true;
+			} else this.move(delta);
 			return { handled: true, render: true };
 		}
 		if (event.button !== "left") return { handled: true };
@@ -1033,7 +1059,7 @@ export class SettingsPane {
 			this.pressed = this.targetAt({ x: event.x, y: event.y }) ?? null;
 			const at = this.itemAt(event.y);
 			const item = at === null ? undefined : this.shown[at];
-			this.dragging = item?.kind === "preset" || item?.kind === "entry" ? { item: at as number, over: null } : null;
+			this.dragging = !this.editing && (item?.kind === "preset" || item?.kind === "entry") ? { item: at as number, over: null } : null;
 			return { handled: true, capture: this.dragging !== null };
 		}
 		if (event.type === "drag" && this.dragging) {
@@ -1059,13 +1085,15 @@ export class SettingsPane {
 		if (event.type !== "click") return { handled: true };
 		const target = this.pressed;
 		this.pressed = null;
+		// A click anywhere but the edit's own choices is done with it, unsaved, and then does what it does.
+		if (this.editing) this.setMode({ kind: "browse" });
 		if (target) {
 			target.act();
 			return { handled: true, render: true };
 		}
 		if (inEditor) {
 			this.area = "list";
-			this.searching = false;
+			if (this.searching) this.setMode({ kind: "browse" });
 			this.proseFor(prose).editor.handleMouse({
 				...event,
 				x: event.x - this.listLeft,
@@ -1079,7 +1107,7 @@ export class SettingsPane {
 		if (at !== null) {
 			this.cursor = at;
 			this.area = "list";
-			this.searching = false;
+			if (this.searching) this.setMode({ kind: "browse" });
 		}
 		return { handled: true, render: true };
 	}
@@ -1177,7 +1205,7 @@ export class SettingsPane {
 			[
 				field,
 				() => {
-					this.searching = true;
+					this.setMode({ kind: "search" });
 					this.area = "list";
 				},
 			],
@@ -1208,11 +1236,14 @@ export class SettingsPane {
 		const extra =
 			this.editing?.kind === "choices" ? (this.editing.s.control.kind === "enum" ? this.editing.s.control.choices.length : 0) : 0;
 		const room = Math.max(1, height - extra);
-		if (this.cursor < this.scroll) this.scroll = this.cursor;
-		if (this.cursor >= this.scroll + room) this.scroll = this.cursor - room + 1;
+		if (!this.scrolledAway) {
+			if (this.cursor < this.scroll) this.scroll = this.cursor;
+			if (this.cursor >= this.scroll + room) this.scroll = this.cursor - room + 1;
+		}
 		this.scroll = Math.max(0, Math.min(this.scroll, Math.max(0, items.length - room)));
 		// Headings keep their place above the first row in view.
-		if (this.scroll > 0 && items[this.scroll - 1]?.kind === "heading" && this.cursor - this.scroll + 1 < room) this.scroll--;
+		if (!this.scrolledAway && this.scroll > 0 && items[this.scroll - 1]?.kind === "heading" && this.cursor - this.scroll + 1 < room)
+			this.scroll--;
 		const labelWidth = Math.min(
 			36,
 			Math.max(12, ...items.map((i) => (i.kind === "setting" && i.s.control.kind !== "paths" ? visibleWidth(i.s.label) : 0))),
@@ -1234,7 +1265,7 @@ export class SettingsPane {
 							to: width,
 							act: () => {
 								this.set(editing.s, c.value);
-								this.editing = null;
+								this.setMode({ kind: "browse" });
 							},
 						});
 						rows.push(ci === editing.choice ? this.host.paint.cursor(line, true) : line);

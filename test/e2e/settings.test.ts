@@ -196,6 +196,38 @@ test("the shortlist is automatic until its first edit writes it out; ↺ brings 
 	expect(read()).toBe("# mine\n");
 });
 
+test("an edit stays on its setting while the wheel scrolls the list, and a click elsewhere is done with it", async () => {
+	s = scenario("settings", "edit-wheel");
+	config(s, COMMENTED);
+	s.swb("drive", "start", "--size", "160x24");
+	await waitState(s, "ready", (x) => x.ready);
+	s.keys(",");
+	await waitState(s, "Settings", (x) => x.mode === "settings" && x.settings?.section === "General");
+	s.keys("j", "j", "j", "Enter");
+	const editing = await waitState(
+		s,
+		"inactive_after in edit",
+		(x) => x.settings?.editing === "text" && x.settings.items[x.settings.cursor]?.key === "inactive_after",
+	);
+	const at = editing.settings?.cursor;
+	s.swb("drive", "wheel", "down", ...find("Move sessions to Inactive after"));
+	s.swb("drive", "wheel", "down", ...find("Move sessions to Inactive after"));
+	await Bun.sleep(400);
+	expect(state(s).settings).toMatchObject({ cursor: at, editing: "text" });
+	s.keys("C-u", "-l", "48h", "Enter");
+	await waitState(s, "48h saved", (x) => item(x, "inactive_after")?.value === "48h" && x.settings?.editing === null);
+	expect(read()).toContain('inactive_after = "48h" # long weekends');
+	expect(state(s).settings?.cursor).toBe(at);
+
+	// Clicking another setting mid-edit leaves the edit unsaved and selects what was clicked.
+	s.keys("Enter", "C-u", "-l", "12h");
+	await waitState(s, "in edit again", (x) => x.settings?.editing === "text");
+	await click("Roster width");
+	const clicked = await waitState(s, "the edit done with", (x) => x.settings?.editing === null);
+	expect(clicked.settings?.items[clicked.settings.cursor]?.key).toBe("roster_width");
+	expect(read()).toContain('inactive_after = "48h" # long weekends');
+});
+
 test("an Operator's instructions are written straight into Settings' Operators section, save themselves, and stop at the cap", async () => {
 	s = scenario("settings", "operator");
 	s.swb("drive", "start", "--size", "160x40");
