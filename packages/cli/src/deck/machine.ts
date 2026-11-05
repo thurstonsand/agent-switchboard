@@ -1343,6 +1343,8 @@ export function cursorEntry(): Entry | null {
 
 function input(data: string): void {
 	if (isKeyRelease(data)) return;
+	// A key reaches the roster only while its pane has the keyboard, ahead of the focus hook saying so.
+	focusOn(rosterPane);
 	m.hover = null;
 	m.pointer = null;
 	panes.keyAt = performance.now();
@@ -1632,6 +1634,8 @@ function clicked(): ClickTarget | null {
 function mouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
 	// A control under the pointer lights up, wherever it is.
 	let relit = false;
+	// tmux selects the pane before it hands over a press, ahead of the focus hook saying so.
+	if (event.type === "press" && event.button === "left") focusOn(rosterPane);
 	const settings = settingsPane();
 	if (settings) return settings.handleMouse(event);
 	if (event.type === "move") {
