@@ -2832,8 +2832,9 @@ function focusOnceShown(pane: () => string | null): void {
 			if (!target) return;
 			if (
 				asked !== m.focusMoves &&
+				// tmux answers a pane id that's gone with an empty line, not an error.
 				(await tmuxAsync(UI, "display", "-p", "-t", from, "#{pane_id}").then(
-					() => true,
+					(id) => id === from,
 					() => false,
 				))
 			)
