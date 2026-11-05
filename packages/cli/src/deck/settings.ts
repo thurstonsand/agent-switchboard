@@ -29,6 +29,7 @@ import {
 } from "../config.ts";
 import { type Catalog, type Choice, effortLevels, effortMark, type Model, presetLabel, searchMatch, shortlist } from "../harnesses.ts";
 import { setOrReset, withValue } from "../write-config.ts";
+import { type Binding, bindingFor, legendParts } from "./model.ts";
 import type { SettingsState } from "./protocol.ts";
 import { bold, cyan, dim, gray, green, key, red, shortPath, yellow } from "./style.ts";
 
@@ -52,6 +53,8 @@ export type SettingsHost = {
 	paint: { cursor: (line: string, focused: boolean) => string; hover: (line: string) => string };
 	message: (now: number, withConfigError: boolean) => string;
 	requestRender: () => void;
+	/** Runs a change the pane starts on its own, as its save timer does, the way the Deck runs every change. */
+	dispatch: (change: () => void) => void;
 };
 
 type Item =
@@ -108,7 +111,60 @@ type Adding = {
 
 type AddRow = { kind: "group"; text: string; depth: number } | { kind: "model"; model: Model } | { kind: "custom"; model: Model };
 
-type ClickTarget = { y: number; from: number; to: number; act: () => void };
+/**
+ * What a key, a click, or a legend button asks Settings to do. Keys find theirs in the mode's keymap, and every button
+ * carries one, so a click goes through the same checks its key does.
+ */
+type SettingsCommand =
+	/** The mode's highlight: the list's cursor, an open choice list's, the model search's, or the effort's. */
+	| { kind: "step"; by: number }
+	/** ⏎ in an edit, the search, or a step of adding, or a click on one of its choices; null is the highlighted one. */
+	| { kind: "choose"; index: number | null }
+	/** esc: back out of an edit or a step of adding, clear the search, or drop the filter, else close. */
+	| { kind: "cancel" }
+	/** A key no binding takes, typed into the mode's field. */
+	| { kind: "type"; data: string }
+	/** ⏎ on a list item, the cursor's when null; a click on one puts the cursor there first. */
+	| { kind: "activate"; at: number | null }
+	/** A click on a list row: the cursor goes there. */
+	| { kind: "select"; at: number }
+	/** A section by its place, the keyboard to `area` with it, or left where it is when null. */
+	| { kind: "section"; to: number; area: "rail" | "list" | null }
+	| { kind: "area"; to: "rail" | "list" }
+	| { kind: "search" }
+	| { kind: "filter"; changed: boolean }
+	/** ← and → on an item, the cursor's when null; `wrap` cycles past the last level back to the first. */
+	| { kind: "adjust"; by: number; at: number | null; wrap: boolean }
+	| { kind: "choices" }
+	| { kind: "reset"; at: number | null }
+	| { kind: "add" }
+	| { kind: "remove" }
+	| { kind: "shift"; by: number }
+	| { kind: "star"; at: number | null }
+	| { kind: "refresh" }
+	| { kind: "open"; line: number | null }
+	| { kind: "close" }
+	| { kind: "help" };
+
+type ClickTarget = { y: number; from: number; to: number; command: SettingsCommand };
+type Part = [text: string, command: SettingsCommand | null];
+
+/** What the left button is in the middle of: a press on a button, which its click runs, or dragging a list item. */
+type Gesture =
+	| { kind: "none" }
+	| { kind: "press"; target: ClickTarget }
+	| { kind: "drag"; item: number; over: number | null; target: ClickTarget | null };
+
+const CHOOSE: SettingsCommand = { kind: "choose", index: null };
+const CANCEL: SettingsCommand = { kind: "cancel" };
+const CLOSE: SettingsCommand = { kind: "close" };
+const step = (by: number): SettingsCommand => ({ kind: "step", by });
+const bind = (keys: string[], name: string, label: string | null, command: SettingsCommand | null): Binding<SettingsCommand> => ({
+	keys,
+	name,
+	label,
+	command,
+});
 
 type SettingsMode = { kind: "browse" } | { kind: "search" } | { kind: "edit"; edit: Editing } | { kind: "add"; add: Adding };
 
@@ -261,9 +317,7 @@ export class SettingsPane {
 	hover: number | null = null;
 	pointer: { x: number; y: number } | null = null;
 	targets: ClickTarget[] = [];
-	pressed: ClickTarget | null = null;
-	/** A preset or path being dragged to a new place in its list. */
-	dragging: { item: number; over: number | null } | null = null;
+	gesture: Gesture = { kind: "none" };
 	listTop = 2;
 	listHeight = 0;
 	listLeft = 0;
@@ -468,9 +522,11 @@ export class SettingsPane {
 		this.set(s, values[(at + step + values.length) % values.length]);
 	}
 
-	/** ← and →: a number steps, a choice cycles, and a preset's effort moves through what its harness and model take. */
-	/** `wrap` cycles past the last level back to the first, as a click on the effort does. */
-	step(delta: number, item = this.current(), wrap = false): void {
+	/**
+	 * ← and →: a number steps, a choice cycles, and a preset's effort moves through what its harness and model take.
+	 * `wrap` cycles past the last level back to the first, as a click on the effort does.
+	 */
+	adjust(delta: number, item: Item | undefined, wrap: boolean): void {
 		if (item?.kind === "setting" && item.s.control.kind === "int") {
 			const { min, max } = item.s.control;
 			const value = this.valueOf(item.s) as number;
@@ -634,30 +690,15 @@ export class SettingsPane {
 		const key = prose.s.key.join(".");
 		if (text !== this.valueOf(prose.s) && this.set(prose.s, text) !== null) {
 			drafts.set(key, prose.editor.getText());
-			this.host.requestRender();
 			return;
 		}
 		prose.synced = text;
 		drafts.delete(key);
 	}
 
-	/** Every key but Tab and esc is the editor's. Text past the cap is never let in, so there's nothing to refuse. */
+	/** Every key its keymap leaves is the editor's. Text past the cap is never let in, so there's nothing to refuse. */
 	proseInput(s: Setting, data: string): void {
 		const prose = this.proseFor(s);
-		const k = decodeKittyPrintable(data) ?? data;
-		if (matchesKey(data, "escape")) {
-			this.host.close();
-			return;
-		}
-		if (matchesKey(data, "tab") || matchesKey(data, "shift+tab")) {
-			this.saveProse();
-			if (!this.narrow) this.area = "rail";
-			return;
-		}
-		if (!prose.typed && (k === "[" || k === "]")) {
-			this.setSection(this.section + (k === "[" ? -1 : 1));
-			return;
-		}
 		const editor = prose.editor;
 		const before = editor.getText();
 		const room = prose.max - before.length;
@@ -676,7 +717,7 @@ export class SettingsPane {
 		if (editor.getText() === before) return;
 		prose.typed = true;
 		if (prose.timer) clearTimeout(prose.timer);
-		prose.timer = setTimeout(() => this.saveProse(), SAVE_AFTER);
+		prose.timer = setTimeout(() => this.host.dispatch(() => this.saveProse()), SAVE_AFTER);
 	}
 
 	/** What's being written and how much room is left, then the editor, rules above and below, filling the rest. */
@@ -830,39 +871,6 @@ export class SettingsPane {
 		this.cursor = items.findIndex((i) => i.kind === "preset" && i.index === this.presets().length - 1);
 	}
 
-	addInput(data: string): void {
-		const adding = this.adding as Adding;
-		adding.error = null;
-		if (matchesKey(data, "escape")) {
-			if (adding.step === "search") this.setMode({ kind: "browse" });
-			else if (adding.step === "effort") adding.step = "search";
-			else adding.step = adding.picked?.agent ? "search" : "effort";
-			return;
-		}
-		if (adding.step === "search") {
-			if (matchesKey(data, "up") || matchesKey(data, "down")) this.moveAdd(matchesKey(data, "up") ? -1 : 1);
-			else if (matchesKey(data, "pageUp") || matchesKey(data, "pageDown"))
-				this.moveAdd((matchesKey(data, "pageUp") ? -1 : 1) * Math.max(1, this.listHeight - 2));
-			else if (matchesKey(data, "enter")) this.pickModel(this.addRows()[adding.choice]);
-			else if (matchesKey(data, "ctrl+r")) this.host.refresh(true);
-			else {
-				adding.query.handleInput(data);
-				adding.choice = this.firstModel();
-				adding.top = 0;
-			}
-			return;
-		}
-		if (adding.step === "effort") {
-			const levels = effortLevels(adding.picked as Model);
-			if (matchesKey(data, "up") || matchesKey(data, "left")) adding.effort = Math.max(0, adding.effort - 1);
-			else if (matchesKey(data, "down") || matchesKey(data, "right")) adding.effort = Math.min(levels.length - 1, adding.effort + 1);
-			else if (matchesKey(data, "enter")) adding.step = "note";
-			return;
-		}
-		if (matchesKey(data, "enter")) this.finishAdding();
-		else adding.note.handleInput(data);
-	}
-
 	// ── keys ───────────────────────────────────────────────────────────
 
 	move(delta: number): void {
@@ -892,138 +900,306 @@ export class SettingsPane {
 		this.hover = null;
 		this.pointer = null;
 		this.scrolledAway = false;
-		if (this.host.error()) {
-			const k = decodeKittyPrintable(data) ?? data;
-			if (k === "O" || matchesKey(data, "enter")) this.host.open(this.host.error()?.line ?? null);
-			else if (matchesKey(data, "escape")) this.host.close();
-			return;
-		}
-		if (this.adding) {
-			this.addInput(data);
-			return;
-		}
+		if (this.adding) this.adding.error = null;
+		const binding = bindingFor(this.keymap(), data);
+		if (binding?.command) this.run(binding.command);
+		else if (!binding && this.typing()) this.run({ kind: "type", data });
+	}
+
+	/** Whether the mode has a field that takes the keys its keymap doesn't. */
+	typing(): boolean {
+		if (this.host.error()) return false;
+		if (this.adding) return this.adding.step !== "effort";
 		const editing = this.editing;
-		if (editing?.kind === "text") {
-			if (matchesKey(data, "escape")) this.setMode({ kind: "browse" });
-			else if (matchesKey(data, "enter")) this.commitText();
-			else {
-				editing.input.handleInput(data);
-				editing.error = null;
-			}
-			return;
+		if (editing) return editing.kind !== "choices";
+		return this.searching || this.proseFocused();
+	}
+
+	/** The keys Settings takes in its mode, in the order its legend shows the ones it labels. */
+	keymap(): Binding<SettingsCommand>[] {
+		const error = this.host.error();
+		if (error)
+			return [bind(["O", "enter"], "O", "open it", { kind: "open", line: error.line }), bind(["escape"], "esc", "sessions", CLOSE)];
+		const adding = this.adding;
+		if (adding?.step === "search") {
+			const page = Math.max(1, this.listHeight - 2);
+			return [
+				bind(["enter"], "⏎", "choose", CHOOSE),
+				bind([], "↑ ↓", "move", null),
+				bind(["ctrl+r"], "C-r", "refresh", { kind: "refresh" }),
+				bind(["escape"], "esc", "cancel", CANCEL),
+				bind(["up"], "↑", null, step(-1)),
+				bind(["down"], "↓", null, step(1)),
+				bind(["pageUp"], "PgUp", null, step(-page)),
+				bind(["pageDown"], "PgDn", null, step(page)),
+			];
 		}
-		if (editing?.kind === "chord") {
-			if (matchesKey(data, "escape")) this.setMode({ kind: "browse" });
-			else if (matchesKey(data, "enter") && editing.captured) {
-				const error = this.set(setting("keys.prefix"), editing.captured);
-				if (error === null) this.setMode({ kind: "browse" });
-				else editing.error = error;
-			} else {
-				const name = tmuxKey(data);
-				if (name) editing.captured = name;
-				editing.error = name ? null : "that key has no tmux name";
-			}
-			return;
+		if (adding?.step === "effort")
+			return [
+				bind(["enter"], "⏎", "next", CHOOSE),
+				bind(["escape"], "esc", "back", CANCEL),
+				bind(["up", "left"], "↑", null, step(-1)),
+				bind(["down", "right"], "↓", null, step(1)),
+			];
+		if (adding) return [bind(["enter"], "⏎", "add", CHOOSE), bind(["escape"], "esc", "back", CANCEL)];
+		const editing = this.editing;
+		if (editing) {
+			// Until a chord is caught, ⏎ is one it can catch.
+			const save = editing.kind !== "chord" || editing.captured ? [bind(["enter"], "⏎", "save", CHOOSE)] : [];
+			const arrows = editing.kind === "choices" ? [bind(["up"], "↑", null, step(-1)), bind(["down"], "↓", null, step(1))] : [];
+			return [...save, bind(["escape"], "esc", "cancel", CANCEL), ...arrows];
 		}
-		if (editing?.kind === "choices") {
-			const choices = editing.s.control.kind === "enum" ? editing.s.control.choices : [];
-			if (matchesKey(data, "escape")) this.setMode({ kind: "browse" });
-			else if (matchesKey(data, "up") || matchesKey(data, "down"))
-				editing.choice = Math.max(0, Math.min(choices.length - 1, editing.choice + (matchesKey(data, "up") ? -1 : 1)));
-			else if (matchesKey(data, "enter")) {
-				this.set(editing.s, choices[editing.choice]?.value);
-				this.setMode({ kind: "browse" });
-			}
-			return;
-		}
-		if (this.searching) {
-			if (matchesKey(data, "escape")) {
-				this.search.setValue("");
-				this.setMode({ kind: "browse" });
-			} else if (matchesKey(data, "enter") || matchesKey(data, "down")) this.setMode({ kind: "browse" });
-			else {
-				this.search.handleInput(data);
-				this.cursor = this.firstSelectable(this.items());
-				this.scroll = 0;
-			}
-			return;
-		}
+		if (this.searching) return [bind(["enter", "down"], "⏎", "done", CHOOSE), bind(["escape"], "esc", "clear", CANCEL)];
+		const sections = [
+			bind(["]"], "[ ]", "section", { kind: "section", to: this.section + 1, area: null }),
+			bind(["["], "[", null, { kind: "section", to: this.section - 1, area: null }),
+		];
 		const prose = this.proseFocused() ? this.proseShown() : null;
-		if (prose) {
-			this.proseInput(prose, data);
-			return;
-		}
-		const k = decodeKittyPrintable(data) ?? data;
-		if (matchesKey(data, "escape")) {
-			if (this.query() !== "" || this.changedOnly) {
-				this.search.setValue("");
-				this.changedOnly = false;
-				this.cursor = this.firstSelectable(this.items());
-			} else this.host.close();
-			return;
-		}
-		if (matchesKey(data, "tab") || matchesKey(data, "shift+tab")) {
-			if (!this.narrow) this.area = this.area === "rail" ? "list" : "rail";
-			return;
-		}
-		if (k === "[" || k === "]") {
-			this.setSection(this.section + (k === "[" ? -1 : 1));
-			return;
-		}
-		if (k === "/") {
-			this.setMode({ kind: "search" });
-			this.area = "list";
-			return;
-		}
-		if (k === "c") {
-			this.changedOnly = !this.changedOnly;
-			this.cursor = this.firstSelectable(this.items());
-			return;
-		}
-		if (k === "?") {
-			this.host.help();
-			return;
-		}
-		if (k === "O") {
-			const s = this.settingOf(this.current());
-			this.host.open(s ? lineOf(this.host.loaded().text, s.key) : null);
-			return;
-		}
-		if (this.area === "rail") {
-			if (matchesKey(data, "down") || k === "j") this.setSection(this.section + 1);
-			else if (matchesKey(data, "up") || k === "k") this.setSection(this.section - 1);
-			else if (matchesKey(data, "enter") || matchesKey(data, "right") || k === "l") this.area = "list";
-			return;
-		}
+		if (prose)
+			return [
+				bind(["tab", "shift+tab"], "⇥", this.narrow ? null : "sections", { kind: "area", to: "rail" }),
+				// pi's editor binds it; the legend's button types it.
+				bind([], "C--", "undo", { kind: "type", data: "\x1f" }),
+				bind(["escape"], "esc", "sessions", CLOSE),
+				// Once writing starts, [ and ] are part of it.
+				...(this.proseFor(prose).typed ? [] : sections),
+			];
 		const item = this.current();
-		if (matchesKey(data, "down") || k === "j") this.move(1);
-		else if (matchesKey(data, "up") || k === "k") this.move(-1);
-		else if (k === "g") this.move(Number.NEGATIVE_INFINITY);
-		else if (k === "G") this.move(Number.POSITIVE_INFINITY);
-		else if (matchesKey(data, "pageDown")) this.move(Math.max(1, this.listHeight - 1));
-		else if (matchesKey(data, "pageUp")) this.move(-Math.max(1, this.listHeight - 1));
-		else if (matchesKey(data, "enter")) this.activate(item);
-		else if (k === " ") {
-			if (item?.kind === "harness" || (item?.kind === "setting" && ["bool", "enum"].includes(item.s.control.kind))) this.activate(item);
-		} else if (matchesKey(data, "left") || k === "h") {
-			if (item?.kind === "setting" || item?.kind === "preset") this.step(-1, item);
-		} else if (matchesKey(data, "right") || k === "l") {
-			if (item?.kind === "setting" || item?.kind === "preset") this.step(1, item);
-		} else if (k === "e" && item?.kind === "setting" && item.s.control.kind === "enum") {
-			const values = item.s.control.choices.map((c) => c.value);
-			this.setMode({
-				kind: "edit",
-				edit: { kind: "choices", s: item.s, choice: Math.max(0, values.indexOf(String(this.valueOf(item.s)))) },
-			});
-		} else if (k === "r") this.reset(item);
-		else if (k === "a") {
-			const s = this.settingOf(item);
-			if (s?.control.kind === "paths") this.startText({ kind: "addEntry", s }, "");
-			else if (s?.control.kind === "presets" || s?.control.kind === "harnesses") this.startAdding();
-		} else if (k === "x") this.removeItem(item);
-		else if (k === "J" || k === "K") this.shift(k === "J" ? 1 : -1, item);
-		else if (k === "*" && item?.kind === "preset") this.starPreset(item.index);
-		else if (k === "R") this.host.refresh(true);
+		const s = this.settingOf(item);
+		const area = bind(["tab", "shift+tab"], "⇥", this.narrow ? null : "area", {
+			kind: "area",
+			to: this.area === "rail" ? "list" : "rail",
+		});
+		const tail = [
+			bind(["/"], "/", "search", { kind: "search" }),
+			bind(["O"], "O", "file", { kind: "open", line: s ? lineOf(this.host.loaded().text, s.key) : null }),
+			bind(["escape"], "esc", null, CANCEL),
+			bind(["c"], "c", null, { kind: "filter", changed: !this.changedOnly }),
+			bind(["?"], "?", null, { kind: "help" }),
+		];
+		if (this.area === "rail")
+			return [
+				area,
+				...sections,
+				...tail,
+				bind(["down", "j"], "j", null, { kind: "section", to: this.section + 1, area: null }),
+				bind(["up", "k"], "k", null, { kind: "section", to: this.section - 1, area: null }),
+				bind(["enter", "right", "l"], "⏎", null, { kind: "area", to: "list" }),
+			];
+		const control = item?.kind === "setting" ? item.s.control.kind : null;
+		const listed = item?.kind === "preset" || item?.kind === "entry";
+		let enter: string | null = "edit";
+		if (item?.kind === "preset") enter = "note";
+		else if (item?.kind === "harness") enter = null;
+		else if (control === "bool") enter = "toggle";
+		else if (control === "enum") enter = "next";
+		else if (item?.kind === "shortlist" || item?.kind === "addPreset") enter = "add";
+		const resettable =
+			s !== null &&
+			s.control.kind !== "prose" &&
+			(this.isSet(s) || (s.control.kind === "presets" && this.host.loaded().config.presets !== null));
+		const page = Math.max(1, this.listHeight - 1);
+		const activate: SettingsCommand = { kind: "activate", at: null };
+		return [
+			area,
+			...sections,
+			bind(["enter"], "⏎", enter, activate),
+			...(item?.kind === "harness" || control === "bool" || control === "enum"
+				? [bind([" "], "space", item?.kind === "harness" ? "on/off" : null, activate)]
+				: []),
+			bind(["right", "l"], "← →", item?.kind === "preset" ? "effort" : control === "int" ? "step" : null, {
+				kind: "adjust",
+				by: 1,
+				at: null,
+				wrap: false,
+			}),
+			bind(["left", "h"], "←", null, { kind: "adjust", by: -1, at: null, wrap: false }),
+			bind(["*"], "*", item?.kind === "preset" ? "default" : null, { kind: "star", at: null }),
+			bind(["J"], "J K", listed ? "move" : null, { kind: "shift", by: 1 }),
+			bind(["K"], "K", null, { kind: "shift", by: -1 }),
+			bind(["x"], "x", listed ? "remove" : null, { kind: "remove" }),
+			bind(["e"], "e", control === "enum" ? "choices" : null, { kind: "choices" }),
+			bind(["a"], "a", item?.kind === "harness" ? "add preset" : null, { kind: "add" }),
+			bind(["r"], "r", resettable ? "reset" : null, { kind: "reset", at: null }),
+			...tail,
+			bind(["down", "j"], "j", null, step(1)),
+			bind(["up", "k"], "k", null, step(-1)),
+			bind(["g"], "g", null, step(Number.NEGATIVE_INFINITY)),
+			bind(["G"], "G", null, step(Number.POSITIVE_INFINITY)),
+			bind(["pageDown"], "PgDn", null, step(page)),
+			bind(["pageUp"], "PgUp", null, step(-page)),
+			bind(["R"], "R", null, { kind: "refresh" }),
+		];
+	}
+
+	/** Every key, click, and legend button ends here. */
+	run(c: SettingsCommand): void {
+		switch (c.kind) {
+			case "step":
+				this.stepMode(c.by);
+				break;
+			case "choose":
+				this.choose(c.index);
+				break;
+			case "cancel":
+				this.cancel();
+				break;
+			case "type":
+				this.type(c.data);
+				break;
+			case "activate":
+				if (c.at !== null) this.select(c.at);
+				this.activate();
+				break;
+			case "select":
+				this.select(c.at);
+				break;
+			case "section":
+				this.setSection(c.to);
+				if (c.area) this.area = c.area;
+				break;
+			case "area":
+				this.saveProse();
+				if (!this.narrow) this.area = c.to;
+				break;
+			case "search":
+				this.setMode({ kind: "search" });
+				this.area = "list";
+				break;
+			case "filter":
+				this.changedOnly = c.changed;
+				this.cursor = this.firstSelectable(this.items());
+				break;
+			case "adjust":
+				this.adjust(c.by, this.itemOf(c.at), c.wrap);
+				break;
+			case "choices": {
+				const item = this.current();
+				if (item?.kind !== "setting" || item.s.control.kind !== "enum") break;
+				const values = item.s.control.choices.map((choice) => choice.value);
+				this.setMode({
+					kind: "edit",
+					edit: { kind: "choices", s: item.s, choice: Math.max(0, values.indexOf(String(this.valueOf(item.s)))) },
+				});
+				break;
+			}
+			case "reset":
+				this.reset(this.itemOf(c.at));
+				break;
+			case "add": {
+				const s = this.settingOf(this.current());
+				if (s?.control.kind === "paths") this.startText({ kind: "addEntry", s }, "");
+				else if (s?.control.kind === "presets" || s?.control.kind === "harnesses") this.startAdding();
+				break;
+			}
+			case "remove":
+				this.removeItem();
+				break;
+			case "shift":
+				this.shift(c.by);
+				break;
+			case "star": {
+				const item = this.itemOf(c.at);
+				if (item?.kind === "preset") this.starPreset(item.index);
+				break;
+			}
+			case "refresh":
+				this.host.refresh(true);
+				break;
+			case "open":
+				this.host.open(c.line);
+				break;
+			case "close":
+				this.host.close();
+				break;
+			case "help":
+				this.host.help();
+				break;
+		}
+	}
+
+	/** A list item as last drawn, or the cursor's when null. */
+	itemOf(at: number | null): Item | undefined {
+		return at === null ? this.current() : this.shown[at];
+	}
+
+	select(at: number): void {
+		this.cursor = at;
+		this.area = "list";
+		if (this.searching) this.setMode({ kind: "browse" });
+	}
+
+	stepMode(by: number): void {
+		const adding = this.adding;
+		const editing = this.editing;
+		if (adding?.step === "search") this.moveAdd(by);
+		else if (adding?.step === "effort")
+			adding.effort = Math.max(0, Math.min(effortLevels(adding.picked as Model).length - 1, adding.effort + by));
+		else if (editing?.kind === "choices") {
+			const count = editing.s.control.kind === "enum" ? editing.s.control.choices.length : 0;
+			editing.choice = Math.max(0, Math.min(count - 1, editing.choice + by));
+		} else if (!adding) this.move(by);
+	}
+
+	choose(index: number | null): void {
+		const adding = this.adding;
+		const editing = this.editing;
+		if (adding?.step === "search") {
+			if (index !== null) adding.choice = index;
+			this.pickModel(this.addRows()[adding.choice]);
+		} else if (adding?.step === "effort") {
+			if (index !== null) adding.effort = index;
+			adding.step = "note";
+		} else if (adding) this.finishAdding();
+		else if (editing?.kind === "text") this.commitText();
+		else if (editing?.kind === "chord" && editing.captured) {
+			const error = this.set(setting("keys.prefix"), editing.captured);
+			if (error === null) this.setMode({ kind: "browse" });
+			else editing.error = error;
+		} else if (editing?.kind === "choices") {
+			const choices = editing.s.control.kind === "enum" ? editing.s.control.choices : [];
+			this.set(editing.s, choices[index ?? editing.choice]?.value);
+			this.setMode({ kind: "browse" });
+		} else if (this.searching) this.setMode({ kind: "browse" });
+	}
+
+	cancel(): void {
+		const adding = this.adding;
+		if (adding) {
+			if (adding.step === "search") this.setMode({ kind: "browse" });
+			else if (adding.step === "effort") adding.step = "search";
+			else adding.step = adding.picked?.agent ? "search" : "effort";
+		} else if (this.editing) this.setMode({ kind: "browse" });
+		else if (this.searching) {
+			this.search.setValue("");
+			this.setMode({ kind: "browse" });
+		} else if (this.query() !== "" || this.changedOnly) {
+			this.search.setValue("");
+			this.changedOnly = false;
+			this.cursor = this.firstSelectable(this.items());
+		} else this.host.close();
+	}
+
+	type(data: string): void {
+		const adding = this.adding;
+		const editing = this.editing;
+		if (adding?.step === "search") {
+			adding.query.handleInput(data);
+			adding.choice = this.firstModel();
+			adding.top = 0;
+		} else if (adding) adding.note.handleInput(data);
+		else if (editing?.kind === "text") {
+			editing.input.handleInput(data);
+			editing.error = null;
+		} else if (editing?.kind === "chord") {
+			const name = tmuxKey(data);
+			if (name) editing.captured = name;
+			editing.error = name ? null : "that key has no tmux name";
+		} else if (this.searching) {
+			this.search.handleInput(data);
+			this.cursor = this.firstSelectable(this.items());
+			this.scroll = 0;
+		} else if (this.proseFocused()) this.proseInput(this.proseShown() as Setting, data);
 	}
 
 	// ── mouse ──────────────────────────────────────────────────────────
@@ -1053,49 +1229,54 @@ export class SettingsPane {
 		if (event.type === "wheel") {
 			const delta = Math.sign(event.wheelDelta ?? 0);
 			if (inEditor) this.proseFor(prose).editor.handleInput(delta < 0 ? "\x1b[A" : "\x1b[B");
-			else if (this.adding?.step === "search") this.moveAdd(delta);
 			else if (this.editing) {
 				// What's being edited stays on its item; the list scrolls under it.
 				this.scroll = Math.max(0, this.scroll + delta);
 				this.scrolledAway = true;
-			} else this.move(delta);
+			} else this.run(step(delta));
 			return { handled: true, render: true };
 		}
 		if (event.button !== "left") return { handled: true };
 		if (event.type === "press") {
-			this.pressed = this.targetAt({ x: event.x, y: event.y }) ?? null;
+			const target = this.targetAt({ x: event.x, y: event.y }) ?? null;
 			const at = this.itemAt(event.y);
 			const item = at === null ? undefined : this.shown[at];
-			this.dragging = !this.editing && (item?.kind === "preset" || item?.kind === "entry") ? { item: at as number, over: null } : null;
-			return { handled: true, capture: this.dragging !== null };
+			if (at !== null && !this.editing && (item?.kind === "preset" || item?.kind === "entry")) {
+				this.gesture = { kind: "drag", item: at, over: null, target };
+				return { handled: true, capture: true };
+			}
+			this.gesture = target ? { kind: "press", target } : { kind: "none" };
+			return { handled: true, capture: false };
 		}
-		if (event.type === "drag" && this.dragging) {
-			this.dragging.over = this.itemAt(event.y);
+		if (event.type === "drag" && this.gesture.kind === "drag") {
+			this.gesture.over = this.itemAt(event.y);
 			return { handled: true, render: true };
 		}
-		if (event.type === "release" && this.dragging) {
-			const { item, over } = this.dragging;
-			this.dragging = null;
+		if (event.type === "release" && this.gesture.kind === "drag") {
+			const { item, over, target } = this.gesture;
+			// A drag that lands nowhere new is a press, and its click runs the button under it.
+			this.gesture = target ? { kind: "press", target } : { kind: "none" };
 			const from = this.shown[item];
 			const to = over === null ? undefined : this.shown[over];
 			if (from?.kind === "preset" && to?.kind === "preset" && from.index !== to.index) {
 				this.cursor = item;
 				this.movePreset(from.index, to.index);
-				this.pressed = null;
+				this.gesture = { kind: "none" };
 			} else if (from?.kind === "entry" && to?.kind === "entry" && from.s === to.s && from.index !== to.index) {
 				this.cursor = item;
 				this.moveEntry(from, to.index);
-				this.pressed = null;
+				this.gesture = { kind: "none" };
 			}
 			return { handled: true, render: true };
 		}
 		if (event.type !== "click") return { handled: true };
-		const target = this.pressed;
-		this.pressed = null;
-		// A click anywhere but the edit's own choices is done with it, unsaved, and then does what it does.
-		if (this.editing) this.setMode({ kind: "browse" });
+		const target = this.gesture.kind === "press" ? this.gesture.target : null;
+		this.gesture = { kind: "none" };
+		// A click anywhere but the edit's own answers is done with it, unsaved, and then does what it does.
+		const answers = target?.command.kind === "choose" || target?.command.kind === "cancel";
+		if (this.editing && !answers) this.setMode({ kind: "browse" });
 		if (target) {
-			target.act();
+			this.run(target.command);
 			return { handled: true, render: true };
 		}
 		if (inEditor) {
@@ -1111,25 +1292,21 @@ export class SettingsPane {
 			return { handled: true, render: true };
 		}
 		const at = this.itemAt(event.y);
-		if (at !== null) {
-			this.cursor = at;
-			this.area = "list";
-			if (this.searching) this.setMode({ kind: "browse" });
-		}
+		if (at !== null) this.run({ kind: "select", at });
 		return { handled: true, render: true };
 	}
 
 	// ── drawing ────────────────────────────────────────────────────────
 
 	/** Joins the parts into row y's line, recording where each clickable one lands. */
-	clickable(y: number, x0: number, parts: [string, (() => void) | null][]): string {
+	clickable(y: number, x0: number, parts: Part[]): string {
 		let x = x0;
 		let line = "";
 		const p = this.pointer;
-		for (const [text, act] of parts) {
+		for (const [text, command] of parts) {
 			const w = visibleWidth(text);
-			if (act) this.targets.push({ y, from: x, to: x + w, act });
-			line += act && p?.y === y && p.x >= x && p.x < x + w ? this.host.paint.cursor(text, true) : text;
+			if (command) this.targets.push({ y, from: x, to: x + w, command });
+			line += command && p?.y === y && p.x >= x && p.x < x + w ? this.host.paint.cursor(text, true) : text;
 			x += w;
 		}
 		return line;
@@ -1161,19 +1338,19 @@ export class SettingsPane {
 		const rule =
 			this.narrow || error || this.adding ? "─".repeat(width) : `${"─".repeat(RAIL)}┴${"─".repeat(Math.max(0, width - RAIL - 1))}`;
 		if (!prose) lines.push(gray(rule), ...this.footer(width, error));
-		lines.push(this.messageLine(now), this.legend(height - 1, width, error));
+		lines.push(this.messageLine(now), this.clickable(height - 1, 0, legendParts(this.keymap(), width)));
 		return lines.map((line) => truncateToWidth(line, width, "…", true));
 	}
 
 	header(width: number): string {
-		const close: [string, (() => void) | null] = [`${bold("esc")} ${dim("sessions")} `, () => this.host.close()];
+		const close: Part = [`${bold("esc")} ${dim("sessions")} `, CLOSE];
 		if (this.narrow) {
 			const name = SECTIONS[this.section] as string;
-			const left: [string, (() => void) | null][] = [
+			const left: Part[] = [
 				[` ${bold("Settings")}  `, null],
-				["‹", () => this.setSection(this.section - 1)],
+				["‹", { kind: "section", to: this.section - 1, area: null }],
 				[` ${name} `, null],
-				["›", () => this.setSection(this.section + 1)],
+				["›", { kind: "section", to: this.section + 1, area: null }],
 			];
 			const used = left.reduce((n, [t]) => n + visibleWidth(t), 0);
 			return this.clickable(0, 0, [...left, [" ".repeat(Math.max(1, width - used - visibleWidth(close[0]))), null], close]);
@@ -1185,17 +1362,17 @@ export class SettingsPane {
 		return this.clickable(0, 0, [
 			[title, null],
 			[" ".repeat(gap), null],
-			[path, () => this.host.open(null)],
+			[path, { kind: "open", line: null }],
 			[" ".repeat(Math.max(1, width - used - visibleWidth(close[0]))), null],
 			close,
 		]);
 	}
 
 	searchLine(width: number): string {
-		const filters: [string, (() => void) | null][] = [
-			[this.changedOnly ? gray("all") : bold("all"), () => this.setFilter(false)],
+		const filters: Part[] = [
+			[this.changedOnly ? gray("all") : bold("all"), { kind: "filter", changed: false }],
 			["   ", null],
-			[this.changedOnly ? bold("changed") : gray("changed"), () => this.setFilter(true)],
+			[this.changedOnly ? bold("changed") : gray("changed"), { kind: "filter", changed: true }],
 			[" ", null],
 		];
 		const fw = filters.reduce((n, [t]) => n + visibleWidth(t), 0);
@@ -1206,23 +1383,7 @@ export class SettingsPane {
 				? `${cyan("/")} ${this.search.getValue()}`
 				: gray("/ search");
 		const pad = Math.max(1, width - 1 - visibleWidth(field) - fw);
-		return this.clickable(1, 0, [
-			[" ", null],
-			[
-				field,
-				() => {
-					this.setMode({ kind: "search" });
-					this.area = "list";
-				},
-			],
-			[" ".repeat(pad), null],
-			...filters,
-		]);
-	}
-
-	setFilter(changed: boolean): void {
-		this.changedOnly = changed;
-		this.cursor = this.firstSelectable(this.items());
+		return this.clickable(1, 0, [[" ", null], [field, { kind: "search" }], [" ".repeat(pad), null], ...filters]);
 	}
 
 	body(width: number, height: number): string[] {
@@ -1265,15 +1426,7 @@ export class SettingsPane {
 						if (rows.length >= height) return;
 						const line = truncateToWidth(`      ${ci === editing.choice ? "●" : "○"} ${c.value}  ${gray(c.about)}`, listWidth, "…", true);
 						const cy = this.listTop + rows.length;
-						this.targets.push({
-							y: cy,
-							from: left,
-							to: width,
-							act: () => {
-								this.set(editing.s, c.value);
-								this.setMode({ kind: "browse" });
-							},
-						});
+						this.targets.push({ y: cy, from: left, to: width, command: { kind: "choose", index: ci } });
 						rows.push(ci === editing.choice ? this.host.paint.cursor(line, true) : line);
 					});
 			}
@@ -1294,15 +1447,7 @@ export class SettingsPane {
 		if (!section) return " ".repeat(RAIL);
 		const active = r === this.section && this.query() === "" && !this.changedOnly;
 		const text = truncateToWidth(` ${section}`, RAIL, "…", true);
-		this.targets.push({
-			y,
-			from: 0,
-			to: RAIL,
-			act: () => {
-				this.setSection(r);
-				this.area = "rail";
-			},
-		});
+		this.targets.push({ y, from: 0, to: RAIL, command: { kind: "section", to: r, area: "rail" } });
 		if (active) return this.host.paint.cursor(text, this.area === "rail");
 		return this.pointer?.y === y && this.pointer.x < RAIL ? this.host.paint.hover(text) : text;
 	}
@@ -1311,9 +1456,9 @@ export class SettingsPane {
 		const selected = i === this.cursor && this.area === "list" && !this.searching;
 		const lit = selected || i === this.hover;
 		const mark = i === this.cursor ? "▸" : " ";
-		const dropping = this.dragging?.over === i && this.dragging.item !== i;
+		const dropping = this.gesture.kind === "drag" && this.gesture.over === i && this.gesture.item !== i;
 		let line: string;
-		const parts: [string, (() => void) | null][] = [];
+		const parts: Part[] = [];
 		switch (item.kind) {
 			case "heading":
 				return truncateToWidth(` ${bold(item.text)}`, width, "…", true);
@@ -1339,20 +1484,20 @@ export class SettingsPane {
 			case "addEntry": {
 				const editing = this.editing?.kind === "text" && this.editing.target.kind === "addEntry" && i === this.cursor;
 				if (editing) parts.push([`    ${this.inputCell(width - 6)}`, null]);
-				else parts.push(["    ", null], [green("+ add a path"), () => this.activateAt(i)]);
+				else parts.push(["    ", null], [green("+ add a path"), { kind: "activate", at: i }]);
 				break;
 			}
 			case "harness":
 				parts.push(...this.harnessParts(item.harness, i));
 				break;
 			case "shortlist":
-				parts.push(...this.shortlistParts(width));
+				parts.push(...this.shortlistParts(i, width));
 				break;
 			case "preset":
 				parts.push(...this.presetParts(item.index, i, width));
 				break;
 			case "addPreset":
-				parts.push(["  ", null], [green("+ add a preset"), () => this.activateAt(i)]);
+				parts.push(["  ", null], [green("+ add a preset"), { kind: "activate", at: i }]);
 				break;
 		}
 		line = this.clickable(y, left + 1, parts);
@@ -1363,18 +1508,12 @@ export class SettingsPane {
 		return i === this.hover ? this.host.paint.hover(line) : line;
 	}
 
-	activateAt(i: number): void {
-		this.cursor = i;
-		this.area = "list";
-		this.activate(this.shown[i]);
-	}
-
 	inputCell(width: number): string {
 		const editing = this.editing as Editing & { kind: "text" };
 		return editing.input.render(Math.max(10, width))[0] ?? "";
 	}
 
-	settingParts(s: Setting, i: number, lit: boolean, labelWidth: number, width: number): [string, (() => void) | null][] {
+	settingParts(s: Setting, i: number, lit: boolean, labelWidth: number, width: number): Part[] {
 		const set = this.isSet(s);
 		const label = ` ${truncateToWidth(s.label, labelWidth, "…", true)}  `;
 		const editingHere = i === this.cursor ? this.editing : null;
@@ -1394,9 +1533,9 @@ export class SettingsPane {
 		}
 		const value = show(s, this.valueOf(s));
 		const shown = set ? value : dim(value);
-		const parts: [string, (() => void) | null][] = [
+		const parts: Part[] = [
 			[label, null],
-			[shown, s.control.kind === "paths" ? null : () => this.activateAt(i)],
+			[shown, s.control.kind === "paths" ? null : { kind: "activate", at: i }],
 		];
 		if (lit && s.control.kind !== "prose") {
 			const fallback = s.fallback();
@@ -1405,14 +1544,14 @@ export class SettingsPane {
 					["   ", null],
 					[gray(`default ${show(s, fallback.value)}`), null],
 					["  ", null],
-					[gray("↺ reset"), () => this.reset({ kind: "setting", s })],
+					[gray("↺ reset"), { kind: "reset", at: i }],
 				);
 			else parts.push(["   ", null], [gray(fallback.from ?? "default"), null]);
 		}
 		return parts;
 	}
 
-	harnessParts(harness: Harness, i: number): [string, (() => void) | null][] {
+	harnessParts(harness: Harness, i: number): Part[] {
 		const on = this.host.loaded().config.harnesses.includes(harness);
 		const set = this.isSet(setting("harnesses"));
 		const status = this.host.catalog()?.status[harness];
@@ -1420,28 +1559,22 @@ export class SettingsPane {
 		const note = status === undefined ? gray("finding…") : status.problem ? red(status.problem) : "";
 		return [
 			[" ", null],
-			[set ? box : dim(box), () => this.toggleAt(i, harness)],
+			[set ? box : dim(box), { kind: "activate", at: i }],
 			[` ${(set ? (s: string) => s : dim)(harness.padEnd(8))} `, null],
 			[note, null],
 		];
 	}
 
-	toggleAt(i: number, harness: Harness): void {
-		this.cursor = i;
-		this.area = "list";
-		this.toggleHarness(harness);
-	}
-
-	shortlistParts(width: number): [string, (() => void) | null][] {
+	shortlistParts(i: number, width: number): Part[] {
 		const custom = this.host.loaded().config.presets !== null;
 		const title = ` ${bold("Shortlist")}`;
-		const right: [string, (() => void) | null] = custom ? [gray("↺"), () => this.reset({ kind: "shortlist" })] : [gray("automatic"), null];
+		const right: Part = custom ? [gray("↺"), { kind: "reset", at: i }] : [gray("automatic"), null];
 		const pad = Math.max(1, width - 3 - visibleWidth(title) - visibleWidth(right[0]));
 		const listed = this.host.catalog() === null && !custom ? [gray("   finding harnesses…"), null] : null;
 		return [[title, null], ...(listed ? [listed as [string, null]] : []), [" ".repeat(pad), null], right];
 	}
 
-	presetParts(index: number, i: number, width: number): [string, (() => void) | null][] {
+	presetParts(index: number, i: number, width: number): Part[] {
 		const choice = this.choices()[index];
 		if (!choice) return [];
 		const p = choice.preset;
@@ -1456,9 +1589,9 @@ export class SettingsPane {
 		const editing = this.editing?.kind === "text" && this.editing.target.kind === "note" && i === this.cursor;
 		return [
 			[`${String(index + 1).padStart(2)} `, null],
-			[star, () => this.starPreset(index)],
+			[star, { kind: "star", at: i }],
 			[` ${paint(where.padEnd(16).slice(0, 16))} `, null],
-			[paint(`${model}${" ".repeat(Math.max(0, 22 - visibleWidth(model)))}`), () => this.step(1, { kind: "preset", index }, true)],
+			[paint(`${model}${" ".repeat(Math.max(0, 22 - visibleWidth(model)))}`), { kind: "adjust", by: 1, at: i, wrap: true }],
 			[" ", null],
 			[editing ? this.inputCell(noteWidth) : note, null],
 		];
@@ -1477,7 +1610,7 @@ export class SettingsPane {
 		rows.push(
 			this.clickable(y, 0, [
 				["  ", null],
-				[key("O", "open config.toml at that line"), () => this.host.open(error.line)],
+				[key("O", "open config.toml at that line"), { kind: "open", line: error.line }],
 			]),
 		);
 		while (rows.length < height) rows.push("");
@@ -1517,15 +1650,7 @@ export class SettingsPane {
 					"…",
 					true,
 				);
-				this.targets.push({
-					y,
-					from: 0,
-					to: width,
-					act: () => {
-						adding.effort = i;
-						adding.step = "note";
-					},
-				});
+				this.targets.push({ y, from: 0, to: width, command: { kind: "choose", index: i } });
 				rows.push(i === adding.effort ? this.host.paint.cursor(line, true) : line);
 			});
 			while (rows.length < height) rows.push("");
@@ -1562,15 +1687,7 @@ export class SettingsPane {
 				const what = row.kind === "custom" ? green(`use "${m.provider ? `${m.provider}/` : ""}${m.model}" as a model id`) : name.padEnd(30);
 				line = `     ${what}  ${gray(row.kind === "custom" ? "" : m.note)}`;
 				const index = adding.top + r;
-				this.targets.push({
-					y: this.listTop + r,
-					from: 0,
-					to: inner,
-					act: () => {
-						adding.choice = index;
-						this.pickModel(row);
-					},
-				});
+				this.targets.push({ y: this.listTop + r, from: 0, to: inner, command: { kind: "choose", index } });
 			}
 			line = truncateToWidth(line, inner, "…", true);
 			if (adding.top + r === adding.choice) line = this.host.paint.cursor(line, true);
@@ -1623,59 +1740,6 @@ export class SettingsPane {
 	messageLine(now: number): string {
 		if (this.flashText && this.flashText.until > now) return ` ${red(`✗ ${this.flashText.text}`)}`;
 		return this.host.message(now, this.host.error() === null);
-	}
-
-	legend(y: number, width: number, error: ConfigError | null): string {
-		const hints: [string, string, () => void][] = [];
-		const press = (data: string) => () => this.handleInput(data);
-		if (error) hints.push(["O", "open it", () => this.host.open(error.line)], ["esc", "sessions", () => this.host.close()]);
-		else if (this.adding) {
-			const step = this.adding.step;
-			if (step === "search")
-				hints.push(["⏎", "choose", press("\r")], ["↑ ↓", "move", () => {}], ["C-r", "refresh", () => this.host.refresh(true)]);
-			else hints.push(["⏎", step === "effort" ? "next" : "add", press("\r")]);
-			hints.push(["esc", step === "search" ? "cancel" : "back", press("\x1b")]);
-		} else if (this.proseFocused()) {
-			if (!this.narrow) hints.push(["⇥", "sections", press("\t")]);
-			hints.push(["C--", "undo", press("\x1f")], ["esc", "sessions", press("\x1b")]);
-		} else if (this.editing) hints.push(["⏎", "save", press("\r")], ["esc", "cancel", press("\x1b")]);
-		else {
-			const item = this.current();
-			if (!this.narrow) hints.push(["⇥", "area", press("\t")]);
-			hints.push(["[ ]", "section", press("]")]);
-			if (item?.kind === "preset")
-				hints.push(
-					["⏎", "note", press("\r")],
-					["← →", "effort", press("\x1b[C")],
-					["*", "default", press("*")],
-					["J K", "move", press("J")],
-					["x", "remove", press("x")],
-				);
-			else if (item?.kind === "entry") hints.push(["⏎", "edit", press("\r")], ["J K", "move", press("J")], ["x", "remove", press("x")]);
-			else if (item?.kind === "harness") hints.push(["space", "on/off", press(" ")], ["a", "add preset", press("a")]);
-			else if (item?.kind === "setting" && item.s.control.kind === "bool") hints.push(["⏎", "toggle", press("\r")]);
-			else if (item?.kind === "setting" && item.s.control.kind === "enum")
-				hints.push(["⏎", "next", press("\r")], ["e", "choices", press("e")]);
-			else if (item?.kind === "setting" && item.s.control.kind === "int")
-				hints.push(["← →", "step", press("\x1b[C")], ["⏎", "edit", press("\r")]);
-			else if (item?.kind === "shortlist" || item?.kind === "addPreset") hints.push(["⏎", "add", press("\r")]);
-			else hints.push(["⏎", "edit", press("\r")]);
-			const s = this.settingOf(item);
-			if (
-				s &&
-				s.control.kind !== "prose" &&
-				(this.isSet(s) || (s.control.kind === "presets" && this.host.loaded().config.presets !== null))
-			)
-				hints.push(["r", "reset", press("r")]);
-			hints.push(["/", "search", press("/")], ["O", "file", press("O")]);
-		}
-		const parts = hints.flatMap(([name, label, act]): [string, (() => void) | null][] => [
-			[" ", null],
-			[key(name, label), act],
-		]);
-		// Hints that don't fit are dropped whole, from the end.
-		while (parts.length > 2 && parts.reduce((n, [t]) => n + visibleWidth(t), 0) > width) parts.splice(-2, 2);
-		return this.clickable(y, 0, parts);
 	}
 
 	state(): SettingsState {

@@ -95,6 +95,17 @@ test("the mouse reaches everything the keys do: a row's Peek, the hidden or narr
 	await click("key or click closes", 140);
 	await until(() => !s.screen().includes("key or click closes"), budgets.settle, "help closed by a click");
 
+	// A Peek's buttons are its row's prefix keys: one closes a filter being typed, as the key does, and the query stays.
+	s.keys("M-a", "/");
+	await waitState(s, "filtering", (x) => x.mode === "filter");
+	s.keys("-l", "a");
+	await waitState(s, "typed into the filter", (x) => x.filter === "a");
+	await peekButton("bravo", b, "Mark Unseen u");
+	await waitState(s, "the filter closed by the Peek's button", (x) => x.mode === "roster" && x.filter === "a");
+	await until(() => entry(s, b).markedUnseen, budgets.settle, "bravo marked Unseen from its Peek");
+	s.keys("Escape");
+	await waitState(s, "the filter cleared", (x) => x.filter === "");
+
 	s.keys("M-a", "/");
 	await waitState(s, "filtering", (x) => x.mode === "filter");
 	s.keys("-l", "brav", "Enter");

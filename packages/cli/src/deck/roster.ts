@@ -11,6 +11,7 @@ import {
 	ProcessTerminal,
 	type RgbColor,
 	sliceByColumn,
+	type TerminalColors,
 	TuiAltScreen,
 	type TuiMouseEvent,
 	type TuiMouseEventResult,
@@ -37,6 +38,7 @@ import { writeConfig } from "../write-config.ts";
 import { Control } from "./control.ts";
 import { deckSocket, HELP_POPUP, placeholderName, rosterCols, SPLIT_FROM } from "./deck.ts";
 import { helpSize } from "./help.ts";
+import { type Binding, bindingFor, type Command, legendParts, type RowAct } from "./model.ts";
 import { type Overlay, type OverlayButton, Overlays, type OverlayView } from "./overlay.ts";
 import type {
 	Card,
@@ -179,6 +181,10 @@ let ready = false;
 
 type Toast = { text: string; level: "info" | "error"; until: number };
 let toasts: Toast[] = [];
+/**
+ * The one piece of state an effect adds to directly, as a tmux command's failure does: a notice, which no change reads
+ * but to put it away. A failure can land during a commit, where a change can't start.
+ */
 function toast(text: string, level: Toast["level"]): void {
 	toasts.push({ text, level, until: Date.now() + TOAST_MS });
 	tui.requestRender();
@@ -529,31 +535,25 @@ function viewed(): Applied {
 	return d;
 }
 
-/** Directories whose Editor this staging already asked for, so an Editor that dies isn't restarted in a loop. */
-const editorsAsked = new Set<string>();
-/** Directories whose Editor died after this staging asked for it, already reported once. */
-const editorsLost = new Set<string>();
-const editorWaits = new Map<string, ((name: string | null) => void)[]>();
+/**
+ * Each directory whose Editor this staging asked for, so one that dies isn't restarted in a loop: still `asking`, with
+ * the view it `shows` once it runs; `asked`; or `lost`, died since and already reported once.
+ */
+type EditorAsk = { kind: "asking"; shows: { id: string; view: View } | null } | { kind: "asked" } | { kind: "lost" };
+const editors = new Map<string, EditorAsk>();
 
-/** Resolves to the directory's Editor once the worker reports it, or null if it couldn't start. */
-function requestEditor(dir: string): Promise<string | null> {
-	editorsAsked.add(dir);
-	const existing = snapshot?.editors[dir];
-	if (existing) return Promise.resolve(existing);
-	return new Promise((resolve) => {
-		const waits = editorWaits.get(dir);
-		if (waits) {
-			waits.push(resolve);
-			return;
-		}
-		editorWaits.set(dir, [resolve]);
-		post({ type: "editor", dir });
-	});
+/** Asks the worker for the directory's Editor, to show `shows` once it runs. */
+function requestEditor(dir: string, shows: { id: string; view: View } | null): void {
+	editors.set(dir, { kind: "asking", shows });
+	post({ type: "editor", dir });
 }
 
-function settleEditorWaits(dir: string, name: string | null): void {
-	for (const resolve of editorWaits.get(dir) ?? []) resolve(name);
-	editorWaits.delete(dir);
+function onEditor(dir: string, name: string | null): void {
+	const ask = editors.get(dir);
+	if (ask?.kind !== "asking") return;
+	editors.set(dir, { kind: "asked" });
+	const e = ask.shows && entries.get(ask.shows.id);
+	if (name !== null && e && ask.shows && panes.applied.id === e.id) setView(e, ask.shows.view);
 }
 
 /** A harness on the Stage's pane before it's up, which shows its terminal's echo, not its own screen. */
@@ -596,21 +596,28 @@ function cardStream(): Response {
 }
 
 let dispatching = false;
+/** tmux work the changes since the last commit started, which commit runs once the Stage is in line with them. */
+let effects: (() => void)[] = [];
 
 /** Runs a change to the Deck's state, one at a time: a change that starts another inside it is a bug. */
 function transition<T>(change: () => T): T {
 	if (dispatching) throw new Error("a Deck change started inside another");
 	dispatching = true;
+	const before = effects.length;
 	try {
 		return change();
+	} catch (error) {
+		// What a change that failed started goes with it.
+		effects.length = before;
+		throw error;
 	} finally {
 		dispatching = false;
 	}
 }
 
 /**
- * Every change to the Deck's state comes in here, or ends in commit when it waits on tmux on the way: a key, a click, a
- * prefix key, a worker's reply, a timer, a config edit.
+ * Every change to the Deck's state comes in here: a key, a click, a prefix key, a worker's reply, a timer, a config
+ * edit. A change only changes state, posts to the worker, and leaves tmux work for afterCommit.
  */
 function dispatch<T>(change: () => T): T {
 	const result = transition(change);
@@ -618,12 +625,31 @@ function dispatch<T>(change: () => T): T {
 	return result;
 }
 
-/** Settles what a change left: the roster's cursor and mode first, then the Stage, the status line, and the screen. */
+/**
+ * Runs `effect` once the change in progress is committed, behind the Stage's placement for it: a pane the change
+ * brings up is in place before the keyboard goes there.
+ */
+function afterCommit(effect: () => void): void {
+	if (!dispatching) throw new Error("afterCommit outside a Deck change");
+	effects.push(effect);
+}
+
+/**
+ * Settles what the changes left: the roster's cursor and mode first, then the Stage, the status line, and the screen,
+ * then the tmux work they started. Also runs on its own after a tmux command the UI server sent finishes.
+ */
 function commit(): void {
 	if (dispatching) throw new Error("a Deck commit inside a change");
 	roster.normalize();
 	apply();
+	// A key's time goes only to the switch its own commit makes.
+	panes.keyAt = 0;
 	syncStatus();
+	// Setting it repaints the whole Deck, best done in the change's own frame than a tick later.
+	syncTitle();
+	const run = effects;
+	effects = [];
+	for (const effect of run) effect();
 }
 
 function apply(): void {
@@ -634,9 +660,10 @@ function apply(): void {
 	syncVisit();
 	const e = d.id === null ? undefined : entries.get(d.id);
 	if (d.host && e?.open && viewOf(e) !== "agent" && snapshot && !snapshot.editors[e.cwd]) {
-		if (!editorsAsked.has(e.cwd)) void requestEditor(e.cwd);
-		else if (!editorWaits.has(e.cwd) && !editorsLost.has(e.cwd)) {
-			editorsLost.add(e.cwd);
+		const ask = editors.get(e.cwd);
+		if (!ask) requestEditor(e.cwd, null);
+		else if (ask.kind === "asked") {
+			editors.set(e.cwd, { kind: "lost" });
 			toast(`editor for ${e.cwd} exited; showing ${harnessName(e.harness)}`, "error");
 		}
 	}
@@ -743,12 +770,11 @@ function stageSession(id: string): void {
 	stage.staged = id;
 	stage.stagedAt = Date.now();
 	if (stage.ended?.id !== id) stage.ended = null;
-	editorsAsked.clear();
-	editorsLost.clear();
+	// An ask in flight stays, so its directory isn't asked twice; what it shows waits on its own session.
+	for (const [dir, ask] of editors) if (ask.kind !== "asking") editors.delete(dir);
 	const e = entries.get(id);
 	if (e) readTranscript(e, true);
 	scheduleHighlightWake();
-	apply();
 }
 
 function scheduleHighlightWake(): void {
@@ -773,14 +799,12 @@ function wake(id: string, keyboard: boolean): void {
 	const existing = launchFor(id);
 	if (existing) {
 		existing.keyboard ||= keyboard;
-		apply();
 		return;
 	}
 	if (entries.get(id)?.live) return;
 	const req = nextReq();
 	launches.push({ req, id, host: null, since: Date.now(), keyboard });
 	post({ type: "wake", req, id });
-	apply();
 }
 
 /** Restarts a session's harness, live or not, to carry on; the Stage shows it starting, as a wake does, until it's back. */
@@ -790,7 +814,6 @@ function reload(id: string): void {
 	const req = nextReq();
 	launches.push({ req, id, host: null, since: Date.now(), keyboard: focus === "stage" });
 	post({ type: "reload", req, id });
-	apply();
 }
 
 /** A new session on `target`; with none, the worker picks `harness`'s first preset, or the default, once it knows what can start. */
@@ -805,7 +828,6 @@ function newSession(cwd: string, group: string | null, target: LaunchTarget | nu
 	stage.staged = null;
 	stage.ended = null;
 	post({ type: "new", req, cwd, group, target, harness });
-	apply();
 	focusOnceShown(() => panes.side?.pane ?? stagePane);
 }
 
@@ -853,7 +875,7 @@ function launchEnded(launch: Launch, lines: string[], text: string): void {
 		// isn't a move onto what's staged now.
 		focusMoves++;
 		returning = true;
-		void panes.showRoster(true);
+		afterCommit(() => void panes.showRoster(true));
 	}
 }
 
@@ -881,7 +903,7 @@ function followHost(): void {
 	// A reload stops it on purpose; its new host takes over the Stage.
 	if (launchFor(id)) return;
 	stage.ended = { id, failed: false, lines: [] };
-	if (focus === "stage") void panes.showRoster(true);
+	if (focus === "stage") afterCommit(() => void panes.showRoster(true));
 }
 
 /** The cursor the last Deck in this Project left, until the first snapshot places it. */
@@ -974,12 +996,10 @@ function onSnapshot(next: Snapshot): void {
 	if (!started) startCursor();
 	const e = stage.staged === null ? undefined : entries.get(stage.staged);
 	if (e) readTranscript(e, false);
-	apply();
-	roster.syncStage(false);
-	// A turn that lands while I'm already watching is seen as it lands.
-	if (stage.watched && stage.visited && entries.get(stage.watched)?.unseen) post({ type: "visit", id: stage.watched });
-	// Setting it repaints the whole Deck, best done with the snapshot's own frame than a tick later.
-	syncTitle();
+	// A turn that lands while I'm already watching is seen as it lands; commit settles what I'm watching.
+	afterCommit(() => {
+		if (stage.watched && stage.visited && entries.get(stage.watched)?.unseen) post({ type: "visit", id: stage.watched });
+	});
 	checkReady();
 }
 
@@ -1007,7 +1027,7 @@ function onWorker(message: FromWorker): void {
 				roster.expanded = new Set(message.layout.expanded.flatMap((saved) => SECTION_KEYS.filter((key) => key === saved)));
 				panes.dragged = message.layout.rosterCols;
 				restoredKey = message.layout.selectedKey;
-				void panes.layout();
+				afterCommit(() => void panes.layout());
 			}
 			break;
 		case "snapshot":
@@ -1016,12 +1036,10 @@ function onWorker(message: FromWorker): void {
 		case "launched": {
 			const launch = launches.find((l) => l.req === message.req);
 			if (launch) launch.host = message.host;
-			apply();
 			break;
 		}
 		case "transcript":
 			transcripts.set(message.id, { transcript: message.transcript, error: message.error });
-			apply();
 			break;
 		case "peek":
 			onPeekInfo(message.id, message.info);
@@ -1039,7 +1057,6 @@ function onWorker(message: FromWorker): void {
 			for (const [id, local] of localViews) if (local.req === req) localViews.delete(id);
 			for (const [id, local] of localGroups) if (local.req === req) localGroups.delete(id);
 			toast(error, "error");
-			apply();
 			break;
 		}
 		case "stopFailed":
@@ -1049,11 +1066,10 @@ function onWorker(message: FromWorker): void {
 			const launch = launches.find((l) => l.req === message.req);
 			if (launch) launchEnded(launch, [message.text], message.text);
 			else toast(message.text, "error");
-			apply();
 			break;
 		}
 		case "editor":
-			settleEditorWaits(message.dir, message.name);
+			onEditor(message.dir, message.name);
 			if (message.text) toast(`editor: ${message.text}`, "error");
 			break;
 		case "shell":
@@ -1073,12 +1089,10 @@ function onWorker(message: FromWorker): void {
 				const at = rows.findIndex((r) => r.kind === "target" && r.target.path === path);
 				roster.choosing.choice = at === -1 ? Math.min(roster.choosing.choice, rows.length - 1) : at;
 			}
-			tui.requestRender();
 			break;
 		}
 		case "catalog":
 			catalog = message.catalog;
-			tui.requestRender();
 			break;
 		case "error":
 			toast(message.text, "error");
@@ -1112,7 +1126,6 @@ function reveal(id: string): void {
 	}
 	for (let up = parentOf(e); up; up = parentOf(up)) roster.collapsed.delete(foldKey(up.id));
 	roster.selectedKey = id;
-	roster.syncStage(true);
 }
 
 type SectionKey = "operators" | "inactive" | "snoozed" | "archived";
@@ -1193,6 +1206,12 @@ function groupKey(group: string): string {
 /** Where a dragged session would land: a header to light up and the Group it would take, or nowhere. */
 type Drop = { header: HeaderRow; name: string | null } | null;
 
+/** A session being dragged by the mouse; `moved` once the pointer has left its row. */
+type Drag = { kind: "drag"; id: string; moved: boolean; drop: Drop };
+
+/** What the left button is in the middle of: a press on a button, which its click runs, or a drag. */
+type Gesture = { kind: "none" } | { kind: "press"; target: ClickTarget } | Drag;
+
 // The cursor's background is mixed from the terminal's own background and foreground, as pi's system theme
 // does. Until the terminal reports its colors, reverse video stands in. The row under the pointer gets a fainter mix
 // than the cursor's, focused or not; the cursor also has the ▌ bar while its session is on the Stage.
@@ -1212,7 +1231,10 @@ function hoverLine(line: string): string {
 	return cursorBg ? sgrBg(cursorBg.hover, line) : line;
 }
 
-type ClickTarget = { y: number; from: number; to: number; act: () => void };
+/** Where a click lands, as of the last render, and the command it runs; null takes the click and does nothing. */
+type ClickTarget = { y: number; from: number; to: number; command: Command | null };
+/** A stretch of a line, and the command a click on it runs. */
+type Part = [text: string, command: Command | null];
 
 /** `m`'s picker: the sessions it moves, the Group it renames when it started on one's header, and the highlighted choice. */
 type NameMode = {
@@ -1297,9 +1319,11 @@ class Roster implements Component, Focusable {
 	}
 
 	/** Leaves the mode it's in for `next`. */
+	/** A mode takes keys, so one opened while the Stage has the keyboard brings it to the roster. */
 	enter(next: Mode): void {
 		this.leave();
 		this.mode = next;
+		if (focus === "stage") afterCommit(() => void panes.showRoster(true));
 	}
 
 	/**
@@ -1311,7 +1335,7 @@ class Roster implements Component, Focusable {
 		this.mode = { kind: "roster" };
 		if (was.kind === "settings") {
 			was.pane.saveProse();
-			panes.zoomRoster(false);
+			afterCommit(() => panes.zoomRoster(false));
 		}
 	}
 	search = new Input({ prompt: "/ " });
@@ -1320,8 +1344,10 @@ class Roster implements Component, Focusable {
 	pickerListY = 0;
 	completed: { typed: string; rows: string[] } | null = null;
 	path = new Input({ prompt: "" });
-	/** A session being dragged by the mouse; `moved` once the pointer has left its row. */
-	dragging: { id: string; moved: boolean; drop: Drop } | null = null;
+	gesture: Gesture = { kind: "none" };
+	get drag(): Drag | null {
+		return this.gesture.kind === "drag" ? this.gesture : null;
+	}
 	/** The session row under the pointer. A key clears it until the pointer moves again, and so does the pointer leaving. */
 	hover: string | null = null;
 	/** Where the pointer rests, which lights the control under it; null after a key or once it leaves. */
@@ -1337,7 +1363,6 @@ class Roster implements Component, Focusable {
 	listHeight = 0;
 	/** What a click does, by row and column range, as of the last render. */
 	targets: ClickTarget[] = [];
-	pressed: ClickTarget | null = null;
 
 	query(): string {
 		return this.filter.getValue().trim().toLowerCase();
@@ -1503,12 +1528,18 @@ class Roster implements Component, Focusable {
 		return index;
 	}
 
-	/** What a change leaves to settle: the cursor on a row, a prompt whose row is gone put away, a typed path's completions read. */
+	/**
+	 * What a change leaves to settle: the cursor on a row, a prompt whose row is gone put away, a typed path's completions
+	 * read, and the Stage on the cursor's session; it stays put while the cursor is on a header, and while a new session
+	 * starts, until the cursor moves.
+	 */
 	normalize(): void {
 		const rows = this.rows();
-		this.resolveCursor(rows);
+		const row = rows[this.resolveCursor(rows)];
 		if (this.archiving !== null && !rows.some((r) => r.key === this.archiving)) this.leave();
 		if (this.choosing?.mode === "add") this.addRows();
+		if (row?.kind !== "session" || row.entry.id === stage.staged || (stage.staged === null && newLaunch() && stage.holdForNew)) return;
+		stageSession(row.entry.id);
 	}
 
 	selected(): Row | undefined {
@@ -1521,14 +1552,6 @@ class Roster implements Component, Focusable {
 		return row?.kind === "session" ? row.entry : null;
 	}
 
-	/** The Stage follows the cursor onto session rows, and stays put while the cursor is on a header. */
-	syncStage(fromKey: boolean): void {
-		const e = this.cursorEntry();
-		if (stage.staged === null && newLaunch() && stage.holdForNew) return;
-		if (e && e.id !== stage.staged) stageSession(e.id);
-		else if (fromKey) apply();
-	}
-
 	handleInput(data: string): void {
 		dispatch(() => this.input(data));
 	}
@@ -1536,7 +1559,7 @@ class Roster implements Component, Focusable {
 	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
 		const result = transition(() => this.mouse(event));
 		// Pointer motion that lights nothing new changes nothing, and skips the commit as it skips the render.
-		if (result?.render !== false) commit();
+		if (result?.render !== false || effects.length > 0) commit();
 		return result;
 	}
 
@@ -1550,114 +1573,280 @@ class Roster implements Component, Focusable {
 		toasts = toasts.filter((t) => t.until === Number.POSITIVE_INFINITY);
 		if (this.settings) {
 			this.settings.handleInput(data);
-			panes.keyAt = 0;
-			tui.requestRender();
 			return;
 		}
-		if (this.choosing) {
-			this.pickerInput(data);
-			panes.keyAt = 0;
-			tui.requestRender();
-			return;
-		}
-		if (this.snoozing) {
-			const k = decodeKittyPrintable(data) ?? data;
-			if (matchesKey(data, "up") || k === "k") this.snoozing.choice = Math.max(0, this.snoozing.choice - 1);
-			else if (matchesKey(data, "down") || k === "j") this.snoozing.choice = Math.min(SNOOZE_CHOICES.length - 1, this.snoozing.choice + 1);
-			else if (matchesKey(data, "enter")) this.finishSnooze((SNOOZE_CHOICES[this.snoozing.choice] as { snooze: SnoozePreset }).snooze);
-			else if (matchesKey(data, "escape") || k === "q" || k === "s") this.leave();
-			panes.keyAt = 0;
-			tui.requestRender();
-			return;
-		}
-		if (this.archiving !== null) {
-			const k = decodeKittyPrintable(data) ?? data;
-			if (k === "a" || k === "A") this.finishArchiving(k === "A");
-			else if (k === "d" && entries.get(this.archiving)?.worktree) this.finishArchiving(false, true);
-			else if (k === "D" && entries.get(this.archiving)?.worktree) this.finishArchiving(true, true);
-			else if (matchesKey(data, "escape")) this.finishArchiving(null);
-			panes.keyAt = 0;
-			tui.requestRender();
-			return;
-		}
-		if (this.naming) {
-			const naming = this.naming;
-			const choices = this.choices();
-			if (matchesKey(data, "up") || matchesKey(data, "down")) {
-				const step = matchesKey(data, "up") ? -1 : 1;
-				naming.choice = Math.max(0, Math.min(choices.length - 1, naming.choice + step));
-			} else if (matchesKey(data, "enter")) {
-				const choice = choices[naming.choice];
-				if (choice) this.finishNaming(choice.name);
-			} else if (matchesKey(data, "escape")) this.leave();
-			else {
-				const before = naming.input.getValue();
-				naming.input.handleInput(data);
-				const refused = unnameable(naming.input.getValue());
-				if (refused.length > 0) {
-					naming.input.setValue(before);
-					toast(`a Group's name can't hold ${refused.map((char) => JSON.stringify(char)).join(" ")}`, "info");
-				}
-				naming.choice = 0;
+		const binding = bindingFor(keymap(), data);
+		if (binding?.command) this.run(binding.command);
+		else if (!binding && this.typing()) this.run({ kind: "type", data });
+	}
+
+	/** Whether the mode has a field that takes the keys its keymap doesn't. */
+	typing(): boolean {
+		return this.filtering || this.naming !== null || (this.choosing !== null && !this.choosing.confirm);
+	}
+
+	/** Every key, click, prefix key, and button ends here. */
+	run(c: Command): void {
+		switch (c.kind) {
+			case "step":
+				this.step(c.by);
+				break;
+			case "choose":
+				this.choose(c.index);
+				break;
+			case "cancel":
+				this.cancel();
+				break;
+			case "type":
+				this.type(c.data);
+				break;
+			case "activate":
+				this.activate(c.enter);
+				break;
+			case "unfold":
+				if (c.open) this.right();
+				else this.left();
+				break;
+			case "select":
+				this.select(c.key, c.index);
+				break;
+			case "fold": {
+				const row = this.rows().find((r): r is SessionRow => r.kind === "session" && r.key === c.id);
+				if (row) this.setFolded(row, !row.folded);
+				break;
 			}
-			panes.keyAt = 0;
-			tui.requestRender();
-			return;
-		}
-		if (this.filtering) {
-			if (matchesKey(data, "up") || matchesKey(data, "down")) this.move(matchesKey(data, "up") ? -1 : 1);
-			else if (matchesKey(data, "enter")) this.leave();
-			else if (matchesKey(data, "escape")) {
+			case "moveSession":
+				this.moveSession(c.by);
+				break;
+			case "row":
+				this.act(c.act, c.row === null ? this.selected() : this.rows().find((r) => r.key === c.row));
+				break;
+			case "archiveAnswer":
+				this.finishArchiving(c.all, c.deleteWorktree);
+				break;
+			case "history":
+				goHistory(c.step);
+				break;
+			case "reveal":
+				reveal(c.id);
+				break;
+			case "filter":
+				this.enter({ kind: "filter" });
+				break;
+			case "clearFilter":
 				this.filter.setValue("");
-				this.leave();
-			} else {
-				this.filter.handleInput(data);
-				const rows = this.rows();
-				const first = rows.find((r) => r.kind === "session");
-				if (first && !rows.some((r) => r.kind === "session" && r.key === this.selectedKey)) this.selectedKey = first.key;
+				break;
+			case "addDir":
+				this.openPicker("add", null, null);
+				break;
+			case "menu":
+				this.toggleMenu();
+				break;
+			case "complete":
+				this.complete();
+				break;
+			case "remove":
+				this.askRemove();
+				break;
+			case "view": {
+				const e = stage.staged === null ? undefined : entries.get(stage.staged);
+				if (e) showView(e, c.view);
+				break;
 			}
-			this.syncStage(true);
-			panes.keyAt = 0;
-			tui.requestRender();
-			return;
+			case "shell":
+				toggleShell();
+				break;
+			case "roster":
+				if (c.to === "hide") {
+					if (!this.settings) afterCommit(() => void panes.hideRoster());
+				} else afterCommit(() => void panes.showRoster(c.to === "focus"));
+				break;
+			case "settings":
+				openSettings();
+				break;
+			case "config":
+				afterCommit(() => openConfig(c.line));
+				break;
+			case "help":
+				afterCommit(() => void showHelp());
+				break;
+			case "quit":
+				afterCommit(quit);
+				break;
 		}
-		const k = decodeKittyPrintable(data) ?? data;
-		if (matchesKey(data, "ctrl+c") || k === "q") {
-			quit();
-			return;
+	}
+
+	/** A row's own command, from its key on the cursor's row, its Peek's buttons, or a prefix key. */
+	act(act: RowAct, row: Row | undefined): void {
+		switch (act) {
+			case "wake":
+				this.wake(row);
+				break;
+			case "stop":
+				this.stop(row);
+				break;
+			case "reload":
+				this.reload(row);
+				break;
+			case "archive":
+				this.toggleArchived(row);
+				break;
+			case "snooze":
+				this.toggleSnooze(row);
+				break;
+			case "unseen":
+				this.toggleUnseen(row);
+				break;
+			case "parent":
+				this.toParent(row);
+				break;
+			case "copyOpen":
+				this.copy(true, row);
+				break;
+			case "copyMention":
+				this.copy(false, row);
+				break;
+			case "new":
+				this.newAt(row);
+				break;
+			case "group":
+				this.startNaming(row);
+				break;
 		}
-		if (matchesKey(data, "down") || k === "j") this.move(1);
-		else if (matchesKey(data, "up") || k === "k") this.move(-1);
-		else if (k === "g") this.move(Number.NEGATIVE_INFINITY);
-		else if (k === "G") this.move(Number.POSITIVE_INFINITY);
-		else if (matchesKey(data, "enter") || k === " ") this.activate(matchesKey(data, "enter"));
-		else if (matchesKey(data, "right") || k === "l") this.right();
-		else if (matchesKey(data, "left") || k === "h") this.left();
-		else if (matchesKey(data, "escape")) this.filter.setValue("");
-		else if (k === "w") this.wake();
-		else if (k === "x") this.stop();
-		else if (k === "R") this.reload();
-		else if (k === "a") this.toggleArchived();
-		else if (k === "s") this.toggleSnooze();
-		else if (k === "u") this.toggleUnseen();
-		else if (k === "p") this.toParent();
-		else if (k === "[" || k === "]") goHistory(k === "[" ? -1 : 1);
-		else if (k === "y" || k === "Y") this.copy(k === "y");
-		else if (k === "n") this.newAt();
-		else if (k === "N") this.openPicker("add", null, null);
-		else if (k === "/") this.enter({ kind: "filter" });
-		else if (k === "m") this.startNaming();
-		else if (k === ",") openSettings();
-		else if (k === "O" && configError) openConfig(configError.line);
-		else if (k === "?") void showHelp();
-		this.syncStage(true);
-		panes.keyAt = 0;
-		tui.requestRender();
+	}
+
+	/** The mode's highlight moves by `by`: the cursor, or a prompt's, picker's, or menu's choice. */
+	step(by: number): void {
+		const mode = this.mode;
+		if (mode.kind === "roster" || mode.kind === "filter") this.move(by);
+		else if (mode.kind === "snooze") mode.choice = Math.max(0, Math.min(SNOOZE_CHOICES.length - 1, mode.choice + by));
+		else if (mode.kind === "name") mode.choice = Math.max(0, Math.min(this.choices().length - 1, mode.choice + by));
+		else if (mode.kind === "picker") {
+			const choosing = mode.picker;
+			if (choosing.confirm) return;
+			if (choosing.menu) {
+				choosing.menu.cursor = Math.max(0, Math.min(menuPresets(choosing.menu.query).length - 1, choosing.menu.cursor + by));
+				return;
+			}
+			const first = choosing.mode === "pick" ? 0 : -1;
+			const count = choosing.mode === "pick" ? this.pickRows().length : this.addRows().length;
+			choosing.choice = Math.max(first, Math.min(count - 1, choosing.choice + by));
+		}
+	}
+
+	/** ⏎, or a click on a choice: what the mode's choice does. */
+	choose(index: number | null): void {
+		const mode = this.mode;
+		if (mode.kind === "filter") this.leave();
+		else if (mode.kind === "snooze") {
+			const choice = SNOOZE_CHOICES[index ?? mode.choice];
+			if (choice) this.finishSnooze(choice.snooze);
+		} else if (mode.kind === "name") {
+			const choice = this.choices()[index ?? mode.choice];
+			if (choice) this.finishNaming(choice.name);
+		} else if (mode.kind === "picker") {
+			const choosing = mode.picker;
+			if (choosing.confirm) this.finishRemove(true);
+			else if (choosing.menu) {
+				const preset = menuPresets(choosing.menu.query)[index ?? choosing.menu.cursor];
+				if (preset !== undefined) this.choosePreset(preset);
+			} else {
+				if (index !== null) choosing.choice = index;
+				this.pickerEnter();
+			}
+		}
+	}
+
+	/** esc, or a ✕: the mode backs out a step. */
+	cancel(): void {
+		const mode = this.mode;
+		if (mode.kind === "filter") {
+			this.filter.setValue("");
+			this.leave();
+		} else if (mode.kind === "name" || mode.kind === "snooze") this.leave();
+		else if (mode.kind === "archive") this.finishArchiving(null);
+		else if (mode.kind === "picker") {
+			const choosing = mode.picker;
+			if (choosing.confirm) this.finishRemove(false);
+			else if (choosing.menu) choosing.menu = null;
+			else if (choosing.mode === "add" && choosing.opened === "pick") {
+				choosing.mode = "pick";
+				choosing.choice = this.pickRows().length - 1;
+			} else this.closePicker();
+		}
+	}
+
+	/** A key into the mode's field. */
+	type(data: string): void {
+		const naming = this.naming;
+		const choosing = this.choosing;
+		if (this.filtering) {
+			this.filter.handleInput(data);
+			const rows = this.rows();
+			const first = rows.find((r) => r.kind === "session");
+			if (first && !rows.some((r) => r.kind === "session" && r.key === this.selectedKey)) this.selectedKey = first.key;
+		} else if (naming) {
+			const before = naming.input.getValue();
+			naming.input.handleInput(data);
+			const refused = unnameable(naming.input.getValue());
+			if (refused.length > 0) {
+				naming.input.setValue(before);
+				toast(`a Group's name can't hold ${refused.map((char) => JSON.stringify(char)).join(" ")}`, "info");
+			}
+			naming.choice = 0;
+		} else if (choosing?.menu) {
+			const menu = choosing.menu;
+			const k = decodeKittyPrintable(data) ?? data;
+			if (matchesKey(data, "backspace")) menu.query = menu.query.slice(0, -1);
+			else if (k.length === 1 && k >= " ") menu.query += k;
+			else return;
+			menu.cursor = 0;
+		} else if (choosing?.mode === "pick") {
+			this.search.handleInput(data);
+			const typed = this.search.getValue();
+			// A path typed into the search is an add.
+			if (typed.startsWith("/") || typed.startsWith("~")) {
+				choosing.mode = "add";
+				this.path.setValue(typed);
+				this.search.setValue("");
+				choosing.choice = typedChoice(typed);
+				return;
+			}
+			choosing.choice = this.bestMatch();
+		} else if (choosing) {
+			this.path.handleInput(data);
+			choosing.choice = typedChoice(this.path.getValue());
+		}
+	}
+
+	/** A click on a row: the cursor goes there, and it acts as ⏎ does. Picking a row is done filtering, and the filter stays. */
+	select(key: string, index: number): void {
+		if (this.filtering) this.leave();
+		const row = this.rows().find((r) => r.key === key);
+		if (!row) return;
+		this.selectedKey = key;
+		this.lastIndex = index;
+		stage.holdForNew = false;
+		if (isHeader(row)) this.toggle(row);
+		else this.focusEntry(row.entry);
 	}
 
 	/** The click target under a point, as of the last render. */
 	targetAt(p: { x: number; y: number } | null): ClickTarget | undefined {
 		return p ? this.targets.find((t) => t.y === p.y && p.x >= t.from && p.x < t.to) : undefined;
+	}
+
+	press(p: { x: number; y: number }): ClickTarget | undefined {
+		const target = this.targetAt(p);
+		this.gesture = target ? { kind: "press", target } : { kind: "none" };
+		return target;
+	}
+
+	/** The button a click lands on: the one under its press. */
+	clicked(): ClickTarget | null {
+		const target = this.gesture.kind === "press" ? this.gesture.target : null;
+		this.gesture = { kind: "none" };
+		return target;
 	}
 
 	mouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
@@ -1673,12 +1862,10 @@ class Roster implements Component, Focusable {
 		// The archive prompt answers to its own buttons and nothing else.
 		if (this.archiving !== null) {
 			if (event.type === "move") return { handled: true, render: relit };
-			if (event.button === "left" && event.type === "press") this.pressed = this.targetAt(event) ?? null;
+			if (event.button === "left" && event.type === "press") this.press(event);
 			else if (event.button === "left" && event.type === "click") {
-				const target = this.pressed;
-				this.pressed = null;
-				target?.act();
-				this.syncStage(true);
+				const target = this.clicked();
+				if (target?.command) this.run(target.command);
 			}
 			return { handled: true, render: true };
 		}
@@ -1694,22 +1881,22 @@ class Roster implements Component, Focusable {
 				}
 				return { handled: true, render: relit };
 			}
-			if (event.type === "wheel") this.pickerInput(event.wheelDelta && event.wheelDelta > 0 ? "\x1b[B" : "\x1b[A");
-			else if (event.button === "left" && event.type === "press")
-				this.pressed = this.targets.find((t) => t.y === event.y && event.x >= t.from && event.x < t.to) ?? null;
+			if (event.type === "wheel") this.run({ kind: "step", by: Math.sign(event.wheelDelta ?? 0) });
+			else if (event.button === "left" && event.type === "press") this.press(event);
 			else if (event.button === "left" && event.type === "click") {
-				const target = this.pressed;
-				this.pressed = null;
-				if (target) target.act();
-				else if (this.choosing.menu) this.choosing.menu = null;
+				const target = this.clicked();
+				if (target?.command) this.run(target.command);
+				else if (!target && this.choosing.menu) this.choosing.menu = null;
 			}
 			return { handled: true, render: true };
 		}
 		if (event.type === "move") {
 			const on = this.over.find((o) => event.x >= o.x && event.x < o.x + o.width && event.y >= o.y && event.y < o.y + o.view.lines.length);
 			if (on) {
-				on.pointer?.();
-				return { handled: true, render: relit };
+				if (on.hovers === null || on.hovers === this.hover) return { handled: true, render: relit };
+				cancelPendingPeek();
+				this.hover = on.hovers;
+				return { handled: true, render: true };
 			}
 			const row = this.rowAt(event.y);
 			const hover = row?.kind === "session" ? row.key : null;
@@ -1718,49 +1905,39 @@ class Roster implements Component, Focusable {
 			return { handled: true, render: true };
 		}
 		if (event.type === "wheel") {
-			this.move(Math.sign(event.wheelDelta ?? 0));
-			this.syncStage(true);
+			this.run({ kind: "step", by: Math.sign(event.wheelDelta ?? 0) });
 			return { handled: true };
 		}
 		if (event.button !== "left") return undefined;
 		// Clicking the roster focuses it, and its focus hook can re-render the legend before the release: the target is the
 		// one under the press.
 		if (event.type === "press") {
-			this.pressed = this.targets.find((t) => t.y === event.y && event.x >= t.from && event.x < t.to) ?? null;
-			this.dragging = null;
+			const target = this.press(event);
 			const row = this.rowAt(event.y);
-			if (this.pressed || row?.kind !== "session" || !row.entry.open || row.entry.operator) return undefined;
-			this.dragging = { id: row.entry.id, moved: false, drop: null };
+			if (target || row?.kind !== "session" || !row.entry.open || row.entry.operator) return undefined;
+			this.gesture = { kind: "drag", id: row.entry.id, moved: false, drop: null };
 			return { capture: true };
 		}
-		if (event.type === "drag" && this.dragging) {
-			const e = entries.get(this.dragging.id);
-			this.dragging.moved = true;
-			this.dragging.drop = e ? this.dropAt(event.y, e) : null;
+		const drag = this.drag;
+		if (event.type === "drag" && drag) {
+			const e = entries.get(drag.id);
+			drag.moved = true;
+			drag.drop = e ? this.dropAt(event.y, e) : null;
 			return { handled: true };
 		}
-		if (event.type === "release" && this.dragging) {
+		if (event.type === "release" && drag) {
 			this.finishDrag(event.y);
 			return { handled: true, render: true };
 		}
 		if (event.type !== "click") return undefined;
-		const target = this.pressed;
-		this.pressed = null;
+		const target = this.clicked();
 		if (target) {
-			target.act();
-			this.syncStage(true);
+			if (target.command) this.run(target.command);
 			return { handled: true };
 		}
 		const row = this.rowAt(event.y);
 		if (!row) return undefined;
-		// Picking a row is done filtering, as ⏎ is; the filter stays applied.
-		if (this.filtering) this.leave();
-		this.selectedKey = row.key;
-		this.lastIndex = this.scrollTop + (event.y - this.listTop);
-		stage.holdForNew = false;
-		if (isHeader(row)) this.toggle(row);
-		else this.focusEntry(row.entry);
-		this.syncStage(true);
+		this.run({ kind: "select", key: row.key, index: this.scrollTop + (event.y - this.listTop) });
 		return { handled: true };
 	}
 
@@ -1775,7 +1952,7 @@ class Roster implements Component, Focusable {
 			this.choosing ||
 			this.naming ||
 			this.snoozing ||
-			this.dragging ||
+			this.drag ||
 			this.archiving !== null ||
 			this.settings
 		)
@@ -1834,8 +2011,8 @@ class Roster implements Component, Focusable {
 				`${truncateToWidth(under, o.x, "", true)}\x1b[0m${hot?.y === i ? hot.hot : line}\x1b[0m${sliceByColumn(under, o.x + o.width, width - o.x - o.width)}`;
 		});
 		this.targets.unshift(
-			...o.view.buttons.map((b) => ({ y: o.y + b.y, from: o.x + b.from, to: o.x + b.to, act: b.act })),
-			...o.view.lines.map((_, i) => ({ y: o.y + i, from: o.x, to: o.x + o.width, act: () => {} })),
+			...o.view.buttons.map((b) => ({ y: o.y + b.y, from: o.x + b.from, to: o.x + b.to, command: b.command })),
+			...o.view.lines.map((_, i) => ({ y: o.y + i, from: o.x, to: o.x + o.width, command: null })),
 		);
 	}
 
@@ -1894,7 +2071,7 @@ class Roster implements Component, Focusable {
 	focusEntry(e: Entry): void {
 		stageSession(e.id);
 		if (!e.live) wake(e.id, true);
-		void panes.focusStage();
+		afterCommit(() => void panes.focusStage());
 	}
 
 	right(): void {
@@ -1954,7 +2131,9 @@ class Roster implements Component, Focusable {
 		const req = nextReq();
 		if (row.key === this.selected()?.key) {
 			this.pin = { index: this.resolveCursor(this.rows()), req, answered: false };
+			// The cursor's session lingers once archived, and the keyboard comes to the roster to look it over or move on.
 			if (e.open) this.lingering = e.id;
+			if (e.open && focus === "stage") afterCommit(() => void panes.showRoster(true));
 		}
 		post(e.open ? { type: "archive", req, ids: [e.id] } : { type: "unarchive", req, id: e.id });
 	}
@@ -2049,9 +2228,12 @@ class Roster implements Component, Focusable {
 		const e = row?.kind === "session" ? row.entry : null;
 		if (!e) return;
 		const text = command ? `swb open ${e.id}` : `@session:${e.id}`;
-		void clip(text).then(
-			() => toast(`copied ${text}`, "info"),
-			(error: Error) => toast(`copy failed: ${error.message}`, "error"),
+		afterCommit(
+			() =>
+				void clip(text).then(
+					() => toast(`copied ${text}`, "info"),
+					(error: Error) => toast(`copy failed: ${error.message}`, "error"),
+				),
 		);
 	}
 
@@ -2120,7 +2302,7 @@ class Roster implements Component, Focusable {
 	}
 
 	/** The picker's rows, which the list gives up its bottom to; each choice is a button. */
-	picker(width: number, height: number): [string, (() => void) | null][] {
+	picker(width: number, height: number): Part[] {
 		if (this.snoozing) return this.snoozeMenu(width);
 		const naming = this.naming;
 		if (!naming) return [];
@@ -2128,24 +2310,24 @@ class Roster implements Component, Focusable {
 		const shown = Math.max(1, Math.min(choices.length, height - 4));
 		const from = Math.max(0, Math.min(naming.choice - shown + 1, choices.length - shown));
 		const title = ` ${naming.renaming ? "rename" : "Group for"} ${naming.title} `;
-		const out: [string, (() => void) | null][] = [
+		const out: Part[] = [
 			[`${gray(`─${truncateToWidth(title, width - 5, "…")}${"─".repeat(Math.max(0, width - 4 - visibleWidth(title)))}`)} ✕ `, null],
 		];
 		for (let i = from; i < from + shown; i++) {
 			const choice = choices[i] as { label: string; name: string | null };
 			const label = choice.name === null ? dim(choice.label) : choice.label.startsWith("+ ") ? green(choice.label) : choice.label;
 			const line = truncateToWidth(`   ${label}`, width, "…", true);
-			out.push([i === naming.choice ? cursorLine(line, true) : line, () => this.finishNaming(choice.name)]);
+			out.push([i === naming.choice ? cursorLine(line, true) : line, { kind: "choose", index: i }]);
 		}
 		return out;
 	}
 
-	snoozeMenu(width: number): [string, (() => void) | null][] {
+	snoozeMenu(width: number): Part[] {
 		const snoozing = this.snoozing;
 		if (!snoozing) return [];
 		const now = Date.now();
 		const title = ` Snooze ${snoozing.title} `;
-		const out: [string, (() => void) | null][] = [
+		const out: Part[] = [
 			[`${gray(`─${truncateToWidth(title, width - 5, "…")}${"─".repeat(Math.max(0, width - 4 - visibleWidth(title)))}`)} ✕ `, null],
 		];
 		SNOOZE_CHOICES.forEach((choice, i) => {
@@ -2153,7 +2335,7 @@ class Roster implements Component, Focusable {
 			const at = gray(until === null ? "↘" : wakeAt(until, now));
 			const label = `   ${choice.label}`;
 			const line = `${label}${" ".repeat(Math.max(1, width - visibleWidth(label) - visibleWidth(at) - 1))}${at} `;
-			out.push([i === snoozing.choice ? cursorLine(line, true) : line, () => this.finishSnooze(choice.snooze)]);
+			out.push([i === snoozing.choice ? cursorLine(line, true) : line, { kind: "choose", index: i }]);
 		});
 		return out;
 	}
@@ -2179,8 +2361,8 @@ class Roster implements Component, Focusable {
 
 	/** Lands a drag: into the Group under the pointer, out of any on its Project, or nowhere. */
 	finishDrag(y: number): void {
-		const drag = this.dragging;
-		this.dragging = null;
+		const drag = this.drag;
+		this.gesture = { kind: "none" };
 		const e = drag && entries.get(drag.id);
 		if (!e || !drag.moved) return;
 		const drop = this.dropAt(y, e);
@@ -2358,97 +2540,36 @@ class Roster implements Component, Focusable {
 		choosing.menu = null;
 	}
 
-	/**
-	 * The menu's keys: a number picks what it shows by its place until something's typed, when it narrows the menu like any
-	 * other key, since model names have numbers in them; the arrows and Enter pick the highlighted one.
-	 */
-	menuInput(data: string): void {
-		const choosing = this.choosing as Choosing;
-		const menu = choosing.menu as Menu;
-		const shown = menuPresets(menu.query);
-		const k = decodeKittyPrintable(data) ?? data;
-		if (matchesKey(data, "escape") || matchesKey(data, "tab") || matchesKey(data, "shift+tab")) choosing.menu = null;
-		else if (matchesKey(data, "up") || matchesKey(data, "down"))
-			menu.cursor = Math.max(0, Math.min(shown.length - 1, menu.cursor + (matchesKey(data, "up") ? -1 : 1)));
-		else if (matchesKey(data, "enter")) {
-			const index = shown[menu.cursor];
-			if (index !== undefined) this.choosePreset(index);
-		} else if (menu.query === "" && /^[1-9]$/.test(k)) {
-			const index = shown[Number(k) - 1];
-			if (index !== undefined) this.choosePreset(index);
-		} else if (matchesKey(data, "backspace")) {
-			menu.query = menu.query.slice(0, -1);
-			menu.cursor = 0;
-		} else if (k.length === 1 && k >= " ") {
-			menu.query += k;
-			menu.cursor = 0;
-		}
+	/** Tab in add mode: the highlighted completion, typed out. */
+	complete(): void {
+		const choosing = this.choosing;
+		if (choosing?.mode !== "add") return;
+		const match = this.addRows()[Math.max(0, choosing.choice)];
+		if (!match) return;
+		this.path.setValue(`${shortPath(match)}/`);
+		choosing.choice = -1;
 	}
 
-	pickerInput(data: string): void {
+	/** ⏎ in the picker: starts in the highlighted directory, or the one typed, or goes on to add one. */
+	pickerEnter(): void {
 		const choosing = this.choosing as Choosing;
-		if (choosing.confirm) {
-			const k = decodeKittyPrintable(data) ?? data;
-			if (k === "y" || matchesKey(data, "enter")) this.finishRemove(true);
-			else if (k === "n" || matchesKey(data, "escape")) this.finishRemove(false);
-			return;
-		}
-		if (choosing.menu) {
-			this.menuInput(data);
-			return;
-		}
-		const first = choosing.mode === "pick" ? 0 : -1;
-		const count = choosing.mode === "pick" ? this.pickRows().length : this.addRows().length;
-		if (matchesKey(data, "escape")) {
-			if (choosing.mode === "add" && choosing.opened === "pick") {
-				choosing.mode = "pick";
-				choosing.choice = this.pickRows().length - 1;
-			} else this.closePicker();
-		} else if (matchesKey(data, "up") || matchesKey(data, "down")) {
-			choosing.choice = Math.max(first, Math.min(count - 1, choosing.choice + (matchesKey(data, "up") ? -1 : 1)));
-		} else if (choosing.mode === "pick" && (matchesKey(data, "tab") || matchesKey(data, "shift+tab"))) {
-			// Tab opens the menu of what runs the new session; in add mode it completes the path instead.
-			this.toggleMenu();
-		} else if (choosing.mode === "add" && matchesKey(data, "tab")) {
-			const match = this.addRows()[Math.max(0, choosing.choice)];
-			if (match) {
-				this.path.setValue(`${shortPath(match)}/`);
-				choosing.choice = -1;
-			}
-		} else if (matchesKey(data, "enter")) {
-			if (choosing.mode === "pick") {
-				const row = this.pickRows()[choosing.choice];
-				if (row?.kind === "add") {
-					choosing.mode = "add";
-					this.path.setValue("");
-					choosing.choice = typedChoice("");
-				} else if (row) this.start(row.target.path);
-				return;
-			}
-			const path = this.addTarget();
-			// biome-ignore lint/plugin: Enter waits on the directory it starts in.
-			if (!statSync(path, { throwIfNoEntry: false })?.isDirectory()) {
-				toast(`no directory ${shortPath(path)}`, "error");
-				return;
-			}
-			if (!this.listed().has(path)) post({ type: "addDir", path });
-			this.start(path);
-		} else if (choosing.mode === "pick") {
-			this.search.handleInput(data);
-			const typed = this.search.getValue();
-			// A path typed into the search is an add.
-			if (typed.startsWith("/") || typed.startsWith("~")) {
+		if (choosing.mode === "pick") {
+			const row = this.pickRows()[choosing.choice];
+			if (row?.kind === "add") {
 				choosing.mode = "add";
-				this.path.setValue(typed);
-				this.search.setValue("");
-				choosing.choice = typedChoice(typed);
-				return;
-			}
-			choosing.choice = this.bestMatch();
-		} else {
-			this.path.handleInput(data);
-			choosing.choice = typedChoice(this.path.getValue());
+				this.path.setValue("");
+				choosing.choice = typedChoice("");
+			} else if (row) this.start(row.target.path);
+			return;
 		}
+		const path = this.addTarget();
+		// biome-ignore lint/plugin: Enter waits on the directory it starts in.
+		if (!statSync(path, { throwIfNoEntry: false })?.isDirectory()) {
+			toast(`no directory ${shortPath(path)}`, "error");
+			return;
+		}
+		if (!this.listed().has(path)) post({ type: "addDir", path });
+		this.start(path);
 	}
 
 	renderPicker(width: number, height: number): string[] {
@@ -2463,7 +2584,7 @@ class Roster implements Component, Focusable {
 			: (this.search.render(Math.max(10, width - 2))[0] ?? "");
 		// The launch card goes on the Stage; with no room there, as on a narrow Deck, the roster draws it under its title.
 		const card = launchOnStage(width) ? null : launchCard(choosing, width, "right");
-		for (const b of card?.buttons ?? []) this.targets.push({ y: 1 + b.y, from: b.from, to: b.to, act: b.act });
+		for (const b of card?.buttons ?? []) this.targets.push({ y: 1 + b.y, from: b.from, to: b.to, command: b.command });
 		this.card = card ? card.lines.map((line) => Bun.stripANSI(line)) : null;
 		// While the menu is open, the rest of the picker waits behind it.
 		const muted = (line: string) => (choosing.menu ? gray(Bun.stripANSI(line)) : line);
@@ -2476,31 +2597,23 @@ class Roster implements Component, Focusable {
 		this.pickerListY = lines.length;
 		// The picker's detail is its path and two blank lines.
 		const bodyHeight = Math.max(1, height - lines.length - 6);
-		let body: [string, (() => void) | null][];
+		let body: Part[];
 		let detail: string;
 		if (!adding) {
 			const rows = this.pickRows();
-			body = rows.map((row, i): [string, (() => void) | null] => {
-				const act = () => {
-					choosing.choice = i;
-					this.pickerInput("\r");
-				};
+			body = rows.map((row, i): Part => {
 				const line = truncateToWidth(pickLine(row, width, i === choosing.choice), width, "…", true);
-				return [i === choosing.choice ? cursorLine(line, true) : line, act];
+				return [i === choosing.choice ? cursorLine(line, true) : line, { kind: "choose", index: i }];
 			});
 			const row = rows[choosing.choice];
 			detail = row?.kind === "target" ? ` ${gray(shortPath(row.target.path))}` : dirTrees === null ? ` ${dim("finding directories…")}` : "";
 		} else {
 			const listed = this.listed();
 			const matches = this.completedRows();
-			body = matches.map((path, i): [string, (() => void) | null] => {
+			body = matches.map((path, i): Part => {
 				const name = `${basename(path)}/`;
 				const line = truncateToWidth(`   ${listed.has(path) ? dim(name) : name}`, width, "…", true);
-				const act = () => {
-					choosing.choice = i;
-					this.pickerInput("\r");
-				};
-				return [i === choosing.choice ? cursorLine(line, true) : line, act];
+				return [i === choosing.choice ? cursorLine(line, true) : line, { kind: "choose", index: i }];
 			});
 			detail = ` ${gray(shortPath(this.addTarget()))}`;
 		}
@@ -2512,50 +2625,21 @@ class Roster implements Component, Focusable {
 		this.pickerTop = top;
 		this.listHeight = bodyHeight;
 		const shown = body.slice(top, top + bodyHeight);
-		shown.forEach(([, act], i) => {
+		shown.forEach(([, command], i) => {
 			// The remove prompt is modal: only its own answers are buttons; and so is the menu, which a click elsewhere closes.
-			if (!act || choosing.confirm || choosing.menu) return;
+			if (!command || choosing.confirm || choosing.menu) return;
 			const y = this.pickerListY + i;
 			// The cursor row's ✕, at its right edge, removes it.
 			if (!adding && top + i === choosing.choice && this.pickRows()[choosing.choice]?.kind === "target")
-				this.targets.push({ y, from: width - 3, to: width, act: () => this.askRemove() });
-			this.targets.push({ y, from: 0, to: width, act });
+				this.targets.push({ y, from: width - 3, to: width, command: { kind: "remove" } });
+			this.targets.push({ y, from: 0, to: width, command });
 		});
 		const out = shown.map(([line]) => line);
 		while (out.length < bodyHeight) out.push("");
-		if (choosing.confirm) overlayConfirm(out, width, choosing.confirm, this.pickerListY, (yes) => this.finishRemove(yes), this.targets);
+		if (choosing.confirm) overlayConfirm(out, width, choosing.confirm, this.pickerListY, keymap(), this.targets);
 		lines.push(...out.map(muted), gray("─".repeat(width)), muted(detail), "", "", this.messageLine(Date.now()));
-		const presets = pickerPresets();
 		// The remove prompt carries its own keys.
-		const hints: Hint[] = choosing.confirm
-			? []
-			: choosing.menu
-				? [
-						...(choosing.menu.query === "" ? ([[`1–${Math.min(9, presets.length)}`, "pick", () => {}]] as Hint[]) : []),
-						["⏎", "choose", () => this.pickerInput("\r")],
-						["esc", "keep", () => this.pickerInput("\x1b")],
-					]
-				: adding
-					? [
-							["⇥", "complete", () => this.pickerInput("\t")],
-							["⏎", "start", () => this.pickerInput("\r")],
-							["esc", choosing.opened === "pick" ? "back" : "cancel", () => this.pickerInput("\x1b")],
-						]
-					: [
-							["⏎", "start", () => this.pickerInput("\r")],
-							...(presets.length > 0 ? ([["⇥", "preset", () => this.toggleMenu()]] as Hint[]) : []),
-							[`${config.prefix} d`, "remove", () => this.askRemove()],
-							["esc", "cancel", () => this.pickerInput("\x1b")],
-						];
-		lines.push(
-			this.clickable(
-				lines.length,
-				hints.flatMap(([name, label, act]): [string, (() => void) | null][] => [
-					[" ", null],
-					[key(name, label), act],
-				]),
-			),
-		);
+		lines.push(choosing.confirm ? "" : this.legend(lines.length, keymap(), width, []));
 		return lines.map((line) => truncateToWidth(line, width, "…", true));
 	}
 
@@ -2609,9 +2693,9 @@ class Roster implements Component, Focusable {
 	/** The filter's tag, atop the list while one applies, is a button that clears it. */
 	filterTag(width: number): string | null {
 		if (this.query() === "" || this.filtering) return null;
-		const parts: [string, (() => void) | null][] = [
+		const parts: Part[] = [
 			[" ", null],
-			[`${magenta(`/${this.filter.getValue()}`)} ✕`, () => this.filter.setValue("")],
+			[`${magenta(`/${this.filter.getValue()}`)} ✕`, { kind: "clearFilter" }],
 		];
 		return truncateToWidth(this.clickable(0, parts), width, "…");
 	}
@@ -2619,17 +2703,11 @@ class Roster implements Component, Focusable {
 	list(rows: Row[], index: number, width: number, full: number, now: number): string[] {
 		const picker = this.picker(width, full);
 		const height = Math.max(1, full - picker.length);
-		picker.forEach(([, act], i) => {
-			if (act) this.targets.push({ y: this.listTop + height + i, from: 0, to: width, act });
+		picker.forEach(([, command], i) => {
+			if (command) this.targets.push({ y: this.listTop + height + i, from: 0, to: width, command });
 		});
 		// The ✕ closing the Group picker, at its title's right end.
-		if (picker.length > 0)
-			this.targets.push({
-				y: this.listTop + height,
-				from: width - 3,
-				to: width,
-				act: () => this.leave(),
-			});
+		if (picker.length > 0) this.targets.push({ y: this.listTop + height, from: width - 3, to: width, command: { kind: "cancel" } });
 		// The archive prompt opens beneath its row, pushing the rows after it down; its row is the cursor's.
 		const asking = this.archiving === null ? -1 : rows.findIndex((r) => r.key === this.archiving);
 		const archiveEntry = this.archiving === null ? undefined : entries.get(this.archiving);
@@ -2650,12 +2728,12 @@ class Roster implements Component, Focusable {
 			}
 			const y = this.listTop + out.length;
 			const line = truncateToWidth(rowLine(row, width, now), width, "…", true);
-			if (this.dragging?.drop?.header.key === row.key) out.push(cursorLine(line, true));
+			if (this.drag?.drop?.header.key === row.key) out.push(cursorLine(line, true));
 			else if (i === index) out.push(cursorLine(line, focus === "roster"));
 			else out.push(row.key === this.hover ? hoverLine(line) : line);
 			if (row.kind === "session" && row.family.length > 0) {
 				const at = foldColumn(row);
-				this.targets.push({ y, from: at - 1, to: at + 1, act: () => this.setFolded(row, !row.folded) });
+				this.targets.push({ y, from: at - 1, to: at + 1, command: { kind: "fold", id: row.key } });
 			}
 			if (i === asking) out.push(...this.archivePrompt((row as SessionRow).entry, width, this.listTop + out.length));
 		}
@@ -2664,50 +2742,41 @@ class Roster implements Component, Focusable {
 		return [...out, ...picker.map(([line]) => line)];
 	}
 
-	/** Archive alone, with its family, or delete this linked worktree as well. */
+	/** Archive alone, with its family, or delete this linked worktree as well: the archive keymap's answers, as buttons. */
 	archivePrompt(e: Entry, width: number, top: number): string[] {
 		const inner = Math.max(1, width - 4);
 		const family = openDescendants(entries.values(), e.id);
 		const box = (text: string) => ` │${truncateToWidth(text, inner, "…", true)}│`;
-		const choices: [string, (() => void) | null][] = [
+		const answers = keymap().filter((b) => b.label !== null);
+		const keep = answers.filter((b) => b.command?.kind !== "archiveAnswer" || !b.command.deleteWorktree);
+		const deleting = answers.filter((b) => b.command?.kind === "archiveAnswer" && b.command.deleteWorktree);
+		const choice = this.clickable(top + 2, [
 			[" │ Archive  ", null],
-			[key("a", "this"), () => this.finishArchiving(false)],
-		];
-		if (family.length > 0) choices.push(["  ", null], [key("A", `all ${family.length + 1}`), () => this.finishArchiving(true)]);
-		choices.push(["  ", null], [key("esc", "abort"), () => this.finishArchiving(null)]);
-		const choice = this.clickable(top + 2, choices);
-		const deletion = e.worktree
-			? this.clickable(top + 3, [
-					[" │ ", null],
-					[key("d", "archive + delete worktree"), () => this.finishArchiving(false, true)],
-				])
-			: null;
-		const deleteFamily =
-			e.worktree && family.length > 0
-				? this.clickable(top + 4, [
-						[" │ ", null],
-						[key("D", `all ${family.length + 1} + delete this worktree`), () => this.finishArchiving(true, true)],
-					])
-				: null;
+			...keep.flatMap((b, i): Part[] => [...(i > 0 ? ([["  ", null]] as Part[]) : []), [key(b.name, b.label as string), b.command]]),
+		]);
+		const lines = deleting.map((b, i) =>
+			this.clickable(top + 3 + i, [
+				[" │ ", null],
+				[key(b.name, b.label as string), b.command],
+			]),
+		);
 		return [
 			` ┌${"─".repeat(inner)}┐`,
 			box(` ${family.length > 0 ? familyTally(family) : "Branch kept; clean worktree only"}`),
-			`${truncateToWidth(choice, inner + 2, "…", true)}│`,
-			...(deletion ? [`${truncateToWidth(deletion, inner + 2, "…", true)}│`] : []),
-			...(deleteFamily ? [`${truncateToWidth(deleteFamily, inner + 2, "…", true)}│`] : []),
+			...[choice, ...lines].map((line) => `${truncateToWidth(line, inner + 2, "…", true)}│`),
 			` └${"─".repeat(inner)}┘`,
 		];
 	}
 
 	/** Joins the parts into row y's line, recording where each clickable one lands. */
-	clickable(y: number, parts: [string, (() => void) | null][]): string {
+	clickable(y: number, parts: Part[]): string {
 		let x = 0;
 		let line = "";
 		const p = this.pointer;
-		for (const [text, act] of parts) {
+		for (const [text, command] of parts) {
 			const w = visibleWidth(text);
-			if (act) this.targets.push({ y, from: x, to: x + w, act });
-			line += act && p?.y === y && p.x >= x && p.x < x + w ? cursorLine(text, true) : text;
+			if (command) this.targets.push({ y, from: x, to: x + w, command });
+			line += command && p?.y === y && p.x >= x && p.x < x + w ? cursorLine(text, true) : text;
 			x += w;
 		}
 		return line;
@@ -2719,15 +2788,15 @@ class Roster implements Component, Focusable {
 		if (!e) return panes.narrow ? ["", "", ""] : [""];
 		let tabs = "";
 		if (stage.staged === e.id && e.open) {
-			const parts: [string, (() => void) | null][] = [[" ", null]];
+			const parts: Part[] = [[" ", null]];
 			for (const view of VIEWS) {
 				// The first view is the session's own TUI, whichever harness that is.
 				const label = ` ${view === "agent" ? e.harness : view} `;
-				parts.push([view === panes.applied.view ? cursorLine(label, true) : gray(label), () => void showView(e, view)]);
+				parts.push([view === panes.applied.view ? cursorLine(label, true) : gray(label), { kind: "view", view }]);
 			}
 			// The shell is a toggle beside the views, not one of them.
 			if (!panes.narrow)
-				parts.push([gray(" · "), null], [panes.applied.shell ? cursorLine(" shell ", true) : gray(" shell "), () => void toggleShell()]);
+				parts.push([gray(" · "), null], [panes.applied.shell ? cursorLine(" shell ", true) : gray(" shell "), { kind: "shell" }]);
 			tabs = this.clickable(panes.narrow ? top + 2 : top, parts);
 		}
 		if (!panes.narrow) return [truncateToWidth(tabs, width, "…")];
@@ -2747,87 +2816,46 @@ class Roster implements Component, Focusable {
 				? ` ${text}`
 				: this.clickable(y, [
 						[" ", null],
-						[text, () => openConfig(error.line)],
+						[text, { kind: "config", line: error.line }],
 					]);
 		}
 		if (!t) return snapshot && newer(snapshot.swbVersion, VERSION) ? ` ${red(`✗ swb ${snapshot.swbVersion} is in; reopen the Deck`)}` : "";
 		return ` ${t.level === "error" ? red(`✗ ${t.text}`) : green(t.text)}`;
 	}
 
-	/** Each key in the legend is also a button. */
+	/** The legend line: a field being typed into, where a drag would land, or the keys the mode takes. */
 	hints(y: number, cols: number): string {
 		// The archive prompt carries its own keys.
 		if (this.archiving !== null) return "";
 		if (this.filtering) return ` ${this.filter.render(Math.max(10, panes.rosterWidth() - 2))[0] ?? ""}`;
 		if (this.naming) return ` ${this.naming.input.render(Math.max(10, panes.rosterWidth() - 2))[0] ?? ""}`;
-		if (this.snoozing)
-			return this.clickable(y, [
-				[" ", null],
-				[key("⏎", "snooze"), () => this.finishSnooze((SNOOZE_CHOICES[this.snoozing?.choice ?? 0] as { snooze: SnoozePreset }).snooze)],
-				[" ", null],
-				[key("esc", "cancel"), () => this.leave()],
-			]);
-		const drag = this.dragging;
+		const drag = this.drag;
 		if (drag?.moved) {
 			if (!drag.drop) return ` ${red("✗ not here")}`;
 			return drag.drop.name === null ? ` ⇢ out of its Group` : ` ⇢ into ${bold(drag.drop.name)}`;
 		}
-		const help: Hint = ["?", "keys", () => void showHelp()];
-		const newAtCursor: Hint = ["n", "new", () => this.newAt()];
-		const enter = (label: string): Hint => ["⏎", label, () => this.activate(true)];
-		const row = this.selected();
-		let hints: Hint[];
-		if (focus === "stage" && (panes.applied.target === placeholder || harnessStarting(panes.applied)))
-			hints = [
-				["esc", "list", () => void panes.showRoster(true)],
-				[`${config.prefix} ?`, "keys", help[2]],
-			];
-		else if (focus === "stage")
-			hints = [
-				[`${config.prefix} h`, "list", () => void panes.showRoster(true)],
-				[`${config.prefix} z`, "hide list", () => void panes.hideRoster()],
-				[`${config.prefix} ?`, "keys", help[2]],
-			];
-		else if (!row) hints = [newAtCursor, help];
-		else if (row.kind === "header" && row.group !== null)
-			hints = [enter(row.collapsed ? "expand" : "collapse"), ["m", "rename", () => this.startNaming()], newAtCursor, help];
-		else if (row.kind === "header") hints = [enter(row.collapsed ? "expand" : "collapse"), newAtCursor, help];
-		else if (row.kind === "section" && row.key === "operators")
-			hints = [enter(row.expanded ? "collapse" : "expand"), ["n", "new operator", () => this.newAt()], help];
-		else if (row.kind === "section") hints = [enter(row.expanded ? "collapse" : "expand"), help];
-		else if (!row.entry.open) hints = [enter("open"), ["a", "unarchive", () => this.toggleArchived()], help];
-		else if (row.entry.snoozed)
-			hints = [
-				enter(row.entry.live ? "focus" : "wake"),
-				["s", "unsnooze", () => this.toggleSnooze()],
-				["a", "archive", () => this.toggleArchived()],
-				help,
-			];
-		else hints = [enter(row.entry.live ? "focus" : "wake"), ["a", "archive", () => this.toggleArchived()], newAtCursor, help];
-		// Settings joins the legend where it fits.
-		const settings: Hint = [",", "settings", () => openSettings()];
-		const width = (list: Hint[]) => list.reduce((n, [name, label]) => n + 1 + visibleWidth(key(name, label)), 0);
 		// `[` and `]` as buttons, at the legend's right end, gray while there's nowhere to go.
-		const arrow = (glyph: string, step: -1 | 1): [string, (() => void) | null] =>
-			historyStep(step) === -1 ? [gray(glyph), null] : [bold(glyph), () => goHistory(step)];
-		const arrows = " ‹ › ".length;
-		if (focus === "roster" && width([...hints, settings]) + arrows <= panes.rosterWidth()) hints.push(settings);
-		return this.clickable(y, [
-			...hints.flatMap(([name, label, act]): [string, (() => void) | null][] => [
-				[" ", null],
-				[key(name, label), act],
-			]),
-			[" ".repeat(Math.max(1, cols - width(hints) - arrows + 1)), null],
-			arrow("‹", -1),
-			[" ", null],
-			arrow("›", 1),
-		]);
+		const arrow = (glyph: string, step: -1 | 1): Part =>
+			historyStep(step) === -1 ? [gray(glyph), null] : [bold(glyph), { kind: "history", step }];
+		const arrows: Part[] = this.mode.kind === "roster" ? [arrow("‹", -1), [" ", null], arrow("›", 1)] : [];
+		return this.legend(y, focus === "stage" ? stageKeys() : keymap(), cols, arrows);
+	}
+
+	/**
+	 * A keymap's labelled bindings as buttons, in its order, and `trailing` at the right end. What doesn't fit goes whole,
+	 * from the end.
+	 */
+	legend(y: number, bindings: Binding<Command>[], cols: number, trailing: Part[]): string {
+		const end = trailing.reduce((n, [text]) => n + visibleWidth(text), 0);
+		// Trailing parts keep a column of their own either side.
+		const parts = legendParts(bindings, trailing.length === 0 ? cols : cols - end - 2);
+		if (trailing.length === 0) return this.clickable(y, parts);
+		const used = parts.reduce((n, [text]) => n + visibleWidth(text), 0);
+		return this.clickable(y, [...parts, [" ".repeat(Math.max(1, cols - used - end - 1)), null], ...trailing]);
 	}
 
 	invalidate(): void {}
 }
-
-type Hint = [name: string, label: string, act: () => void];
 
 type PickRow = { kind: "target"; target: Target; tree: TargetTree | null; context: boolean; score: number; at: number[] } | { kind: "add" };
 
@@ -2929,13 +2957,13 @@ function pickLine(row: PickRow, width: number, cursor: boolean): string {
 	return `${truncateToWidth(label, width - 3, "…", true)} ✕ `;
 }
 
-/** The remove prompt, boxed over the middle of the list; its buttons are click targets too. */
+/** The remove prompt, boxed over the middle of the list; its keymap's answers are its buttons. */
 function overlayConfirm(
 	out: string[],
 	width: number,
 	confirm: { name: string; worktrees: number },
 	listY: number,
-	answer: (yes: boolean) => void,
+	answers: Binding<Command>[],
 	targets: ClickTarget[],
 ): void {
 	const inner = Math.min(width - 4, 34);
@@ -2947,7 +2975,7 @@ function overlayConfirm(
 		pad(confirm.worktrees > 0 ? `and its ${confirm.worktrees} worktree${confirm.worktrees > 1 ? "s" : ""}` : ""),
 		pad("from this list?"),
 		pad(""),
-		pad(`${key("y", "remove")}  ${key("n", "keep")}`),
+		pad(answers.map((b) => key(b.name, b.label as string)).join("  ")),
 		`${" ".repeat(left)}└${"─".repeat(inner)}┘`,
 	];
 	const top = Math.max(0, Math.floor((out.length - lines.length) / 3));
@@ -2955,10 +2983,12 @@ function overlayConfirm(
 		out[top + i] = line;
 	});
 	const y = listY + top + 5;
-	targets.unshift(
-		{ y, from: left + 2, to: left + 10, act: () => answer(true) },
-		{ y, from: left + 12, to: left + 18, act: () => answer(false) },
-	);
+	let x = left + 2;
+	for (const b of answers) {
+		const w = visibleWidth(key(b.name, b.label as string));
+		targets.unshift({ y, from: x, to: x + w, command: b.command });
+		x += w + 2;
+	}
 }
 
 function rowLine(row: Row, width: number, now: number): string {
@@ -2970,7 +3000,7 @@ function rowLine(row: Row, width: number, now: number): string {
 	if (row.kind === "section") return ` ${row.expanded ? "▾" : "▸"} ${row.label} ${gray(`(${row.count})`)}`;
 	const e = row.entry;
 	// Mid-drag, the session being carried is a hollow outline of itself.
-	if (roster.dragging?.moved && roster.dragging.id === e.id) {
+	if (roster.drag?.moved && roster.drag.id === e.id) {
 		const lead = `${gray("┆")}${rowLead(row)}`;
 		return `${lead}${gray("◌")} ${gray(truncateToWidth(displayName(e), width - visibleWidth(lead) - 2, "…"))}`;
 	}
@@ -3068,10 +3098,13 @@ const PEEK_FOLD_ROWS = 8;
 
 type PeekSpot = { id: string; source: "pointer" | "cursor"; y: number };
 
+/** Where the pointer rests until the Peek opens there; `waiting` once it has rested, for what the Peek shows. */
+type PendingPeek = { spot: PeekSpot; timer: Timer; waiting: boolean };
+
 const peek = {
 	/** Where the Peek is, once the pointer rested there and what it shows came in or stopped being waited for. */
 	settled: null as PeekSpot | null,
-	pending: null as { spot: PeekSpot; timer: Timer } | null,
+	pending: null as PendingPeek | null,
 	/** Where the last render wanted the Peek. */
 	spot: null as PeekSpot | null,
 	/** The Peek put away when the keyboard went to the Stage; it stays away until its row changes. */
@@ -3082,7 +3115,6 @@ const peek = {
 	watching: false,
 	info: new Map<string, { info: PeekInfo; at: number }>(),
 	asked: new Set<string>(),
-	infoWaits: new Map<string, () => void>(),
 };
 
 const spotKey = (spot: PeekSpot | null | undefined) => (spot ? `${spot.id}@${spot.y}` : null);
@@ -3115,21 +3147,24 @@ function syncPeek(spot: PeekSpot | null): void {
 		peek.settled = null;
 		return;
 	}
-	const pending = {
-		spot,
-		timer: setTimeout(
-			async () => {
-				if (!peek.info.has(spot.id))
-					await Promise.race([new Promise<void>((resolve) => peek.infoWaits.set(spot.id, resolve)), Bun.sleep(PEEK_INFO_WAIT_MS)]);
-				if (peek.pending !== pending) return;
-				peek.pending = null;
-				peek.settled = spot;
-				tui.requestRender();
-			},
-			peek.settled ? PEEK_SWITCH_MS : PEEK_OPEN_MS,
-		),
-	};
-	peek.pending = pending;
+	peek.pending = { spot, waiting: false, timer: setTimeout(() => dispatch(peekRested), peek.settled ? PEEK_SWITCH_MS : PEEK_OPEN_MS) };
+}
+
+/** The pointer rested: the Peek opens once what it shows comes in, or once it's waited long enough for it. */
+function peekRested(): void {
+	const pending = peek.pending as PendingPeek;
+	if (peek.info.has(pending.spot.id)) settlePeek();
+	else {
+		pending.waiting = true;
+		pending.timer = setTimeout(() => dispatch(settlePeek), PEEK_INFO_WAIT_MS);
+	}
+}
+
+function settlePeek(): void {
+	const pending = peek.pending as PendingPeek;
+	clearTimeout(pending.timer);
+	peek.pending = null;
+	peek.settled = pending.spot;
 }
 
 /** Whether the UI server reports the pointer leaving: while something under it is lit, or something leaves with it. */
@@ -3152,9 +3187,7 @@ function askPeekInfo(id: string): void {
 function onPeekInfo(id: string, info: PeekInfo): void {
 	peek.asked.delete(id);
 	peek.info.set(id, { info, at: Date.now() });
-	peek.infoWaits.get(id)?.();
-	peek.infoWaits.delete(id);
-	tui.requestRender();
+	if (peek.pending?.waiting && peek.pending.spot.id === id) settlePeek();
 }
 
 /** The pointer or the keyboard went elsewhere, as the UI server saw it, and took the Peek with it. */
@@ -3179,12 +3212,6 @@ function peekOverlays(rows: Row[], width: number, height: number): Overlay[] {
 	const w = panes.narrow ? Math.max(PEEK_MIN_COLS, Math.min(PEEK_COLS, width - 16)) : Math.min(PEEK_COLS, panes.width - width - 1);
 	if (w < PEEK_MIN_COLS || width < PEEK_MIN_COLS) return [];
 	const view = peekView(row, w, height, panes.narrow ? "right" : "left");
-	const pointer = () => {
-		cancelPendingPeek();
-		if (roster.hover === spot.id) return false;
-		roster.hover = spot.id;
-		return true;
-	};
 	return [
 		{
 			id: "peek",
@@ -3194,7 +3221,7 @@ function peekOverlays(rows: Row[], width: number, height: number): Overlay[] {
 			width: w,
 			view,
 			leaves: true,
-			pointer,
+			hovers: spot.id,
 		},
 	];
 }
@@ -3210,7 +3237,7 @@ function toastOverlay(now: number, width: number, y: number): Overlay[] {
 	if (visibleWidth(text) <= width - 1) return [];
 	const paint = t.level === "error" ? red : green;
 	const lines = [gray("─".repeat(width)), ...wrapTextWithAnsi(text, width - 1).map((line) => ` ${paint(line)}`)];
-	return [{ id: "toast", about: t.text, x: 0, y: y - lines.length + 1, width, view: { lines, buttons: [] }, leaves: false, pointer: null }];
+	return [{ id: "toast", about: t.text, x: 0, y: y - lines.length + 1, width, view: { lines, buttons: [] }, leaves: false, hovers: null }];
 }
 
 /** The launch card is as wide as this, or the Stage, whichever is narrower. */
@@ -3241,7 +3268,7 @@ function launchOverlays(choosing: Choosing, width: number, height: number): Over
 			width: w,
 			view: launchCard(choosing, w, "left"),
 			leaves: false,
-			pointer: null,
+			hovers: null,
 		});
 	}
 	if (choosing.menu) {
@@ -3249,14 +3276,9 @@ function launchOverlays(choosing: Choosing, width: number, height: number): Over
 		const w = Math.min(MENU_COLS, (onStage ? panes.width : width) - field.x - 4);
 		const y = field.y + 1;
 		const view = launchMenu(choosing, w, height - y);
-		want.push({ id: "menu", about: "launch", x: field.x + 2, y, width: w, view, leaves: false, pointer: null });
+		want.push({ id: "menu", about: "launch", x: field.x + 2, y, width: w, view, leaves: false, hovers: null });
 	}
 	return want;
-}
-
-/** A key a Peek's button runs, on its session. */
-function peekKey(k: string, id: string): () => void {
-	return () => void prefixKey(k, id).catch((error: Error) => toast(error.message, "error"));
 }
 
 /** A path too long for the Peek keeps its end, where the directories that tell sessions apart are. */
@@ -3322,7 +3344,7 @@ function launchCard(choosing: Choosing, width: number, open: "left" | "right"): 
 		buttons:
 			presets.length === 0
 				? []
-				: [{ y: 1, from: margin, to: margin + inner, act: () => roster.toggleMenu(), hot: frame(cursorLine(field, true)) }],
+				: [{ y: 1, from: margin, to: margin + inner, command: { kind: "menu" }, hot: frame(cursorLine(field, true)) }],
 	};
 }
 
@@ -3366,10 +3388,8 @@ function launchMenu(choosing: Choosing, width: number, maxHeight: number): Overl
 	items.slice(from, to).forEach((line, i) => {
 		const n = itemAt.indexOf(from + i);
 		const content = truncateToWidth(line, inner, "…", true);
-		if (n !== -1) {
-			const index = shown[n] as number;
-			buttons.push({ y: lines.length, from: 2, to: 2 + inner, act: () => roster.choosePreset(index), hot: row(hoverLine(content)) });
-		}
+		if (n !== -1)
+			buttons.push({ y: lines.length, from: 2, to: 2 + inner, command: { kind: "choose", index: n }, hot: row(hoverLine(content)) });
 		lines.push(row(n === menu.cursor ? cursorLine(content, true) : content));
 	});
 	lines.push(
@@ -3410,11 +3430,11 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	const group = groupOf(e);
 	if (group !== null) head.push(`${gray("Group")} ${group}`);
 	// Lines that are buttons: who started it, and on a fold, each session it hides.
-	const links: { at: number; act: () => void }[] = [];
+	const links: { at: number; command: Command }[] = [];
 	const parent = parentOf(e);
 	if (parent) {
 		const label = `${gray("started by")} ${originMark(origin(e))} `;
-		links.push({ at: head.length, act: peekKey("p", e.id) });
+		links.push({ at: head.length, command: { kind: "row", act: "parent", row: e.id } });
 		head.push(`${label}${truncateToWidth(displayName(parent), inner - visibleWidth(label) - 2, "…", true)} ${dim("p")}`);
 		if (parent.project !== e.project && !parent.operator)
 			head.push(gray(`${" ".repeat(visibleWidth(label))}in ${projectName(parent.project)}`));
@@ -3423,12 +3443,12 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 		head.push(rule, `${gray("folded")} ${foldedTally(row.family.map((p) => p.entry))}`);
 		for (const { entry, nest } of row.family.slice(0, PEEK_FOLD_ROWS)) {
 			const guides = `${nest.continues.map((on) => (on ? "│  " : "   ")).join("")}${nest.last ? "└─ " : "├─ "}`;
-			links.push({ at: head.length, act: () => reveal(entry.id) });
+			links.push({ at: head.length, command: { kind: "reveal", id: entry.id } });
 			head.push(`${gray(guides)}${glyph(stateOf(entry), now)} ${displayName(entry)}`);
 		}
 		const rest = row.family[PEEK_FOLD_ROWS];
 		if (rest) {
-			links.push({ at: head.length, act: () => reveal(rest.entry.id) });
+			links.push({ at: head.length, command: { kind: "reveal", id: rest.entry.id } });
 			head.push(gray(`… ${row.family.length - PEEK_FOLD_ROWS} more`));
 		}
 	}
@@ -3456,11 +3476,11 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 		turn.push(rule, ...shown.map((line, i) => `${gray(i === 0 ? label : " ".repeat(pad))}${line}`));
 	}
 	// The buttons, wrapped; each is the row's key, so the Peek teaches them too.
-	const buttons: { y: number; from: number; to: number; key: string; text: string }[] = [];
+	const buttons: { y: number; from: number; to: number; command: Command; text: string }[] = [];
 	const buttonLines: string[] = [];
 	let line = "";
 	let x = 0;
-	for (const [label, k] of peekButtons(row)) {
+	for (const [label, k, act] of peekButtons(row)) {
 		const text = ` ${label} ${dim(k)} `;
 		const w = visibleWidth(text);
 		if (x > 0 && x + 1 + w > inner) {
@@ -3472,7 +3492,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 			line += " ";
 			x += 1;
 		}
-		buttons.push({ y: buttonLines.length, from: x, to: x + w, key: k, text });
+		buttons.push({ y: buttonLines.length, from: x, to: x + w, command: { kind: "row", act, row: row.key }, text });
 		line += text;
 		x += w;
 	}
@@ -3497,7 +3517,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 					y: 1 + link.at,
 					from: margin,
 					to: margin + inner,
-					act: link.act,
+					command: link.command,
 					hot: frame(cursorLine(truncateToWidth(body[link.at] as string, inner, "…", true), true)),
 				})),
 			...buttons
@@ -3506,71 +3526,192 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 					const y = 1 + buttonsAt + b.y;
 					// The line again with this one button lit, for the pointer resting on it.
 					const lit = (buttonLines[b.y] as string).replace(b.text, cursorLine(b.text, true));
-					return { y, from: margin + b.from, to: margin + b.to, act: peekKey(b.key, e.id), hot: frame(lit) };
+					return { y, from: margin + b.from, to: margin + b.to, command: b.command, hot: frame(lit) };
 				}),
 		],
 	};
 }
 
-// ── Deck actions ────────────────────────────────────────────────────────
+// ── keys ────────────────────────────────────────────────────────────────
+
+const bind = (keys: string[], name: string, label: string | null, command: Command | null): Binding<Command> => ({
+	keys,
+	name,
+	label,
+	command,
+});
+const step = (by: number): Command => ({ kind: "step", by });
+const CHOOSE: Command = { kind: "choose", index: null };
+const CANCEL: Command = { kind: "cancel" };
+const ARROWS = [bind(["up"], "↑", null, step(-1)), bind(["down"], "↓", null, step(1))];
+
+/** The keys the roster pane takes in its mode, in the order its legend shows the ones it labels. */
+function keymap(): Binding<Command>[] {
+	const mode = roster.mode;
+	switch (mode.kind) {
+		case "settings":
+			return [];
+		// Their legend line is the field being typed into.
+		case "filter":
+		case "name":
+			return [...ARROWS, bind(["enter"], "⏎", null, CHOOSE), bind(["escape"], "esc", null, CANCEL)];
+		case "snooze":
+			return [
+				bind(["up", "k"], "↑", null, step(-1)),
+				bind(["down", "j"], "↓", null, step(1)),
+				bind(["enter"], "⏎", "snooze", CHOOSE),
+				bind(["escape", "q", "s"], "esc", "cancel", CANCEL),
+			];
+		case "archive": {
+			const e = entries.get(mode.id);
+			const family = e ? openDescendants(entries.values(), e.id).length : 0;
+			const answer = (all: boolean, deleteWorktree: boolean): Command => ({ kind: "archiveAnswer", all, deleteWorktree });
+			const out = [bind(["a"], "a", "this", answer(false, false))];
+			if (family > 0) out.push(bind(["A"], "A", `all ${family + 1}`, answer(true, false)));
+			out.push(bind(["escape"], "esc", "abort", CANCEL));
+			if (e?.worktree) out.push(bind(["d"], "d", "archive + delete worktree", answer(false, true)));
+			if (e?.worktree && family > 0) out.push(bind(["D"], "D", `all ${family + 1} + delete this worktree`, answer(true, true)));
+			return out;
+		}
+		case "picker":
+			return pickerKeys(mode.picker);
+		case "roster":
+			return rosterKeys(roster.selected());
+	}
+}
+
+function pickerKeys(choosing: Choosing): Binding<Command>[] {
+	if (choosing.confirm) return [bind(["y", "enter"], "y", "remove", CHOOSE), bind(["n", "escape"], "n", "keep", CANCEL)];
+	if (choosing.menu) {
+		// A number picks what the menu shows by its place, until something's typed: model names have numbers in them.
+		const shown = menuPresets(choosing.menu.query);
+		const numbers =
+			choosing.menu.query === "" && shown.length > 0
+				? [
+						bind([], `1–${Math.min(9, shown.length)}`, "pick", null),
+						...shown.slice(0, 9).map((_, i) => bind([String(i + 1)], String(i + 1), null, { kind: "choose", index: i })),
+					]
+				: [];
+		return [...numbers, bind(["enter"], "⏎", "choose", CHOOSE), bind(["escape", "tab", "shift+tab"], "esc", "keep", CANCEL), ...ARROWS];
+	}
+	if (choosing.mode === "add")
+		return [
+			bind(["tab"], "⇥", "complete", { kind: "complete" }),
+			bind(["enter"], "⏎", "start", CHOOSE),
+			bind(["escape"], "esc", choosing.opened === "pick" ? "back" : "cancel", CANCEL),
+			...ARROWS,
+		];
+	return [
+		bind(["enter"], "⏎", "start", CHOOSE),
+		...(pickerPresets().length > 0 ? [bind(["tab", "shift+tab"], "⇥", "preset", { kind: "menu" })] : []),
+		// The prefix key, which reaches the roster through the UI server.
+		bind([], `${config.prefix} d`, "remove", { kind: "remove" }),
+		bind(["escape"], "esc", "cancel", CANCEL),
+		...ARROWS,
+	];
+}
+
+/** The roster's own keys, on its cursor's row; the legend shows what that row's are. */
+function rosterKeys(row: Row | undefined): Binding<Command>[] {
+	const session = row?.kind === "session" ? row.entry : null;
+	const onRow = (act: RowAct): Command => ({ kind: "row", act, row: null });
+	let enter: string | null = null;
+	if (row?.kind === "header") enter = row.collapsed ? "expand" : "collapse";
+	else if (row?.kind === "section") enter = row.expanded ? "collapse" : "expand";
+	else if (session) enter = !session.open ? "open" : session.live ? "focus" : "wake";
+	let newLabel: string | null = null;
+	if (!row || row.kind === "header" || (session?.open && !session.snoozed)) newLabel = "new";
+	else if (row.kind === "section" && row.key === "operators") newLabel = "new operator";
+	return [
+		bind(["enter"], "⏎", enter, { kind: "activate", enter: true }),
+		bind(["m"], "m", row?.kind === "header" && row.group !== null ? "rename" : null, onRow("group")),
+		bind(["s"], "s", session?.snoozed ? "unsnooze" : null, onRow("snooze")),
+		bind(["a"], "a", session ? (session.open ? "archive" : "unarchive") : null, onRow("archive")),
+		bind(["n"], "n", newLabel, onRow("new")),
+		bind(["?"], "?", "keys", { kind: "help" }),
+		bind([","], ",", "settings", { kind: "settings" }),
+		bind(["down", "j"], "j", null, step(1)),
+		bind(["up", "k"], "k", null, step(-1)),
+		bind(["g"], "g", null, step(Number.NEGATIVE_INFINITY)),
+		bind(["G"], "G", null, step(Number.POSITIVE_INFINITY)),
+		bind([" "], "space", null, { kind: "activate", enter: false }),
+		bind(["right", "l"], "l", null, { kind: "unfold", open: true }),
+		bind(["left", "h"], "h", null, { kind: "unfold", open: false }),
+		bind(["escape"], "esc", null, { kind: "clearFilter" }),
+		bind(["w"], "w", null, onRow("wake")),
+		bind(["x"], "x", null, onRow("stop")),
+		bind(["R"], "R", null, onRow("reload")),
+		bind(["u"], "u", null, onRow("unseen")),
+		bind(["p"], "p", null, onRow("parent")),
+		bind(["["], "[", null, { kind: "history", step: -1 }),
+		bind(["]"], "]", null, { kind: "history", step: 1 }),
+		bind(["y"], "y", null, onRow("copyOpen")),
+		bind(["Y"], "Y", null, onRow("copyMention")),
+		bind(["N"], "N", null, { kind: "addDir" }),
+		bind(["/"], "/", null, { kind: "filter" }),
+		...(configError ? [bind(["O"], "O", null, { kind: "config", line: configError.line })] : []),
+		bind(["q", "ctrl+c"], "q", null, { kind: "quit" }),
+	];
+}
 
 /**
- * The roster's own keys, from anywhere after the prefix. j and k step over headers, and the keyboard stays put. Given a
- * session, from a Peek's buttons, the key acts on that session's row instead of the cursor's.
+ * While the Stage has the keyboard, the legend shows the prefix keys that bring the roster back, which the UI server
+ * binds; a click runs what they do.
  */
-async function prefixKey(k: string, id: string | undefined): Promise<void> {
-	const row = id === undefined ? roster.selected() : roster.rows().find((r) => r.key === id);
-	if (id !== undefined && !row) throw new Error(`no session ${id} in the roster`);
-	if (k === ",") {
-		await panes.showRoster(true);
-		openSettings();
-		return;
-	}
-	// Session commands wait while Settings is open.
-	if (roster.settings) return;
-	if (k === "d") {
-		roster.askRemove();
-		return;
-	}
-	// Any other command abandons a prompt or picker left open, which would otherwise take the keys it brings back.
-	roster.leave();
-	if (k === "/") {
-		await panes.showRoster(true);
-		roster.enter({ kind: "filter" });
-	} else if (k === "m") {
-		await panes.showRoster(true);
-		roster.startNaming(row);
-	} else if (k === "J" || k === "K") roster.moveSession(k === "J" ? 1 : -1);
-	else if (k === "n") {
-		await panes.showRoster(true);
-		roster.newAt(row);
-	} else if (k === "N") {
-		await panes.showRoster(true);
-		roster.openPicker("add", null, null);
-	} else if (k === "w") roster.wake(row);
-	else if (k === "x") roster.stop(row);
-	else if (k === "R") roster.reload(row);
-	else if (k === "a") {
-		// The cursor's session lingers once archived, and the keyboard goes to the roster to look it over or move on; so
-		// does asking whether its family or worktree goes too.
-		if (
-			row?.kind === "session" &&
-			row.entry.open &&
-			(row.key === roster.selected()?.key || row.entry.worktree !== null || openDescendants(entries.values(), row.entry.id).length > 0)
-		)
-			await panes.showRoster(true);
-		roster.toggleArchived(row);
-	} else if (k === "p") roster.toParent(row);
-	else if (k === "u") roster.toggleUnseen(row);
-	else if (k === "[" || k === "]") goHistory(k === "[" ? -1 : 1);
-	else if (k === "s" || k === "S") {
-		// The menu takes the keyboard; unsnoozing needs none.
-		if (!(row?.kind === "session" && row.entry.snoozed)) await panes.showRoster(true);
-		roster.toggleSnooze(row);
-	} else if (k === "y" || k === "Y") roster.copy(k === "y", row);
-	else throw new Error(`unknown deck key ${k}`);
-	roster.syncStage(true);
+function stageKeys(): Binding<Command>[] {
+	const help = bind([], `${config.prefix} ?`, "keys", { kind: "help" });
+	if (panes.applied.target === placeholder || harnessStarting(panes.applied))
+		return [bind([], "esc", "list", { kind: "roster", to: "focus" }), help];
+	return [
+		bind([], `${config.prefix} h`, "list", { kind: "roster", to: "focus" }),
+		bind([], `${config.prefix} z`, "hide list", { kind: "roster", to: "hide" }),
+		help,
+	];
 }
+
+/**
+ * The roster's keys from anywhere, after the prefix: `swb __deck key`. j and k step over headers, and the keyboard stays
+ * put. Given a row, as a Peek's buttons are, a key acts on that row instead of the cursor's.
+ */
+function prefixKeymap(row: string | null): Binding<Command>[] {
+	const onRow = (act: RowAct): Command => ({ kind: "row", act, row });
+	return [
+		bind([","], ",", null, { kind: "settings" }),
+		bind(["/"], "/", null, { kind: "filter" }),
+		bind(["m"], "m", null, onRow("group")),
+		bind(["J"], "J", null, { kind: "moveSession", by: 1 }),
+		bind(["K"], "K", null, { kind: "moveSession", by: -1 }),
+		bind(["n"], "n", null, onRow("new")),
+		bind(["N"], "N", null, { kind: "addDir" }),
+		bind(["w"], "w", null, onRow("wake")),
+		bind(["x"], "x", null, onRow("stop")),
+		bind(["R"], "R", null, onRow("reload")),
+		bind(["a"], "a", null, onRow("archive")),
+		bind(["p"], "p", null, onRow("parent")),
+		bind(["u"], "u", null, onRow("unseen")),
+		bind(["["], "[", null, { kind: "history", step: -1 }),
+		bind(["]"], "]", null, { kind: "history", step: 1 }),
+		bind(["s", "S"], "s", null, onRow("snooze")),
+		bind(["y"], "y", null, onRow("copyOpen")),
+		bind(["Y"], "Y", null, onRow("copyMention")),
+		bind(["d"], "d", null, { kind: "remove" }),
+	];
+}
+
+/**
+ * A prefix key. Settings holds every key while it's open; any other mode is abandoned first, since a prompt or picker
+ * left open would take the keys the command brings back, except for the picker's own `d`.
+ */
+function prefixKey(k: string, row: string | undefined): void {
+	if (row !== undefined && !roster.rows().some((r) => r.key === row)) throw new Error(`no session ${row} in the roster`);
+	const command = bindingFor(prefixKeymap(row ?? null), k)?.command;
+	if (!command) throw new Error(`unknown deck key ${k}`);
+	if (roster.settings) return;
+	if (command.kind !== "remove") roster.leave();
+	roster.run(command);
+}
+
+// ── Deck actions ────────────────────────────────────────────────────────
 
 async function deckClient(): Promise<string | undefined> {
 	return (await tmuxAsync(UI, "list-clients", "-t", `=${deck}`, "-F", "#{client_name}")).split("\n")[0] || undefined;
@@ -3588,26 +3729,26 @@ async function showHelp(): Promise<void> {
 	await tmuxAsync(UI, "display-popup", "-c", client, "-E", ...fit, ...HELP_POPUP);
 }
 
-/** A Peek's buttons: each one's label and the roster key it runs. */
-function peekButtons(row: Row): [label: string, key: string][] {
-	if (row.kind === "section") return row.key === "operators" ? [["New Operator", "n"]] : [];
+/** A Peek's buttons: each one's label, the roster key that does the same, and what it does. */
+function peekButtons(row: Row): [label: string, key: string, act: RowAct][] {
+	if (row.kind === "section") return row.key === "operators" ? [["New Operator", "n", "new"]] : [];
 	if (row.kind === "header") {
-		const items: [string, string][] = [["New session here", "n"]];
-		if (row.group !== null) items.push(["Rename Group…", "m"]);
+		const items: [string, string, RowAct][] = [["New session here", "n", "new"]];
+		if (row.group !== null) items.push(["Rename Group…", "m", "group"]);
 		return items;
 	}
 	const e = row.entry;
-	const items: [string, string][] = [];
-	if (!e.open) items.push(["Unarchive", "a"]);
+	const items: [string, string, RowAct][] = [];
+	if (!e.open) items.push(["Unarchive", "a", "archive"]);
 	else {
-		items.push(e.live ? ["Stop", "x"] : ["Wake", "w"]);
-		if (!e.provisional) items.push(["Reload", "R"]);
-		if (!e.provisional && !e.snoozed) items.push(e.markedUnseen ? ["Unmark Unseen", "u"] : ["Mark Unseen", "u"]);
-		if (!e.provisional) items.push(e.snoozed ? ["Unsnooze", "s"] : ["Snooze…", "s"], ["Archive", "a"]);
-		if (!e.operator) items.push(["Group…", "m"]);
-		items.push([e.operator ? "New Operator" : "New session here", "n"]);
+		items.push(e.live ? ["Stop", "x", "stop"] : ["Wake", "w", "wake"]);
+		if (!e.provisional) items.push(["Reload", "R", "reload"]);
+		if (!e.provisional && !e.snoozed) items.push(e.markedUnseen ? ["Unmark Unseen", "u", "unseen"] : ["Mark Unseen", "u", "unseen"]);
+		if (!e.provisional) items.push(e.snoozed ? ["Unsnooze", "s", "snooze"] : ["Snooze…", "s", "snooze"], ["Archive", "a", "archive"]);
+		if (!e.operator) items.push(["Group…", "m", "group"]);
+		items.push([e.operator ? "New Operator" : "New session here", "n", "new"]);
 	}
-	items.push(["Copy swb open <id>", "y"], ["Copy @session:<id>", "Y"]);
+	items.push(["Copy swb open <id>", "y", "copyOpen"], ["Copy @session:<id>", "Y", "copyMention"]);
 	return items;
 }
 
@@ -3660,23 +3801,32 @@ process.stdin.on("error", (error: NodeJS.ErrnoException) => {
 let focusReads = Promise.resolve();
 
 /**
- * The keyboard's pane, read afresh. The hook that reports a move, and a prefix key pressed just after it, each run in
- * the background and can land in either order.
+ * Reads the keyboard's pane afresh, then runs `then` in the same change, with the Deck's focus up to date. The hook
+ * that reports a move and a prefix key pressed just after it each run in the background, and the chain keeps them in
+ * the order they came.
  */
-async function syncFocus(): Promise<void> {
-	focusReads = focusReads.then(async () => {
+function withFocus(then: (() => void) | null): Promise<void> {
+	const read = focusReads.then(async () => {
 		const pane = await tmuxAsync(UI, "display", "-p", "-t", deck, "#{pane_id}");
-		if (pane !== focusedPane) focusMoves++;
-		focusedPane = pane;
+		dispatch(() => {
+			focusOn(pane);
+			then?.();
+		});
 	});
-	await focusReads;
+	focusReads = read.catch(() => {});
+	return read;
+}
+
+function focusOn(pane: string): void {
+	if (pane !== focusedPane) focusMoves++;
+	focusedPane = pane;
 	const was = focus;
 	focus = focusedPane === rosterPane ? "roster" : "stage";
 	// Moving to another pane, by ctrl-hjkl or the prefix, leaves Settings.
 	if (focus === "stage" && roster.settings) closeSettings();
 	if (focus === "roster") for (const launch of launches) launch.keyboard = false;
 	// A drag released over another pane never reports its release here.
-	else roster.dragging = null;
+	else if (roster.drag) roster.gesture = { kind: "none" };
 	// Moving onto a dormant session, by click or key, means to use it.
 	const onView = stage.staged === null ? undefined : entries.get(stage.staged);
 	if (focus === "roster") returning = false;
@@ -3687,20 +3837,23 @@ async function syncFocus(): Promise<void> {
 		peek.byKeys = false;
 		if (roster.choosing) roster.choosing.menu = null;
 	}
-	syncStatus();
-	apply();
 }
 
+/**
+ * A command the UI server sent. What it asks of the Deck's state goes through dispatch; what it asks of the Stage's
+ * panes goes straight to them, and the server's commit settles the rest once it's done.
+ */
 async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 	switch (cmd) {
 		case "focus":
-			await syncFocus();
+			await withFocus(null);
 			break;
 		case "terminal-focus": {
 			const focused = argv[0] === "in";
 			if (focused === terminalFocused) break;
-			terminalFocused = focused;
-			syncVisit();
+			dispatch(() => {
+				terminalFocused = focused;
+			});
 			// Of several Decks, the one in use owns the colors every hosted program sees.
 			if (focused && profile) post({ type: "colors", colors: profile });
 			break;
@@ -3710,8 +3863,9 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 			break;
 		case "view-swap":
 		case "view-split":
-			await syncFocus();
-			if (!roster.settings) await changeView(cmd === "view-swap");
+			await withFocus(() => {
+				if (!roster.settings) changeView(cmd === "view-swap");
+			});
 			break;
 		case "roster":
 			// Settings holds the roster beside the Stage; showing it, and with it the keyboard, still goes.
@@ -3725,12 +3879,12 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 			await panes.focusStage();
 			break;
 		case "shell":
-			await syncFocus();
-			if (!roster.settings) await toggleShell();
+			await withFocus(() => {
+				if (!roster.settings) toggleShell();
+			});
 			break;
 		case "key":
-			await syncFocus();
-			await prefixKey(argv[0] ?? "", argv[1]);
+			await withFocus(() => prefixKey(argv[0] ?? "", argv[1]));
 			break;
 		case "help":
 			await showHelp();
@@ -3738,41 +3892,44 @@ async function handleCommand(cmd: string, argv: string[]): Promise<void> {
 		// The UI server saw the pointer leave both the roster and its overlays, or a key typed elsewhere; it put away
 		// what leaves with them, and stopped watching, on its way here.
 		case "pointer-out":
-			pointerOut();
+			dispatch(pointerOut);
 			break;
 		case "esc":
-			for (const launch of launches) launch.keyboard = false;
-			await panes.showRoster(true);
-			apply();
+			dispatch(() => {
+				for (const launch of launches) launch.keyboard = false;
+				afterCommit(() => void panes.showRoster(true));
+			});
 			break;
 		// The session on view taking me to another. One it launched a moment ago reaches this Deck with a later snapshot.
 		case "show": {
 			const [id = "", from, view] = argv;
 			const deadline = Date.now() + 2000;
 			while (!entries.has(id) && Date.now() < deadline) await Bun.sleep(50);
-			const e = entries.get(id);
-			if (!e) throw new Error(`no session ${id} on this Deck`);
-			if (stage.staged !== from) throw new Error("the user has moved off this session; nothing switched");
-			reveal(id);
-			// Asking to be taken there means as much as clicking its row: a dormant one starts.
-			roster.focusEntry(e);
-			if (view !== undefined && view !== viewOf(e)) await showView(e, view as View);
+			dispatch(() => {
+				const e = entries.get(id);
+				if (!e) throw new Error(`no session ${id} on this Deck`);
+				if (stage.staged !== from) throw new Error("the user has moved off this session; nothing switched");
+				reveal(id);
+				// Asking to be taken there means as much as clicking its row: a dormant one starts.
+				roster.focusEntry(e);
+				if (view !== undefined && view !== viewOf(e)) showView(e, view as View);
+			});
 			break;
 		}
 		// A key typed on a session's card, which only the keyboard on the Stage can type, means to use it.
-		case "wake": {
-			const { kind, id } = panes.applied;
-			if (id !== null && (kind === "dormant" || kind === "exited" || kind === "failed")) wake(id, true);
+		case "wake":
+			dispatch(() => {
+				const { kind, id } = panes.applied;
+				if (id !== null && (kind === "dormant" || kind === "exited" || kind === "failed")) wake(id, true);
+			});
 			break;
-		}
 		default:
 			throw new Error(`unknown deck command ${cmd}`);
 	}
-	tui.requestRender();
 }
 
 /** Shows or hides the shell beside, below, or in place of pi for the staged session's directory, and the keyboard follows it in and back out. */
-async function toggleShell(): Promise<void> {
+function toggleShell(): void {
 	const e = panes.applied.id === null ? undefined : entries.get(panes.applied.id);
 	if (!e?.open) {
 		toast("no open session on view", "info");
@@ -3780,9 +3937,7 @@ async function toggleShell(): Promise<void> {
 	}
 	if (shellsAsked.delete(e.cwd)) return;
 	if (shellsShown.delete(e.cwd)) {
-		const inShell = focus === "stage" && focusedPane === shellShownIn();
-		apply();
-		if (inShell) await panes.focusStage();
+		if (focus === "stage" && focusedPane === shellShownIn()) afterCommit(() => void panes.focusStage());
 		return;
 	}
 	if (snapshot?.shells[e.cwd]) showShell(e.cwd);
@@ -3796,7 +3951,6 @@ async function toggleShell(): Promise<void> {
 /** Shows a directory's shell, once it runs, with the keyboard in it. */
 function showShell(dir: string): void {
 	shellsShown.add(dir);
-	apply();
 	focusOnceShown(() => shellShownIn());
 }
 
@@ -3810,28 +3964,30 @@ let focusMoves = 0;
 function focusOnceShown(pane: () => string | null): void {
 	const asked = focusMoves;
 	const from = focusedPane;
-	panes.queue(async () => {
-		const target = pane();
-		if (!target) return;
-		if (
-			asked !== focusMoves &&
-			(await tmuxAsync(UI, "display", "-p", "-t", from, "#{pane_id}").then(
-				() => true,
-				() => false,
-			))
-		)
-			return;
-		await tmuxAsync(UI, "select-pane", ...(panes.narrow ? ["-Z"] : []), "-t", target).catch((error: Error) =>
-			toast(`focus: ${error.message}`, "error"),
-		);
-	});
+	afterCommit(() =>
+		panes.queue(async () => {
+			const target = pane();
+			if (!target) return;
+			if (
+				asked !== focusMoves &&
+				(await tmuxAsync(UI, "display", "-p", "-t", from, "#{pane_id}").then(
+					() => true,
+					() => false,
+				))
+			)
+				return;
+			await tmuxAsync(UI, "select-pane", ...(panes.narrow ? ["-Z"] : []), "-t", target).catch((error: Error) =>
+				toast(`focus: ${error.message}`, "error"),
+			);
+		}),
+	);
 }
 
 /**
  * `e` swaps pi and the Editor by what's showing, so an Editor that died comes back, and does nothing in split. `v` enters split with the keyboard on the Editor, and
  * leaves it for whichever pane had the keyboard.
  */
-async function changeView(swap: boolean): Promise<void> {
+function changeView(swap: boolean): void {
 	const e = panes.applied.id === null ? undefined : entries.get(panes.applied.id);
 	if (!e?.open) {
 		toast("no open session on view", "info");
@@ -3844,16 +4000,22 @@ async function changeView(swap: boolean): Promise<void> {
 	if (swap) next = showing === "editor" ? "agent" : "editor";
 	else if (saved !== "split") next = "split";
 	else next = showing === "split" && focus === "stage" && focusedPane === stagePane ? "editor" : "agent";
-	await showView(e, next);
+	showView(e, next);
+}
+
+/** A view with the Editor in it waits for the Editor to run; asking for one that died brings it back. */
+function showView(e: Entry, next: View): void {
+	const ask = next === "agent" ? undefined : editors.get(e.cwd);
+	if (ask?.kind === "asking") ask.shows = { id: e.id, view: next };
+	else if (next !== "agent" && !snapshot?.editors[e.cwd]) requestEditor(e.cwd, { id: e.id, view: next });
+	else {
+		if (next !== "agent") editors.set(e.cwd, { kind: "asked" });
+		setView(e, next);
+	}
 }
 
 /** The keyboard goes to the pane the view brought up, or stays in the shell; entering split, to the Editor, since that's what I split to look at. */
-async function showView(e: Entry, next: View): Promise<void> {
-	if (next !== "agent") {
-		editorsAsked.delete(e.cwd);
-		editorsLost.delete(e.cwd);
-		if ((await requestEditor(e.cwd)) === null || panes.applied.id !== e.id) return;
-	}
+function setView(e: Entry, next: View): void {
 	if (next !== "editor" && !e.live) wake(e.id, focus === "stage");
 	if (next === "split" && panes.width < SPLIT_FROM) toast(`split needs ${SPLIT_FROM} columns; showing ${harnessName(e.harness)}`, "info");
 	// Leaving split from a shell replacing pi keeps the keyboard in the shell, wherever it lands.
@@ -3861,7 +4023,6 @@ async function showView(e: Entry, next: View): Promise<void> {
 	const req = nextReq();
 	localViews.set(e.id, { view: next, req });
 	post({ type: "view", req, id: e.id, view: next });
-	apply();
 	focusOnceShown(() => (inShell && shellShownIn()) || stagePane);
 }
 
@@ -3877,14 +4038,12 @@ function applyLoaded(next: Loaded): void {
 	if (JSON.stringify(before.rosterWidth) !== JSON.stringify(config.rosterWidth)) {
 		// A new width is meant to show, over one dragged before it.
 		panes.dragged = null;
-		void panes.layout();
+		afterCommit(() => void panes.layout());
 	}
 	if (JSON.stringify(before.dirs) !== JSON.stringify(config.dirs)) post({ type: "dirs" });
 	if (before.wakeOnHighlight !== config.wakeOnHighlight) scheduleHighlightWake();
-	if (before.shellPosition !== config.shellPosition) apply();
 	// biome-ignore lint/plugin: a Settings save, or a config.toml edit, writes it, once per change.
 	if (before.operatorInstructions !== config.operatorInstructions) ensureOperatorDir(config.operatorInstructions);
-	tui.requestRender();
 }
 
 /** config.toml again, after a change on disk: a valid one applies, an invalid one is reported and leaves the Deck as it was. */
@@ -3897,7 +4056,6 @@ function reloadConfig(): void {
 	} catch (error) {
 		if (!(error instanceof ConfigError)) throw error;
 		configError = error;
-		tui.requestRender();
 	}
 }
 
@@ -3953,30 +4111,29 @@ const settingsHost = {
 	},
 	catalog: () => catalog,
 	refresh: (models: boolean) => post({ type: "refresh", models }),
-	open: openConfig,
+	open: (line: number | null) => afterCommit(() => openConfig(line)),
 	close: () => closeSettings(),
-	help: () => void showHelp(),
+	help: () => afterCommit(() => void showHelp()),
 	paint: { cursor: cursorLine, hover: hoverLine },
 	message: (now: number, withConfigError: boolean) => roster.messageLine(now, null, withConfigError),
 	requestRender: () => tui.requestRender(),
+	dispatch: (change: () => void) => dispatch(change),
 };
 
 /** Settings fills the Deck: the roster zooms its own pane over the Stage, which keeps running underneath. */
 function openSettings(): void {
 	if (roster.settings) return;
-	roster.dragging = null;
+	roster.gesture = { kind: "none" };
 	if (stage.highlightTimer) clearTimeout(stage.highlightTimer);
 	stage.highlightTimer = null;
 	roster.enter({ kind: "settings", pane: new SettingsPane(settingsHost) });
 	post({ type: "refresh", models: false });
-	panes.zoomRoster(true);
-	tui.requestRender();
+	afterCommit(() => panes.zoomRoster(true));
 }
 
 function closeSettings(): void {
 	if (!roster.settings) return;
 	roster.leave();
-	tui.requestRender();
 }
 
 /** A narrow Deck's roster is zoomed already, and stays so. */
@@ -4029,7 +4186,7 @@ function viewState(): DeckState {
 	const labels = new Map(rows.flatMap((row) => (row.kind === "header" && row.group !== null ? [[row.key, row.group]] : [])));
 	const index = roster.cursorIndex(rows);
 	const cursorRow = rows[index];
-	const drop = roster.dragging?.moved ? roster.dragging.drop : null;
+	const drop = roster.drag?.moved ? roster.drag.drop : null;
 	const applied = panes.applied;
 	const staged = applied.id === null ? undefined : entries.get(applied.id);
 	return {
@@ -4128,7 +4285,19 @@ const overlays = new Overlays({
 	deck,
 	failed: (message) => toast(message, "error"),
 	left: () => dispatch(pointerOut),
-	// After a click on one of its buttons, or the pointer lighting something in it, each in the overlay's own input.
+	// A Peek's buttons are its row's prefix keys, and leave a mode left open as those do.
+	pressed: (command) =>
+		dispatch(() => {
+			if (command.kind === "row") roster.leave();
+			roster.run(command);
+		}),
+	hovered: (row) => {
+		if (roster.hover !== row || peek.pending)
+			dispatch(() => {
+				cancelPendingPeek();
+				roster.hover = row;
+			});
+	},
 	changed: () => commit(),
 });
 tui.setFocus(roster);
@@ -4142,7 +4311,11 @@ process.stdout.write("\x1b[?1003h");
 // The worker mirrors them into the sessions server, for the panes it hosts; see its mirror().
 let profile: TerminalProfile | null = null;
 async function queryColors(scheme: "light" | "dark" | null): Promise<void> {
-	const { foreground, background, palette } = await tui.queryTerminalColors({ timeoutMs: 200 });
+	const reported = await tui.queryTerminalColors({ timeoutMs: 200 });
+	dispatch(() => takeColors(reported, scheme));
+}
+
+function takeColors({ foreground, background, palette }: TerminalColors, scheme: "light" | "dark" | null): void {
 	cursorBg =
 		background && foreground
 			? {
@@ -4166,7 +4339,6 @@ async function queryColors(scheme: "light" | "dark" | null): Promise<void> {
 		};
 		post({ type: "colors", colors: profile });
 	}
-	commit();
 }
 tui.onTerminalColorSchemeChange((scheme) => void queryColors(scheme));
 tui.setTerminalColorSchemeNotifications(true);
@@ -4207,7 +4379,10 @@ Bun.serve({
 
 post({ type: "init", deck, config, here });
 post({ type: "dirs" });
-if (args.new) newSession(args.new, null, null, args.harness ? asHarness(args.harness) : null);
+if (args.new) {
+	const cwd = args.new;
+	dispatch(() => newSession(cwd, null, null, args.harness ? asHarness(args.harness) : null));
+}
 void panes.layout();
 
 function stageUp(ttys: string[]): void {

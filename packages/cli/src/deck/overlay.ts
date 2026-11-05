@@ -1,16 +1,16 @@
 import { openSync, writeSync } from "node:fs";
 import tty from "node:tty";
 import { tmuxAsync, tmuxTry, UI } from "../tmux.ts";
+import type { Command } from "./model.ts";
 
 // Overlays are boxes the roster puts over the Deck: a Peek, the launch card, its menu. What lies over the roster's own
 // lines it draws itself; here, the rest float over the Stage. Each is a tmux floating pane in the Deck's window, which
 // sits above the tiled panes without resizing them or touching the harness on the Stage, and never takes the keyboard:
 // the Deck's mouse bindings pass clicks on one through without selecting it. Its program ignores its terminal; the
-// roster opens that terminal itself, paints it, and reads its mouse there, so a button is a closure and nothing crosses
-// a process boundary.
+// roster opens that terminal itself, paints it, and reads its mouse there, so nothing crosses a process boundary.
 
-/** A button on an overlay: where it is, its line again with it lit, and what a click does. */
-export type OverlayButton = { y: number; from: number; to: number; hot: string; act: () => void };
+/** A button on an overlay: where it is, its line again with it lit, and the command a click runs. */
+export type OverlayButton = { y: number; from: number; to: number; hot: string; command: Command };
 
 /** What an overlay shows: its lines, as wide as it is, and the stretches of them that are buttons. */
 export type OverlayView = { lines: string[]; buttons: OverlayButton[] };
@@ -29,8 +29,8 @@ export type Overlay = {
 	width: number;
 	view: OverlayView;
 	leaves: boolean;
-	/** The pointer moving over it; true when that changed what the roster shows. */
-	pointer: (() => boolean) | null;
+	/** The row whose Peek it is, which stays lit while the pointer is on it. */
+	hovers: string | null;
 };
 
 type Shown = {
@@ -58,7 +58,11 @@ export type OverlayHost = {
 	failed: (message: string) => void;
 	/** One that `leaves` went without the roster: the UI server saw the pointer or a key go elsewhere. */
 	left: () => void;
-	/** Something shown changed by itself: a click ran, the pointer lit something, or one went. */
+	/** A click on a button. */
+	pressed: (command: Command) => void;
+	/** The pointer moving over one that hovers a row. */
+	hovered: (row: string) => void;
+	/** Something shown went by itself. */
 	changed: () => void;
 };
 
@@ -319,13 +323,14 @@ export class Overlays {
 			// 32 and up is motion; 35, with no button held.
 			if (button >= 32 && button < 64) {
 				s.at = at;
-				if (s.overlay.pointer?.()) this.host.changed();
+				if (s.overlay.hovers !== null) this.host.hovered(s.overlay.hovers);
 				this.paint(s);
 			} else if (button === 0 && kind === "M") {
+				// A float on its way out still shows the buttons of a mode that may be gone.
+				if (!this.want.includes(s.overlay)) continue;
 				const hit = s.overlay.view.buttons.find((b) => b.y === at.y && at.x >= b.from && at.x < b.to);
 				if (!hit) continue;
-				hit.act();
-				this.host.changed();
+				this.host.pressed(hit.command);
 			}
 		}
 	}
