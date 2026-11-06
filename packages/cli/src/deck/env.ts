@@ -1,28 +1,14 @@
 import { parseArgs } from "node:util";
 import { UsageError } from "../errors.ts";
 import { tmux, UI } from "../tmux.ts";
-import { deckSocket, placeholderName } from "./deck.ts";
+import { type DeckIntent, deckSocket } from "./deck.ts";
 
-// What this Deck's roster process was started with: its flags, its panes, and its socket.
+// What this roster process was started with: the intent of the swb that started it, its panes, and its socket.
 
-export const { values: args } = parseArgs({
-	args: process.argv.slice(3),
-	options: {
-		deck: { type: "string" },
-		select: { type: "string" },
-		new: { type: "string" },
-		harness: { type: "string" },
-		here: { type: "string" },
-		continue: { type: "boolean" },
-	},
-});
+const { values } = parseArgs({ args: process.argv.slice(3), options: { intent: { type: "string" } } });
 
-if (!args.deck || !args.here) throw new UsageError("__roster: --deck and --here are required");
-
-export const deck = args.deck;
-
-/** Where swb was run: `-c` and `swb new` start there. */
-export const here = args.here;
+/** What the swb that started this roster asked of the Deck; a later swb's arrives as a command. */
+export const startIntent: DeckIntent | null = values.intent ? (JSON.parse(values.intent) as DeckIntent) : null;
 
 if (!process.env.TMUX_PANE) throw new UsageError("__roster: runs only inside a Deck pane");
 
@@ -43,6 +29,4 @@ export const [stagePane, stageTty] = tmux(
 
 if (!stagePane || !stageTty) throw new UsageError("__roster: its window names no Stage");
 
-export const sock = deckSocket(deck);
-
-export const placeholder = placeholderName(deck);
+export const sock = deckSocket();

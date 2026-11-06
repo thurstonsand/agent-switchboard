@@ -19,12 +19,7 @@ const toolPath = [ttydDir, dirname(which("ffmpeg"))].join(":");
 
 /** The Deck as text and ANSI, taken when the director finishes, while the tape still holds the Deck open. */
 function snapshot(s: Scenario): void {
-	const decks = readdirSync(join(s.env.XDG_STATE_HOME as string, "agent-switchboard/decks"))
-		.filter((file) => file.endsWith(".sock"))
-		.map((file) => file.slice(0, -".sock".length));
-	for (const deck of decks) {
-		s.save(decks.length === 1 ? "deck-state.json" : `deck-state-${deck}.json`, s.swb("deck", "state", "--json", "--deck", deck));
-	}
+	s.save("deck-state.json", s.swb("deck", "state", "--json"));
 	const panes = s.tmux(s.servers.ui, "list-panes", "-a", "-F", "#{pane_id}").split("\n").filter(Boolean);
 	const capture = (...flags: string[]) =>
 		panes.map((pane) => s.tmux(s.servers.ui, "capture-pane", "-p", ...flags, "-t", pane)).join("\n----\n");

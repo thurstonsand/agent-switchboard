@@ -67,7 +67,7 @@ A session whose agent finished a turn after my last **Visit**, or one I marked U
 ### Organization
 
 **Deck**:
-What `swb` opens: the **Roster** beside a **Stage**, in one disposable layout. Each invocation gets its own.
+What `swb` opens: the **Roster** beside a **Stage**. There is one, shared by every terminal that opens it, and it outlives them.
 
 **Roster**:
 The Deck's list of sessions, in sections: **Operators**, open sessions by **Project**, **Inactive**, **Snoozed**, then **Archived**.

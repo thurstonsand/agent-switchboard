@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { config, entry, reply, seed, state, waitState } from "./harness/deck.ts";
+import { closeDeck, config, entry, reply, seed, state, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -81,7 +81,7 @@ test("n then Enter on Operators starts a trusted pi that reads only swb's curren
 	s.save("operator.txt", s.screen());
 });
 
-test("a new Deck restores the last one's cursor and folds; -c puts pi on this Project's most recent session", async () => {
+test("the Deck outlives its terminal; one started afresh restores the last one's cursor and folds; -c moves it to this Project's most recent session", async () => {
 	s = scenario("phase6", "restore");
 	const [older, newer] = (await seed(s, { turns: ["older"] }, { turns: ["newer"] })) as [string, string];
 
@@ -100,6 +100,11 @@ test("a new Deck restores the last one's cursor and folds; -c puts pi on this Pr
 	await waitState(s, "cursor on the other session", (x) => x.cursor === target);
 	await Bun.sleep(1000);
 	s.swb("drive", "stop");
+
+	// The Deck is still up, as the cursor left it.
+	s.swb("drive", "start");
+	expect(state(s)).toMatchObject({ cursor: target, focus: "roster" });
+	closeDeck(s);
 
 	s.swb("drive", "start");
 	const restored = await waitState(s, "the restored cursor", (x) => x.ready && x.cursor !== null);

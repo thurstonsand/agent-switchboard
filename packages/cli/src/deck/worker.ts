@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import { statSync } from "node:fs";
-import { bootId, type Harness, linkedWorktreeAsync, operatorDir, projectRoot, type View } from "@swb/shared";
+import { bootId, type Harness, linkedWorktreeAsync, operatorDir, type View } from "@swb/shared";
 import { span } from "@swb/shared/trace";
 import type { Config } from "../config.ts";
 import { deriveSessions, type RuntimeRecord, runtimeLive, runtimeRecords, type SessionRow, sessionRows, type World } from "../derive.ts";
@@ -25,7 +25,7 @@ import {
 import { loadLayout, markUnseen, markVisited, openStore, saveLayout, setGroup, setView } from "../store.ts";
 import { listSessions, SESSIONS, tmux, tmuxTry, UI } from "../tmux.ts";
 import { locateTranscript } from "../transcripts/read.ts";
-import { ensurePlaceholder, ensureUiServer, placeholderName } from "./deck.ts";
+import { DECK, ensurePlaceholder, ensureUiServer, PLACEHOLDER } from "./deck.ts";
 import type { Diff, Entry, FromWorker, NewSession, Snapshot, TerminalProfile, ToWorker, Transcript, Turn } from "./protocol.ts";
 import { readTranscript } from "./transcript.ts";
 
@@ -36,7 +36,8 @@ declare const self: Worker;
 
 const TICK_MS = 250;
 
-let deck = "";
+/** Whether the roster has said it listens, so the placeholder can follow its cards. */
+let listening = false;
 let config: Config;
 const db = openStore();
 const boot = bootId();
@@ -197,7 +198,7 @@ function worktreeOf(row: SessionRow): string | null {
 			worktrees.set(cwd, tree?.path ?? null);
 			asking.delete(cwd);
 			// Before init, its own tick posts the first snapshot.
-			if (asking.size === 0 && deck) poll();
+			if (asking.size === 0 && listening) poll();
 		});
 	}
 	return worktrees.get(cwd) ?? null;
@@ -315,10 +316,10 @@ function quietKill(signal: "TERM" | "KILL", pid: number): string {
 
 /**
  * An idle live pi nobody is viewing stops after reap_after. A freshly started one counts from its start, so a
- * background wake isn't reaped on the spot. The attached check runs inside tmux, so a Deck that attached since
+ * background wake isn't reaped on the spot. The attached check runs inside tmux, so a viewer that attached since
  * this poll keeps it.
  *
- * A process gets one SIGTERM, from whichever Deck gets there first: tmux marks its session @swb_reaped as it sends
+ * A process gets one SIGTERM, from whichever roster's worker gets there first, as one replaces another: tmux marks its session @swb_reaped as it sends
  * it. pi shuts down once and ignores every later SIGTERM, and the SIGHUP of a closed pane too, so a shutdown hook
  * that hangs would keep it forever; one still there REAP_GRACE_MS after its SIGTERM gets SIGKILL.
  */
@@ -395,7 +396,7 @@ function tick(): Set<string> {
 	}
 	// A Deck without its placeholder shows a blank Stage, so a killed sessions server comes straight back.
 	if (!snap.serverUp) ensureSessionsServer();
-	if (!names.has(placeholderName(deck))) ensurePlaceholder(deck);
+	if (!names.has(PLACEHOLDER)) ensurePlaceholder(false);
 	if (profile && serverPid !== mirroredServer) {
 		mirroredServer = serverPid;
 		try {
@@ -476,11 +477,12 @@ async function peek(id: string, cwd: string, path: string | null, harness: Harne
 async function handle(message: ToWorker): Promise<void> {
 	switch (message.type) {
 		case "init":
-			deck = message.deck;
+			listening = true;
 			// Only now: the placeholder follows the roster's card stream, and the roster posts init once its socket listens.
-			ensurePlaceholder(deck);
+			// One left by the roster before this one follows that one's stream, on that one's swb.
+			ensurePlaceholder(true);
 			config = message.config;
-			post({ type: "restore", root: projectRoot(message.here), layout: loadLayout(db) });
+			post({ type: "restore", layout: loadLayout(db) });
 			setInterval(poll, TICK_MS);
 			if (catalog) post({ type: "catalog", catalog });
 			// The roster shows "loading…" until its first snapshot, which shouldn't wait on refresh spawning every harness.
@@ -489,7 +491,7 @@ async function handle(message: ToWorker): Promise<void> {
 		case "config": {
 			const prefixChanged = message.config.prefix !== config.prefix;
 			config = message.config;
-			// The prefix lives on the UI server every Deck shares; reloading its conf moves them all.
+			// The prefix lives on the UI server's conf, which a reload moves every terminal on the Deck to.
 			if (prefixChanged) ensureUiServer(config);
 			announce();
 			break;
@@ -578,7 +580,7 @@ async function handle(message: ToWorker): Promise<void> {
 			return;
 		case "colors":
 			profile = message.colors;
-			tmux(UI, "set", "-w", "-t", `=${deck}:`, "@swb_scheme", profile.scheme);
+			tmux(UI, "set", "-w", "-t", `=${DECK}:`, "@swb_scheme", profile.scheme);
 			mirroredServer = "";
 			break;
 		case "view":

@@ -255,7 +255,7 @@ export async function adopt(args: string[]): Promise<void> {
 			throw new SwbError(`adopt: ${s.id} is already tracked; swb open ${s.id}`);
 		track(db, s, false, at);
 	});
-	await openDeck({ select: s.id, newCwd: null, continue: false });
+	await openDeck({ kind: "open", id: s.id });
 }
 
 const SKIPPED: Record<Skip["skip"], (n: number) => string> = {

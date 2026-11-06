@@ -4,13 +4,13 @@ import { budgets, type Scenario, until } from "./index.ts";
 
 type Pane = { index: number; width: number; active: boolean };
 
-function panes(s: Scenario, st: DeckState): Pane[] {
+function panes(s: Scenario): Pane[] {
 	return s
 		.tmux(
 			s.servers.ui,
 			"list-panes",
 			"-t",
-			`=${st.deck}:`,
+			"=deck:",
 			"-f",
 			"#{!:#{pane_floating_flag}}",
 			"-F",

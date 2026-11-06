@@ -1,13 +1,13 @@
-import { mkdirSync, readdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { type Harness, stateDir } from "@swb/shared";
 import { now, since, span } from "@swb/shared/trace";
 import { type Config, loadConfig, type RosterWidth } from "../config.ts";
 import { SwbError } from "../errors.ts";
 import { ensureOperatorDir } from "../operator.ts";
-import { ensureServer, ensureSessionsServer, hook, notify, onlyControl, randomHex, SWB, startScrubbed } from "../sessions.ts";
+import { buildStamp, ensureServer, ensureSessionsServer, hook, newer, notify, SWB, startScrubbed } from "../sessions.ts";
 import { openStore } from "../store.ts";
-import { CLIENT_CWD, cleanEnv, listSessions, quote, SESSIONS, tmux, tmuxClient, tmuxTry, UI } from "../tmux.ts";
+import { CLIENT_CWD, cleanEnv, quote, SESSIONS, tmux, tmuxClient, tmuxTry, UI } from "../tmux.ts";
+import { VERSION } from "../version.ts";
 import type { DeckState } from "./protocol.ts";
 
 export const HELP_POPUP = ["-T", " swb keys ", `${SWB} __help`];
@@ -21,20 +21,18 @@ export function rosterCols(width: RosterWidth, deckWidth: number): number {
 export const NARROW_BELOW = 100;
 export const SPLIT_FROM = 160;
 
-export function decksDir(): string {
-	return join(stateDir(), "decks");
+/** The Deck's session on the UI server. There is one, which every `swb` attaches its terminal to. */
+export const DECK = "deck";
+
+/** The session on the sessions server that renders the Deck's cards. */
+export const PLACEHOLDER = "placeholder";
+
+/** The Deck's socket, the one file it keeps: everything else it shares lives in its processes and in tmux. */
+export function deckSocket(): string {
+	return join(stateDir(), "deck.sock");
 }
 
-/** The Deck's socket, the one file a Deck keeps: everything else it shares lives in its processes and in tmux. */
-export function deckSocket(deck: string): string {
-	return join(decksDir(), `${deck}.sock`);
-}
-
-export function placeholderName(deck: string): string {
-	return `placeholder-${deck}`;
-}
-
-const deckCmd = (what: string) => notify(`__deck #{session_name} ${what}`);
+const deckCmd = (what: string) => notify(`__deck ${what}`);
 const roster = (what: string) => deckCmd(`roster ${what}`);
 /** From the roster: the pane the keyboard last left, or the session's pi when that pane is gone. */
 const backToStage = `if -F '#{P:#{?pane_last,1,}}' { last-pane } { ${deckCmd("stage")} }`;
@@ -52,31 +50,22 @@ export function nav(k: "h" | "j" | "k" | "l"): string {
 }
 
 /**
- * The Deck pane that showed a tmux session of the sessions server most recently: a nested client of the sessions server
- * whose tty is that pane's. Null when no Deck shows it.
+ * The Deck pane showing a tmux session of the sessions server: a nested client of the sessions server whose tty is that
+ * pane's. Null when the Deck doesn't show it.
  */
-export function deckShowing(target: string): { deck: string; pane: string } | null {
-	const clients = tmux(SESSIONS, "list-clients", "-t", `=${target}`, "-F", "#{client_activity}\t#{client_tty}")
-		.split("\n")
-		.filter(Boolean)
-		.map((line) => line.split("\t") as [string, string])
-		.toSorted(([a], [b]) => Number(b) - Number(a));
+export function deckShowing(target: string): string | null {
+	const ttys = tmux(SESSIONS, "list-clients", "-t", `=${target}`, "-F", "#{client_tty}").split("\n");
 	// A client attached from outside swb, with no Deck open, leaves the UI server down.
-	const listed = tmuxTry(UI, "list-panes", "-a", "-F", "#{pane_tty}\t#{pane_id}\t#{session_name}");
+	const listed = tmuxTry(UI, "list-panes", "-a", "-F", "#{pane_tty}\t#{pane_id}");
 	if (!listed.ok) return null;
-	const panes = new Map(
-		listed.out.split("\n").map((line) => {
-			const [tty, pane, deck] = line.split("\t") as [string, string, string];
-			return [tty, { deck, pane }];
-		}),
-	);
-	return clients.map(([, tty]) => panes.get(tty)).find(Boolean) ?? null;
+	const panes = new Map(listed.out.split("\n").map((line) => line.split("\t") as [string, string]));
+	return ttys.map((tty) => panes.get(tty)).find(Boolean) ?? null;
 }
 
 /** `swb __nav`, from an Editor at its own edge: the move runs in the Deck pane showing it, as if ctrl-hjkl had reached tmux. */
 export function editorNav(k: string, editor: string): void {
 	if (k !== "h" && k !== "j" && k !== "k" && k !== "l") throw new SwbError(`__nav: no direction ${k}`);
-	const pane = deckShowing(editor)?.pane;
+	const pane = deckShowing(editor);
 	if (!pane) return;
 	const result = Bun.spawnSync([...tmuxClient(UI), "source-file", "-t", pane, "-"], {
 		cwd: CLIENT_CWD,
@@ -91,7 +80,7 @@ export function editorNav(k: string, editor: string): void {
  * Overlays, the Peek among them, are floating panes the roster paints (see overlay.ts), and the roster keeps the
  * keyboard. The UI server looks at every event first: the pointer leaving both the roster and every overlay, or a key
  * typed outside the roster, puts away the overlays that go with it, @swb_leave's kill-panes, before the event goes on,
- * and tells the roster. The roster sets @swb_roster to its pane, and @swb_watch while it wants to hear of it. In a mouse
+ * and tells the roster. The Deck names the roster's pane in @swb_roster, and the roster sets @swb_watch while it wants to hear of it. In a mouse
  * binding the pane formats are the pane under the pointer.
  */
 const OVER_OVERLAY = "#{pane_floating_flag}";
@@ -197,30 +186,30 @@ function uiConf(config: Config): string {
 		`bind Tab if -F '#{@swb_narrow}' { if -F '#{pane_index}' { select-pane -Z -t :.0 } { select-pane -Z -t :.1 } } { if -F '#{@swb_hidden}' { ${roster("focus")} } { if -F '#{pane_index}' { select-pane -t :.0 } { ${backToStage} } } }`,
 		`bind h ${nav("h")}`,
 		// j and k move between panes on the Stage; the roster has none above or below, so there they move between sessions.
-		`bind j if -F '${IN_ROSTER}' { ${notify("__deck #{session_name} key J")} } { ${nav("j")} }`,
-		`bind k if -F '${IN_ROSTER}' { ${notify("__deck #{session_name} key K")} } { ${nav("k")} }`,
+		`bind j if -F '${IN_ROSTER}' { ${notify("__deck key J")} } { ${nav("j")} }`,
+		`bind k if -F '${IN_ROSTER}' { ${notify("__deck key K")} } { ${nav("k")} }`,
 		`bind l if -F '#{||:#{@swb_narrow},#{||:#{pane_index},#{@swb_hidden}}}' { ${nav("l")} } { ${backToStage} }`,
 		...(["h", "j", "k", "l"] as const).map((k) => `bind -n C-${k} if -F '#{@swb_editor}' { send-keys C-${k} } { ${nav(k)} }`),
 		// z says which it means as it's pressed, so it lands the same whichever order it and an h just after reach the roster.
 		`bind z if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { if -F '#{@swb_hidden}' { ${roster("show")} } { ${roster("hide")} } }`,
-		...[..."nNawxRyY/JKmdSpu,[]"].map((k) => `bind ${k} ${notify(`__deck #{session_name} key ${k}`)}`),
-		`bind e ${notify("__deck #{session_name} view-swap")}`,
-		`bind v ${notify("__deck #{session_name} view-split")}`,
-		`bind s ${notify("__deck #{session_name} shell")}`,
-		"bind q kill-session",
-		`bind ? ${notify("__deck #{session_name} help")}`,
+		...[..."nNawxRyY/JKmdSpu,[]"].map((k) => `bind ${k} ${notify(`__deck key ${k}`)}`),
+		`bind e ${notify("__deck view-swap")}`,
+		`bind v ${notify("__deck view-split")}`,
+		`bind s ${notify("__deck shell")}`,
+		"bind q detach-client",
+		`bind ? ${notify("__deck help")}`,
 		`bind ${prefix} send-keys ${prefix}`,
-		// A Deck is created detached; destroy-unattached set globally would kill it before its client attaches.
-		`set-hook -g client-attached[0] "if -F '#{m:deck-*,#{session_name}}' 'set destroy-unattached on'"`,
-		hook("client-focus-in", "__deck #{session_name} terminal-focus in"),
-		hook("client-focus-out", "__deck #{session_name} terminal-focus out"),
-		hook("client-light-theme", "__deck #{session_name} terminal-scheme light"),
-		hook("client-dark-theme", "__deck #{session_name} terminal-scheme dark"),
-		hook("window-pane-changed", "__deck #{session_name} focus #{pane_id}"),
+		hook("client-focus-in", "__deck terminals"),
+		hook("client-focus-out", "__deck terminals"),
+		hook("client-attached", "__deck terminals"),
+		hook("client-detached", "__deck terminals"),
+		hook("client-light-theme", "__deck terminal-scheme light"),
+		hook("client-dark-theme", "__deck terminal-scheme dark"),
+		hook("window-pane-changed", "__deck focus #{pane_id}"),
 		`set-hook -g window-pane-changed[1] { ${KEY_TARGETS} }`,
 		`set-hook -g window-layout-changed[0] { ${KEY_TARGETS} }`,
-		hook("session-window-changed", "__deck #{session_name} focus #{pane_id}"),
-		hook("window-resized", "__deck #{session_name} layout"),
+		hook("session-window-changed", "__deck focus #{pane_id}"),
+		hook("window-resized", "__deck layout"),
 	].join("\n");
 }
 
@@ -229,21 +218,27 @@ export function ensureUiServer(config: Config): void {
 		UI,
 		uiConf(config),
 		(path) => startScrubbed(UI, ["-f", path, "new-session", "-d", "-s", "swb-ctl", ";", "set", "-t", "swb-ctl", "@swb_kind", "control"]),
-		() => onlyControl(UI),
+		// No terminal shows the Deck, which starts over from its saved layout with the next swb.
+		() => tmux(UI, "list-clients") === "",
 	);
 }
 
-/** The Deck's placeholder session on the sessions server, which renders the cards its roster streams. */
-export function ensurePlaceholder(deck: string): void {
-	const name = placeholderName(deck);
-	if (tmuxTry(SESSIONS, "has-session", "-t", `=${name}`).ok) return;
-	const command = `exec ${[SWB, "__placeholder", "--sock", deckSocket(deck)].map(quote).join(" ")}`;
+/**
+ * The Deck's placeholder session on the sessions server, which renders the cards its roster streams. `fresh` restarts
+ * one already running, on this swb and this roster's stream.
+ */
+export function ensurePlaceholder(fresh: boolean): void {
+	const command = `exec ${[SWB, "__placeholder", "--sock", deckSocket()].map(quote).join(" ")}`;
+	if (tmuxTry(SESSIONS, "has-session", "-t", `=${PLACEHOLDER}`).ok) {
+		if (fresh) tmux(SESSIONS, "respawn-pane", "-k", "-t", `=${PLACEHOLDER}:`, command);
+		return;
+	}
 	tmux(
 		SESSIONS,
 		"new-session",
 		"-d",
 		"-s",
-		name,
+		PLACEHOLDER,
 		"-x",
 		"120",
 		"-y",
@@ -252,15 +247,9 @@ export function ensurePlaceholder(deck: string): void {
 		";",
 		"set",
 		"-t",
-		name,
+		PLACEHOLDER,
 		"@swb_kind",
 		"placeholder",
-		";",
-		"set",
-		"-t",
-		name,
-		"@swb_deck",
-		deck,
 	);
 }
 
@@ -284,75 +273,147 @@ export function deckEnv(): string[] {
 }
 
 /**
- * A Stage pane: a nested client of the sessions server, attached first to `target`. It waits for the Deck's own client
- * first, because a nested client that attaches before the real terminal has no colors to inherit. Whenever it drops, it
- * parks on the placeholder, and the roster, hearing it land there, switches it back to what the Stage shows; a shell's
- * pane instead closes with its shell. A new Deck's worker makes the placeholder only once its roster listens, so the
- * Stage waits for that too rather than miss it and sit out a retry.
+ * A Stage pane: a nested client of the sessions server, attached first to `target`. It waits for a terminal to attach
+ * to the Deck first, because a nested client that attaches before the real terminal has no colors to inherit. Whenever
+ * it drops, it parks on the placeholder, and the roster, hearing it land there, switches it back to what the Stage
+ * shows; a shell's pane instead closes with its shell. A new roster's worker makes the placeholder only once the roster
+ * listens, so the Stage waits for that too rather than miss it and sit out a retry.
  */
-export function stageScript(deck: string, target: string, closes = false): string {
+export function stageScript(target: string, closes = false): string {
 	const ui = tmuxClient(UI).map(quote).join(" ");
 	const sessions = tmuxClient(SESSIONS).map(quote).join(" ");
-	const attached = `${ui} list-clients -t ${quote(`=${deck}`)} 2>/dev/null | grep -q .`;
-	const parking = `${sessions} has-session -t ${quote(`=${placeholderName(deck)}`)} 2>/dev/null`;
+	const attached = `${ui} list-clients -t ${quote(`=${DECK}`)} 2>/dev/null | grep -q .`;
+	const parking = `${sessions} has-session -t ${quote(`=${PLACEHOLDER}`)} 2>/dev/null`;
 	const wait = (ready: string) => ["unset TMUX TMUX_PANE", `until ${ready}; do sleep 0.02; done`];
 	const attach = (session: string) => `${sessions} attach -t ${quote(`=${session}`)} >/dev/null 2>&1`;
 	if (closes) return [...wait(attached), `exec ${attach(target)}`].join("\n");
-	return [
-		...wait(`${attached} && ${parking}`),
-		attach(target),
-		"while :; do",
-		`  ${attach(placeholderName(deck))} || sleep 0.2`,
-		"done",
-	].join("\n");
+	return [...wait(`${attached} && ${parking}`), attach(target), "while :; do", `  ${attach(PLACEHOLDER)} || sleep 0.2`, "done"].join("\n");
 }
 
-/** `continue`: pi takes the keyboard on the most recent session in this Project, or a new one. */
-export type DeckIntent = { select: string | null; newCwd: string | null; continue: boolean; harness?: Harness };
+/**
+ * What a `swb` asks of the Deck as it attaches: a session to show, a new one to start, or the most recent session in a
+ * Project, or a new one in its directory when it has none. The last two take the keyboard.
+ */
+export type DeckIntent =
+	| { kind: "open"; id: string }
+	| { kind: "new"; cwd: string; harness: Harness | null }
+	| { kind: "continue"; root: string; cwd: string };
 
-/** Builds a Deck (roster pane and Stage pane) and attaches this terminal to it. */
-export async function openDeck(intent: DeckIntent): Promise<void> {
+/** Attaches this terminal to the Deck, starting it or its roster as needed, and hands the roster `intent`. */
+export async function openDeck(intent: DeckIntent | null): Promise<void> {
 	if (!process.stdout.isTTY) throw new SwbError("swb needs a terminal");
+	// A pane of swb's own is on the Deck already: the Deck attached there would show itself showing itself.
+	if (basename(process.env.TMUX?.split(",")[0] ?? "") === SESSIONS) throw new SwbError("this terminal is inside the Deck already");
 	const config = span("deck.config", loadConfig);
 	span("deck.store", openStore);
 	span("deck.operator", () => ensureOperatorDir(config.operatorInstructions));
-	// Reap a crashed Deck's placeholder first; left standing, it holds the sessions server back from restarting.
-	span("deck.reap", liveDecks);
 	span("deck.sessions-server", ensureSessionsServer);
 	span("deck.ui-server", () => ensureUiServer(config));
-	const deck = `deck-${randomHex(3)}`;
-	mkdirSync(decksDir(), { recursive: true, mode: 0o700 });
-	const panes = now();
+	const told = span("deck.roster", () => ensureRoster(config, intent));
+	if (!told && intent) {
+		const at = now();
+		await postIntent(intent);
+		since("deck.intent", at);
+	}
+	const attach = Bun.spawn([...tmuxClient(UI), "attach", "-t", `=${DECK}`], {
+		cwd: CLIENT_CWD,
+		env: cleanEnv(),
+		stdio: ["inherit", "inherit", "inherit"],
+	});
+	process.exitCode = await attach.exited;
+}
 
+function rosterCommand(intent: DeckIntent | null): string {
+	const roster = [SWB, "__roster", ...(intent ? ["--intent", JSON.stringify(intent)] : [])];
+	return `exec ${roster.map(quote).join(" ")}`;
+}
+
+/**
+ * Makes sure the Deck has a roster on this swb, as the clock does: one that died, or runs an older swb, is started
+ * afresh in its pane, which a roster keeps after it exits; a newer swb's is left alone. Returns whether it started one,
+ * which then has `intent` already. Two swbs at once serialize on the db's write lock, so the second finds the first's.
+ */
+function ensureRoster(config: Config, intent: DeckIntent | null): boolean {
+	if (rosterState().kind === "current") return false;
+	const db = openStore();
+	try {
+		return db.tx(() => {
+			const state = rosterState();
+			switch (state.kind) {
+				case "current":
+					return false;
+				case "none":
+					createDeck(config, intent);
+					return true;
+				case "broken":
+					// The roster or the Stage lost its pane, or never said which it was: the Deck starts over.
+					tmux(UI, "kill-session", "-t", `=${DECK}`);
+					createDeck(config, intent);
+					return true;
+				case "stale":
+					respawnRoster(state.roster, state.stage, intent);
+					return true;
+			}
+		});
+	} finally {
+		db.close();
+	}
+}
+
+type RosterState = { kind: "none" } | { kind: "broken" } | { kind: "stale"; roster: string; stage: string } | { kind: "current" };
+
+/** Whether the Deck is up with a roster running this swb or a newer one, or what it lacks. */
+function rosterState(): RosterState {
+	// display-message answers for a session that isn't there, from another.
+	if (!tmuxTry(UI, "has-session", "-t", `=${DECK}`).ok) return { kind: "none" };
+	const [roster = "", build = "", stage = ""] = tmux(
+		UI,
+		"display",
+		"-p",
+		"-t",
+		`=${DECK}:`,
+		"#{@swb_roster}\t#{@swb_roster_build}\t#{@swb_stage}",
+	).split("\t");
+	const panes = new Map(
+		tmux(UI, "list-panes", "-s", "-t", `=${DECK}`, "-F", "#{pane_id} #{pane_dead}")
+			.split("\n")
+			.map((line) => line.split(" ") as [string, string]),
+	);
+	const dead = panes.get(roster);
+	if (dead === undefined || !panes.has(stage)) return { kind: "broken" };
+	if (dead === "0" && (build === buildStamp() || newer(build.split(":")[0] ?? "", VERSION))) return { kind: "current" };
+	return { kind: "stale", roster, stage };
+}
+
+/** Builds the Deck: the Stage's pane, and the roster's beside it. */
+function createDeck(config: Config, intent: DeckIntent | null): void {
+	const panes = now();
 	const cols = process.stdout.columns;
 	const rows = process.stdout.rows;
 	const env = deckEnv();
-	const roster = [SWB, "__roster", "--deck", deck, "--here", process.cwd()];
-	if (intent.select) roster.push("--select", intent.select);
-	if (intent.newCwd) roster.push("--new", intent.newCwd);
-	if (intent.harness) roster.push("--harness", intent.harness);
-	if (intent.continue) roster.push("--continue");
 	// One tmux command, not one per step. A new pane gives up a row to its border label, and tmux holds back any resize
 	// within 250 ms of the last: a split sent separately reached the Stage that much later and redrew it, but resizes
-	// queued together land as one. The roster reads the Stage's id from @swb_stage, since the command can't name it.
-	const narrow = cols < NARROW_BELOW ? [";", "set", "-t", deck, "@swb_narrow", "1", ";", "resize-pane", "-Z", "-t", `=${deck}:`] : [];
+	// queued together land as one. The roster reads the Stage's id from @swb_stage, since the command can't name it; a
+	// session option, since hiding and showing the roster moves the Stage between windows. The roster's pane is named,
+	// and kept after its roster exits, in the same command: a roster that died at once would leave no pane to name.
+	const narrow = cols < NARROW_BELOW ? [";", "set", "-t", DECK, "@swb_narrow", "1", ";", "resize-pane", "-Z", "-t", `=${DECK}:`] : [];
 	tmux(
 		UI,
 		"new-session",
 		"-d",
 		"-s",
-		deck,
+		DECK,
 		"-x",
 		String(cols),
 		"-y",
 		String(rows),
 		...env,
-		stageScript(deck, placeholderName(deck)),
+		stageScript(PLACEHOLDER),
 		";",
 		"set",
-		"-wF",
+		"-F",
 		"-t",
-		`=${deck}:`,
+		DECK,
 		"@swb_stage",
 		"#{pane_id}",
 		";",
@@ -362,52 +423,108 @@ export async function openDeck(intent: DeckIntent): Promise<void> {
 		"-l",
 		String(rosterCols(config.rosterWidth, cols)),
 		"-t",
-		`=${deck}:`,
+		`=${DECK}:`,
 		...env,
-		`exec ${roster.map(quote).join(" ")}`,
+		rosterCommand(intent),
+		";",
+		"set",
+		"-p",
+		"-t",
+		`=${DECK}:`,
+		"remain-on-exit",
+		"on",
+		";",
+		"set",
+		"-F",
+		"-t",
+		DECK,
+		"@swb_roster",
+		"#{pane_id}",
+		";",
+		"set",
+		"-t",
+		DECK,
+		"@swb_roster_build",
+		buildStamp(),
 		...narrow,
 	);
 	since("deck.panes", panes);
-
-	const attach = Bun.spawn([...tmuxClient(UI), "attach", "-t", `=${deck}`], {
-		cwd: CLIENT_CWD,
-		env: cleanEnv(),
-		stdio: ["inherit", "inherit", "inherit"],
-	});
-	process.exitCode = await attach.exited;
 }
 
-/** Live Decks by name; sockets whose Deck session is gone are removed. */
-export function liveDecks(): string[] {
-	let names: string[];
-	try {
-		names = readdirSync(decksDir())
-			.filter((file) => file.endsWith(".sock"))
-			.map((file) => file.slice(0, -".sock".length));
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-		throw error;
+/**
+ * Starts a roster afresh in the dead or outdated one's pane. It starts as on a new Deck, so the Deck goes back to one:
+ * the roster beside the Stage, unzoomed, with nothing else on it.
+ */
+function respawnRoster(roster: string, stage: string, intent: DeckIntent | null): void {
+	const [rosterWindow, stageWindow, zoomed] = tmux(
+		UI,
+		"display",
+		"-p",
+		"-t",
+		roster,
+		"#{window_id}",
+		";",
+		"display",
+		"-p",
+		"-t",
+		stage,
+		"#{window_id}\n#{window_zoomed_flag}",
+	).split("\n") as [string, string, string];
+	if (zoomed === "1") tmux(UI, "resize-pane", "-Z", "-t", stage);
+	if (rosterWindow !== stageWindow) tmux(UI, "join-pane", "-h", "-b", "-s", roster, "-t", stage);
+	for (const pane of tmux(UI, "list-panes", "-s", "-t", `=${DECK}`, "-F", "#{pane_id}").split("\n")) {
+		if (pane && pane !== roster && pane !== stage) tmux(UI, "kill-pane", "-t", pane);
 	}
-	const live = names.filter((deck) => {
-		if (tmuxTry(UI, "has-session", "-t", `=${deck}`).ok) return true;
-		rmSync(deckSocket(deck), { force: true });
-		return false;
-	});
-	// A roster that died without its cleanup leaves its placeholder behind on the sessions server.
-	const decks = new Set(listSessions(UI).map(([name]) => name as string));
-	for (const [name, kind, deck] of listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_deck}")) {
-		if (kind === "placeholder" && !decks.has(deck as string)) tmuxTry(SESSIONS, "kill-session", "-t", `=${name}`);
-	}
-	return live;
+	tmux(
+		UI,
+		"set",
+		"-u",
+		"-t",
+		DECK,
+		"@swb_narrow",
+		";",
+		"set",
+		"-u",
+		"-t",
+		DECK,
+		"@swb_hidden",
+		";",
+		"respawn-pane",
+		"-k",
+		"-t",
+		roster,
+		...deckEnv(),
+		rosterCommand(intent),
+		";",
+		"set",
+		"-t",
+		DECK,
+		"@swb_roster_build",
+		buildStamp(),
+	);
 }
 
-export async function fetchState(deck: string): Promise<DeckState> {
-	const response = await fetch("http://deck/state", { unix: deckSocket(deck) });
-	if (!response.ok) throw new SwbError(`deck ${deck}: GET /state: ${response.status}`);
+/** Hands a running roster an intent; one that's still starting gets a moment to listen. */
+async function postIntent(intent: DeckIntent): Promise<void> {
+	const deadline = Date.now() + 5000;
+	for (;;) {
+		try {
+			return await postCommand("intent", [JSON.stringify(intent)]);
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if ((code !== "ENOENT" && code !== "ECONNREFUSED" && code !== "FailedToOpenSocket") || Date.now() > deadline) throw error;
+			await Bun.sleep(20);
+		}
+	}
+}
+
+export async function fetchState(): Promise<DeckState> {
+	const response = await fetch("http://deck/state", { unix: deckSocket() });
+	if (!response.ok) throw new SwbError(`deck: GET /state: ${response.status}`);
 	return (await response.json()) as DeckState;
 }
 
-export async function postCommand(deck: string, cmd: string, args: string[]): Promise<void> {
-	const response = await fetch("http://deck/cmd", { unix: deckSocket(deck), method: "POST", body: JSON.stringify({ cmd, args }) });
-	if (!response.ok) throw new SwbError(`deck ${deck}: ${cmd}: ${await response.text()}`);
+export async function postCommand(cmd: string, args: string[]): Promise<void> {
+	const response = await fetch("http://deck/cmd", { unix: deckSocket(), method: "POST", body: JSON.stringify({ cmd, args }) });
+	if (!response.ok) throw new SwbError(`deck: ${cmd}: ${await response.text()}`);
 }

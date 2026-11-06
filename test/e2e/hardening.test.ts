@@ -154,13 +154,9 @@ test("a newer swb takes over: idle pis stop, a working one keeps its turn, and e
 	expect(existsSync(draft)).toBe(false);
 
 	s.swb("drive", "stop");
-	// The Deck takes its placeholder down after drive stop returns; killing it here too would race that.
-	await until(
-		() => names(ui).every((name) => name === "swb-ctl") && !names(sessions).some((name) => name.startsWith("placeholder-")),
-		budgets.settle,
-		"the Deck and its placeholder gone",
-	);
-	for (const name of names(sessions)) if (name !== "swb-ctl") s.tmux(sessions, "kill-session", "-t", `=${name}`);
+	await until(() => s.tmux(ui, "list-clients") === "", budgets.settle, "no terminal on the Deck");
+	// What's left is swb's own: its clock, and the Deck's placeholder.
+	for (const name of names(sessions)) if (name !== "swb-ctl" && name !== "placeholder") s.tmux(sessions, "kill-session", "-t", `=${name}`);
 	for (const server of [sessions, ui]) s.tmux(server, "set", "-gu", "@swb_version");
 	const before = [pid(sessions), pid(ui)];
 	s.swb("drive", "start");

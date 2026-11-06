@@ -59,7 +59,7 @@ export const deckOpen = suite({
 		},
 		{
 			name: "deck.open.warm",
-			feels: "`swb` with swb's servers already up, 200 sessions: until the Deck is ready and still.",
+			feels: "`swb` with the Deck already up, 200 sessions: until it is ready and still.",
 			primary: "settled",
 			runs: 8,
 			sample: async (_env, { t }) => {
@@ -105,7 +105,7 @@ export const deckOpen = suite({
 				await focusRoster(t);
 				await Bun.sleep(300);
 				const t0 = await t.press("q");
-				const { last, doneAt } = await t.settle(t0, () => t.deck() === null, { what: "the Deck gone" });
+				const { last, doneAt } = await t.settle(t0, () => !t.attached(), { what: "the terminal off the Deck" });
 				await t.atPrompt();
 				return { t0, metrics: { settled: last - t0, gone: doneAt - t0 } };
 			},

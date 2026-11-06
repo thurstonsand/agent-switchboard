@@ -8,7 +8,7 @@ import { openStore } from "../store.ts";
 import { killServer, listSessions, SESSIONS, tmuxTry, UI } from "../tmux.ts";
 
 /**
- * Stops everything swb runs: every harness, saving drafts as an upgrade does, then the Decks, the Editors, and the
+ * Stops everything swb runs: every harness, saving drafts as an upgrade does, then the Deck, the Editors, and the
  * clock. Sessions stay open and dormant, schedules wait in the db for the next swb, and reloads still waiting are dropped. A running turn refuses it
  * without --force, which cuts it off.
  */
@@ -30,5 +30,5 @@ export function quit(args: string[]): void {
 	stopPis(live);
 	killServer(UI);
 	killServer(SESSIONS);
-	console.log(`Stopped ${live.length} session${live.length === 1 ? "" : "s"}, every Deck, and swb's clock. swb starts them again.`);
+	console.log(`Stopped ${live.length} session${live.length === 1 ? "" : "s"}, the Deck, and swb's clock. swb starts them again.`);
 }

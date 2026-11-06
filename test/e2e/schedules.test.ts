@@ -236,7 +236,7 @@ test("swb quit refuses a running turn, then stops everything, leaving sessions o
 	await until(() => entry(s, pi.id).activity === "idle", budgets.settle, "idle");
 	const quit = unlocalized("quit");
 	expect(quit.stderr.toString()).toBe("");
-	expect(quit.stdout.toString().trim()).toBe("Stopped 1 session, every Deck, and swb's clock. swb starts them again.");
+	expect(quit.stdout.toString().trim()).toBe("Stopped 1 session, the Deck, and swb's clock. swb starts them again.");
 	expect(() => s.tmux(s.servers.sessions, "has-session")).toThrow();
 	expect(() => s.tmux(s.servers.ui, "has-session")).toThrow();
 	expect(entry(s, pi.id)).toMatchObject({ open: true, live: false, cutOff: null });

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { config, cursorTo, entry, reply, sessionRows, state, waitState } from "./harness/deck.ts";
+import { closeDeck, config, cursorTo, entry, reply, sessionRows, state, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 import { host, launched, ready, scheduled, snoozeOf, swbIn, type } from "./harness/schedules.ts";
 
@@ -196,7 +196,7 @@ test("the Deck's Snoozed section: s snoozes from the roster, the row says when i
 	);
 	expect(ran.peek?.lines.find((l) => l.includes("✓ SWB soon"))).toMatch(/✓ SWB soon · ran just now/);
 
-	// Snoozed by its agent under the cursor, it isn't where the next Deck starts, though another session is.
+	// Snoozed by its agent under the cursor, it isn't where the Deck starts over, though another session is.
 	const other = await launched(s, "pi", "reply other");
 	s.swb("snooze", id, "one_hour");
 	await waitState(
@@ -205,7 +205,7 @@ test("the Deck's Snoozed section: s snoozes from the roster, the row says when i
 		(x) => x.cursor === id && x.rows.some((r) => r.kind === "section" && r.label === "Snoozed"),
 	);
 	await Bun.sleep(1500);
-	s.swb("drive", "stop");
+	closeDeck(s);
 	s.swb("drive", "start");
 	const reopened = await waitState(s, "the next Deck", (x) => x.ready && x.rows.some((r) => r.kind === "section" && r.label === "Snoozed"));
 	expect(reopened.cursor).toBe(other.id);

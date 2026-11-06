@@ -26,7 +26,7 @@ function keys(prefix: string): [string, string][] {
 		["hover", "a session's Peek beside it; its buttons are these keys"],
 		["drag", "into a Group, or out onto its Project"],
 		["/", "filter; esc clears"],
-		["q", "close the Deck (sessions keep running)"],
+		["q", "leave the Deck, as it is, for the next swb"],
 		["", ""],
 		["C-h j k l", "move between panes, through nvim's windows"],
 		[`${prefix} h j k l`, `the pane whose label shows that key while ${prefix} is down`],
@@ -39,7 +39,7 @@ function keys(prefix: string): [string, string][] {
 		[`${prefix} S`, "snooze or unsnooze, as s in the sidebar"],
 		[`${prefix} <key>`, "n N w x R a p u [ ] y Y / m , as in the sidebar"],
 		[`${prefix} d`, "in the directory picker, remove the highlighted one"],
-		[`${prefix} q`, "close the Deck from anywhere"],
+		[`${prefix} q`, "leave the Deck from anywhere"],
 		[`${prefix} ?`, "these keys"],
 		[`${prefix} ${prefix}`, `a literal ${prefix}`],
 	];

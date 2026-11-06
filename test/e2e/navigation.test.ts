@@ -27,7 +27,7 @@ test("M-a z inside Settings leaves the roster shown, and Tab afterwards still ta
 	await waitState(s, "Settings closed", (x) => x.mode === "roster");
 	const after = state(s);
 	expect(after.layout.rosterHidden).toBe(false);
-	expect(s.tmux(s.servers.ui, "show", "-qv", "-t", after.deck, "@swb_hidden")).toBe("");
+	expect(s.tmux(s.servers.ui, "show", "-qv", "-t", "deck", "@swb_hidden")).toBe("");
 	s.keys("M-a", "Tab");
 	await waitState(s, "the keyboard on the Stage", (x) => x.focus === "stage");
 });
@@ -126,7 +126,8 @@ test("roster navigation: h l space and a header click fold projects; g G jump; M
 	s.keys("M-a", "h");
 	await waitState(s, "roster", (x) => x.focus === "roster");
 	s.keys("q");
-	await until(() => s.swbTry("drive", "state").code !== 0, budgets.settle, "the Deck closed");
+	await until(() => s.swbTry("drive", "state").code !== 0, budgets.settle, "the terminal off the Deck");
+	expect(s.tmux(s.servers.ui, "list-sessions", "-F", "#{session_name}").split("\n")).toContain("deck");
 	expect(s.ls().find((e) => e.id === b)?.live).toBe(true);
 });
 

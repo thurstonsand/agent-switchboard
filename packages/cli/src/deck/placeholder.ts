@@ -16,9 +16,8 @@ const TYPED_MS = 1500;
 let frame = "";
 
 /**
- * The roster streams the Stage's card, a line of JSON each time it changes, for as long as its Deck lives. The stream
- * ending or failing means the Deck is gone, so this placeholder goes too, as does one the Deck's worker started again
- * just after the Deck's exit killed it.
+ * The roster streams the Stage's card, a line of JSON each time it changes, for as long as it runs. The stream ending or
+ * failing means the roster is gone, so this placeholder goes too; the next roster's worker starts another on its stream.
  */
 async function follow(): Promise<never> {
 	try {
@@ -35,7 +34,7 @@ async function follow(): Promise<never> {
 			}
 		}
 	} catch (error) {
-		// A card that won't parse is a bug, not a Deck going away.
+		// A card that won't parse is a bug, not a roster going away.
 		if (error instanceof SyntaxError) throw error;
 	}
 	process.exit(0);

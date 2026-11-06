@@ -1,4 +1,4 @@
-import { rmSync } from "node:fs";
+import { rmSync, statSync } from "node:fs";
 import { basename } from "node:path";
 import {
 	type Component,
@@ -20,9 +20,10 @@ import { targetName } from "../dirs.ts";
 import { type Choice, presetLabels } from "../harnesses.ts";
 import { presetUntil } from "../schedules.ts";
 import { newer } from "../sessions.ts";
-import { SESSIONS, tmux, tmuxTry, UI } from "../tmux.ts";
+import { tmux, UI } from "../tmux.ts";
 import { VERSION } from "../version.ts";
-import { deck, placeholder, rosterPane, sock, stagePane } from "./env.ts";
+import { DECK } from "./deck.ts";
+import { rosterPane, sock, stagePane } from "./env.ts";
 import {
 	addTarget,
 	archiveCancels,
@@ -1079,14 +1080,16 @@ function stopDiscovery(): void {
 	}
 }
 
+/** The socket file this roster listens on, by inode: a roster that replaced this one may have its own there by now. */
+let listening: number | null = null;
+
 function cleanup(): never {
 	settingsPane()?.saveProse();
 	overlays.closeAllNow();
 	stopDiscovery();
-	// biome-ignore-start lint/plugin: at exit, when nothing waits on the roster's keys any more.
-	tmuxTry(SESSIONS, "kill-session", "-t", `=${placeholder}`);
-	rmSync(sock, { force: true });
-	// biome-ignore-end lint/plugin: exit
+	// The roster that replaces this one may already listen there.
+	// biome-ignore lint/plugin: at exit, when nothing waits on the roster's keys any more.
+	if (statSync(sock, { throwIfNoEntry: false })?.ino === listening) rmSync(sock, { force: true });
 	ctl.close();
 	process.exit(0);
 }
@@ -1156,7 +1159,6 @@ function viewState(): DeckState {
 	const applied = panes.applied;
 	const staged = applied.id === null ? undefined : model.entries.get(applied.id);
 	return {
-		deck,
 		ready: model.ready,
 		terminalFocused: model.terminalFocused,
 		cursor: cursorRow?.kind === "session" ? cursorRow.entry.id : null,
@@ -1250,7 +1252,7 @@ tui.setLayoutRoot(roster);
 
 const overlays = new Overlays({
 	pane: rosterPane,
-	deck,
+	deck: DECK,
 	failed: (message) => toast(message, "error"),
 	left: onPointerOut,
 	pressed: onOverlayPress,
@@ -1287,7 +1289,7 @@ tui.setTerminalColorSchemeNotifications(true);
 void queryColors(null);
 
 // biome-ignore-start lint/plugin: before the roster's first frame, when nothing waits on its keys yet.
-tmux(UI, "set", "-t", deck, "@swb_roster", rosterPane, ";", "set", "-p", "-t", rosterPane, "@swb_label", "swb");
+tmux(UI, "set", "-p", "-t", rosterPane, "@swb_label", "swb");
 
 rmSync(sock, { force: true });
 
@@ -1319,6 +1321,9 @@ Bun.serve({
 		return new Response("not found", { status: 404 });
 	},
 });
+
+// biome-ignore lint/plugin: startup
+listening = statSync(sock).ino;
 
 boot({
 	requestRender: () => tui.requestRender(),

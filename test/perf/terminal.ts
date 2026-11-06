@@ -118,25 +118,20 @@ export class Terminal {
 		return this.s.tmux(this.server, "capture-pane", "-p", "-t", "=t:");
 	}
 
-	/** The Deck this terminal is attached to, if any. */
-	deck(): string | null {
+	/** Whether this terminal is attached to the Deck. */
+	attached(): boolean {
 		const tty = this.s.tmux(this.server, "display", "-p", "-t", "=t:", "#{pane_tty}");
 		try {
-			const line = this.s
-				.tmux(this.s.servers.ui, "list-clients", "-F", "#{client_tty}\t#{session_name}")
-				.split("\n")
-				.find((l) => l.split("\t")[0] === tty);
-			return line ? (line.split("\t")[1] as string) : null;
+			return this.s.tmux(this.s.servers.ui, "list-clients", "-F", "#{client_tty}").split("\n").includes(tty);
 		} catch {
-			return null;
+			return false;
 		}
 	}
 
 	/** The attached Deck's state, straight from its socket; null while there is none. */
 	async state(): Promise<DeckState | null> {
-		const deck = this.deck();
-		if (!deck) return null;
-		const sock = join(this.s.env.XDG_STATE_HOME as string, "agent-switchboard/decks", `${deck}.sock`);
+		if (!this.attached()) return null;
+		const sock = join(this.s.env.XDG_STATE_HOME as string, "agent-switchboard/deck.sock");
 		try {
 			return (await (await fetch("http://deck/state", { unix: sock })).json()) as DeckState;
 		} catch {
@@ -172,7 +167,7 @@ export class Terminal {
 	}
 
 	async atPrompt(): Promise<void> {
-		await until(() => this.deck() === null && /\$ ?$/m.test(this.screen().trimEnd()), 15_000, "the shell's prompt");
+		await until(() => !this.attached() && /\$ ?$/m.test(this.screen().trimEnd()), 15_000, "the shell's prompt");
 	}
 
 	close(): void {

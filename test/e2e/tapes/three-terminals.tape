@@ -1,8 +1,8 @@
-# Three Decks on one switchboard: a session started in one shows in all; typing and archiving in any is seen by all.
+# One Deck in three terminals: a session started in one shows in all; typing and archiving in any is seen by all.
 Source common.tape
 Set Height 1400
 
-Type "# three Decks, one switchboard" Sleep 1s Enter
+Type "# one Deck, three terminals" Sleep 1s Enter
 Hide
 Type "tmux -L demo -f /dev/null new -s demo swb new \; split-window -v swb \; split-window -v swb \; select-layout even-vertical \; set -g status off" Enter
 Show

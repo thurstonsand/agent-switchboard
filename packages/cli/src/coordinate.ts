@@ -263,13 +263,13 @@ export async function show(db: Db, from: string, id: string, view: View | null):
 	if (!recorded && !db.get("SELECT 1 FROM runtimes WHERE session_id = ?", id))
 		throw new SwbError(`no session ${id}; session_list lists them`);
 	const host = db.get("SELECT tmux_session FROM runtimes WHERE session_id = ?", from)?.tmux_session as string | undefined;
-	const showing = host === undefined ? null : deckShowing(host);
-	if (!showing) throw new SwbError(`no Deck is showing this session, so there is none to switch; \`swb open ${id}\` opens one on it`);
-	await postCommand(showing.deck, "show", [id, from, ...(view ? [view] : [])]);
+	if (host === undefined || deckShowing(host) === null)
+		throw new SwbError(`the Deck isn't showing this session, so there is nothing to switch; \`swb open ${id}\` opens it there`);
+	await postCommand("show", [id, from, ...(view ? [view] : [])]);
 	const name = displayName({ id, title: titleOf(db, id) });
 	return {
 		text: `Showing "${name}". The user isn't watching this session now, so end your turn with one short line.`,
-		details: { id, deck: showing.deck },
+		details: { id },
 	};
 }
 

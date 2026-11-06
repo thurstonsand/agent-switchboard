@@ -17,7 +17,7 @@ export function state(s: Scenario): DeckState {
 
 /** The title the Deck's tmux gives its terminal. */
 export function title(s: Scenario): string {
-	return s.tmux(s.servers.ui, "display", "-p", "-t", `=${state(s).deck}:`, "#{T:set-titles-string}");
+	return s.tmux(s.servers.ui, "display", "-p", "-t", "=deck:", "#{T:set-titles-string}");
 }
 
 export function entry(s: Scenario, id: string): LsEntry {
@@ -41,8 +41,8 @@ export function config(s: Scenario, toml: string): void {
 export async function waitState(s: Scenario, what: string, probe: (st: DeckState) => boolean, ms = budgets.settle): Promise<DeckState> {
 	const first = state(s);
 	if (probe(first)) return first;
-	// Resolve the driven Deck once; polling its public socket avoids three processes per observation.
-	const socket = join(s.env.XDG_STATE_HOME as string, "agent-switchboard/decks", `${first.deck}.sock`);
+	// Polling the Deck's public socket avoids three processes per observation.
+	const socket = join(s.env.XDG_STATE_HOME as string, "agent-switchboard/deck.sock");
 	return until(
 		async () => {
 			const response = await fetch("http://deck/state", { unix: socket });
@@ -140,9 +140,16 @@ export async function cursorTo(s: Scenario, id: string): Promise<void> {
 	}
 }
 
+/** Takes the Deck down with its terminal, as a reboot would, so the next `swb drive start` builds it afresh. */
+export function closeDeck(s: Scenario): void {
+	s.swb("drive", "stop");
+	s.tmux(s.servers.ui, "kill-server");
+}
+
 export type Terminal = {
 	server: string;
-	deck: () => string;
+	/** Whether this terminal is attached to the Deck. */
+	attached: () => boolean;
 	state: () => DeckState;
 	/** Waits until a ready Deck is attached to this terminal. */
 	ready: () => Promise<void>;
@@ -156,19 +163,17 @@ export function terminal(s: Scenario, name: string, command: string, size = "140
 	const [x, y] = size.split("x") as [string, string];
 	s.tmux(server, "new-session", "-d", "-s", "t", "-c", s.project, "-x", x, "-y", y, command);
 	s.tmux(server, "set", "-s", "escape-time", "0", ";", "set", "-g", "status", "off", ";", "set", "-g", "remain-on-exit", "on");
-	const deck = () => {
+	const attached = () => {
 		const tty = s.tmux(server, "display", "-p", "-t", "=t:", "#{pane_tty}");
-		const line = s
-			.tmux(s.servers.ui, "list-clients", "-F", "#{client_tty}\t#{session_name}")
-			.split("\n")
-			.find((l) => l.split("\t")[0] === tty);
-		if (!line) throw new Error(`no Deck on terminal ${name}`);
-		return line.split("\t")[1] as string;
+		return s.tmux(s.servers.ui, "list-clients", "-F", "#{client_tty}").split("\n").includes(tty);
 	};
-	const state = (): DeckState => JSON.parse(s.swb("deck", "state", "--deck", deck(), "--json"));
+	const state = (): DeckState => {
+		if (!attached()) throw new Error(`no Deck on terminal ${name}`);
+		return JSON.parse(s.swb("deck", "state", "--json"));
+	};
 	return {
 		server,
-		deck,
+		attached,
 		state,
 		ready: async () => {
 			await until(

@@ -1,4 +1,4 @@
-import { BUSY_EXIT, isBusy } from "@swb/shared";
+import { BUSY_EXIT, isBusy, projectRoot } from "@swb/shared";
 import { booted, span } from "@swb/shared/trace";
 import { codexHost } from "./codex/host.ts";
 import { adopt } from "./commands/adopt.ts";
@@ -30,10 +30,10 @@ import { VERSION } from "./version.ts";
 
 const USAGE = `swb: Agent Switchboard
 
-  swb                          open a Deck where the last one left off
-  swb -c, --continue           open a Deck on this Project's most recent session, or a new one
-  swb new [--cwd DIR] [--harness H]  open a Deck on a new session
-  swb open ID                  open a Deck on a session
+  swb                          open the Deck as it was left
+  swb -c, --continue           move the Deck to this Project's most recent session, or a new one
+  swb new [--cwd DIR] [--harness H]  move the Deck to a new session
+  swb open ID                  move the Deck to a session
   swb adopt ID|TRANSCRIPT      track a pi, Claude Code, or Codex session run outside swb, then open it; quit it first
   swb adopt --all              track every session pi, Claude Code, and Codex ran outside swb, archived, and index them
   swb ls [--json]              list sessions with derived state
@@ -45,7 +45,7 @@ const USAGE = `swb: Agent Switchboard
   swb unarchive ID             reopen an archived session
   swb snooze ID one_hour|one_day|monday|next_message|off|TIME
                                hide a session in Snoozed until then, or its next message; TIME is ISO 8601, local unless it has an offset
-  swb quit [--force]           stop every session, Deck, and the clock; sessions stay open, dormant
+  swb quit [--force]           stop every session, the Deck, and the clock; sessions stay open, dormant
   swb wake ID                  start a dormant session in the background
   swb reload ID [--idle]       restart a session's agent on fresh config and have it carry on; --idle waits for its turn to end
                                and leaves it waiting for a prompt
@@ -71,7 +71,7 @@ const USAGE = `swb: Agent Switchboard
                                the schedules a session set or receives
   swb unschedule ID --from ID  cancel a pending schedule
   swb show ID --from ID [--view agent|editor|split]
-                               switch the Deck showing the caller to a session, and start it
+                               switch the Deck, while it shows the caller, to a session, and start it
   swb update --from ID         swb_update_session as a line calls it; its arguments as JSON on stdin
   swb mcp --harness claude|codex
                                the MCP server a Claude Code or Codex session lists swb's tools from
@@ -79,7 +79,7 @@ const USAGE = `swb: Agent Switchboard
   swb drive keys [--delay MS] [-l TEXT]… [KEY…] | capture [--ansi] | theme light|dark | focus in|out
             | click X Y | wheel up|down X Y | move X Y | drag X1 Y1 X2 Y2 [--hold] | release X Y (0-based cells) | resize COLSxROWS | clipboard | stop
   swb drive state | wait PATH=VALUE [--timeout MS]
-  swb deck state [--deck NAME] [--json]
+  swb deck state [--json]
   swb migrate                  create or upgrade the db
   swb --version`;
 
@@ -112,10 +112,10 @@ async function main(args: string[]): Promise<void> {
 	if (CHECKS_CONFIG.has(command)) readConfig();
 	switch (command) {
 		case undefined:
-			return openDeck({ select: null, newCwd: null, continue: false });
+			return openDeck(null);
 		case "-c":
 		case "--continue":
-			return openDeck({ select: null, newCwd: null, continue: true });
+			return openDeck({ kind: "continue", root: projectRoot(process.cwd()), cwd: process.cwd() });
 		case "--version":
 			console.log(VERSION);
 			return;

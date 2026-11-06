@@ -1,6 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import type { DeckState } from "../../packages/cli/src/deck/protocol.ts";
-import { config, cursorTo, entry, seed, state, waitState } from "./harness/deck.ts";
+import { closeDeck, config, cursorTo, entry, seed, state, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 import { type Pane, panes, prefixKeys, savedView, started } from "./harness/views.ts";
 
@@ -17,19 +16,19 @@ afterEach(async () => {
 	await s.cleanup();
 });
 
-function activePane(s: Scenario, st: DeckState): number {
-	return (panes(s, st).find((p) => p.active) as Pane).index;
+function activePane(s: Scenario): number {
+	return (panes(s).find((p) => p.active) as Pane).index;
 }
 
 type Box = { id: string; left: number; top: number; width: number; height: number };
 
-function boxes(s: Scenario, st: DeckState): Box[] {
+function boxes(s: Scenario): Box[] {
 	return s
 		.tmux(
 			s.servers.ui,
 			"list-panes",
 			"-t",
-			`=${st.deck}:`,
+			"=deck:",
 			"-f",
 			"#{!:#{pane_floating_flag}}",
 			"-F",
@@ -59,12 +58,12 @@ test("M-a v splits the editor at 65% beside pi; M-a h and l walk all three panes
 
 	const st = await prefixKeys(s, "M-a", "v", "split", (x) => x.layout.split && x.staged.view === "split");
 	expect(st.staged.savedView).toBe("split");
-	const [roster, editor, pi] = panes(s, st) as [Pane, Pane, Pane];
-	expect(panes(s, st).length).toBe(3);
+	const [roster, editor, pi] = panes(s) as [Pane, Pane, Pane];
+	expect(panes(s).length).toBe(3);
 	expect(roster.width).toBe(42);
 	expect(Math.abs(editor.width / (editor.width + pi.width + 1) - 0.65)).toBeLessThan(0.02);
 	// Even from pi view with the keyboard on pi, splitting means I want to look at the editor.
-	await until(() => activePane(s, st) === 1, budgets.settle, "the keyboard on the editor");
+	await until(() => activePane(s) === 1, budgets.settle, "the keyboard on the editor");
 	await waitState(s, "focus on the editor", (x) => x.focus === "editor");
 	await until(() => s.screen().includes("hello"), budgets.settle, "pi redrawn at its new width");
 	s.save("split.txt", s.screen());
@@ -78,41 +77,35 @@ test("M-a v splits the editor at 65% beside pi; M-a h and l walk all three panes
 	];
 	for (const [key, want] of walk) {
 		s.keys("M-a", key);
-		await until(() => activePane(s, st) === want, budgets.settle, `M-a ${key} to pane ${want}`);
+		await until(() => activePane(s) === want, budgets.settle, `M-a ${key} to pane ${want}`);
 		await waitState(s, `focus on ${want}`, (x) => x.focus === ["roster", "editor", "stage"][want]);
 	}
 
 	s.keys("M-a", "Tab");
-	await until(() => activePane(s, st) === 0, budgets.settle, "M-a Tab to the roster");
+	await until(() => activePane(s) === 0, budgets.settle, "M-a Tab to the roster");
 	s.keys("M-a", "Tab");
-	await until(() => activePane(s, st) === 2, budgets.settle, "M-a Tab back to pi, not the editor");
+	await until(() => activePane(s) === 2, budgets.settle, "M-a Tab back to pi, not the editor");
 	s.keys("M-a", "h", "M-a", "h");
 	await waitState(s, "roster", (x) => x.focus === "roster");
 	const hidden = await prefixKeys(s, "M-a", "z", "M-a z hides the roster", (x) => x.layout.rosterHidden && x.focus === "stage");
-	const [shownEditor, shownPi] = panes(s, hidden) as [Pane, Pane];
-	expect(panes(s, hidden).length).toBe(2);
+	const [shownEditor, shownPi] = panes(s) as [Pane, Pane];
+	expect(panes(s).length).toBe(2);
 	expect(shownEditor.width + shownPi.width + 1).toBe(200);
-	expect(activePane(s, hidden)).toBe(1);
+	expect(activePane(s)).toBe(1);
 	expect(hidden.layout.split).toBe(true);
 	s.save("split-hidden.txt", s.screen());
 	await prefixKeys(s, "M-a", "h", "M-a h to the editor", (x) => x.focus === "editor");
-	const shown = await prefixKeys(
-		s,
-		"M-a",
-		"h",
-		"M-a h past the editor shows the roster",
-		(x) => !x.layout.rosterHidden && x.focus === "roster",
-	);
-	expect(panes(s, shown).map((p) => p.index)).toEqual([0, 1, 2]);
-	expect((panes(s, shown)[0] as Pane).width).toBe(42);
-	expect(activePane(s, shown)).toBe(0);
+	await prefixKeys(s, "M-a", "h", "M-a h past the editor shows the roster", (x) => !x.layout.rosterHidden && x.focus === "roster");
+	expect(panes(s).map((p) => p.index)).toEqual([0, 1, 2]);
+	expect((panes(s)[0] as Pane).width).toBe(42);
+	expect(activePane(s)).toBe(0);
 	await cursorTo(s, other);
 	const away = await waitState(s, "the other session alone", (x) => x.staged.id === other && !x.layout.split);
 	expect(away.staged).toMatchObject({ view: "agent", savedView: "agent" });
-	expect(panes(s, away).length).toBe(2);
+	expect(panes(s).length).toBe(2);
 	await cursorTo(s, id);
 	await waitState(s, "split again", (x) => x.staged.id === id && x.layout.split && x.staged.view === "split");
-	expect(panes(s, state(s)).length).toBe(3);
+	expect(panes(s).length).toBe(3);
 	s.save("split-restored.txt", s.screen());
 
 	s.keys("Enter", "M-a", "h");
@@ -120,7 +113,7 @@ test("M-a v splits the editor at 65% beside pi; M-a h and l walk all three panes
 	s.keys("M-a", "v");
 	const toEditor = await waitState(s, "split left for the editor", (x) => !x.layout.split && x.staged.view === "editor");
 	expect(toEditor).toMatchObject({ focus: "editor", staged: { savedView: "editor" } });
-	expect(panes(s, toEditor).length).toBe(2);
+	expect(panes(s).length).toBe(2);
 	s.save("left-for-editor.txt", s.screen());
 	s.keys("M-a", "v");
 	await waitState(s, "split from the editor, keyboard on the editor", (x) => x.layout.split && x.focus === "editor");
@@ -141,12 +134,12 @@ test("split shows pi below 160 columns and returns on widening, survives reopeni
 	s.swb("drive", "resize", "150x50");
 	const narrowed = await waitState(s, "pi alone at 150", (x) => !x.layout.split && x.layout.width === 150);
 	expect(narrowed.staged).toMatchObject({ view: "agent", savedView: "split" });
-	expect(panes(s, narrowed).length).toBe(2);
+	expect(panes(s).length).toBe(2);
 	s.save("150-cols.txt", s.screen());
 	s.swb("drive", "resize", "200x50");
 	await waitState(s, "split at 200", (x) => x.layout.split && x.staged.view === "split");
 
-	s.swb("drive", "stop");
+	closeDeck(s);
 	s.tmux(s.servers.sessions, "kill-session", "-t", `=${live.staged.host}`);
 	await until(() => !entry(s, id).live, budgets.settle, "dormant");
 	expect(savedView(s, id)).toBe("split");
@@ -156,7 +149,7 @@ test("split shows pi below 160 columns and returns on widening, survives reopeni
 	const dormant = await waitState(s, "a dormant card in one pane", (x) => x.staged.kind === "dormant");
 	expect(dormant.staged).toMatchObject({ view: "agent", savedView: "split" });
 	expect(dormant.layout.split).toBe(false);
-	expect(panes(s, dormant).length).toBe(2);
+	expect(panes(s).length).toBe(2);
 	s.save("dormant-split.txt", s.screen());
 	s.keys("w");
 	await waitState(s, "split once live", (x) => x.staged.kind === "live" && x.layout.split, budgets.piReady);
@@ -176,18 +169,18 @@ test("split shows pi below 160 columns and returns on widening, survives reopeni
 	await prefixKeys(s, "M-a", "h", "the roster focused", (x) => x.focus === "roster");
 
 	s.swb("drive", "resize", "90x40");
-	const tiny = await waitState(s, "the roster alone at 90", (x) => x.layout.rosterOnly && !x.layout.split);
-	expect(panes(s, tiny).length).toBe(2);
-	await until(() => activePane(s, tiny) === 0 && !s.screen().includes("hello"), budgets.settle, "only the roster on screen");
-	expect(s.tmux(s.servers.ui, "display", "-p", "-t", `=${tiny.deck}:`, "#{window_zoomed_flag}")).toBe("1");
+	await waitState(s, "the roster alone at 90", (x) => x.layout.rosterOnly && !x.layout.split);
+	expect(panes(s).length).toBe(2);
+	await until(() => activePane(s) === 0 && !s.screen().includes("hello"), budgets.settle, "only the roster on screen");
+	expect(s.tmux(s.servers.ui, "display", "-p", "-t", "=deck:", "#{window_zoomed_flag}")).toBe("1");
 	s.save("90-cols.txt", s.screen());
 
 	s.swb("drive", "resize", "200x50");
 	await waitState(s, "wide again", (x) => !x.layout.rosterOnly && x.layout.width === 200);
 	await prefixKeys(s, "M-a", "z", "the roster hidden", (x) => x.layout.rosterHidden);
 	s.swb("drive", "resize", "40x15");
-	const squeezed = await waitState(s, "the roster back at 40", (x) => x.layout.rosterOnly && !x.layout.rosterHidden);
-	expect(panes(s, squeezed)[0]?.index).toBe(0);
+	await waitState(s, "the roster back at 40", (x) => x.layout.rosterOnly && !x.layout.rosterHidden);
+	expect(panes(s)[0]?.index).toBe(0);
 	await prefixKeys(s, "M-a", "h", "the roster reachable at 40", (x) => x.focus === "roster");
 	s.save("hidden-then-40-cols.txt", s.screen());
 });
@@ -195,8 +188,7 @@ test("split shows pi below 160 columns and returns on widening, survives reopeni
 test("two M-a s before the shell is up take each other back, and neither waits forever", async () => {
 	s = scenario("phase7", "shell-twice");
 	await started(s, "--", "new");
-	const { deck } = state(s);
-	const toggle = () => Bun.spawn([`${s.bin}/swb`, "__deck", deck, "shell"], { env: s.env, stdout: "ignore", stderr: "pipe" });
+	const toggle = () => Bun.spawn([`${s.bin}/swb`, "__deck", "shell"], { env: s.env, stdout: "ignore", stderr: "pipe" });
 	const both = [toggle(), toggle()];
 	const exited = await Promise.race([Promise.all(both.map((p) => p.exited)), Bun.sleep(budgets.settle).then(() => null)]);
 	for (const p of both) p.kill();
@@ -211,9 +203,9 @@ test("M-a s puts the directory's shell under pi, right of the split editor; ctrl
 	config(s, 'editor = "cat -v"');
 	await started(s, "--size", "200x50", "--", "new");
 	await prefixKeys(s, "M-a", "v", "split", (x) => x.layout.split && x.focus === "editor");
-	let st = await prefixKeys(s, "M-a", "s", "the shell, with the keyboard", (x) => x.layout.shell === "below" && x.focus === "shell");
-	const [roster, editor, pi, shell] = boxes(s, st) as [Box, Box, Box, Box];
-	expect(boxes(s, st).length).toBe(4);
+	await prefixKeys(s, "M-a", "s", "the shell, with the keyboard", (x) => x.layout.shell === "below" && x.focus === "shell");
+	const [roster, editor, pi, shell] = boxes(s) as [Box, Box, Box, Box];
+	expect(boxes(s).length).toBe(4);
 	expect(shell.left).toBe(pi.left);
 	expect(shell.width).toBe(pi.width);
 	expect(shell.top).toBe(pi.top + pi.height + 1);
@@ -272,15 +264,15 @@ test("M-a s puts the directory's shell under pi, right of the split editor; ctrl
 
 	s.keys("C-l", "C-j");
 	await waitState(s, "shell", (x) => x.focus === "shell");
-	st = await prefixKeys(s, "M-a", "s", "the shell hidden, the keyboard on pi", (x) => x.layout.shell === null && x.focus === "stage");
-	expect(boxes(s, st).length).toBe(3);
+	await prefixKeys(s, "M-a", "s", "the shell hidden, the keyboard on pi", (x) => x.layout.shell === null && x.focus === "stage");
+	expect(boxes(s).length).toBe(3);
 	expect(shells(s).length).toBe(1);
 	await prefixKeys(s, "M-a", "s", "the same shell back", (x) => x.layout.shell === "below" && x.focus === "shell");
 	await until(() => s.screen().includes("shell-42"), budgets.settle, "its scrollback kept");
 
 	s.keys("C-d");
-	st = await waitState(s, "ctrl-d closes it", (x) => x.layout.shell === null && x.layout.split);
-	expect(boxes(s, st).length).toBe(3);
+	await waitState(s, "ctrl-d closes it", (x) => x.layout.shell === null && x.layout.split);
+	expect(boxes(s).length).toBe(3);
 	await until(() => shells(s).length === 0, budgets.settle, "the shell's session gone");
 	await prefixKeys(s, "M-a", "s", "a fresh shell", (x) => x.layout.shell === "below" && x.focus === "shell");
 	expect(s.screen()).not.toContain("shell-42");
@@ -292,7 +284,7 @@ test("the shell opens beside a wide pi and below a tall one, keeps its side whil
 	await started(s, "--size", "200x50", "--", "new");
 	// pi's pane is 157 × 50: 50 rows of cells twice as tall as wide come to less than 157 columns, so beside.
 	let st = await prefixKeys(s, "M-a", "s", "the shell beside pi", (x) => x.layout.shell === "beside" && x.focus === "shell");
-	let [, pi, shell] = boxes(s, st) as [Box, Box, Box];
+	let [, pi, shell] = boxes(s) as [Box, Box, Box];
 	expect(shell.top).toBe(pi.top);
 	expect(shell.left).toBe(pi.left + pi.width + 1);
 	expect(Math.min(pi.width, shell.width)).toBeGreaterThanOrEqual(60);
@@ -302,15 +294,15 @@ test("the shell opens beside a wide pi and below a tall one, keeps its side whil
 
 	// 90 rows would put a new shell below; this one keeps its side while it fits.
 	s.swb("drive", "resize", "200x90");
-	await until(() => (boxes(s, st)[2]?.height ?? 0) > 80, budgets.settle, "the Deck 90 rows tall");
+	await until(() => (boxes(s)[2]?.height ?? 0) > 80, budgets.settle, "the Deck 90 rows tall");
 	await Bun.sleep(500);
 	st = state(s);
 	expect(st.layout.shell).toBe("beside");
-	expect(boxes(s, st).length).toBe(3);
+	expect(boxes(s).length).toBe(3);
 	// 107 columns can't hold two 60-column halves, so it moves below, keeping the keyboard and its scrollback.
 	s.swb("drive", "resize", "150x50");
 	st = await waitState(s, "below at 150x50", (x) => x.layout.width === 150 && x.layout.shell === "below" && x.focus === "shell");
-	[, pi, shell] = boxes(s, st) as [Box, Box, Box];
+	[, pi, shell] = boxes(s) as [Box, Box, Box];
 	expect(shell.left).toBe(pi.left);
 	expect(shell.top).toBe(pi.top + pi.height + 1);
 	await until(() => s.screen().includes("shell-42"), budgets.settle, "its scrollback kept");
@@ -324,7 +316,7 @@ test("the shell opens beside a wide pi and below a tall one, keeps its side whil
 	// 77 columns and 15 rows split neither way: the shell takes pi's pane, keyboard and all.
 	s.swb("drive", "resize", "120x15");
 	st = await waitState(s, "replacing pi at 120x15", (x) => x.layout.width === 120 && x.layout.shell === "replace" && x.focus === "shell");
-	expect(boxes(s, st).length).toBe(2);
+	expect(boxes(s).length).toBe(2);
 	s.keys("-l", "echo over-$((6*7))", "Enter");
 	await until(() => s.screen().includes("over-42") && !s.screen().includes("hello"), budgets.settle, "the shell in pi's place");
 	expect(s.screen().split("\n")[0]).toMatch(/swb.*shell/);
@@ -332,7 +324,7 @@ test("the shell opens beside a wide pi and below a tall one, keeps its side whil
 	// Room again, it splits pi once more, keeping the keyboard.
 	s.swb("drive", "resize", "200x50");
 	st = await waitState(s, "beside at 200x50", (x) => x.layout.width === 200 && x.layout.shell === "beside" && x.focus === "shell");
-	expect(boxes(s, st).length).toBe(3);
+	expect(boxes(s).length).toBe(3);
 	// A narrow Deck always has it replace pi, and M-a s still opens and closes it there.
 	s.swb("drive", "resize", "90x40");
 	await waitState(s, "replacing pi when narrow", (x) => x.layout.rosterOnly && x.layout.shell === "replace" && x.focus === "shell");
@@ -350,7 +342,7 @@ test("the shell opens beside a wide pi and below a tall one, keeps its side whil
 		"split, the shell replacing pi",
 		(x) => x.layout.split && x.layout.shell === "replace" && x.focus === "editor",
 	);
-	expect(boxes(s, st).length).toBe(3);
+	expect(boxes(s).length).toBe(3);
 	await prefixKeys(s, "M-a", "l", "M-a l to the shell", (x) => x.focus === "shell");
 	s.save("replace-split.txt", s.screen());
 	await prefixKeys(
@@ -364,8 +356,8 @@ test("the shell opens beside a wide pi and below a tall one, keeps its side whil
 	await waitState(s, "still beside at 200x50", (x) => x.layout.width === 200 && x.layout.shell === "beside");
 	// Splitting with the shell beside still gives the Editor 65% of the Stage, and the shell goes under pi.
 	st = await prefixKeys(s, "M-a", "v", "split, the shell below pi", (x) => x.layout.split && x.layout.shell === "below");
-	await until(() => boxes(s, state(s)).length === 4, budgets.settle, "four panes");
-	const [, splitEditor, splitPi, splitShell] = boxes(s, state(s)) as [Box, Box, Box, Box];
+	await until(() => boxes(s).length === 4, budgets.settle, "four panes");
+	const [, splitEditor, splitPi, splitShell] = boxes(s) as [Box, Box, Box, Box];
 	expect(Math.abs(splitEditor.width / (splitEditor.width + splitPi.width + 1) - 0.65)).toBeLessThan(0.02);
 	expect(splitShell.left).toBe(splitPi.left);
 	// tmux takes M-a l to whichever of pi and the shell had the keyboard last.
@@ -378,7 +370,7 @@ test("the shell opens beside a wide pi and below a tall one, keeps its side whil
 		"split left, the shell beside pi with the keyboard",
 		(x) => !x.layout.split && x.layout.shell === "beside" && x.focus === "shell",
 	);
-	const [, wholePi, wholeShell] = boxes(s, st) as [Box, Box, Box];
+	const [, wholePi, wholeShell] = boxes(s) as [Box, Box, Box];
 	expect(Math.abs(wholePi.width - wholeShell.width)).toBeLessThanOrEqual(1);
 
 	config(s, 'editor = "cat -v"\nshell_position = "below"\n');

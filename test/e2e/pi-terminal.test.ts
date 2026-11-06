@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { closeDeck } from "./harness/deck.ts";
 import { budgets, repo, type Scenario, scenario, until } from "./harness/index.ts";
 import { entry, prompt, runtimes, startManaged, waitFor } from "./harness/recorder.ts";
 
@@ -16,7 +17,8 @@ afterEach(async () => {
 test("a never-prompted session is killed when its last viewer detaches; a prompted one survives", async () => {
 	s = scenario("phase1", "detach");
 	const blank = await startManaged(s);
-	s.swb("drive", "stop");
+	// The Deck outlives its terminal; only its going takes its Stage off the session.
+	closeDeck(s);
 	await until(
 		() => !s.tmux(s.servers.sessions, "list-sessions", "-F", "#{session_name}").includes(blank.tmux_session),
 		budgets.settle,
@@ -28,7 +30,7 @@ test("a never-prompted session is killed when its last viewer detaches; a prompt
 	await until(() => s.screen().includes("faux-1"), budgets.piReady, "pi ready");
 	await prompt(s, "reply keep me");
 	await until(() => entry(s, kept.session_id)?.activity === "idle", budgets.settle, "idle");
-	s.swb("drive", "stop");
+	closeDeck(s);
 	await Bun.sleep(1000);
 	expect(entry(s, kept.session_id).live).toBe(true);
 });

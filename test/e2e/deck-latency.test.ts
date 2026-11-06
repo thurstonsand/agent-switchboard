@@ -17,8 +17,8 @@ afterEach(async () => {
 
 /** Wall time from a key reaching the Deck's terminal to the roster reporting a moved cursor, read straight off the Deck socket. */
 async function cursorLatency(key: "j" | "k"): Promise<number> {
-	const { deck, cursor } = state(s);
-	const sock = join(s.env.XDG_STATE_HOME as string, "agent-switchboard/decks", `${deck}.sock`);
+	const { cursor } = state(s);
+	const sock = join(s.env.XDG_STATE_HOME as string, "agent-switchboard/deck.sock");
 	const t0 = performance.now();
 	s.tmux(s.servers.drive, "send-keys", "-t", "=drive:", key);
 	for (;;) {

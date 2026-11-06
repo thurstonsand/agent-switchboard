@@ -23,16 +23,16 @@ test("the roster holds roster_width, or a dragged width, through resizes; clicki
 	config(s, 'editor = "cat -v"\nroster_width = "25%"');
 	const live = await started(s, "--size", "200x50", "--", "new");
 	const id = live.staged.id as string;
-	expect(panes(s, live)[0]?.width).toBe(50);
+	expect(panes(s)[0]?.width).toBe(50);
 	s.swb("drive", "resize", "240x50");
-	const wide = await waitState(s, "240 columns", (x) => x.layout.width === 240);
-	await until(() => panes(s, wide)[0]?.width === 60, budgets.settle, `a 60-column roster, not ${panes(s, wide)[0]?.width}`);
+	await waitState(s, "240 columns", (x) => x.layout.width === 240);
+	await until(() => panes(s)[0]?.width === 60, budgets.settle, `a 60-column roster, not ${panes(s)[0]?.width}`);
 	s.save("240-cols.txt", s.screen());
-	s.tmux(s.servers.ui, "resize-pane", "-t", `=${wide.deck}:.0`, "-x", "80");
+	s.tmux(s.servers.ui, "resize-pane", "-t", "=deck:.0", "-x", "80");
 	await Bun.sleep(300);
 	s.swb("drive", "resize", "200x50");
 	await waitState(s, "200 columns", (x) => x.layout.width === 200);
-	await until(() => panes(s, wide)[0]?.width === 80, budgets.settle, `the dragged 80 columns kept, not ${panes(s, wide)[0]?.width}`);
+	await until(() => panes(s)[0]?.width === 80, budgets.settle, `the dragged 80 columns kept, not ${panes(s)[0]?.width}`);
 	s.save("dragged-200-cols.txt", s.screen());
 
 	await prefixKeys(s, "M-a", "h", "the roster focused", (x) => x.focus === "roster");
@@ -161,11 +161,10 @@ test("m names a session's Group, n joins it; dragging moves it between Groups, a
 	git(s, s.project, "worktree", "add", "-q", "-b", "wt", worktree);
 	const [a, b] = (await seed(s, { turns: ["one"], title: "alpha" }, { turns: ["two"], title: "bravo" })) as [string, string];
 	const w = (await started(s, "--", "new", "--cwd", worktree)).staged.id as string;
-	s.swb("drive", "stop");
-	s.swb("drive", "start");
+	s.keys("M-a", "h");
 	const sorted = (...ids: string[]) => ids.sort();
 	// A worktree's session sits with the rest of its Project.
-	await waitState(s, "one Project", (x) => x.ready && Bun.deepEquals(groups(x), { "(project)": sorted(a, b, w) }));
+	await waitState(s, "one Project", (x) => x.focus === "roster" && Bun.deepEquals(groups(x), { "(project)": sorted(a, b, w) }));
 	s.save("project.txt", s.screen());
 	s.save("project.ansi", s.swb("drive", "capture", "--ansi"));
 
@@ -176,7 +175,7 @@ test("m names a session's Group, n joins it; dragging moves it between Groups, a
 	s.keys("-l", "review");
 	const nameLine = () =>
 		s
-			.tmux(s.servers.ui, "capture-pane", "-p", "-e", "-t", `=${state(s).deck}:.0`)
+			.tmux(s.servers.ui, "capture-pane", "-p", "-e", "-t", "=deck:.0")
 			.split("\n")
 			.find((line) => line.includes("> review"));
 	await until(() => nameLine() !== undefined, budgets.settle, "the name typed");

@@ -93,7 +93,7 @@ test("Settings edits config.toml by keyboard and mouse, keeps its comments, and 
 	s.keys("Escape");
 	st = await waitState(s, "back to the roster", (x) => x.mode === "roster");
 	await until(
-		() => s.tmux(s.servers.ui, "display", "-p", "-t", `=${st.deck}:`, "#{window_zoomed_flag}") === "0",
+		() => s.tmux(s.servers.ui, "display", "-p", "-t", "=deck:", "#{window_zoomed_flag}") === "0",
 		budgets.settle,
 		"the roster unzoomed",
 	);
@@ -134,7 +134,7 @@ test("a hand edit applies to an open Deck at once; an invalid one stops new swb 
 test("a new prefix, pressed rather than typed, moves the open Deck to it at once", async () => {
 	s = scenario("settings", "prefix");
 	s.swb("drive", "start", "--size", "160x40");
-	const deck = (await waitState(s, "ready", (x) => x.ready)).deck;
+	await waitState(s, "ready", (x) => x.ready);
 	s.keys(",");
 	await waitState(s, "Settings", (x) => x.mode === "settings");
 	s.keys("]", "]", "]", "]");
@@ -151,7 +151,7 @@ test("a new prefix, pressed rather than typed, moves the open Deck to it at once
 	s.keys("Escape");
 	await waitState(s, "the roster", (x) => x.mode === "roster");
 	s.keys("C-b", ",");
-	await waitState(s, "Settings by C-b ,", (x) => x.mode === "settings" && x.deck === deck);
+	await waitState(s, "Settings by C-b ,", (x) => x.mode === "settings");
 });
 
 test("the shortlist is automatic until its first edit writes it out; ↺ brings the automatic one back", async () => {

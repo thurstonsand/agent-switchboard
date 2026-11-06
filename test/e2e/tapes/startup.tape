@@ -1,4 +1,4 @@
-# Startup: n and Enter on Operators start an Operator, which can't start subagents; a new Deck comes back where the last one left off; swb -c lands in pi.
+# Startup: n and Enter on Operators start an Operator, which can't start subagents; q leaves the Deck, and swb comes back to it as it was; swb -c lands in pi.
 Source common.tape
 
 Type "# n and Enter on Operators start an Operator" Sleep 1s Enter
@@ -30,14 +30,14 @@ Escape
 Sleep 1.5s
 Type "q"
 Sleep 800ms
-Type "# a new Deck in this Project restores the cursor" Sleep 1s Enter
+Type "# swb comes back to the Deck as it was" Sleep 1s Enter
 Type "swb" Sleep 400ms Enter
 Wait+Screen /alpha/
 Sleep 2s
 Screenshot ../artifacts/phase6/videos/startup-restored.png
 Type "q"
 Sleep 800ms
-Type "# swb -c puts pi on this Project's most recent session" Sleep 1s Enter
+Type "# swb -c moves the Deck to this Project's most recent session" Sleep 1s Enter
 Type "swb -c" Sleep 400ms Enter
 Wait+Screen /faux-1/
 Sleep 2s

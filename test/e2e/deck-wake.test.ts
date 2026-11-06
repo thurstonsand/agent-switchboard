@@ -76,9 +76,9 @@ test("Enter on a dormant row puts the keyboard on its pi as it comes up; Enter t
 	s.keys("Enter");
 	await waitState(s, "keyboard in b's pi", (x) => x.focus === "stage");
 	s.keys("M-a", "q");
-	const decks = () => s.tmux(s.servers.ui, "list-sessions", "-F", "#{session_name}").split("\n");
-	await until(() => !decks().some((name) => name.startsWith("deck-")), 5000, "M-a q closes the Deck from pi");
+	await until(() => s.swbTry("drive", "state").code !== 0, 5000, "M-a q takes the terminal off the Deck from pi");
 	s.save("prefix-q.txt", s.screen());
+	expect(s.tmux(s.servers.ui, "list-sessions", "-F", "#{session_name}").split("\n")).toContain("deck");
 	expect(entry(s, a).live && entry(s, b).live).toBe(true);
 });
 

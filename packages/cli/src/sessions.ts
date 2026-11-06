@@ -212,8 +212,9 @@ function awaitStop(db: Db, id: string): void {
 	tmuxTry(SESSIONS, "kill-session", "-t", `=${stop.host}`);
 }
 
-export function onlyControl(server: string): boolean {
-	return listSessions(server, "#{@swb_kind}").every(([, kind]) => kind === "control");
+/** Hosts nothing a restart would lose: swb's clock, and the Deck's placeholder, which both come back with it. */
+function onlySwb(): boolean {
+	return listSessions(SESSIONS, "#{@swb_kind}").every(([, kind]) => kind === "control" || kind === "placeholder");
 }
 
 /** Starts the server from a scrubbed environment, so project credentials from mise or direnv stay out of it. */
@@ -239,7 +240,7 @@ export function ensureSessionsServer(): void {
 		SESSIONS,
 		sessionsConf(),
 		(path) => startScrubbed(SESSIONS, ["-f", path, "new-session", "-d", "-s", CONTROL, ...clockArgs()]),
-		() => onlyControl(SESSIONS),
+		onlySwb,
 	);
 	ensureClock();
 }
@@ -247,8 +248,11 @@ export function ensureSessionsServer(): void {
 /** The sessions server's own session, whose pane runs the clock that fires schedules. */
 const CONTROL = "swb-ctl";
 
-/** Which swb the clock runs: its release, and this binary's mtime, which a reinstall of the same release still moves. */
-function clockStamp(): string {
+/**
+ * Which swb a long-lived process runs, as the clock and the Deck's roster record it: its release, and this binary's
+ * mtime, which a reinstall of the same release still moves.
+ */
+export function buildStamp(): string {
 	return `${VERSION}:${statSync(SWB).mtimeMs}`;
 }
 
@@ -268,7 +272,7 @@ function clockArgs(): string[] {
 		"-t",
 		CONTROL,
 		"@swb_clock",
-		clockStamp(),
+		buildStamp(),
 		";",
 		"set",
 		"-p",
@@ -304,7 +308,7 @@ function ensureClock(): void {
 					"-t",
 					CONTROL,
 					"@swb_clock",
-					clockStamp(),
+					buildStamp(),
 				);
 		});
 	} finally {
@@ -317,7 +321,7 @@ function clockCurrent(): boolean | null {
 	const info = tmuxTry(SESSIONS, "display", "-p", "-t", `=${CONTROL}:`, "#{pane_dead}\t#{@swb_clock}");
 	if (!info.ok) return null;
 	const [dead, stamp = ""] = info.out.split("\t");
-	return dead !== "1" && (stamp === clockStamp() || newer(stamp.split(":")[0] ?? "", VERSION));
+	return dead !== "1" && (stamp === buildStamp() || newer(stamp.split(":")[0] ?? "", VERSION));
 }
 
 /**

@@ -369,7 +369,7 @@ export class StagePanes {
 
 	/** Creates, retargets, or kills the Stage's second pane to match what is applied. Leaving it keeps the keyboard on the Stage. */
 	private syncSide(): void {
-		const { deck, stagePane } = this.host;
+		const { stagePane } = this.host;
 		this.queue(async () => {
 			const want = this.applied.side;
 			try {
@@ -393,7 +393,7 @@ export class StagePanes {
 					UI,
 					...["split-window", "-h", "-d", "-l", "35%", "-t", stagePane, "-P", "-F", "#{pane_id}\t#{pane_tty}"],
 					...deckEnv(),
-					stageScript(deck, want),
+					stageScript(want),
 				);
 				const [pane, tty] = created.split("\t") as [string, string];
 				this.side = { pane, tty, up: false, target: want };
@@ -408,7 +408,7 @@ export class StagePanes {
 	 * had it, out of pi's pane too; one that goes leaves it on pi.
 	 */
 	private syncShell(fromOver: boolean): void {
-		const { deck, stagePane } = this.host;
+		const { stagePane } = this.host;
 		this.queue(async () => {
 			const want = this.applied.shell?.at === "replace" ? null : this.applied.shell;
 			const parent = this.side?.pane ?? stagePane;
@@ -425,7 +425,7 @@ export class StagePanes {
 					UI,
 					...["split-window", want.at === "beside" ? "-h" : "-v", "-d", "-l", "50%", "-t", parent, "-P", "-F", "#{pane_id}"],
 					...deckEnv(),
-					stageScript(deck, want.target, true),
+					stageScript(want.target, true),
 				);
 				this.shellPane = { pane: created, target: want.target, at: want.at, parent };
 				if (refocus || this.shellKeys) await tmuxAsync(UI, "select-pane", "-t", created);

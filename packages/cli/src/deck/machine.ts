@@ -10,7 +10,7 @@ import {
 	type TuiMouseEvent,
 	type TuiMouseEventResult,
 } from "@earendil-works/pi-tui";
-import { harness as asHarness, configDir, type Harness, operatorDir, type SnoozePreset, type View } from "@swb/shared";
+import { configDir, type Harness, operatorDir, type SnoozePreset, type View } from "@swb/shared";
 import { harnessName } from "@swb/shared/mailbox";
 import { mark, span } from "@swb/shared/trace";
 import { ConfigError, configPath, type Loaded, readConfig } from "../config.ts";
@@ -25,8 +25,8 @@ import type { DeckLayout } from "../store.ts";
 import { quote, tmuxAsync, UI } from "../tmux.ts";
 import { writeConfig } from "../write-config.ts";
 import { Control } from "./control.ts";
-import { HELP_POPUP, rosterCols, SPLIT_FROM } from "./deck.ts";
-import { args, deck, here, placeholder, rosterPane, stagePane, stageTty } from "./env.ts";
+import { DECK, type DeckIntent, HELP_POPUP, PLACEHOLDER, rosterCols, SPLIT_FROM } from "./deck.ts";
+import { rosterPane, stagePane, stageTty, startIntent } from "./env.ts";
 import { helpSize } from "./help.ts";
 import {
 	type Binding,
@@ -110,7 +110,7 @@ const m: Model = {
 	returning: false,
 	restoredKey: null,
 	started: false,
-	hereRoot: "",
+	intent: startIntent?.kind === "new" ? null : startIntent,
 	continueTo: null,
 	cursorBg: null,
 	breath: null,
@@ -175,7 +175,7 @@ export const ctl = new Control((line) => {
 	const [kind, tty, , session] = line.split(" ");
 	if (kind !== "%client-session-changed" || !tty) return;
 	dispatch(() => stageUp([tty]));
-	if (session === placeholder) panes.parked(tty, placeholder);
+	if (session === PLACEHOLDER) panes.parked(tty, PLACEHOLDER);
 });
 
 /** The last request id handed out; see FromWorker. */
@@ -305,7 +305,7 @@ export function launchElapsed(e: Entry, now: number): string {
 const EMPTY: Card = { head: [], lines: ["Nothing selected."], turns: [], tail: [], ending: null, agent: "" };
 
 function onCard(kind: Applied["kind"], id: string | null, card: Card): Applied {
-	return { kind, id, host: null, card, view: "agent", target: placeholder, side: null, shell: null };
+	return { kind, id, host: null, card, view: "agent", target: PLACEHOLDER, side: null, shell: null };
 }
 
 /** A pi still starting, on view so whatever it asks before it registers (a missing cwd, project trust) can be answered. */
@@ -320,7 +320,7 @@ function piShown(a: Applied): boolean {
 /** The Stage's panes, and the roster's place beside them. */
 export const panes = new StagePanes(
 	{
-		deck,
+		deck: DECK,
 		rosterPane,
 		stagePane,
 		stageTty,
@@ -353,7 +353,7 @@ function syncStatus(): void {
 	if (want === statusShown) return;
 	statusShown = want;
 	statusOps = statusOps.then(() =>
-		tmuxAsync(UI, "set", "-t", deck, "status", want ? "on" : "off").then(
+		tmuxAsync(UI, "set", "-t", DECK, "status", want ? "on" : "off").then(
 			() => {},
 			(error: Error) => toast(`status: ${error.message}`, "error"),
 		),
@@ -375,7 +375,7 @@ function syncTitle(): void {
 	if (want === titleShown) return;
 	titleShown = want;
 	titleOps = titleOps.then(() =>
-		tmuxAsync(UI, "set", "-t", deck, "set-titles-string", want).then(
+		tmuxAsync(UI, "set", "-t", DECK, "set-titles-string", want).then(
 			() => {},
 			(error: Error) => toast(`title: ${error.message}`, "error"),
 		),
@@ -502,11 +502,11 @@ function onEditor(dir: string, name: string | null): void {
 
 /** A harness on the Stage's pane before it's up, which shows its terminal's echo, not its own screen. */
 function harnessStarting(a: Applied): boolean {
-	return a.kind === "loading" && a.target !== placeholder;
+	return a.kind === "loading" && a.target !== PLACEHOLDER;
 }
 
 function setStageCard(d: Applied): void {
-	if (!d.card || d.target !== placeholder) return;
+	if (!d.card || d.target !== PLACEHOLDER) return;
 	const json = JSON.stringify(d.card);
 	if (json === m.stage.cardJson) return;
 	m.stage.cardJson = json;
@@ -821,32 +821,27 @@ function followHost(): void {
 }
 
 /**
- * Where the first snapshot puts the cursor: `swb open`'s session, `-c`'s most recent session here, where the last Deck
- * left it, else the session I last visited. Only `-c` takes the keyboard.
+ * Where the first snapshot puts the cursor: where the swb that started the Deck asked for, where the last Deck left it,
+ * else the session I last visited.
  */
 function startCursor(): void {
 	m.started = true;
-	// `[` reaches back past this Deck, through the Visits every Deck and tmux client before it made.
+	// `[` reaches back past this roster, through the Visits every roster and tmux client before it made.
 	m.history.ids = [...m.entries.values()]
 		.filter((e) => e.open && e.visitedAt !== null)
 		.sort((a, b) => (a.visitedAt ?? 0) - (b.visitedAt ?? 0))
 		.map((e) => e.id);
 	m.history.at = m.history.ids.length - 1;
-	if (args.select || args.new) return;
-	// A snoozed session is out of the way until it wakes: neither -c nor the last visit lands on one.
-	const open = [...m.entries.values()].filter((e) => e.open && !e.provisional && !e.snoozed);
-	if (args.continue) {
-		const recent = open
-			.filter((e) => e.project === m.hereRoot)
-			.sort((a, b) => (b.visitedAt ?? 0) - (a.visitedAt ?? 0) || b.activityAt - a.activityAt)[0];
-		if (!recent) {
-			newSession(here, null, null);
-			return;
-		}
-		reveal(recent.id);
-		m.continueTo = recent;
+	if (m.intent) {
+		const intent = m.intent;
+		m.intent = null;
+		applyIntent(intent);
 		return;
 	}
+	// A new session's, which the boot started.
+	if (startIntent) return;
+	// A snoozed session is out of the way until it wakes: the last visit doesn't land on one.
+	const open = [...m.entries.values()].filter((e) => e.open && !e.provisional && !e.snoozed);
 	// Nor does where the last Deck left off, if it has been snoozed since.
 	const restored = m.restoredKey === null ? undefined : m.entries.get(m.restoredKey);
 	if (restored?.open && !restored.snoozed) {
@@ -859,6 +854,33 @@ function startCursor(): void {
 	}
 	const visited = open.filter((e) => e.visitedAt !== null).sort((a, b) => (b.visitedAt ?? 0) - (a.visitedAt ?? 0))[0];
 	if (visited) reveal(visited.id);
+}
+
+/** What a swb asked of the Deck. Only `-c` and a new session take the keyboard. */
+function applyIntent(intent: DeckIntent): void {
+	switch (intent.kind) {
+		// A later swb's ask outweighs an earlier -c still waiting on the Stage.
+		case "open":
+			m.continueTo = null;
+			reveal(intent.id);
+			return;
+		case "new":
+			m.continueTo = null;
+			newSession(intent.cwd, null, null, intent.harness);
+			return;
+		case "continue": {
+			const recent = [...m.entries.values()]
+				.filter((e) => e.open && !e.provisional && !e.snoozed && e.project === intent.root)
+				.sort((a, b) => (b.visitedAt ?? 0) - (a.visitedAt ?? 0) || b.activityAt - a.activityAt)[0];
+			if (!recent) {
+				newSession(intent.cwd, null, null);
+				return;
+			}
+			reveal(recent.id);
+			if (m.ready) focusEntry(recent);
+			else m.continueTo = recent;
+		}
+	}
 }
 
 let savedLayout = "";
@@ -932,7 +954,6 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => dispatch(() => onWorker(
 function onWorker(message: FromWorker): void {
 	switch (message.type) {
 		case "restore":
-			m.hereRoot = message.root;
 			if (message.layout) {
 				m.collapsed = new Set(message.layout.collapsed);
 				m.expanded = new Set(message.layout.expanded.flatMap((saved) => SECTION_KEYS.filter((key) => key === saved)));
@@ -2421,7 +2442,7 @@ function settlePeek(): void {
 function syncWatch(want: boolean): void {
 	if (want === m.peek.watching) return;
 	m.peek.watching = want;
-	void tmuxAsync(UI, "set", "-t", deck, ...(want ? ["@swb_watch", "1"] : ["-u", "@swb_watch"])).catch((error: Error) =>
+	void tmuxAsync(UI, "set", "-t", DECK, ...(want ? ["@swb_watch", "1"] : ["-u", "@swb_watch"])).catch((error: Error) =>
 		toast(`peek: ${error.message}`, "error"),
 	);
 }
@@ -2591,7 +2612,7 @@ function rosterKeys(row: Row | undefined): Binding<Command>[] {
  */
 export function stageKeys(): Binding<Command>[] {
 	const help = bind([], `${m.config.prefix} ?`, "keys", { kind: "help" });
-	if (panes.applied.target === placeholder || harnessStarting(panes.applied))
+	if (panes.applied.target === PLACEHOLDER || harnessStarting(panes.applied))
 		return [bind([], "esc", "list", { kind: "roster", to: "focus" }), help];
 	return [
 		bind([], `${m.config.prefix} h`, "list", { kind: "roster", to: "focus" }),
@@ -2644,17 +2665,33 @@ function prefixKey(k: string, row: string | undefined): void {
 
 // ── Deck actions ────────────────────────────────────────────────────────
 
-async function deckClient(): Promise<string | undefined> {
-	return (await tmuxAsync(UI, "list-clients", "-t", `=${deck}`, "-F", "#{client_name}")).split("\n")[0] || undefined;
+/** The terminal on the Deck I used last, which tmux picks to the microsecond: its name, width, and height. */
+async function deckClient(): Promise<[name: string, cols: string, rows: string] | undefined> {
+	const [name, cols, rows] = (
+		await tmuxAsync(UI, "display", "-p", "-t", `=${DECK}:`, "#{client_name}\t#{client_width}\t#{client_height}")
+	).split("\t");
+	return name && cols && rows ? [name, cols, rows] : undefined;
+}
+
+/**
+ * Whether any terminal on the Deck is focused, as tmux tracks it: one that never reports focus counts as focused, and
+ * none is once the last one leaves, so no Visit lands while I'm away.
+ */
+async function countTerminals(): Promise<void> {
+	const focused = (await tmuxAsync(UI, "list-clients", "-t", `=${DECK}`, "-F", "#{client_flags}"))
+		.split("\n")
+		.some((flags) => flags.split(",").includes("focused"));
+	if (focused !== m.terminalFocused)
+		dispatch(() => {
+			m.terminalFocused = focused;
+		});
 }
 
 /** `?`: every key in a popup sized to show them all, short of its terminal's size; tmux refuses a popup bigger than that. */
 async function showHelp(): Promise<void> {
-	const line = (await tmuxAsync(UI, "list-clients", "-t", `=${deck}`, "-F", "#{client_name}\t#{client_width}\t#{client_height}")).split(
-		"\n",
-	)[0];
-	if (!line) return;
-	const [client, cols, rows] = line.split("\t") as [string, string, string];
+	const found = await deckClient();
+	if (!found) return;
+	const [client, cols, rows] = found;
 	const size = helpSize(m.config.prefix);
 	const fit = ["-w", String(Math.min(size.width, Number(cols))), "-h", String(Math.min(size.height, Number(rows)))];
 	await tmuxAsync(UI, "display-popup", "-c", client, "-E", ...fit, ...HELP_POPUP);
@@ -2685,8 +2722,11 @@ export function peekButtons(row: Row): [label: string, key: string, act: RowAct]
 
 process.stdout.on("resize", () => void panes.noteDrag());
 
+/** Takes the terminal I used last off the Deck, which keeps running for the next swb. */
 function quit(): void {
-	void tmuxAsync(UI, "kill-session", "-t", `=${deck}`);
+	void deckClient().then((client) => {
+		if (client) return tmuxAsync(UI, "detach-client", "-t", client[0]);
+	});
 }
 
 let focusReads = Promise.resolve();
@@ -2698,7 +2738,7 @@ let focusReads = Promise.resolve();
  */
 function withFocus(then: (() => void) | null): Promise<void> {
 	const read = focusReads.then(async () => {
-		const pane = await tmuxAsync(UI, "display", "-p", "-t", deck, "#{pane_id}");
+		const pane = await tmuxAsync(UI, "display", "-p", "-t", DECK, "#{pane_id}");
 		dispatch(() => {
 			focusOn(pane);
 			then?.();
@@ -2740,16 +2780,9 @@ export async function handleCommand(cmd: string, argv: string[]): Promise<void> 
 		case "focus":
 			await withFocus(null);
 			break;
-		case "terminal-focus": {
-			const focused = argv[0] === "in";
-			if (focused === m.terminalFocused) break;
-			dispatch(() => {
-				m.terminalFocused = focused;
-			});
-			// Of several Decks, the one in use owns the colors every hosted program sees.
-			if (focused && m.profile) post({ type: "colors", colors: m.profile });
+		case "terminals":
+			await countTerminals();
 			break;
-		}
 		case "terminal-scheme":
 			if (argv[0] !== "light" && argv[0] !== "dark") throw new Error(`terminal-scheme: expected light or dark, got ${argv[0]}`);
 			screen.recheckColors(argv[0]);
@@ -2812,6 +2845,19 @@ export async function handleCommand(cmd: string, argv: string[]): Promise<void> 
 			});
 			break;
 		}
+		// What a swb attaching to the Deck asks of it. A session it just adopted reaches the Deck with a later snapshot.
+		case "intent": {
+			const intent = JSON.parse(argv[0] ?? "") as DeckIntent;
+			if (intent.kind === "open") {
+				const deadline = Date.now() + 2000;
+				while (!m.entries.has(intent.id) && Date.now() < deadline) await Bun.sleep(50);
+			}
+			dispatch(() => {
+				if (!m.started && intent.kind !== "new") m.intent = intent;
+				else applyIntent(intent);
+			});
+			break;
+		}
 		// A key typed on a session's card, which only the keyboard on the Stage can type, means to use it.
 		case "wake":
 			dispatch(() => {
@@ -2865,12 +2911,12 @@ function focusOnceShown(pane: () => string | null): void {
 			try {
 				// tmux answers a pane id that's gone with an empty line, not an error.
 				const [now, still] = (
-					await tmuxAsync(UI, "display", "-p", "-t", deck, "#{pane_id}", ";", "display", "-p", "-t", from, "#{pane_id}")
+					await tmuxAsync(UI, "display", "-p", "-t", DECK, "#{pane_id}", ";", "display", "-p", "-t", from, "#{pane_id}")
 				).split("\n");
 				if ((asked !== m.focusMoves || now !== from) && still === from) return;
 				// A key can still move it between that read and this move, so tmux checks again as it moves.
 				const select = `select-pane ${panes.narrow ? "-Z " : ""}-t ${target}`;
-				await tmuxAsync(UI, "if", "-F", "-t", deck, `#{==:#{pane_id},${now}}`, select);
+				await tmuxAsync(UI, "if", "-F", "-t", DECK, `#{==:#{pane_id},${now}}`, select);
 			} catch (error) {
 				toast(`focus: ${(error as Error).message}`, "error");
 			}
@@ -2980,7 +3026,7 @@ function openConfig(line: number | null): void {
 			UI,
 			"display-popup",
 			"-c",
-			client,
+			client[0],
 			"-E",
 			"-w",
 			"90%",
@@ -3071,7 +3117,6 @@ function checkReady(): void {
 	if (m.ready || m.snapshot === null || !panes.main.up) return;
 	m.ready = true;
 	mark("roster.ready");
-	if (args.select) reveal(args.select);
 	if (m.continueTo) focusEntry(m.continueTo);
 }
 
@@ -3095,13 +3140,14 @@ let screen: Screen;
 /** Starts the Deck once its screen is up: the worker's first asks, the Stage's clients, and the clock that ticks it. */
 export function boot(on: Screen): void {
 	screen = on;
-	post({ type: "init", deck, config: m.config, here });
+	post({ type: "init", config: m.config });
 	post({ type: "dirs" });
-	if (args.new) {
-		const cwd = args.new;
-		dispatch(() => newSession(cwd, null, null, args.harness ? asHarness(args.harness) : null));
+	if (startIntent?.kind === "new") {
+		const intent = startIntent;
+		dispatch(() => applyIntent(intent));
 	}
 	void panes.layout();
+	void countTerminals().catch((error: Error) => toast(`terminals: ${error.message}`, "error"));
 	// Attached before it lists them, the control client hears every client that attaches after the list.
 	void ctl.run("list-clients -F '#{client_tty}'").then(
 		(out) => dispatch(() => stageUp(out.split("\n"))),

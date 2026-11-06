@@ -7,9 +7,8 @@ import { openDeck } from "../deck/deck.ts";
 export async function newSession(args: string[]): Promise<void> {
 	const { values } = parseArgs({ args, options: { cwd: { type: "string" }, harness: { type: "string" } } });
 	await openDeck({
-		select: null,
-		newCwd: realpathSync(resolve(values.cwd ?? process.cwd())),
-		continue: false,
-		...(values.harness ? { harness: harness(values.harness) } : {}),
+		kind: "new",
+		cwd: realpathSync(resolve(values.cwd ?? process.cwd())),
+		harness: values.harness ? harness(values.harness) : null,
 	});
 }

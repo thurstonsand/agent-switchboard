@@ -10,7 +10,7 @@ Schema v12: update swb and the pi line together.
 
 ### Changed
 
-- A new Deck starts where the last one left off, wherever it's opened. It used to keep a cursor, folds, and roster width for each Project, and started a Project it hadn't seen on the session last visited.
+- There is one Deck, and every `swb` opens it: each terminal shows the same cursor, keyboard, and session. `q` leaves it as it is for the next `swb`, and `swb -c`, `swb new`, and `swb open` move it. The session on its Stage keeps running while it's there, even with no terminal on the Deck. A roster that died or belongs to an older swb restarts in place the next time `swb` runs. `swb deck state` no longer takes `--deck`. Each `swb` used to open a Deck of its own, which kept a cursor, folds, and roster width for its Project.
 - Archiving a session cancels every schedule it set, the messages to other sessions and the launches included, as well as those aimed at it. A cron launch no longer keeps starting children of an archived session. The Deck's `a` names them first and asks again, after asking whether its family goes too; `swb archive` asks at a terminal, and refuses without one unless given `--yes`. Deleting a worktree with its archive no longer refuses a scheduled launch into it that an archived session set.
 
 ### Fixed

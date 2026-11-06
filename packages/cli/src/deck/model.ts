@@ -3,6 +3,7 @@ import type { View } from "@swb/shared";
 import type { Config, ConfigError, Loaded } from "../config.ts";
 import type { Target, TargetTree } from "../dirs.ts";
 import type { Catalog } from "../harnesses.ts";
+import type { DeckIntent } from "./deck.ts";
 import type { Overlay } from "./overlay.ts";
 import type { Entry, PeekInfo, Snapshot, TerminalProfile, Transcript } from "./protocol.ts";
 import type { SettingsPane } from "./settings.ts";
@@ -200,8 +201,8 @@ export type Model = {
 	/** The cursor the last Deck left, until the first snapshot places it. */
 	restoredKey: string | null;
 	started: boolean;
-	/** The Project `here` is in, which the worker finds before its first snapshot. */
-	hereRoot: string;
+	/** What a swb asked of the Deck before its first snapshot, which acts on it; a new session doesn't wait for that. */
+	intent: DeckIntent | null;
 	/** `-c`: the session whose pi takes the keyboard once the Stage is up. */
 	continueTo: Entry | null;
 	// The cursor's background is mixed from the terminal's own background and foreground, as pi's system theme

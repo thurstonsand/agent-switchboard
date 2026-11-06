@@ -1,7 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { DeckState } from "../../packages/cli/src/deck/protocol.ts";
 import { cursorTo, entry, piSessions, seed, state, waitState } from "./harness/deck.ts";
 import { alive, budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
@@ -15,63 +14,50 @@ afterEach(async () => {
 	await s.cleanup();
 });
 
-test("closing the Deck's terminal destroys the Deck, its roster, its placeholder, and its socket", async () => {
+test("closing the Deck's terminal leaves the Deck and its roster for the next swb, which starts a dead or outdated roster afresh in its pane", async () => {
 	s = scenario("phase2", "close");
 	s.swb("drive", "start");
-	const { deck } = state(s);
-	const sock = join(s.env.XDG_STATE_HOME as string, "agent-switchboard/decks", `${deck}.sock`);
+	const sock = join(s.env.XDG_STATE_HOME as string, "agent-switchboard/deck.sock");
 	expect(existsSync(sock)).toBe(true);
-	const rosterPid = Number(s.tmux(s.servers.ui, "display", "-p", "-t", `=${deck}:.0`, "#{pane_pid}"));
+	const roster = () => s.tmux(s.servers.ui, "show", "-qv", "-t", "deck", "@swb_roster");
+	const rosterPid = () => Number(s.tmux(s.servers.ui, "display", "-p", "-t", roster(), "#{pane_pid}"));
+	const first = rosterPid();
 	s.swb("drive", "stop");
-	await until(
-		() => !s.tmux(s.servers.ui, "list-sessions", "-F", "#{session_name}").includes(deck),
-		budgets.settle,
-		"the Deck session gone",
-	);
-	// Flaky in CI only. Whether the roster outlived it tells a cleanup that never ran from one that died partway.
-	await until(() => !existsSync(sock), budgets.settle, "the socket gone").catch((error: Error) => {
-		throw new Error(`${error.message}; the roster ${alive(rosterPid) ? "is still running" : "has exited"}`);
-	});
-	await until(
-		() => !s.tmux(s.servers.sessions, "list-sessions", "-F", "#{session_name}").includes(deck),
-		budgets.settle,
-		"the placeholder gone",
-	);
-	await until(() => !alive(rosterPid), budgets.settle, "the roster process gone");
-	expect(s.swbTry("deck", "state").err).toContain("no live deck");
-});
-
-test("two Decks waking one session start exactly one pi", async () => {
-	s = scenario("phase2", "two-decks");
-	const [a] = (await seed(s, { turns: ["a"] })) as [string];
+	await Bun.sleep(500);
+	expect(alive(first)).toBe(true);
+	expect(existsSync(sock)).toBe(true);
+	expect(s.tmux(s.servers.sessions, "list-sessions", "-F", "#{@swb_kind}").split("\n")).toContain("placeholder");
 	s.swb("drive", "start");
-	await cursorTo(s, a);
-	const other = `swb-other-${s.instance}`;
-	s.tmux(other, "new-session", "-d", "-s", "other", "-x", "140", "-y", "40", "-c", s.project, join(s.bin, "swb"));
-	const decks = await until(
-		() => {
-			const err = s.swbTry("deck", "state").err;
-			const m = /several live decks \(([^)]+)\)/.exec(err);
-			return m ? (m[1] as string).split(", ") : false;
-		},
-		budgets.deckReady,
-		"the second Deck",
+	expect(rosterPid()).toBe(first);
+	// Hiding and showing the roster moves the Stage into the roster's window; the next roster still finds it.
+	s.keys("M-a", "z");
+	await waitState(s, "the roster hidden", (x) => x.layout.rosterHidden);
+	s.keys("M-a", "z");
+	await waitState(s, "the roster shown", (x) => !x.layout.rosterHidden);
+
+	s.swb("drive", "stop");
+	process.kill(first, "SIGKILL");
+	await until(
+		() => s.tmux(s.servers.ui, "display", "-p", "-t", roster(), "#{pane_dead}") === "1",
+		budgets.settle,
+		"the roster's pane dead",
 	);
-	const mine = state(s).deck;
-	const theirs = decks.find((d) => d !== mine) as string;
-	const theirState = () => JSON.parse(s.swb("deck", "state", "--deck", theirs, "--json")) as DeckState;
-	await until(() => theirState().ready && theirState().cursor === a, budgets.deckReady, "the second Deck, its cursor on a");
-	s.tmux(s.servers.drive, "send-keys", "-t", "=drive:", "w");
-	s.tmux(other, "send-keys", "-t", "=other:", "w");
-	await waitState(s, "live in mine", (x) => x.staged.id === a && x.staged.kind === "live", budgets.piReady);
-	await until(() => theirState().staged.kind === "live", budgets.piReady, "live in theirs");
-	expect(piSessions(s)).toHaveLength(1);
-	expect(s.ls().filter((e) => e.live)).toHaveLength(1);
-	s.save("mine.txt", s.screen());
-	s.save("theirs.txt", s.tmux(other, "capture-pane", "-p", "-t", "=other:"));
+	s.swb("drive", "start");
+	const second = rosterPid();
+	expect(second).not.toBe(first);
+	expect(alive(second)).toBe(true);
+
+	s.swb("drive", "stop");
+	const [version] = s.tmux(s.servers.ui, "show", "-qv", "-t", "deck", "@swb_roster_build").split(":");
+	s.tmux(s.servers.ui, "set", "-t", "deck", "@swb_roster_build", `${version}:0`);
+	s.swb("drive", "start");
+	expect(rosterPid()).not.toBe(second);
+	await until(() => !alive(second), budgets.settle, "the outdated roster gone");
+	expect(existsSync(sock)).toBe(true);
+	expect(state(s).ready).toBe(true);
 });
 
-test("a Deck killed while its wake waits on the launch lock doesn't wedge later wakes", async () => {
+test("a roster killed while its wake waits on the launch lock doesn't wedge later wakes", async () => {
 	s = scenario("phase2", "killed-waker");
 	const [a] = (await seed(s, { turns: ["a"] })) as [string];
 	s.swb("drive", "start");
@@ -92,7 +78,7 @@ test("a Deck killed while its wake waits on the launch lock doesn't wedge later 
 		await cursorTo(s, a);
 		s.keys("w");
 		await waitState(s, "loading", (x) => x.staged.kind === "loading", 2000);
-		const rosterPid = Number(s.tmux(s.servers.ui, "display", "-p", "-t", `=${state(s).deck}:.0`, "#{pane_pid}"));
+		const rosterPid = Number(s.tmux(s.servers.ui, "display", "-p", "-t", "=deck:.0", "#{pane_pid}"));
 		process.kill(rosterPid, "SIGKILL");
 		await until(() => !alive(rosterPid), budgets.settle, "the roster gone");
 	} finally {
@@ -101,8 +87,6 @@ test("a Deck killed while its wake waits on the launch lock doesn't wedge later 
 	}
 	s.swbTry("drive", "stop");
 	expect(piSessions(s)).toHaveLength(0);
-	s.swbTry("deck", "state");
-	expect(s.tmux(s.servers.sessions, "list-sessions", "-F", "#{@swb_kind}").split("\n")).not.toContain("placeholder");
 	s.swb("drive", "start");
 	await cursorTo(s, a);
 	s.keys("w");

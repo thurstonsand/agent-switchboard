@@ -21,27 +21,22 @@ function sgr(button: number, col: number, row: number, release = false): string 
 
 const READY_MS = 15_000;
 
-/** The Deck the drive pane's terminal is attached to: its client on the UI server shares the pane's tty. */
-function drivenDeck(): string | null {
+/** Whether the drive pane's terminal is on the Deck: a client of the UI server with the pane's tty. */
+function driven(): boolean {
 	const tty = harness("display", "-p", "-t", PANE, "#{pane_tty}");
-	const clients = tmuxTry(UI, "list-clients", "-F", "#{client_tty}\t#{session_name}");
-	if (!clients.ok) return null;
-	const match = clients.out.split("\n").find((line) => line.split("\t")[0] === tty);
-	return match ? (match.split("\t")[1] as string) : null;
+	const clients = tmuxTry(UI, "list-clients", "-F", "#{client_tty}");
+	return clients.ok && clients.out.split("\n").includes(tty);
 }
 
-function requireDeck(): string {
-	const deck = drivenDeck();
-	if (!deck) throw new SwbError(`drive: no Deck on the driven terminal\n${harness("capture-pane", "-p", "-t", PANE)}`);
-	return deck;
+function requireDeck(): void {
+	if (!driven()) throw new SwbError(`drive: no Deck on the driven terminal\n${harness("capture-pane", "-p", "-t", PANE)}`);
 }
 
 async function waitReady(): Promise<void> {
 	const deadline = Date.now() + READY_MS;
 	while (Date.now() < deadline) {
-		const deck = drivenDeck();
-		if (deck) {
-			const state = await fetchState(deck).catch(() => null);
+		if (driven()) {
+			const state = await fetchState().catch(() => null);
 			if (state?.ready === true) return;
 		}
 		await Bun.sleep(50);
@@ -112,7 +107,8 @@ export async function drive(args: string[]): Promise<void> {
 			break;
 		}
 		case "state":
-			console.log(JSON.stringify(await fetchState(requireDeck())));
+			requireDeck();
+			console.log(JSON.stringify(await fetchState()));
 			break;
 		case "wait": {
 			const { values, positionals } = parseArgs({
@@ -128,7 +124,8 @@ export async function drive(args: string[]): Promise<void> {
 			const deadline = Date.now() + Number(values.timeout);
 			let seen: unknown;
 			while (Date.now() < deadline) {
-				seen = at(await fetchState(requireDeck()), path);
+				requireDeck();
+				seen = at(await fetchState(), path);
 				if (String(seen) === want) return;
 				await Bun.sleep(50);
 			}

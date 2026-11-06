@@ -21,15 +21,15 @@ const NVIM = which("nvim");
 const TAPE = 40_000;
 
 /** The one Deck the tape's terminal opened. */
-function deck(s: Scenario, name?: string): DeckState {
-	return JSON.parse(s.swb("deck", "state", ...(name ? ["--deck", name] : []), "--json"));
+function deck(s: Scenario): DeckState {
+	return JSON.parse(s.swb("deck", "state", "--json"));
 }
 
-async function waitDeck(s: Scenario, what: string, probe: (st: DeckState) => boolean, name?: string): Promise<DeckState> {
+async function waitDeck(s: Scenario, what: string, probe: (st: DeckState) => boolean): Promise<DeckState> {
 	return until(
 		() => {
 			try {
-				const st = deck(s, name);
+				const st = deck(s);
 				return probe(st) && st;
 			} catch {
 				return false;
@@ -152,7 +152,7 @@ export const directors: Record<string, Director> = {
 		},
 		run: async (s) => {
 			const agents = join(s.env.XDG_CONFIG_HOME as string, "agent-switchboard", "operator", "AGENTS.md");
-			const st = await waitDeck(s, "the editor", (x) => x.settings?.prose?.focused === true);
+			await waitDeck(s, "the editor", (x) => x.settings?.prose?.focused === true);
 			const shipped = readFileSync(agents, "utf8");
 			// Saved with no key pressed for it.
 			await until(() => readFileSync(agents, "utf8").endsWith("lead with the one that's waited longest.\n"), TAPE, "AGENTS.md rewritten");
@@ -162,7 +162,7 @@ export const directors: Record<string, Director> = {
 			// A long style guide pasted in, as the tape can't: the shipped instructions, over and over, past the cap.
 			const paste = join(s.root, "paste.md");
 			writeFileSync(paste, `\n\n${shipped.repeat(Math.ceil(16_000 / shipped.length))}`);
-			const roster = s.tmux(s.servers.ui, "display", "-p", "-t", `=${st.deck}:.0`, "#{pane_id}");
+			const roster = s.tmux(s.servers.ui, "display", "-p", "-t", "=deck:.0", "#{pane_id}");
 			s.tmux(s.servers.ui, "load-buffer", "-b", "guide", paste);
 			s.tmux(s.servers.ui, "paste-buffer", "-p", "-b", "guide", "-t", roster);
 			await waitDeck(s, "the paste cut at the cap", (x) => x.settings?.prose?.text.length === 16_000);
@@ -1216,7 +1216,7 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
-	"three-decks": {
+	"three-terminals": {
 		run: async (s) => {
 			const pane = (i: number) => `=demo:0.${i}`;
 			const keys = (i: number, ...k: string[]) => {
@@ -1241,23 +1241,27 @@ export const directors: Record<string, Director> = {
 					TAPE,
 					what,
 				);
-			await all("three Decks", "Archived (0)");
-			await until(() => screens()[0]?.includes("faux-1"), TAPE, "pi in the first Deck");
+			await all("the Deck in three terminals", "Archived (0)");
+			await waitDeck(s, "pi with the keyboard", (x) => x.staged.kind === "live" && x.focus === "stage");
 			await Bun.sleep(800);
-			keys(0, "-l", "reply one session, three Decks", "Enter");
-			await all("the session in every roster", "(1)");
+			keys(0, "-l", "reply one Deck, three terminals", "Enter");
+			await all("the session in every terminal", "(1)");
 			await Bun.sleep(1200);
-			keys(0, "-l", "/name Shared by three Decks", "Enter");
-			await all("the title in every roster", "Shared by three Decks");
+			keys(0, "-l", "/name Shared by three terminals", "Enter");
+			await all("the title in every terminal", "Shared by three terminals");
 			await Bun.sleep(1500);
-			keys(1, "Enter");
-			await Bun.sleep(800);
-			keys(1, "-l", "reply typed from the second Deck", "Enter");
-			await until(() => s.signal("replied.typed from the second Deck") !== "", TAPE, "the second Deck's turn");
+			keys(1, "-l", "reply typed from the second terminal", "Enter");
+			await until(() => s.signal("replied.typed from the second terminal") !== "", TAPE, "the second terminal's turn");
 			await Bun.sleep(2000);
+			keys(2, "M-a", "h");
+			await waitDeck(s, "the keyboard on the roster", (x) => x.focus === "roster");
+			await Bun.sleep(800);
 			keys(2, "a");
+			await waitLs(s, "archived", (ls) => ls[0]?.open === false);
+			// It stays on view, under the one cursor every terminal shares, until that cursor leaves it.
+			await Bun.sleep(1500);
+			keys(1, "j");
 			await all("archived everywhere", "Archived (1)");
-			expect(s.ls()[0]?.open).toBe(false);
 		},
 	},
 
@@ -1305,8 +1309,8 @@ export const directors: Record<string, Director> = {
 			}
 		},
 		run: async (s) => {
-			const { deck } = await waitDeck(s, "the Deck up", () => true);
-			const pane = `=${deck}:.0`;
+			await waitDeck(s, "the Deck up", () => true);
+			const pane = "=deck:.0";
 			const lines = () => s.tmux(s.servers.ui, "capture-pane", "-p", "-t", pane).split("\n");
 			// The last picker: opened after matic-re was added, so it's listed.
 			const shown = await until(
@@ -1359,7 +1363,7 @@ export const directors: Record<string, Director> = {
 					const bytes = [...Buffer.from(`\x1b[<${button};${col + 1};${row + 1}${up ? "m" : "M"}`)].map((b) =>
 						b.toString(16).padStart(2, "0"),
 					);
-					s.tmux(s.servers.ui, "send-keys", "-t", `=${st.deck}:.0`, "-H", ...bytes);
+					s.tmux(s.servers.ui, "send-keys", "-t", "=deck:.0", "-H", ...bytes);
 					await Bun.sleep(120);
 				}
 			};
@@ -1671,14 +1675,8 @@ export const directors: Record<string, Director> = {
 		run: async (s) => {
 			const id = (title: string) => s.ls().find((e) => e.title === title)?.id;
 			await waitLs(s, "an Operator after its first turn", (ls) => ls.some((e) => e.operator && e.activity === "idle"));
-			const first = await waitDeck(s, "alpha under the cursor", (x) => x.cursor === id("alpha") && x.filter === "");
-			const restored = await waitDeck(s, "a second Deck", (x) => x.deck !== first.deck && x.ready && x.cursor !== null);
-			expect(restored).toMatchObject({ cursor: id("alpha"), focus: "roster" });
-			const continued = await waitDeck(
-				s,
-				"swb -c in pi",
-				(x) => x.deck !== restored.deck && x.staged.kind === "live" && x.focus === "stage",
-			);
+			await waitDeck(s, "alpha under the cursor", (x) => x.cursor === id("alpha") && x.filter === "" && x.focus === "roster");
+			const continued = await waitDeck(s, "swb -c in pi", (x) => x.staged.kind === "live" && x.focus === "stage");
 			expect(continued.staged.id).toBe(id("bravo") as string);
 		},
 	},

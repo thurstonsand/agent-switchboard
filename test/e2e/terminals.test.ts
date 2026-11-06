@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import type { DeckState } from "../../packages/cli/src/deck/protocol.ts";
-import { cursorTo, entry, pickNew, rowIndex, seed, sessionRows, state, terminal, waitState } from "./harness/deck.ts";
+import { cursorTo, entry, seed, state, terminal, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -41,7 +41,12 @@ test("a Deck started inside another tmux works as in a bare terminal, M-a passin
 		"back in the roster",
 	);
 	outer.keys("q");
-	await until(() => s.swbTry("deck", "state").code !== 0, budgets.settle, "the Deck closed");
+	await until(() => !outer.attached(), budgets.settle, "the terminal off the Deck");
+	await until(
+		() => !(JSON.parse(s.swb("deck", "state", "--json")) as DeckState).terminalFocused,
+		budgets.settle,
+		"the Deck, still up, watched by nobody",
+	);
 	expect(s.ls()[0]?.live).toBe(true);
 });
 
@@ -75,43 +80,54 @@ test("a narrow terminal shows one pane at a time: Enter shows pi, M-a h returns 
 	s.save("widened.txt", s.screen());
 });
 
-test("three Decks stay in sync: a wake, an archive, and a new session in one show in the others", async () => {
-	s = scenario("phase5", "three-decks");
+test("every swb attaches its terminal to the one Deck: swb open in one moves it in all, keys from any reach it, and q leaves from the one that typed it", async () => {
+	s = scenario("phase5", "one-deck");
 	const [a, b] = (await seed(s, { turns: ["a"] }, { turns: ["b"] })) as [string, string];
 	s.swb("drive", "start");
+	await cursorTo(s, a);
 	const two = terminal(s, "two", "swb");
 	const three = terminal(s, "three", `swb open ${b}`);
 	await two.ready();
 	await three.ready();
-	await until(() => three.state().cursor === b, budgets.settle, "Deck three on b");
-	const rowState = (st: DeckState, id: string) => sessionRows(st).find((r) => r.id === id)?.state;
+	expect([two.attached(), three.attached()]).toEqual([true, true]);
+	await waitState(s, "the Deck on b, from terminal three", (x) => x.cursor === b);
 
-	await cursorTo(s, a);
-	s.keys("Enter");
-	await waitState(s, "a live", (x) => x.staged.id === a && x.staged.kind === "live", budgets.piReady);
-	await until(
-		() => rowState(two.state(), a) === "idle" && rowState(three.state(), a) === "idle",
-		budgets.settle,
-		"a live and seen everywhere",
+	two.keys("Enter");
+	await waitState(
+		s,
+		"b live, from terminal two",
+		(x) => x.staged.id === b && x.staged.kind === "live" && x.focus === "stage",
+		budgets.piReady,
 	);
-
-	three.keys("a");
-	await waitState(s, "b gone from the drive Deck", (x) => rowIndex(x, b) === -1);
-	await until(() => rowIndex(two.state(), b) === -1, budgets.settle, "b gone from Deck two");
-	const archived = (st: DeckState) => st.rows.find((r) => r.kind === "section" && r.label === "Archived");
-	for (const st of [state(s), two.state()]) expect(archived(st)).toMatchObject({ count: 1 });
-	// Deck three, where it was archived, keeps b where it was until its cursor leaves.
-	await until(() => rowState(three.state(), b) === "archived", budgets.settle, "b archived in place in Deck three");
-	expect(archived(three.state())).toMatchObject({ count: 0 });
-
-	await pickNew(s, ["n"], two);
-	await until(() => sessionRows(two.state()).some((r) => r.provisional), budgets.piReady, "a new pi in Deck two");
-	await waitState(s, "the new pi in the drive Deck", (x) => sessionRows(x).some((r) => r.provisional));
-	await until(() => sessionRows(three.state()).some((r) => r.provisional), budgets.settle, "the new pi in Deck three");
+	three.keys("-l", "reply typed from three", "Enter");
+	await until(() => s.signal("replied.typed from three") !== "", budgets.settle, "the turn typed from terminal three");
+	await until(
+		() => {
+			const one = s.screen().trimEnd();
+			return two.screen().trimEnd() === one && three.screen().trimEnd() === one;
+		},
+		budgets.settle,
+		"every terminal showing the Deck alike",
+	);
 	s.save("drive.txt", s.screen());
-	s.save("two.txt", two.screen());
-	s.save("three.txt", three.screen());
-	expect(new Set([state(s).deck, two.deck(), three.deck()]).size).toBe(3);
+
+	// q takes the terminal that typed it off the Deck, though another typed a moment before.
+	two.keys("M-a", "h");
+	await waitState(s, "the roster focused", (x) => x.focus === "roster");
+	three.keys("k");
+	two.keys("q");
+	await until(() => !two.attached(), budgets.settle, "terminal two off the Deck");
+	expect(three.attached()).toBe(true);
+
+	// The Deck is watched while any terminal on it is focused, and by nobody once the last focused one leaves.
+	s.swb("drive", "focus", "out");
+	await Bun.sleep(500);
+	expect(state(s).terminalFocused).toBe(true);
+	three.keys("M-a", "q");
+	await until(() => !three.attached(), budgets.settle, "terminal three off the Deck");
+	await waitState(s, "no focused terminal", (x) => !x.terminalFocused);
+	s.swb("drive", "focus", "in");
+	await waitState(s, "the drive terminal focused", (x) => x.terminalFocused);
 });
 
 test("a plain tmux attach shares a session with the Deck staging it, and detaching leaves it live", async () => {

@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { appendFileSync, readFileSync } from "node:fs";
-import { config, cursorTo, entry, reply, seed, state, terminal, waitState } from "./harness/deck.ts";
+import { config, cursorTo, entry, reply, seed, state, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -32,12 +32,9 @@ test("swb open selects an Inactive session, opening its section", async () => {
 	s.save("open-inactive.txt", s.screen());
 });
 
-test("swb_show_session moves the Deck showing its caller onto the session it names, leaving other Decks where they were", async () => {
+test("swb_show_session moves the Deck onto the session it names while the Deck shows its caller", async () => {
 	s = scenario("phase2", "show");
 	const [a, b] = (await seed(s, { turns: ["alpha"], title: "alpha" }, { turns: ["beta"], title: "beta" })) as [string, string];
-	const other = terminal(s, "other", `swb open ${b}`);
-	await other.ready();
-	await until(() => other.state().cursor === b, budgets.settle, "the other Deck on beta");
 	s.swb("drive", "start", "--", "new");
 	await waitState(s, "the caller live", (x) => x.staged.kind === "live" && x.focus === "stage", budgets.piReady);
 	await reply(s, "caller");
@@ -49,15 +46,14 @@ test("swb_show_session moves the Deck showing its caller onto the session it nam
 	const live = await waitState(s, "alpha live", (x) => x.staged.id === a && x.staged.kind === "live", budgets.piReady);
 	expect(live.focus).toBe("stage");
 	expect(entry(s, a).live).toBe(true);
-	expect(other.state()).toMatchObject({ cursor: b, staged: { id: b } });
 	s.save("shown.txt", s.screen());
 
-	// The caller runs on, but no Deck shows it now, so there's none for it to switch.
+	// The caller runs on, but the Deck has moved off it, so it has nothing to switch.
 	expect(entry(s, caller).live).toBe(true);
 	const unseen = s.swbTry("show", b, "--from", caller);
 	expect(unseen.code).not.toBe(0);
-	expect(unseen.err).toContain("no Deck is showing this session");
-	expect(other.state().cursor).toBe(b);
+	expect(unseen.err).toContain("the Deck isn't showing this session");
+	expect(state(s)).toMatchObject({ cursor: a, staged: { id: a } });
 });
 
 test("a session woken from its card and stopped again shows the turns it took meanwhile", async () => {

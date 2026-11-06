@@ -137,7 +137,6 @@ export type SettingsState = {
 
 /** What `GET /state` answers: the Deck as a driver sees it. */
 export type DeckState = {
-	deck: string;
 	ready: boolean;
 	terminalFocused: boolean;
 	cursor: string | null;
@@ -193,7 +192,7 @@ export type NewSession = {
 };
 
 export type ToWorker =
-	| { type: "init"; deck: string; config: Config; here: string }
+	| { type: "init"; config: Config }
 	| { type: "layout"; layout: DeckLayout }
 	| { type: "wake"; req: number; id: string }
 	| { type: "config"; config: Config }
@@ -223,7 +222,7 @@ export type ToWorker =
  * that `req`, so one for a request it has since moved past changes nothing but its error.
  */
 export type FromWorker =
-	| { type: "restore"; root: string; layout: DeckLayout | null }
+	| { type: "restore"; layout: DeckLayout | null }
 	| { type: "snapshot"; snapshot: Snapshot }
 	| { type: "launched"; req: number; host: string }
 	| { type: "launchFailed"; req: number; text: string }
