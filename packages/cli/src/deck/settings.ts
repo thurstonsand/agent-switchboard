@@ -1354,42 +1354,46 @@ export class SettingsPane {
 	}
 
 	header(width: number): string {
+		const filters: Part[] = [
+			[this.changedOnly ? " all " : this.host.paint.cursor(" all ", true), { kind: "filter", changed: false }],
+			[" · ", null],
+			[this.changedOnly ? this.host.paint.cursor(" changed ", true) : " changed ", { kind: "filter", changed: true }],
+		];
+		const fw = filters.reduce((n, [text]) => n + visibleWidth(text), 0);
+		let left: Part[];
 		if (this.narrow) {
 			const name = SECTIONS[this.section] as string;
-			const left: Part[] = [
+			left = [
 				[` ${bold("Settings")}  `, null],
 				["‹", { kind: "section", to: this.section - 1, area: null }],
 				[` ${name} `, null],
 				["›", { kind: "section", to: this.section + 1, area: null }],
 			];
-			return this.clickable(0, 0, left);
+		} else {
+			const path = gray(shortPath(configPath()));
+			const title = ` ${bold("Settings")}`;
+			const gap = Math.max(1, Math.floor((width - fw - visibleWidth(path)) / 2) - visibleWidth(title));
+			left = [
+				[title, null],
+				[" ".repeat(gap), null],
+				[path, { kind: "open", line: null }],
+			];
 		}
-		const path = gray(shortPath(configPath()));
-		const title = ` ${bold("Settings")}`;
-		const gap = Math.max(1, Math.floor((width - visibleWidth(path)) / 2) - visibleWidth(title));
-		return this.clickable(0, 0, [
-			[title, null],
-			[" ".repeat(gap), null],
-			[path, { kind: "open", line: null }],
-		]);
+		const used = left.reduce((n, [text]) => n + visibleWidth(text), 0);
+		return this.clickable(0, 0, [...left, [" ".repeat(Math.max(1, width - used - fw)), null], ...filters]);
 	}
 
 	searchLine(width: number): string {
-		const filters: Part[] = [
-			[this.changedOnly ? " all " : this.host.paint.cursor(" all ", true), { kind: "filter", changed: false }],
-			[" · ", null],
-			[this.changedOnly ? this.host.paint.cursor(" changed ", true) : " changed ", { kind: "filter", changed: true }],
-			[" ", null],
-		];
-		const fw = filters.reduce((n, [t]) => n + visibleWidth(t), 0);
-		const fieldWidth = Math.max(10, width - fw - 4);
+		const fieldWidth = Math.max(10, width - 4);
 		const field = this.searching
 			? `${cyan("/")} ${this.search.render(fieldWidth)[0] ?? ""}`
 			: this.query() !== ""
 				? `${cyan("/")} ${this.search.getValue()}`
 				: gray("/ search");
-		const pad = Math.max(1, width - 1 - visibleWidth(field) - fw);
-		return this.clickable(1, 0, [[" ", null], [field, { kind: "search" }], [" ".repeat(pad), null], ...filters]);
+		return this.clickable(1, 0, [
+			[" ", null],
+			[field, { kind: "search" }],
+		]);
 	}
 
 	body(width: number, height: number): string[] {
@@ -1545,7 +1549,7 @@ export class SettingsPane {
 			[label, null],
 			[set ? bold(value) : value, s.control.kind === "paths" ? null : { kind: "activate", at: i }],
 		];
-		if (!set && s.control.kind !== "prose") parts.push([`  ${gray(`(${s.fallback().from ?? "default"})`)}`, null]);
+		if (!set && s.fallback().from && s.control.kind !== "prose") parts.push([`  ${gray(`(${s.fallback().from})`)}`, null]);
 		if (lit && s.control.kind !== "prose") {
 			const fallback = s.fallback();
 			if (set)
@@ -1575,7 +1579,7 @@ export class SettingsPane {
 	shortlistParts(i: number): Part[] {
 		const custom = this.host.loaded().config.presets !== null;
 		const title = ` ${bold("Shortlist")}`;
-		const right: Part = custom ? [gray("↺"), { kind: "reset", at: i }] : [gray("from installed harnesses"), null];
+		const right: Part = custom ? [gray("↺"), { kind: "reset", at: i }] : ["", null];
 		const listed = this.host.catalog() === null && !custom ? [gray("   finding harnesses…"), null] : null;
 		return [[title, null], ...(listed ? [listed as [string, null]] : []), [" ", null], right];
 	}

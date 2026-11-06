@@ -76,12 +76,6 @@ export function mix(layer: 38 | 48, a: RgbColor, b: RgbColor, t: number): string
 	return `${layer};2;${c.r};${c.g};${c.b}`;
 }
 
-/** The working glyph breathes from faint to strong and back, every 2.8 s. */
-export function breathe(faint: RgbColor, strong: RgbColor, now: number, s: string): string {
-	const t = (1 - Math.cos((2 * Math.PI * now) / 2800)) / 2;
-	return `\x1b[${mix(38, faint, strong, t)}m${s}\x1b[39m`;
-}
-
 export function hex(color: RgbColor): string {
 	return `#${[color.r, color.g, color.b].map((c) => c.toString(16).padStart(2, "0")).join("")}`;
 }

@@ -33,6 +33,8 @@ test("pi, Claude Code, and Codex message each other: idle sessions start a turn,
 	// Idle: the message is the next turn, in every direction.
 	expect((await send(s, claude.id, pi.id, "reply SWB-c2p")).details.delivered).toBe(true);
 	await until(() => s.signal("replied.SWB-c2p") !== "", budgets.settle, "pi's answer to Claude");
+	expect(pane(s, pi.id)).toContain("↘ from");
+	expect(pane(s, pi.id)).not.toContain("Message from session");
 	expect((await send(s, codex.id, claude.id, "SWB-x2c please ack")).details.delivered).toBe(true);
 	await until(() => pane(s, claude.id).includes("got SWB-x2c please ack"), budgets.settle, "Claude's answer to Codex");
 	// The message shows once, as the turn's prompt, with no receipt beside it.
@@ -68,7 +70,14 @@ test("pi, Claude Code, and Codex message each other: idle sessions start a turn,
 	expect((await send(s, codex.id, pi.id, "reply SWB-mid-pi")).details.delivered).toBe(true);
 	release(s, "p1");
 	await until(() => s.signal("replied.SWB-mid-pi") !== "", budgets.settle, "pi answering the steer");
+	expect(pane(s, pi.id)).not.toContain("Message from session");
 	s.save("mid-turn.txt", [pane(s, pi.id), pane(s, claude.id), pane(s, codex.id)].join("\n=====\n"));
+	s.tmux(s.servers.sessions, "kill-session", "-t", `=${host(s, pi.id)}:`);
+	await until(() => !entry(s, pi.id).live, budgets.settle, "pi dormant");
+	expect((await send(s, claude.id, pi.id, "reply SWB-wake-pi")).details.delivered).toBe(true);
+	await until(() => s.signal("replied.SWB-wake-pi") !== "", budgets.settle, "pi answering after wake");
+	expect(pane(s, pi.id)).toContain("↘ from");
+	expect(pane(s, pi.id)).not.toContain("Message from session");
 });
 
 test("a message Codex refuses mid-compaction is delivered once the compaction ends, with nothing else written", async () => {
@@ -266,7 +275,8 @@ test("agents use swb's tools across harnesses: list, message, launch, and cancel
 	await until(() => pane(s, pi.id).includes("Sessions · 2 found · ctrl+o details"), budgets.settle, "pi's listing row");
 	expect(pane(s, pi.id)).not.toContain("Open sessions (");
 	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, pi.id)}:`, "C-o");
-	await until(() => /Sessions\s*\n\s*Open sessions \(/.test(pane(s, pi.id)), budgets.settle, "pi's expanded row, the model's text");
+	await until(() => pane(s, pi.id).includes(`claude · idle · ${claude.id}`), budgets.settle, "pi's title-first expanded list");
+	expect(pane(s, pi.id)).not.toContain("Open sessions (");
 	expect(pane(s, pi.id)).toContain(claude.id);
 	expect(pane(s, pi.id)).toContain(codex.id);
 	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, pi.id)}:`, "C-o");

@@ -223,6 +223,8 @@ test("Archive stays at its clicked action, Snooze stays at its row, and the Stag
 	s = scenario("phase6", "anchored-prompts");
 	const parent = await launched(s, "reply parent response", { cwd: s.project, title: "parent" });
 	await launched(s, "reply descendant response", { from: parent, title: "child" });
+	const later = await launched(s, "reply later", { cwd: s.project, title: "later" });
+	s.swb("snooze", later, "one_hour");
 	s.swb("drive", "start", "--size", "175x48");
 	await waitState(s, "the Deck", (x) => x.ready);
 	await cursorTo(s, parent);
@@ -246,7 +248,73 @@ test("Archive stays at its clicked action, Snooze stays at its row, and the Stag
 	s.keys("s");
 	await waitState(s, "Snooze", (st) => st.mode === "snooze");
 	await onScreen("Snooze parent", "the Snooze form drawn");
-	expect(Number(find("Snooze parent")[1])).toBe(row + 1);
-	s.keys("Escape");
+	expect(Number(findRight("Snooze parent")[1])).toBe(row + 1);
+	expect(
+		s
+			.screen()
+			.split("\n")
+			.map((line) => line.slice(0, 42))
+			.join("\n"),
+	).toContain("Snoozed");
+	// Exercise the client's Escape binding, not only a key injected into its pane.
+	s.tmux(s.servers.ui, "send-keys", "-K", "-c", s.tmux(s.servers.ui, "list-clients", "-F", "#{client_tty}"), "Escape");
 	await waitState(s, "Snooze canceled", (st) => st.mode === "roster");
+	s.swb("drive", "resize", "85x30");
+	await waitState(s, "narrow roster", (st) => st.layout.rosterOnly);
+	for (const [key, title] of [
+		["s", "Snooze parent"],
+		["m", "Group for parent"],
+		["a", "Archive parent"],
+	] as const) {
+		s.keys(key);
+		await onScreen(title, "the narrow form");
+		const screen = s.screen().split("\n");
+		const form = screen.findIndex((line) => line.includes(title));
+		const parentRow = screen.findIndex((line) => /[○●] parent/.test(line));
+		const childRow = screen.findIndex((line) => /[○●] child/.test(line));
+		expect(form).toBe(parentRow + 1);
+		expect(childRow).toBeGreaterThan(form + 2);
+		expect(screen.some((line) => line.includes("Snoozed"))).toBe(true);
+		s.keys("Escape");
+		await waitState(s, "form canceled", (st) => st.mode === "roster");
+	}
+});
+
+test("narrow details expand by key and click, scroll, follow the selection, and keep their actions", async () => {
+	s = scenario("phase6", "narrow-details");
+	const parent = await launched(s, "reply parent response", { cwd: s.project, title: "parent" });
+	const child = await launched(s, "reply descendant response", { from: parent, title: "child" });
+	s.swb("drive", "start", "--size", "85x30");
+	await waitState(s, "the Deck", (x) => x.ready && x.layout.rosterOnly);
+	await cursorTo(s, child);
+	await onScreen("i ▸ details", "collapsed details");
+	expect(s.screen().match(/child/g)).toHaveLength(1);
+	s.keys("i");
+	await onScreen("got descendant", "the last turn in expanded details");
+	expect(s.screen()).toContain("started by ↳ parent");
+	expect(s.screen()).toContain("created");
+	expect(s.screen()).toContain("a Archive");
+	await click("i ▾ details", 85);
+	await onScreen("i ▸ details", "collapsed by click");
+	expect(s.screen()).not.toContain("got descendant");
+	await click("i ▸ details", 85);
+	await onScreen("got descendant", "expanded by click");
+	s.swb("drive", "resize", "60x18");
+	await until(() => !s.screen().includes("a Archive") && s.screen().includes("PgUp/PgDn"), budgets.settle, "short details");
+	s.keys("NPage");
+	await onScreen("a Archive", "actions after scrolling details");
+	await click("m Group…", 60);
+	await onScreen("Group for child", "the details action targets its session");
+	s.keys("Escape", "PPage");
+	await onScreen("created", "details scrolled back");
+	s.swb("drive", "resize", "85x30");
+	await cursorTo(s, parent);
+	await onScreen("parent response", "details follow the cursor");
+	expect(s.screen()).not.toContain("got descendant");
+	s.keys("i", "/", "-l", "nothingmatches");
+	await onScreen("No matching sessions", "empty filter");
+	expect(s.screen()).toContain("Esc clear filter");
+	await click("Esc clear filter", 85);
+	await waitState(s, "filter cleared by its recovery action", (x) => x.filter === "");
+	expect(s.screen()).toContain("parent");
 });

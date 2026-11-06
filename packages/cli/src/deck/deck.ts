@@ -160,7 +160,7 @@ function uiConf(config: Config): string {
 		"set -g mouse on",
 		`bind -n Any if -F '#{mouse_pane}' { if -F '${POINTER_AWAY}' { ${LEAVE} } ; send-keys -M } { if -F '${KEY_AWAY}' { ${LEAVE} } ; send-keys }`,
 		// A card's own process hears Esc, but a harness starting on the Stage would take it as typeahead; the roster tags its pane.
-		`bind -n Escape { if -F '${KEY_AWAY}' { ${LEAVE} } ; if -F '#{@swb_starting}' { ${deckCmd("esc")} } { send-keys } }`,
+		`bind -n Escape { if -F '${KEY_AWAY}' { ${LEAVE} } ; if -F '#{@swb_starting}' { ${deckCmd("esc")} } { send-keys Escape } }`,
 		// tmux's own defaults, but for overlays; a right click on a pane that takes no mouse no longer opens tmux's menu.
 		overlayAware("MouseDown1Pane", "select-pane -t= ; send-keys -M"),
 		overlayAware(

@@ -226,7 +226,7 @@ test("[ and ] step back and forward through the sessions I visited, from the ros
 	);
 	expect(state(s).cursor).toBe(b);
 	const screen = s.screen().split("\n");
-	const legendY = screen.findLastIndex((line) => line.includes("[ ]"));
+	const legendY = screen.findLastIndex((line) => line.includes("] forward"));
 	s.save("history-legend.txt", screen[legendY] as string);
 	s.swb("drive", "click", String((screen[legendY] as string).indexOf("]")), String(legendY));
 	await waitState(s, "the legend's › forward to c", (x) => x.staged.id === c && x.cursor === c);

@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import type { FSWatcher } from "node:fs";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text, wrapTextWithAnsi } from "@earendil-works/pi-tui";
@@ -108,7 +109,7 @@ export default function (pi: ExtensionAPI) {
 	const failureText = () => {
 		const mismatch = proc.failure?.match(/db schema is v(\d+), this line writes v(\d+)/);
 		return mismatch
-			? `\x1b[2mdb v${mismatch[1]} → v${mismatch[2]}\x1b[22m · update swb + pi; click roster, \x1b[1mR reload\x1b[22m`
+			? `\x1b[2mdb v${mismatch[1]} → v${mismatch[2]}\x1b[22m · update swb + pi; roster: \x1b[1mR\x1b[22m reload`
 			: proc.failure;
 	};
 	const showFailure = () => ui?.setStatus("swb", `\x1b[1;31mswb: not recording\x1b[22;39m · ${failureText()} · transcript saved`);
@@ -367,12 +368,18 @@ export default function (pi: ExtensionAPI) {
 						return new Text(options.expanded ? `${heading}\n${output}` : heading, 0, 0);
 					}
 					if (name === "session_list") {
-						const { sessions } = result.details as { sessions: { id: string; title: string | null }[] };
-						context.state.receipt = !options.expanded;
+						const { sessions } = result.details as {
+							sessions: { id: string; title: string | null; harness: string; state: string; cwd: string; group: string | null }[];
+						};
+						context.state.receipt = true;
+						const heading = `${theme.bold("Sessions")} · ${sessions.length} found`;
+						const entries = sessions.map((s) => {
+							const home = homedir();
+							const cwd = s.cwd === home || s.cwd.startsWith(`${home}/`) ? `~${s.cwd.slice(home.length)}` : s.cwd;
+							return `${theme.bold(s.title ?? s.id.slice(0, 8))}\n  ${s.harness} · ${s.state} · ${theme.fg("dim", s.id)}\n  ${cwd}${s.group ? ` · Group ${s.group}` : ""}`;
+						});
 						return new Text(
-							options.expanded
-								? output
-								: `${theme.bold("Sessions")} · ${sessions.length} found · ${context.keyHint("app.tools.expand", "details")}`,
+							options.expanded ? [heading, ...entries].join("\n") : `${heading} · ${context.keyHint("app.tools.expand", "details")}`,
 							0,
 							0,
 						);

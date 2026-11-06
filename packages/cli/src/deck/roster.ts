@@ -108,7 +108,6 @@ import {
 	blockedMark,
 	blue,
 	bold,
-	breathe,
 	cyan,
 	dim,
 	gray,
@@ -121,20 +120,20 @@ import {
 	wakeAt,
 } from "./style.ts";
 
-function glyph(state: State, now: number, selected = false): string {
+function glyph(state: State, now: number): string {
 	switch (state) {
 		case "loading":
 			return cyan(spinnerFrame(now));
 		case "blocked":
 			return blockedMark("◆");
 		case "working":
-			return selected ? "◐" : model.breath ? breathe(model.breath.faint, model.breath.strong, now, "◐") : cyan("◐");
+			return bold(cyan("◐"));
 		case "unseen":
 			return green("●");
 		case "idle":
 			return "○";
 		case "dormant":
-			return "◌";
+			return dim("◌");
 		case "cut-off":
 			return bold(red("!"));
 		case "errored":
@@ -173,6 +172,10 @@ function cardStream(): Response {
 const ARCHIVE_SCHEDULES = 3;
 
 class Roster implements Component, Focusable {
+	get capturesViewportInput(): boolean {
+		return panes.narrow && model.details.expanded && model.mode.kind === "roster";
+	}
+
 	/**
 	 * pi-tui's focus is always the roster's; it passes it on to the inputs, so the one showing places the terminal's
 	 * cursor rather than drawing one of its own, and tmux shows that cursor only while the roster's pane is active.
@@ -213,23 +216,45 @@ class Roster implements Component, Focusable {
 		const rows = rosterRows();
 		const index = cursorIndex(rows);
 		frame.targets = [];
-		// A wide Deck's Peek says what the session is; the narrow one's roster has no Stage beside it to show one.
-		const detailLines = panes.narrow ? detailRows(width, now, 0).length : 1;
+		frame.promptGap = null;
+		frame.details = null;
+		const prompt = promptOverlay(width, height)[0];
+		const reserved = prompt?.x === 0 ? prompt.view.lines.length : 0;
+		const detail = detailView(rows[index], width, Math.max(1, height - reserved - 8));
 		const tag = filterTag(width);
 		frame.listTop = tag === null ? 0 : 1;
-		const bodyHeight = Math.max(1, height - frame.listTop - 3 - detailLines);
-		const detail = detailRows(width, now, height - detailLines - 2);
+		const detailLines = 1 + (detail?.lines.length ?? 0);
+		const bodyHeight = Math.max(1, height - frame.listTop - 3 - detailLines - reserved);
 		const lines = tag === null ? [] : [tag];
+		const beforeScroll = frame.scrollTop;
 		lines.push(...list(rows, index, width, bodyHeight, now));
+		if (prompt && reserved) {
+			prompt.y = Math.max(frame.listTop, Math.min(frame.listTop + frame.listHeight, prompt.y + beforeScroll - frame.scrollTop));
+			frame.promptGap = { at: prompt.y, rows: reserved };
+			for (const target of frame.targets) if (target.y >= prompt.y) target.y += reserved;
+			lines.splice(prompt.y, 0, ...Array<string>(reserved).fill(""));
+		}
+		const detailTop = height - detailLines - 2;
+		const tabs = detailRows(width, detailTop, detail !== null);
+		if (detail) {
+			const y = detailTop + 1;
+			frame.details = { y, height: detail.lines.length, total: detail.total };
+			for (const b of detail.buttons) {
+				frame.targets.push({ y: y + b.y, from: b.from, to: b.to, command: b.command });
+				const p = model.pointer;
+				if (p?.y === y + b.y && p.x >= b.from && p.x < b.to) detail.lines[b.y] = b.hot;
+			}
+		}
 		lines.push(
 			overflowRule(rows.slice(frame.scrollTop + frame.listHeight), "▼", width),
-			...detail,
+			...tabs,
+			...(detail?.lines ?? []),
 			messageLine(now, height - 2),
 			hints(height - 1, width),
 		);
 		place(
 			lines,
-			[...peekOverlays(rows, width, height), ...promptOverlay(width, height), ...toastOverlay(now, width, height - 2)],
+			[...peekOverlays(rows, width, height), ...(prompt ? [prompt] : []), ...toastOverlay(now, width, height - 2)],
 			width,
 			peekSpot(rows, index),
 		);
@@ -334,14 +359,19 @@ function promptTitle(title: string, width: number): string {
 function promptOverlay(width: number, height: number): Overlay[] {
 	const mode = model.mode;
 	if (mode.kind !== "archive" && mode.kind !== "name" && mode.kind !== "snooze") return [];
+	const rosterWidth = width;
+	const insert = panes.narrow || mode.kind === "name";
+	width = insert ? width : Math.min(Math.max(width, PEEK_COLS), panes.width - rosterWidth - 1);
 	const parts = pickerParts(width, height - 2);
 	const lines = [...parts.map(([line]) => truncateToWidth(line, width, "…", true)), gray("─".repeat(width))];
 	const buttons: OverlayButton[] = parts.flatMap(([line, command], y) =>
 		command ? [{ y, from: 0, to: width, command, hot: cursorLine(truncateToWidth(line, width, "…", true), true) }] : [],
 	);
 	buttons.push({ y: 0, from: width - 3, to: width, command: { kind: "cancel" }, hot: lines[0] as string });
-	const x = Math.max(0, Math.min(mode.at.x, panes.width - width));
-	const y = Math.max(0, Math.min(mode.at.y + lines.length <= height ? mode.at.y : mode.at.y - lines.length, height - lines.length));
+	const x = insert ? 0 : Math.max(rosterWidth + 1, Math.min(mode.at.x, panes.width - width));
+	const y = insert
+		? frame.listTop + rosterRows().findIndex((r) => r.key === mode.at.row) - frame.scrollTop + 1
+		: Math.max(0, Math.min(mode.at.y + lines.length <= height ? mode.at.y : mode.at.y - lines.length, height - lines.length));
 	return [{ id: "prompt", about: mode.kind, x, y, width, view: { lines, buttons }, leaves: false, hovers: null }];
 }
 
@@ -371,7 +401,7 @@ function renderPicker(width: number, height: number): string[] {
 		? `${prompt}${model.path.render(Math.max(10, width - 2 - visibleWidth(prompt)))[0] ?? ""}`
 		: (model.search.render(Math.max(10, width - 2))[0] ?? "");
 	// The launch card goes on the Stage; with no room there, as on a narrow Deck, the roster draws it under its title.
-	const card = launchOnStage(width) ? null : launchCard(choosing, width, "right");
+	const card = launchOnStage(width) ? null : launchCard(choosing, Math.min(LAUNCH_COLS, width), "right");
 	for (const b of card?.buttons ?? []) frame.targets.push({ y: 1 + b.y, from: b.from, to: b.to, command: b.command });
 	frame.card = card ? card.lines.map((line) => Bun.stripANSI(line)) : null;
 	// While the menu is open, the rest of the picker waits behind it.
@@ -465,17 +495,20 @@ function list(rows: Row[], index: number, width: number, full: number, now: numb
 			continue;
 		}
 		const y = frame.listTop + out.length;
-		const line = truncateToWidth(rowLine(row, width, now, i === index || row.key === model.hover), width, "…", true);
+		const line = truncateToWidth(rowLine(row, width, now), width, "…", true);
 		if (dragging()?.drop?.header.key === row.key) out.push(cursorLine(line, true));
 		else if (i === index) out.push(cursorLine(line, model.focus === "roster"));
-		else out.push(row.key === model.hover ? hoverLine(line) : line);
+		else out.push(line);
 		if (row.kind === "session" && row.family.length > 0) {
 			const at = foldColumn(row);
 			frame.targets.push({ y, from: at - 1, to: at + 1, command: { kind: "fold", id: row.key } });
 		}
 	}
 	out.length = height;
-	if (rows.length === 0) out[0] = dim(model.snapshot ? (query() ? "   no matches" : "   no sessions yet · n new") : "   loading…");
+	if (rows.length === 0) {
+		out[0] = model.snapshot ? (query() ? "   No matching sessions" : "   no sessions yet · n new") : dim("   loading…");
+		if (query() && height > 1) out[1] = clickable(frame.listTop + 1, [[`   ${bold("Esc")} clear filter`, { kind: "clearFilter" }]]);
+	}
 	return [...pinned, ...out];
 }
 
@@ -526,13 +559,24 @@ function clickable(y: number, parts: Part[]): string {
 	return line;
 }
 
-/** The Stage's bar: its views and the shell toggle. A narrow Deck, which has no Peek, also states the session and its place. */
-function detailRows(width: number, now: number, top: number): string[] {
+/** Narrow details reuse the Peek, with scrolling when a short terminal cannot show it all. */
+function detailView(row: Row | undefined, width: number, height: number): (OverlayView & { total: number }) | null {
+	if (!panes.narrow || !model.details.expanded || row?.kind !== "session" || model.mode.kind !== "roster") return null;
+	const view = peekView(row, width, Infinity, "right");
+	const top = Math.min(model.details.top, Math.max(0, view.lines.length - height));
+	return {
+		total: view.lines.length,
+		lines: view.lines.slice(top, top + height),
+		buttons: view.buttons.filter((b) => b.y >= top && b.y < top + height).map((b) => ({ ...b, y: b.y - top })),
+	};
+}
+
+/** The Stage's views and, without a Stage beside it, a disclosure for the selected session. */
+function detailRows(width: number, top: number, expanded: boolean): string[] {
 	const e = cursorEntry() ?? (model.stage.staged === null ? null : (model.entries.get(model.stage.staged) ?? null));
-	if (!e) return panes.narrow ? ["", "", ""] : [""];
-	let tabs = "";
+	if (!e) return [""];
+	const parts: Part[] = [[" ", null]];
 	if (model.stage.staged === e.id && e.open) {
-		const parts: Part[] = [[" ", null]];
 		for (const view of VIEWS) {
 			// The first view is the session's own TUI, whichever harness that is.
 			const label = ` ${view === "agent" ? e.harness : view} `;
@@ -540,10 +584,14 @@ function detailRows(width: number, now: number, top: number): string[] {
 		}
 		// The shell is a toggle beside the views, not one of them.
 		if (!panes.narrow) parts.push([gray(" · "), null], [panes.applied.shell ? cursorLine(" shell ", true) : " shell ", { kind: "shell" }]);
-		tabs = clickable(panes.narrow ? top + 2 : top, parts);
 	}
-	if (!panes.narrow) return [truncateToWidth(tabs, width, "…")];
-	return [` ${bold(displayName(e))}`, ` ${status(e)}${launchElapsed(e, now)}`, tabs].map((line) => truncateToWidth(line, width, "…"));
+	if (panes.narrow && cursorEntry())
+		parts.push(
+			["  ", null],
+			[`${bold("i")} ${expanded ? "▾" : "▸"} details`, { kind: "details" }],
+			...(expanded ? ([[gray(" · PgUp/PgDn scroll"), null]] as Part[]) : []),
+		);
+	return [truncateToWidth(clickable(top, parts), width, "…")];
 }
 
 /** A toast, else the config error, which stays until the file is fixed and opens it on a click; y makes it clickable. */
@@ -583,10 +631,11 @@ function hints(y: number, cols: number): string {
 		if (!drag.drop) return ` ${red("✗ not here")}`;
 		return drag.drop.name === null ? ` ⇢ out of its Group` : ` ⇢ into ${bold(drag.drop.name)}`;
 	}
-	// `[` and `]` as buttons, at the legend's right end, gray while there's nowhere to go.
-	const arrow = (glyph: string, step: -1 | 1): Part =>
-		historyStep(step) === -1 ? [gray(glyph), null] : [bold(glyph), { kind: "history", step }];
-	const arrows: Part[] = model.mode.kind === "roster" ? [arrow("[", -1), [" ", null], arrow("]", 1)] : [];
+	const arrows: Part[] = [];
+	if (model.mode.kind === "roster") {
+		if (historyStep(-1) !== -1) arrows.push([`${bold("[")} ${dim("back")} `, { kind: "history", step: -1 }]);
+		if (historyStep(1) !== -1) arrows.push([`${bold("]")} ${dim("forward")}`, { kind: "history", step: 1 }]);
+	}
 	return legend(y, model.focus === "stage" ? stageKeys() : keymap(), cols, arrows);
 }
 
@@ -645,7 +694,7 @@ function overlayConfirm(
 	}
 }
 
-function rowLine(row: Row, width: number, now: number, selected: boolean): string {
+function rowLine(row: Row, width: number, now: number): string {
 	if (row.kind === "header") {
 		const count = gray(` (${row.count})`);
 		const name = row.group === null ? projectName(row.project) : row.group;
@@ -679,9 +728,13 @@ function rowLine(row: Row, width: number, now: number, selected: boolean): strin
 	const hidden = row.folded ? ` ${foldedTally(row.family.map((p) => p.entry))}` : "";
 	const titleWidth = width - visibleWidth(lead) - 2 - visibleWidth(hidden) - visibleWidth(right);
 	const state = stateOf(e);
-	const paint = ["blocked", "unseen", "cut-off", "errored"].includes(state) ? bold : e.provisional ? gray : (s: string) => s;
+	const paint = ["blocked", "unseen", "cut-off", "errored"].includes(state)
+		? bold
+		: e.provisional || state === "dormant"
+			? gray
+			: (s: string) => s;
 	const title = truncateToWidth(paint(displayName(e)), titleWidth, "…", true);
-	return `${lead}${glyph(state, now, selected)} ${title}${hidden}${right}`;
+	return `${lead}${glyph(state, now)} ${title}${hidden}${state === "dormant" ? dim(right) : right}`;
 }
 
 /**
@@ -852,7 +905,7 @@ function presetNote(note: string, width: number): string[] {
  * the menu. On the Stage it opens to the left, onto the roster's border; in a narrow Deck's roster, to the right.
  */
 function launchCard(choosing: Choosing, width: number, open: "left" | "right"): OverlayView {
-	const inner = width - 3;
+	const inner = width - (open === "right" ? 4 : 3);
 	const presets = pickerPresets();
 	const chosen = presets[chosenPreset(choosing)];
 	const menu = choosing.menu;
@@ -870,16 +923,19 @@ function launchCard(choosing: Choosing, width: number, open: "left" | "right"): 
 	}
 	const arrow = presets.length === 0 ? " " : menu ? "▴" : "▾";
 	const field = `${truncateToWidth(value, inner - 2, "…", true)} ${gray(arrow)}`;
-	const frame = peekFrame(open, inner);
-	const edge = `${gray("─")} starts ${gray("─".repeat(Math.max(0, width - 10)))}`;
+	const frame =
+		open === "left"
+			? peekFrame(open, inner)
+			: (content: string) => `${gray("│")} ${truncateToWidth(content, inner, "…", true)} ${gray("│")}`;
+	const edge = `${gray("─")} starts ${gray("─".repeat(Math.max(0, width - (open === "right" ? 11 : 10))))}`;
 	const lines = [
-		open === "left" ? `${edge}${gray("╮")}` : `${gray("╭")}${edge}`,
+		open === "left" ? `${edge}${gray("╮")}` : `${gray("╭")}${edge}${gray("╮")}`,
 		frame(field),
 		...(menu
 			? []
 			: [
 					...presetNote(chosen?.note ?? "", inner).map(frame),
-					gray(open === "left" ? `${"─".repeat(width - 1)}╯` : `╰${"─".repeat(width - 1)}`),
+					gray(open === "left" ? `${"─".repeat(width - 1)}╯` : `╰${"─".repeat(width - 2)}╯`),
 				]),
 	];
 	const margin = open === "left" ? 1 : 2;
@@ -943,13 +999,11 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	const head: string[] = [];
 	const title = wrapTextWithAnsi(displayName(e), inner);
 	const titleLines = title.length > 2 ? [title[0] as string, truncateToWidth(title.slice(1).join(" "), inner, "…")] : title;
-	if (!Bun.stripANSI(rowLine(row, panes.rosterWidth(), now, false)).includes(displayName(e)))
+	if (!Bun.stripANSI(rowLine(row, panes.narrow ? width : panes.rosterWidth(), now)).includes(displayName(e)))
 		head.push(...titleLines.map((line) => bold(line)));
 	head.push(...wrapTextWithAnsi(`${glyph(stateOf(e), now)} ${status(e)}${launchElapsed(e, now)}`, inner));
 	head.push(
-		gray(
-			`created ${ago(e.createdAt, now)} · ${e.open ? `active ${e.activity !== "idle" ? "now" : ago(e.activityAt, now)}` : `archived ${ago(archivedKey(e), now)}`}`,
-		),
+		`${gray("created")} ${ago(e.createdAt, now)} · ${e.open ? `${gray("active")} ${e.activity !== "idle" ? "now" : ago(e.activityAt, now)}` : `${gray("archived")} ${ago(archivedKey(e), now)}`}`,
 	);
 	head.push(rule, tailOf(`${e.harness} · ${shortPath(e.cwd)}`, inner));
 	const info = model.peek.info.get(e.id)?.info;
@@ -999,7 +1053,10 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	}
 	const turn: string[] = [];
 	if (info?.error) turn.push(rule, ...wrapTextWithAnsi(red(`✗ ${info.error}`), inner).slice(0, 3));
-	else if (info?.last && !(panes.applied.id === e.id && panes.applied.view !== "editor" && panes.applied.shell?.at !== "replace")) {
+	else if (
+		info?.last &&
+		(panes.narrow || !(panes.applied.id === e.id && panes.applied.view !== "editor" && panes.applied.shell?.at !== "replace"))
+	) {
 		const label = `${(info.last.who === "you" ? "you" : e.harness).padEnd(Math.max(3, e.harness.length))} `;
 		const pad = visibleWidth(label);
 		const text = wrapTextWithAnsi(info.last.text.replace(/\s+/g, " ").trim(), inner - pad);

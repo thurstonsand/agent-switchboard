@@ -22,14 +22,14 @@ Sleep 1.5s
 Type "/Tidy the parser" Sleep 300ms Enter
 Sleep 300ms
 Escape
-Wait+Screen /stopped · .*open session/
+Wait+Screen /stopped · .*wake & focus/
 Sleep 1.2s
 Screenshot ../artifacts/phase6/videos/turn-endings-stopped.png
 Sleep 1.5s
 Type "/Bump the API" Sleep 300ms Enter
 Sleep 300ms
 Escape
-Wait+Screen /errored · .*open session/
+Wait+Screen /errored · .*wake & focus/
 Sleep 1.2s
 Screenshot ../artifacts/phase6/videos/turn-endings-errored.png
 Sleep 1s

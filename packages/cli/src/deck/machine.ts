@@ -60,7 +60,7 @@ import {
 import type { Card, Entry, FromWorker, PeekInfo, ShellAt, Snapshot, State, StatSummary, ToWorker, Transcript } from "./protocol.ts";
 import { SettingsPane } from "./settings.ts";
 import { type Applied, StagePanes } from "./stage.ts";
-import { attention, bold, cyan, dimColors, gray, green, hex, keyName, lerp, mix, red, sgrBg, shortPath } from "./style.ts";
+import { attention, bold, cyan, dimColors, gray, green, hex, keyName, mix, red, sgrBg, shortPath } from "./style.ts";
 
 const VISIT_MS = 1000;
 
@@ -113,7 +113,6 @@ const m: Model = {
 	hereRoot: "",
 	continueTo: null,
 	cursorBg: null,
-	breath: null,
 	colors: { background: null, scheme: null },
 	dirTrees: null,
 	peek: {
@@ -127,6 +126,7 @@ const m: Model = {
 		info: new Map(),
 		asked: new Set(),
 	},
+	details: { expanded: false, top: 0, id: null },
 	focusMoves: 0,
 	profile: null,
 	selectedKey: "",
@@ -290,7 +290,7 @@ function phaseStatus(e: Entry): string {
 		case "dormant":
 			return m.transcripts.get(e.id)?.transcript?.ending?.kind === "stopped" ? "dormant · stopped" : "dormant";
 		case "cut-off":
-			return `${red("cut off")}${gray(` · ${CAUSES[e.cutOff as CutOff]} · waking continues it`)}`;
+			return `${red("cut off")}${gray(` · ${CAUSES[e.cutOff as CutOff]}`)}`;
 		case "errored":
 			return e.live ? red("errored") : `${red("errored")}${gray(" · dormant")}`;
 		case "archived":
@@ -392,7 +392,7 @@ function syncTitle(): void {
 
 /** Where a conversation stopped short of a reply. Why it was cut off is its status's to say, not this. */
 function ending(e: Entry, read: Transcript | null): string | null {
-	const wake = e.open && m.mode.kind === "roster" ? ` · ${bold("⏎")} ${e.cutOff ? "resume unfinished turn" : "open session"}` : "";
+	const wake = e.open && m.mode.kind === "roster" ? ` · ${bold("⏎")} ${e.cutOff ? "resume unfinished turn" : "wake & focus"}` : "";
 	if (e.cutOff) return `${bold(red("cut off"))}${wake}`;
 	if (read?.ending?.kind === "stopped") return `◌ dormant · stopped${wake}`;
 	if (read?.ending?.kind === "error") return `${bold(red("errored"))}${wake}`;
@@ -412,7 +412,7 @@ function card(e: Entry, lines: string[] = []): Card {
 		turns: transcript ? (read?.turns.slice(-process.stdout.rows) ?? []) : null,
 		// An error's own words hang beneath the turn it ended, like the calls before it.
 		tail: end ? [...(read?.tail ?? []), ...(read?.ending?.kind === "error" ? [read.ending.message] : [])].slice(-process.stdout.rows) : [],
-		ending: end,
+		ending: m.peek.settled?.id === e.id ? null : end,
 		agent: e.harness,
 	};
 }
@@ -571,6 +571,12 @@ function afterCommit(effect: () => void): void {
 export function commit(): void {
 	if (dispatching) throw new Error("a Deck commit inside a change");
 	normalize();
+	const detailId = cursorEntry()?.id ?? null;
+	if (detailId !== m.details.id) {
+		m.details.id = detailId;
+		m.details.top = 0;
+	}
+	if (panes.narrow && m.details.expanded && detailId) askPeekInfo(detailId);
 	apply();
 	// A key's time goes only to the switch its own commit makes.
 	panes.keyAt = 0;
@@ -1112,6 +1118,8 @@ export const frame: Frame = {
 	frameQueued: false,
 	listTop: 0,
 	listHeight: 0,
+	promptGap: null,
+	details: null,
 	targets: [],
 	keyAt: 0,
 };
@@ -1457,6 +1465,7 @@ function run(c: Command): void {
 			enter({ kind: "filter" });
 			break;
 		case "clearFilter":
+			if (filtering()) leave();
 			m.filter.setValue("");
 			break;
 		case "addDir":
@@ -1478,6 +1487,13 @@ function run(c: Command): void {
 		}
 		case "shell":
 			toggleShell();
+			break;
+		case "details":
+			m.details.expanded = !m.details.expanded;
+			m.details.top = 0;
+			break;
+		case "detailScroll":
+			if (frame.details) m.details.top = Math.max(0, Math.min(frame.details.total - frame.details.height, m.details.top + c.by));
 			break;
 		case "roster":
 			if (c.to === "hide") {
@@ -1739,7 +1755,7 @@ function mouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
 		return { handled: true, render: true };
 	}
 	if (event.type === "wheel") {
-		run({ kind: "step", by: Math.sign(event.wheelDelta ?? 0) });
+		run({ kind: frame.details && event.y >= frame.details.y ? "detailScroll" : "step", by: Math.sign(event.wheelDelta ?? 0) });
 		return { handled: true };
 	}
 	if (event.button !== "left") return undefined;
@@ -1771,7 +1787,7 @@ function mouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
 	}
 	const row = rowAt(event.y);
 	if (!row) return undefined;
-	run({ kind: "select", key: row.key, index: frame.scrollTop + (event.y - frame.listTop) });
+	run({ kind: "select", key: row.key, index: rosterRows().findIndex((r) => r.key === row.key) });
 	return { handled: true };
 }
 
@@ -1806,6 +1822,10 @@ export function peekSpot(rows: Row[], index: number): PeekSpot | null {
 }
 
 function rowAt(y: number): Row | undefined {
+	if (frame.promptGap && y >= frame.promptGap.at) {
+		if (y < frame.promptGap.at + frame.promptGap.rows) return undefined;
+		y -= frame.promptGap.rows;
+	}
 	if (y < frame.listTop || y >= frame.listTop + frame.listHeight) return undefined;
 	return rosterRows()[frame.scrollTop + (y - frame.listTop)];
 }
@@ -1902,8 +1922,11 @@ function stopRow(row = selected()): void {
 	else post({ type: "stop", req: nextReq(), id: e.id });
 }
 
-function promptAnchor(row: Row): { x: number; y: number } {
-	return m.pointer ?? { x: 0, y: frame.listTop + rosterRows().findIndex((r) => r.key === row.key) - frame.scrollTop + 1 };
+function promptAnchor(row: Row): { x: number; y: number; row: string } {
+	return {
+		...(m.pointer ?? { x: 0, y: frame.listTop + rosterRows().findIndex((r) => r.key === row.key) - frame.scrollTop + 1 }),
+		row: row.key,
+	};
 }
 
 /**
@@ -2650,6 +2673,17 @@ function rosterKeys(row: Row | undefined): Binding<Command>[] {
 		bind(["n"], "n", newLabel, onRow("new")),
 		bind(["?"], "?", "keys", { kind: "help" }),
 		bind([","], ",", "settings", { kind: "settings" }),
+		...(panes.narrow && session
+			? [
+					bind(["i"], "i", null, { kind: "details" }),
+					...(m.details.expanded
+						? [
+								bind(["pageDown"], "PgDn", null, { kind: "detailScroll", by: frame.details?.height ?? 1 }),
+								bind(["pageUp"], "PgUp", null, { kind: "detailScroll", by: -(frame.details?.height ?? 1) }),
+							]
+						: []),
+				]
+			: []),
 		bind(["down", "j"], "j", null, step(1)),
 		bind(["up", "k"], "k", null, step(-1)),
 		bind(["g"], "g", null, step(Number.NEGATIVE_INFINITY)),
@@ -2764,7 +2798,7 @@ export function peekButtons(row: Row): [label: string, key: string, act: RowAct]
 		: e.cutOff
 			? "Resume unfinished turn"
 			: !e.live
-				? "Open session"
+				? "Wake & focus"
 				: e.errored
 					? "Inspect and retry"
 					: e.activity === "blocked"
@@ -2773,7 +2807,7 @@ export function peekButtons(row: Row): [label: string, key: string, act: RowAct]
 	const items: [string, string, RowAct][] = [[primary, "⏎", "focus"]];
 	if (!e.open) items.push(["Unarchive", "a", "archive"]);
 	else {
-		items.push(e.live ? ["Stop", "x", "stop"] : ["Wake", "w", "wake"]);
+		items.push(e.live ? ["Stop", "x", "stop"] : ["Wake in background", "w", "wake"]);
 		if (!e.provisional && !e.snoozed) items.push(e.markedUnseen ? ["Unmark Unseen", "u", "unseen"] : ["Mark Unseen", "u", "unseen"]);
 		if (!e.provisional) items.push(e.snoozed ? ["Unsnooze", "s", "snooze"] : ["Snooze…", "s", "snooze"], ["Archive", "a", "archive"]);
 		if (!e.operator) items.push(["Group…", "m", "group"]);
@@ -3141,9 +3175,6 @@ function takeColors({ foreground, background, palette }: TerminalColors, scheme:
 					hover: mix(48, background, foreground, light ? 0.12 : 0.06),
 				}
 			: null;
-	const themeCyan = palette?.[6];
-	m.breath =
-		background && foreground && themeCyan ? { faint: lerp(background, themeCyan, 0.6), strong: lerp(themeCyan, foreground, 0.3) } : null;
 	m.colors = { background: background ? hex(background as RgbColor) : null, scheme: scheme ?? m.colors.scheme };
 	if (background && foreground) {
 		// Before the terminal's first report, its scheme is guessed from the background, as tmux does.
@@ -3250,6 +3281,7 @@ export function onFrame(spot: PeekSpot | null, leaves: boolean): boolean {
 		const settled = spotKey(m.peek.settled);
 		syncPeek(wantPeek(spot));
 		syncWatch(m.pointer !== null || m.peek.spot !== null || leaves);
+		if (spotKey(m.peek.settled) !== settled) setStageCard(desired());
 		return spotKey(m.peek.settled) !== settled;
 	});
 }

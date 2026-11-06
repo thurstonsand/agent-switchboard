@@ -8,7 +8,7 @@ const CLOSES = "any key or click closes";
 function lines(prefix: string, columns = Infinity): string[] {
 	prefix = keyName(prefix);
 	const row = (k: string, label: string) => `  ${bold(k.padEnd(17))} ${label}`;
-	const left = [
+	const move = [
 		bold("  Move"),
 		row("j k ↑ ↓", "Move"),
 		row("g G", "First / last"),
@@ -16,35 +16,37 @@ function lines(prefix: string, columns = Infinity): string[] {
 		row("l →", "Focus session / expand"),
 		row("h ←", "Fold family / collapse header"),
 		row("space", "Toggle header or family fold"),
-		"",
+	];
+	const relationships = [
 		bold("  Find & relationships"),
 		row("p", "Session that started this one"),
 		row("[ ]", "Back / forward through Visits"),
 		row("/", "Filter; esc clears"),
 		row("hover", "Peek; its actions use these keys"),
+		row("i", "Expand / collapse narrow details"),
+		row("PgUp PgDn", "Scroll expanded details"),
 		row("drag", "Move into Group / onto Project"),
-		"",
+	];
+	const lifecycle = [
 		bold("  Session lifecycle"),
-		row("w / x", "Wake / stop; session stays open"),
+		row("w / x", "Wake in background / stop"),
 		row("R", "Reload agent on fresh config"),
 		row("n / N", "New in known / added directory"),
 		row("⇥", "Choose preset in directory picker"),
 		row("a", "Archive family or session / unarchive"),
-		"",
-		bold("  Organize"),
-		row("s", "Snooze / unsnooze"),
-		row("u", "Mark / unmark Unseen"),
-		row("m", "Pick or rename Group"),
-		"",
+	];
+	const organize = [bold("  Organize"), row("s", "Snooze / unsnooze"), row("u", "Mark / unmark Unseen"), row("m", "Pick or rename Group")];
+	const settings = [
 		bold("  Copy & settings"),
 		row("y / Y", "Copy swb open <id> / @session:<id>"),
 		row(",", "Settings"),
 		row("q", "Close Deck; sessions keep running"),
 	];
+	const left = [...move, "", ...relationships, "", ...lifecycle, "", ...organize, "", ...settings];
 	const states = [
 		bold("  State marks"),
-		"  ○ idle                 ◌ dormant (not running)",
-		`  ${cyan("◐")} working              ${green("●")} Unseen (finished since Visit)`,
+		`  ○ idle                 ${dim("◌ dormant (not running)")}`,
+		`  ${bold(cyan("◐"))} working              ${green("●")} Unseen (finished since Visit)`,
 		`  ${blockedMark("◆")} blocked              ${bold(red("!"))} cut off · resume unfinished turn`,
 		`  ✓ archived             ${bold(red("×"))} errored · inspect and retry`,
 		`  ${dim("⎇")} worktree`,
@@ -76,7 +78,8 @@ function lines(prefix: string, columns = Infinity): string[] {
 		row(`${prefix} ${prefix}`, `Send literal ${prefix}`),
 	];
 	const width = Math.max(...left.map(visibleWidth)) + 4;
-	if (width + Math.max(...right.map(visibleWidth)) > columns) return ["", ...states, "", ...left, ...right.slice(states.length)];
+	if (width + Math.max(...right.map(visibleWidth)) > columns)
+		return ["", ...move, "", ...lifecycle, "", ...organize, "", ...settings, "", ...relationships, "", ...right];
 	return ["", ...left.map((line, i) => `${line}${" ".repeat(width - visibleWidth(line))}${right[i] ?? ""}`)];
 }
 
