@@ -981,6 +981,11 @@ export const directors: Record<string, Director> = {
 			await Bun.sleep(3500);
 			s.swb("drive", "theme", "light");
 			await waitDeck(s, "light again", (x) => x.colors.background === "#f9f5d7");
+			await Bun.sleep(4000);
+			// Solarized Light, still light, with the report Ghostty sends on any palette change.
+			for (const option of ["window-style", "window-active-style"]) s.tmux(s.servers.drive, "set", "-g", option, "bg=#fdf6e3,fg=#657b83");
+			s.tmux(s.servers.drive, "send-keys", "-t", "=drive:", "-H", ...[...Buffer.from("\x1b[?997;2n")].map((b) => b.toString(16)));
+			await waitDeck(s, "another light", (x) => x.colors.background === "#fdf6e3");
 		},
 	},
 

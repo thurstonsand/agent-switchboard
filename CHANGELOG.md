@@ -19,6 +19,7 @@ Schema v11: update swb and the pi line together.
 - Renaming a Codex session whose app-server went away just then fails instead of waiting forever.
 - A harness whose model listing fails keeps the list it found last, beside the error. The shortlist lost which efforts each model takes, and the add search offered none of its models.
 - A lock left by a swb that died before a reboot no longer holds up the next swb for three minutes, and two swbs can no longer both take over a lock whose holder died.
+- The Deck, and every session it hosts, follows a switch between two light themes, or two dark ones, in a terminal that reports every theme change, as Ghostty does. They kept the old theme's colors until the terminal next flipped between light and dark.
 - An invalid config.toml no longer stops swb's clock. It exited the first time a dormant session had a message waiting, and no schedule fired again; it now says why in its pane and wakes the session once the file is fixed.
 
 ## [0.12.0] - 2026-11-05

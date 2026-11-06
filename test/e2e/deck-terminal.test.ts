@@ -116,7 +116,7 @@ test("a pi follows theme changes even in copy mode, and dims only on the Deck wh
 	await waitState(s, "the roster shown and focused", (x) => !x.layout.rosterHidden && x.focus === "roster");
 	await until(() => renderedMessageBg() === "186;194;194", budgets.settle, "15% dimming survives hiding and showing the roster");
 });
-test("a pi woken with w and never viewed reports the terminal's background and palette, and re-themes while still unviewed", async () => {
+test("a pi woken with w and never viewed reports the terminal's background and palette, and re-themes while still unviewed, even between two dark themes", async () => {
 	s = scenario("phase2", "unviewed-theme");
 	const [a, b] = (await seed(s, { turns: ["a"] }, { turns: ["b"] })) as [string, string];
 	s.swb("drive", "start");
@@ -135,6 +135,15 @@ test("a pi woken with w and never viewed reports the terminal's background and p
 	await waitState(s, "the roster's dark background", (x) => x.colors.background === "#1d2021");
 	await until(async () => (await piColor(host, "11")) === DARK_BG, budgets.settle, "the unviewed pi's dark background");
 	await until(async () => (await piColor(host, "4;9")) === DARK_RED, budgets.settle, "the unviewed pi's dark palette");
+
+	// Solarized Dark, with the report Ghostty sends on any palette change. The drive server, being tmux, sends none
+	// while the scheme stays dark, and swb's UI server would pass this one on to no pane either.
+	s.tmux(s.servers.drive, "set", "-g", "pane-colours[9]", "#cb4b16");
+	for (const option of ["window-style", "window-active-style"]) s.tmux(s.servers.drive, "set", "-g", option, "bg=#002b36,fg=#839496");
+	s.tmux(s.servers.drive, "send-keys", "-t", "=drive:", "-H", ...[...Buffer.from("\x1b[?997;1n")].map((b) => b.toString(16)));
+	await waitState(s, "the roster's other dark background", (x) => x.colors.background === "#002b36");
+	await until(async () => (await piColor(host, "11")) === "\x1b]11;rgb:0000/2b2b/3636\x1b\\", budgets.settle, "the other dark background");
+	await until(async () => (await piColor(host, "4;9")) === "\x1b]4;9;rgb:cbcb/4b4b/1616\x1b\\", budgets.settle, "the other dark palette");
 });
 
 test("a working session's frames reach the terminal synchronized through both tmux layers, the cursor shown only inside one", async () => {

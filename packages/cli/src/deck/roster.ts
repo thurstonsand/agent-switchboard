@@ -1273,6 +1273,15 @@ async function queryColors(scheme: "light" | "dark" | null): Promise<void> {
 
 tui.onTerminalColorSchemeChange((scheme) => void queryColors(scheme));
 
+// A terminal reports its scheme on every palette change, and tmux asks it for its colors again each time, but passes the
+// report on only when the scheme flips: from one light theme to another, this is the roster's only word of it. tmux
+// answers the first query's colors from what it had, but holds its reply until the palette's replies are back from the
+// terminal, which answered tmux first, so the second sees the new colors.
+async function recheckColors(scheme: "light" | "dark"): Promise<void> {
+	await tui.queryTerminalColors({ timeoutMs: 200 });
+	await queryColors(scheme);
+}
+
 tui.setTerminalColorSchemeNotifications(true);
 
 void queryColors(null);
@@ -1317,4 +1326,5 @@ boot({
 	pointerAway: () => overlays.pointerAway(),
 	disarmed: () => overlays.disarmed(),
 	message: (now, withConfigError) => messageLine(now, null, withConfigError),
+	recheckColors: (scheme) => void recheckColors(scheme),
 });

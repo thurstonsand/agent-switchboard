@@ -2750,6 +2750,10 @@ export async function handleCommand(cmd: string, argv: string[]): Promise<void> 
 			if (focused && m.profile) post({ type: "colors", colors: m.profile });
 			break;
 		}
+		case "terminal-scheme":
+			if (argv[0] !== "light" && argv[0] !== "dark") throw new Error(`terminal-scheme: expected light or dark, got ${argv[0]}`);
+			screen.recheckColors(argv[0]);
+			break;
 		case "layout":
 			await panes.layout();
 			break;
@@ -3082,6 +3086,8 @@ type Screen = {
 	/** The UI server stopped watching the pointer leave, as it does once it reports it. */
 	disarmed(): void;
 	message(now: number, withConfigError: boolean): string;
+	/** The terminal reported its scheme to the UI server, which asked it for its colors again. */
+	recheckColors(scheme: "light" | "dark"): void;
 };
 
 let screen: Screen;

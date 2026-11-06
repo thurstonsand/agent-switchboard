@@ -214,6 +214,8 @@ function uiConf(config: Config): string {
 		`set-hook -g client-attached[0] "if -F '#{m:deck-*,#{session_name}}' 'set destroy-unattached on'"`,
 		hook("client-focus-in", "__deck #{session_name} terminal-focus in"),
 		hook("client-focus-out", "__deck #{session_name} terminal-focus out"),
+		hook("client-light-theme", "__deck #{session_name} terminal-scheme light"),
+		hook("client-dark-theme", "__deck #{session_name} terminal-scheme dark"),
 		hook("window-pane-changed", "__deck #{session_name} focus #{pane_id}"),
 		`set-hook -g window-pane-changed[1] { ${KEY_TARGETS} }`,
 		`set-hook -g window-layout-changed[0] { ${KEY_TARGETS} }`,
