@@ -11,7 +11,6 @@ import {
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { HARNESSES, type Harness } from "@swb/shared";
-import { harnessName } from "@swb/shared/mailbox";
 import {
 	type ConfigError,
 	configPath,
@@ -397,7 +396,7 @@ export class SettingsPane {
 				const count = this.presets().length;
 				out.push(
 					{ kind: "shortlist" },
-					{ kind: "heading", text: "Key  Harness   Model                     Effort" },
+					{ kind: "heading", text: "Key  Harness   Model                     Effort   Provider" },
 					...Array.from({ length: count }, (_, index): Item => ({ kind: "preset", index })),
 					{
 						kind: "addPreset",
@@ -1440,7 +1439,7 @@ export class SettingsPane {
 					});
 			}
 		}
-		rows.push("", "", ...this.footer(Math.min(80, listWidth), null));
+		rows.push("", ...this.footer(Math.min(80, listWidth), null));
 		while (rows.length < height) rows.push("");
 		if (items.length === 0) rows[0] = gray(this.changedOnly && this.query() === "" ? "   nothing changed yet" : "   no settings match");
 		return this.railed(rows.slice(0, height));
@@ -1576,7 +1575,7 @@ export class SettingsPane {
 	shortlistParts(i: number, width: number): Part[] {
 		const custom = this.host.loaded().config.presets !== null;
 		const title = ` ${bold("Shortlist")}`;
-		const right: Part = custom ? [gray("↺"), { kind: "reset", at: i }] : [gray("automatic"), null];
+		const right: Part = custom ? [gray("↺"), { kind: "reset", at: i }] : [gray("from installed harnesses"), null];
 		const pad = Math.max(1, width - 3 - visibleWidth(title) - visibleWidth(right[0]));
 		const listed = this.host.catalog() === null && !custom ? [gray("   finding harnesses…"), null] : null;
 		return [[title, null], ...(listed ? [listed as [string, null]] : []), [" ".repeat(pad), null], right];
@@ -1617,7 +1616,7 @@ export class SettingsPane {
 		const adding = this.adding as Adding;
 		if (adding.step !== "search") {
 			const m = adding.picked as Model;
-			return ` ${gray("adding")} ${bold(presetLabel({ ...m, effort: effortLevels(m)[adding.effort] ?? null, use: "", default: false }))} ${gray(`· ${harnessName(m.harness)}`)}`;
+			return ` ${gray("adding")} ${bold(presetLabel({ ...m, effort: effortLevels(m)[adding.effort] ?? null, use: "", default: false }))} ${gray(`· ${m.harness}`)}`;
 		}
 		const catalog = this.host.catalog();
 		const count = this.addRows().filter((r) => r.kind !== "group").length;
@@ -1640,7 +1639,7 @@ export class SettingsPane {
 				const y = this.listTop + rows.length;
 				const line = truncateToWidth(
 					e === null
-						? `   ${"default".padEnd(8)}   ${gray(`${harnessName(m.harness)}'s own`)}`
+						? `   ${"default".padEnd(8)}   ${gray(`${m.harness}'s own`)}`
 						: `   ${e.padEnd(8)} ${effortMark(e) || " "}${e === m.effort ? gray("   its default") : ""}`,
 					width,
 					"…",
@@ -1706,7 +1705,10 @@ export class SettingsPane {
 					: step === "effort"
 						? "The effort it starts at. Change it later from the shortlist with ← →."
 						: "Agents read this note to choose among your presets.";
-			return wrapTextWithAnsi(`   ${about}`, width).concat("", "").slice(0, 2);
+			return wrapTextWithAnsi(about, width - 3)
+				.map((line) => `   ${line}`)
+				.concat("", "")
+				.slice(0, 2);
 		}
 		const item = this.current();
 		const s = this.settingOf(item);
@@ -1722,13 +1724,16 @@ export class SettingsPane {
 			];
 		if (item?.kind === "harness") {
 			const status = this.host.catalog()?.status[item.harness];
-			text = `${harnessName(item.harness)}${status?.version ? ` ${status.version}` : ""}. ${s?.description ?? ""}`;
+			text = `${item.harness}${status?.version ? ` ${status.version}` : ""}. ${s?.description ?? ""}`;
 		}
 		if (item?.kind === "preset") {
 			const choice = this.choices()[item.index];
 			text = choice?.reason ?? choice?.note ?? "";
 		}
-		return wrapTextWithAnsi(`   ${text}`, width).concat("", "").slice(0, 2);
+		return wrapTextWithAnsi(text, width - 3)
+			.map((line) => `   ${line}`)
+			.concat("", "")
+			.slice(0, 2);
 	}
 
 	/** The config error has the whole list's place while it stands, so the message line doesn't repeat it. */

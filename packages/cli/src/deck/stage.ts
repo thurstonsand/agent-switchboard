@@ -89,6 +89,7 @@ export class StagePanes {
 	/** The labels the Stage's panes wear on their top edges, as last set. */
 	private labels = "";
 	private tags: StageTags = { editor: false, starting: false };
+	private cardShown = false;
 
 	constructor(
 		private readonly host: StageHost,
@@ -116,6 +117,11 @@ export class StagePanes {
 		if (shellMoved || d.side !== prev.side) this.syncShell(prev.shell?.at === "replace" && d.shell?.target === prev.shell.target);
 		if (tags.editor !== this.tags.editor) this.tag("@swb_editor", tags.editor);
 		if (tags.starting !== this.tags.starting) this.tag("@swb_starting", tags.starting);
+		const cardShown = d.card !== null && d.view === "agent" && d.shell?.at !== "replace";
+		if (cardShown !== this.cardShown) {
+			this.cardShown = cardShown;
+			this.tag("@swb_card", this.cardShown);
+		}
 		this.tags = tags;
 		this.syncLabels(label);
 		if (d.target === prev.target) return;
@@ -472,7 +478,7 @@ export class StagePanes {
 	 * What the UI server's keys do on the Stage's pane: ctrl-hjkl reach an nvim Editor in it, which hands moves off its own edge
 	 * back through `swb __nav`; Esc goes back to the list from a harness that's starting there, as it does from a card.
 	 */
-	private tag(option: "@swb_editor" | "@swb_starting", on: boolean): void {
+	private tag(option: "@swb_editor" | "@swb_starting" | "@swb_card", on: boolean): void {
 		this.queue(() =>
 			tmuxAsync(UI, "set", "-p", "-t", this.host.stagePane, ...(on ? [option, "1"] : ["-u", option])).then(
 				() => {},

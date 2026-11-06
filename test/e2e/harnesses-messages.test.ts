@@ -261,22 +261,16 @@ test("agents use swb's tools across harnesses: list, message, launch, and cancel
 	type(s, pi.id, `call session_send_message {"session":"${claude.id}","message":"SWB-pi-asks claude","report_back":false}`);
 	await until(() => pane(s, claude.id).includes("got SWB-pi-asks claude"), ready, "Claude answering pi's tool call");
 
-	// pi's row reads as the sessions it found, not the legend over the model's list, until expanded.
+	// The collapsed result counts sessions; the full list is available on demand.
 	type(s, pi.id, "call session_list {}");
-	await until(
-		() => {
-			const others = s.ls().filter((e) => e.id !== pi.id && e.open);
-			const rows = pane(s, pi.id)
-				.split("\n")
-				.map((line) => line.trim());
-			return others.length === 2 && others.every((e) => rows.includes(e.title ?? e.id)) && rows.includes("ctrl+o details");
-		},
-		budgets.settle,
-		"pi's listing row",
-	);
+	await until(() => pane(s, pi.id).includes("Sessions · 2 found · ctrl+o details"), budgets.settle, "pi's listing row");
+	expect(pane(s, pi.id)).not.toContain("Open sessions (");
 	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, pi.id)}:`, "C-o");
 	await until(() => /Sessions\s*\n\s*Open sessions \(/.test(pane(s, pi.id)), budgets.settle, "pi's expanded row, the model's text");
+	expect(pane(s, pi.id)).toContain(claude.id);
+	expect(pane(s, pi.id)).toContain(codex.id);
 	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, pi.id)}:`, "C-o");
+	await until(() => pane(s, pi.id).includes("Sessions · 2 found · ctrl+o details"), budgets.settle, "pi's listing collapsed again");
 
 	// A launch from Claude starts a Codex session whose parent is Claude.
 	type(

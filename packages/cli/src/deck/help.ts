@@ -1,6 +1,6 @@
 import { decodeKittyPrintable, matchesKey, StdinBuffer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { loadConfig } from "../config.ts";
-import { attention, blue, bold, cyan, dim, green, magenta, red } from "./style.ts";
+import { blockedMark, blue, bold, cyan, dim, green, magenta, red } from "./style.ts";
 
 const CLOSES = "any key or click closes";
 
@@ -8,37 +8,43 @@ const CLOSES = "any key or click closes";
 function lines(prefix: string, columns = Infinity): string[] {
 	const row = (k: string, label: string) => `  ${bold(k.padEnd(14))} ${label}`;
 	const left = [
-		bold("  Navigate"),
+		bold("  Move"),
 		row("j k ↑ ↓", "Move"),
 		row("g G", "First / last"),
 		row("⏎", "Focus session; wake if dormant"),
 		row("l →", "Focus session / expand"),
 		row("h ←", "Fold family / collapse header"),
 		row("space", "Toggle header or family fold"),
+		"",
+		bold("  Find & relationships"),
 		row("p", "Session that started this one"),
 		row("[ ]", "Back / forward through Visits"),
 		row("/", "Filter; esc clears"),
 		row("hover", "Peek; its actions use these keys"),
 		row("drag", "Move into Group / onto Project"),
 		"",
-		bold("  Sessions"),
+		bold("  Session lifecycle"),
 		row("w / x", "Wake / stop; session stays open"),
 		row("R", "Reload agent on fresh config"),
 		row("n / N", "New in known / added directory"),
 		row("⇥", "Choose preset in directory picker"),
 		row("a", "Archive family or session / unarchive"),
+		"",
+		bold("  Organize"),
 		row("s", "Snooze / unsnooze"),
 		row("u", "Mark / unmark Unseen"),
-		row("y / Y", "Copy swb open <id> / @session:<id>"),
 		row("m", "Pick or rename Group"),
+		"",
+		bold("  Copy & settings"),
+		row("y / Y", "Copy swb open <id> / @session:<id>"),
 		row(",", "Settings"),
 		row("q", "Close Deck; sessions keep running"),
 	];
 	const right = [
 		bold("  State marks"),
-		`  ○ idle                 ${dim("○")} dormant (not running)`,
+		"  ○ idle                 · dormant (not running)",
 		`  ${cyan("◐")} working              ${green("●")} Unseen (finished since Visit)`,
-		`  ${bold(attention("◆"))} blocked              ${red("⚠")} cut off or errored`,
+		`  ${blockedMark("◆")} blocked              ${red("⚠")} cut off or errored`,
 		`  ${dim("✓")} archived             ${magenta("⎇")} worktree`,
 		`  ${blue("⌁")} started by Operator  ↳ started by session`,
 		"  +N folded family       ◷ once / ↻ recurring schedule",

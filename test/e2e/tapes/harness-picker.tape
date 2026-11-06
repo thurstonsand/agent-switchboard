@@ -23,7 +23,7 @@ Type "n"
 Wait+Screen /starts/
 Sleep 1s
 Tab
-Wait+Screen /Codex/
+Wait+Screen /codex/
 Sleep 1.5s
 Screenshot ../artifacts/phase6/videos/harness-picker-menu.png
 Type "codex"

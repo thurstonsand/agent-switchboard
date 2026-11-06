@@ -175,20 +175,27 @@ export async function cardEndings(s: Scenario, harness: "pi" | "claude" | "codex
 	const glyphs = await waitState(s, "every row", (x) => x.rows.filter((r) => r.kind === "session").length === 4);
 	const glyphOf = (id: string) => glyphs.rows.flatMap((r) => (r.kind === "session" && r.id === id ? [r.glyph] : []))[0];
 	expect([cut, quit, stopped, failed].map(({ id }) => glyphOf(id))).toEqual(["⚠", "⚠", "●", "⚠"]);
-	const card = async (id: string, ...want: string[]) => {
+	const card = async (id: string, ending: string, transcript: string, peek?: string) => {
 		await cursorTo(s, id);
-		await until(() => want.every((text) => s.screen().includes(text)), budgets.settle, want.join(", "));
+		if (peek) await until(() => s.screen().includes(peek), budgets.settle, peek);
+		s.swb("drive", "move", "130", "35");
+		await until(() => [ending, transcript].every((text) => s.screen().includes(text)), budgets.settle, `${ending}, ${transcript}`);
 		return s.screen();
 	};
-	const cutCard = await card(cut.id, "─ cut off ─", "$ echo entered", "cut off · killed · waking continues it");
+	const cutCard = await card(cut.id, "cut off · ⏎ resume unfinished turn", "$ echo entered", "cut off · killed · waking continues it");
 	s.save("cut.txt", cutCard);
-	s.save("quit.txt", await card(quit.id, "─ cut off ─", "$ echo entered", "cut off · shut down"));
-	const stoppedCard = await card(stopped.id, "─ stopped ─", "$ echo entered");
+	s.save("quit.txt", await card(quit.id, "cut off · ⏎ resume unfinished turn", "$ echo entered", "cut off · shut down"));
+	const stoppedCard = await card(stopped.id, "stopped · ⏎ open session", "$ echo entered");
 	s.save("stopped.txt", stoppedCard);
-	const failedCard = await card(failed.id, "─ errored ─", "invalid request: boom");
+	const failedCard = await card(failed.id, "errored · ⏎ open session", "invalid request: boom");
 	s.save("failed.txt", failedCard);
-	expect(stoppedCard).not.toContain("─ cut off ─");
+	expect(stoppedCard).not.toContain("resume unfinished turn");
 	expect(failedCard).not.toContain("$ echo entered");
+	s.keys("n");
+	await waitState(s, "the directory picker", (x) => x.mode === "picker");
+	await until(() => !s.screen().includes("⏎ open session"), budgets.settle, "the picker owns Enter, not the card");
+	s.keys("Escape");
+	await waitState(s, "the roster again", (x) => x.mode === "roster");
 	for (const name of ["k1", "q1", "e1"]) release(s, name);
 
 	// Waking the cut-off session starts a turn that picks its last one back up; waking the stopped one doesn't.

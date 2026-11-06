@@ -384,9 +384,10 @@ function syncTitle(): void {
 
 /** Where a conversation stopped short of a reply. Why it was cut off is its status's to say, not this. */
 function ending(e: Entry, read: Transcript | null): string | null {
-	if (e.cutOff) return red("cut off");
-	if (read?.ending?.kind === "stopped") return yellow("stopped");
-	if (read?.ending?.kind === "error") return red("errored");
+	const wake = e.open && m.mode.kind === "roster" ? ` · ${bold("⏎")} ${e.cutOff ? "resume unfinished turn" : "open session"}` : "";
+	if (e.cutOff) return `${bold(red("cut off"))}${wake}`;
+	if (read?.ending?.kind === "stopped") return `${bold(yellow("stopped"))}${wake}`;
+	if (read?.ending?.kind === "error") return `${bold(red("errored"))}${wake}`;
 	return null;
 }
 
@@ -2552,6 +2553,14 @@ function rosterKeys(row: Row | undefined): Binding<Command>[] {
 	if (row?.kind === "header") enter = row.collapsed ? "expand" : "collapse";
 	else if (row?.kind === "section") enter = row.expanded ? "collapse" : "expand";
 	else if (session) enter = !session.open ? "open" : session.live ? "focus" : "wake";
+	if (
+		!panes.narrow &&
+		session?.open &&
+		panes.applied.target === placeholder &&
+		panes.applied.id === session.id &&
+		panes.applied.card?.ending
+	)
+		enter = null;
 	let newLabel: string | null = null;
 	if (!row || row.kind === "header" || (session?.open && !session.snoozed)) newLabel = "new";
 	else if (row.kind === "section" && row.key === "operators") newLabel = "new operator";

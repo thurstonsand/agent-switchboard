@@ -13,6 +13,7 @@ export const blue = sgr("34", "39");
 export const cyan = sgr("36", "39");
 export const gray = dim;
 export const attention = magenta;
+export const blockedMark = sgr("1;7;35", "22;27;39");
 
 const SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
 
@@ -21,7 +22,7 @@ export function spinnerFrame(now: number): string {
 }
 
 export function key(name: string, label: string): string {
-	return `${bold(name)} ${dim(label)}`;
+	return `${bold(name)} ${label}`;
 }
 
 const MINUTE = 60_000;

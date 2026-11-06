@@ -13,7 +13,6 @@ import {
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { VIEWS } from "@swb/shared";
-import { harnessName } from "@swb/shared/mailbox";
 import { mark } from "@swb/shared/trace";
 import { displayName, openDescendants, projectName } from "../derive.ts";
 import { targetName } from "../dirs.ts";
@@ -104,6 +103,7 @@ import type { DeckState, Entry, PickerState, State } from "./protocol.ts";
 import {
 	age,
 	attention,
+	blockedMark,
 	blue,
 	bold,
 	breathe,
@@ -124,7 +124,7 @@ function glyph(state: State, now: number, selected = false): string {
 		case "loading":
 			return cyan(spinnerFrame(now));
 		case "blocked":
-			return bold(attention("◆"));
+			return blockedMark("◆");
 		case "working":
 			return selected ? "◐" : model.breath ? breathe(model.breath.faint, model.breath.strong, now, "◐") : cyan("◐");
 		case "unseen":
@@ -132,7 +132,7 @@ function glyph(state: State, now: number, selected = false): string {
 		case "idle":
 			return "○";
 		case "dormant":
-			return gray("○");
+			return "·";
 		case "cut-off":
 		case "errored":
 			return red("⚠");
@@ -292,7 +292,7 @@ function pickerParts(width: number, height: number): Part[] {
 	const naming = nameMode();
 	if (!naming) return [];
 	const choices = nameChoices();
-	const shown = Math.max(1, Math.min(choices.length, height - 4));
+	const shown = Math.max(1, Math.min(choices.length, height - 6));
 	const from = Math.max(0, Math.min(naming.choice - shown + 1, choices.length - shown));
 	const title = ` ${naming.renaming ? "rename" : "Group for"} ${naming.title} `;
 	const out: Part[] = [
@@ -304,6 +304,11 @@ function pickerParts(width: number, height: number): Part[] {
 		const line = truncateToWidth(`   ${label}`, width, "…", true);
 		out.push([i === naming.choice ? cursorLine(line, true) : line, { kind: "choose", index: i }]);
 	}
+	out.push(
+		[` ${dim(naming.renaming ? "Rename Group:" : "Filter or new Group:")}`, null],
+		[` ${naming.input.render(Math.max(10, width - 2))[0] ?? ""}`, null],
+		[` ${key("⏎", naming.renaming ? "rename" : "assign")}  ${key("esc", "cancel")}`, null],
+	);
 	return out;
 }
 
@@ -465,7 +470,7 @@ function archiveNotes(e: Entry): string[] {
 		];
 	}
 	const family = openDescendants(model.entries.values(), e.id);
-	return [family.length > 0 ? `${family.length} child session${family.length === 1 ? "" : "s"}` : "Branch kept"];
+	return [family.length > 0 ? `${family.length} child session${family.length === 1 ? "" : "s"}` : "Branch kept with either choice"];
 }
 
 /** The prompt's borders, notes, answers, and a line for each way to delete the worktree too. */
@@ -485,9 +490,11 @@ function archivePrompt(e: Entry, width: number, top: number): string[] {
 			[`${bold(b.name.padEnd(3))} ${b.label}`, b.command],
 		]),
 	);
+	const title = truncateToWidth(` Archive ${displayName(e)} `, inner - 3, "…");
+	frame.targets.push({ y: top, from: width - 5, to: width - 2, command: { kind: "cancel" } });
 	return [
-		` ┌${"─".repeat(inner)}┐`,
-		...notes.map((note) => box(` ${note}`)),
+		` ┌${bold(title)}${"─".repeat(Math.max(0, inner - visibleWidth(title) - 3))} ✕ ┐`,
+		...notes.map((note, i) => box(` ${i === 0 ? dim(note) : note}`)),
 		...lines.map((line) => `${truncateToWidth(line, inner + 2, "…", true)}│`),
 		` └${"─".repeat(inner)}┘`,
 	];
@@ -517,11 +524,10 @@ function detailRows(width: number, now: number, top: number): string[] {
 		for (const view of VIEWS) {
 			// The first view is the session's own TUI, whichever harness that is.
 			const label = ` ${view === "agent" ? e.harness : view} `;
-			parts.push([view === panes.applied.view ? cursorLine(label, true) : gray(label), { kind: "view", view }]);
+			parts.push([view === panes.applied.view ? cursorLine(label, true) : label, { kind: "view", view }]);
 		}
 		// The shell is a toggle beside the views, not one of them.
-		if (!panes.narrow)
-			parts.push([gray(" · "), null], [panes.applied.shell ? cursorLine(" shell ", true) : gray(" shell "), { kind: "shell" }]);
+		if (!panes.narrow) parts.push([gray(" · "), null], [panes.applied.shell ? cursorLine(" shell ", true) : " shell ", { kind: "shell" }]);
 		tabs = clickable(panes.narrow ? top + 2 : top, parts);
 	}
 	if (!panes.narrow) return [truncateToWidth(tabs, width, "…")];
@@ -556,8 +562,7 @@ function hints(y: number, cols: number): string {
 	// The archive prompt carries its own keys.
 	if (archiving() !== null) return "";
 	if (filtering()) return ` ${model.filter.render(Math.max(10, panes.rosterWidth() - 2))[0] ?? ""}`;
-	const naming = nameMode();
-	if (naming) return ` ${naming.input.render(Math.max(10, panes.rosterWidth() - 2))[0] ?? ""}`;
+	if (nameMode()) return "";
 	const drag = dragging();
 	if (drag?.moved) {
 		if (!drag.drop) return ` ${red("✗ not here")}`;
@@ -631,7 +636,10 @@ function rowLine(row: Row, width: number, now: number, selected: boolean): strin
 		const name = row.group === null ? bold(projectName(row.project)) : row.group;
 		return `${" ".repeat(1 + row.depth * 2)}${row.collapsed ? "▸" : "▾"} ${name}${count}`;
 	}
-	if (row.kind === "section") return ` ${row.expanded ? "▾" : "▸"} ${row.label} ${gray(`(${row.count})`)}`;
+	if (row.kind === "section") {
+		const label = ` ${row.expanded ? "▾" : "▸"} ${row.label} (${row.count}) `;
+		return gray(`${label}${"─".repeat(Math.max(0, width - visibleWidth(label) - 1))}`);
+	}
 	const e = row.entry;
 	// Mid-drag, the session being carried is a hollow outline of itself.
 	const drag = dragging();
@@ -692,7 +700,8 @@ function familyTally(family: Entry[]): string {
 		[["blocked"], "◆"],
 		[["cut-off", "errored"], "⚠"],
 		[["unseen"], "●"],
-		[["idle", "dormant"], "○"],
+		[["idle"], "○"],
+		[["dormant"], "·"],
 	];
 	return tally
 		.flatMap(([which, mark]) => {
@@ -763,9 +772,6 @@ function toastOverlay(now: number, width: number, y: number): Overlay[] {
 	return [{ id: "toast", about: t.text, x: 0, y: y - lines.length + 1, width, view: { lines, buttons: [] }, leaves: false, hovers: null }];
 }
 
-/** The launch card's menu, no wider than this. */
-const MENU_COLS = 52;
-
 /**
  * The launch card, on the Stage atop the roster's top row unless the roster draws it, and its menu hung from its field.
  * Both stay while the roster has the keyboard.
@@ -789,10 +795,10 @@ function launchOverlays(choosing: Choosing, width: number, height: number): Over
 	}
 	if (choosing.menu) {
 		const field = onStage ? { x: width + 1, y: 1 } : { x: 0, y: 2 };
-		const w = Math.min(MENU_COLS, (onStage ? panes.width : width) - field.x - 4);
+		const w = Math.min(LAUNCH_COLS, (onStage ? panes.width : width) - field.x);
 		const y = field.y + 1;
 		const view = launchMenu(choosing, w, height - y);
-		want.push({ id: "menu", about: "launch", x: field.x + 2, y, width: w, view, leaves: false, hovers: null });
+		want.push({ id: "menu", about: "launch", x: field.x, y, width: w, view, leaves: false, hovers: null });
 	}
 	return want;
 }
@@ -819,7 +825,12 @@ function peekFrame(open: "left" | "right", inner: number): (content: string) => 
 function presetField(c: Choice): string {
 	const p = c.preset;
 	const what = p.agent ? `${p.agent} ${gray("agent")}` : `${p.model} ${gray(p.effort ?? "default")}`;
-	return `${cyan(harnessName(p.harness))}  ${what}${p.provider ? gray(` · ${p.provider}`) : ""}`;
+	return `${cyan(p.harness)}  ${what}${p.provider ? gray(` · ${p.provider}`) : ""}`;
+}
+
+function presetNote(note: string, width: number): string[] {
+	const lines = wrapTextWithAnsi(note.replaceAll(" · ", "\n"), width);
+	return lines.length <= 3 ? lines : [...lines.slice(0, 2), truncateToWidth(lines.slice(2).join(" "), width, "…")];
 }
 
 /**
@@ -841,7 +852,7 @@ function launchCard(choosing: Choosing, width: number, open: "left" | "right"): 
 				? gray("finding harnesses…")
 				: typeof target === "string"
 					? red(target)
-					: `${cyan(harnessName(target.harness))} ${gray("· its own defaults")}`;
+					: `${cyan(target.harness)} ${gray("· its own defaults")}`;
 	}
 	const arrow = presets.length === 0 ? " " : menu ? "▴" : "▾";
 	const field = `${truncateToWidth(value, inner - 2, "…", true)} ${gray(arrow)}`;
@@ -850,9 +861,12 @@ function launchCard(choosing: Choosing, width: number, open: "left" | "right"): 
 	const lines = [
 		gray(open === "left" ? `${edge}╮` : `╭${edge}`),
 		frame(field),
-		// The open menu says the highlighted preset's note, and covers all but the edge of this one.
-		frame(gray(menu ? "" : (chosen?.note ?? ""))),
-		gray(open === "left" ? `${"─".repeat(width - 1)}╯` : `╰${"─".repeat(width - 1)}`),
+		...(menu
+			? []
+			: [
+					...presetNote(chosen?.note ?? "", inner).map(frame),
+					gray(open === "left" ? `${"─".repeat(width - 1)}╯` : `╰${"─".repeat(width - 1)}`),
+				]),
 	];
 	const margin = open === "left" ? 1 : 2;
 	return {
@@ -887,12 +901,15 @@ function launchMenu(choosing: Choosing, width: number, maxHeight: number): Overl
 		);
 	});
 	if (shown.length === 0) items.push(gray("nothing matches"));
-	// Its frame, and the rule and note under the list.
-	const room = Math.max(1, maxHeight - 4);
+	const note = presetNote(presets[shown[menu.cursor] ?? -1]?.note ?? "", inner);
+	const room = Math.max(1, maxHeight - 4 - note.length);
 	const from = Math.min(Math.max(0, (itemAt[menu.cursor] ?? 0) - room + 1), Math.max(0, items.length - room));
 	const to = Math.min(items.length, from + room);
 	const row = (content: string) => `${gray("│")} ${truncateToWidth(content, inner, "…", true)} ${gray("│")}`;
-	const lines = [gray(`┌${"─".repeat(width - 2)}┐`)];
+	const lines = [
+		gray(`├${"─".repeat(width - 2)}┤`),
+		row(gray(`    ${"Harness".padEnd(8)}${"Model".padEnd(21)}${"Effort".padEnd(8)}Provider`)),
+	];
 	const buttons: OverlayButton[] = [];
 	items.slice(from, to).forEach((line, i) => {
 		const n = itemAt.indexOf(from + i);
@@ -901,7 +918,7 @@ function launchMenu(choosing: Choosing, width: number, maxHeight: number): Overl
 			buttons.push({ y: lines.length, from: 2, to: 2 + inner, command: { kind: "choose", index: n }, hot: row(hoverLine(content)) });
 		lines.push(row(n === menu.cursor ? cursorLine(content, true) : content));
 	});
-	lines.push(gray(`├${"─".repeat(width - 2)}┤`), row(presets[shown[menu.cursor] ?? -1]?.note ?? ""), gray(`└${"─".repeat(width - 2)}┘`));
+	lines.push(gray(`├${"─".repeat(width - 2)}┤`), ...note.map(row), gray(`└${"─".repeat(width - 2)}┘`));
 	return { lines, buttons };
 }
 
@@ -940,7 +957,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	if (parent) {
 		const label = `${gray("started by")} ${originMark(origin(e))} `;
 		links.push({ at: head.length, command: { kind: "row", act: "parent", row: e.id } });
-		head.push(`${label}${truncateToWidth(displayName(parent), inner - visibleWidth(label) - 2, "…", true)} ${dim("p")}`);
+		head.push(`${label}${truncateToWidth(displayName(parent), inner - visibleWidth(label) - 2, "…", true)} ${bold("p")}`);
 		if (parent.project !== e.project && !parent.operator)
 			head.push(gray(`${" ".repeat(visibleWidth(label))}in ${projectName(parent.project)}`));
 	}
@@ -980,25 +997,40 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 		const shown = text.length > 3 ? [...text.slice(0, 2), truncateToWidth(text.slice(2).join(" "), inner - pad, "…")] : text;
 		turn.push(rule, ...shown.map((line, i) => `${gray(i === 0 ? label : " ".repeat(pad))}${line}`));
 	}
-	// Short actions share three columns; creation and copy actions each get a full row.
 	const buttons: { y: number; from: number; to: number; command: Command; text: string }[] = [];
 	const buttonLines: string[] = [];
-	let line = "";
-	let x = 0;
-	for (const [label, k, act] of peekButtons(row)) {
-		const text = ` ${bold(k)} ${label} `;
-		const long = act === "new" || act === "copyOpen" || act === "copyMention";
-		const w = long ? inner : Math.max(visibleWidth(text), Math.floor(inner / 3));
-		if (x > 0 && x + w > inner) {
-			buttonLines.push(line);
-			line = "";
-			x = 0;
+	const actions = peekButtons(row);
+	const session = actions.filter(([, , act]) => ["stop", "wake", "reload", "new"].includes(act));
+	const organize = actions.filter(([, , act]) => ["snooze", "archive", "group", "unseen"].includes(act));
+	const copy = actions.filter(([, , act]) => ["copyOpen", "copyMention"].includes(act));
+	const col = Math.floor(inner / 2);
+	buttonLines.push(`${gray(" Session".padEnd(col))}${gray(" Organize")}`);
+	for (let i = 0; i < Math.max(session.length, organize.length); i++) {
+		let line = "";
+		for (const [column, action] of [session[i], organize[i]].entries()) {
+			if (!action) {
+				line += " ".repeat(col);
+				continue;
+			}
+			const [label, k, act] = action;
+			const text = truncateToWidth(` ${bold(k)} ${label}`, col, "…", true);
+			buttons.push({
+				y: buttonLines.length,
+				from: column * col,
+				to: (column + 1) * col,
+				command: { kind: "row", act, row: row.key },
+				text,
+			});
+			line += text;
 		}
-		buttons.push({ y: buttonLines.length, from: x, to: x + w, command: { kind: "row", act, row: row.key }, text });
-		line += text + " ".repeat(Math.max(0, w - visibleWidth(text)));
-		x += w;
+		buttonLines.push(line);
 	}
-	if (line !== "") buttonLines.push(line);
+	buttonLines.push(gray(" Copy"));
+	for (const [label, k, act] of copy) {
+		const text = ` ${bold(k)} ${label.replace(/^Copy /, "")}`;
+		buttons.push({ y: buttonLines.length, from: 0, to: inner, command: { kind: "row", act, row: row.key }, text });
+		buttonLines.push(text);
+	}
 	const body = [...head, ...(head.length + turn.length + 1 + buttonLines.length + 2 <= maxHeight ? turn : []), rule];
 	const buttonsAt = body.length;
 	body.push(...buttonLines);

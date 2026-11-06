@@ -15,7 +15,7 @@ Screenshot ../artifacts/phase6/videos/mouse-shell.png
 Wait+Screen /key or click closes/
 Sleep 1s
 Screenshot ../artifacts/phase6/videos/mouse-help.png
-Wait+Screen /Copy @session/
+Wait+Screen /Y @session/
 Sleep 1s
 Screenshot ../artifacts/phase6/videos/mouse-narrow-peek.png
 Wait+Screen /show list/

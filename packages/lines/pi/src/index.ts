@@ -3,7 +3,7 @@ import type { FSWatcher } from "node:fs";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Text, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { Text, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { Db, describeTool, launchGuide, linkedWorktree, operatorDir } from "@swb/shared";
 import { frame, listen, markDelivered, pendingFor, sender, unmarkDelivered } from "@swb/shared/mailbox";
 import {
@@ -107,9 +107,9 @@ export default function (pi: ExtensionAPI) {
 
 	const failureText = () => {
 		const mismatch = proc.failure?.match(/db schema is v(\d+), this line writes v(\d+)/);
-		return mismatch ? `Versions ${mismatch[1]}/${mismatch[2]}. Install matching swb + pi integration; R reload in swb.` : proc.failure;
+		return mismatch ? `db v${mismatch[1]}, pi expects v${mismatch[2]} · update swb + pi; R reload` : proc.failure;
 	};
-	const showFailure = () => ui?.setStatus("swb", `${ui.theme.fg("error", ui.theme.bold("swb: not recording"))}: ${failureText()}`);
+	const showFailure = () => ui?.setStatus("swb", `\x1b[1;91mswb: not recording\x1b[22;39m · ${failureText()}`);
 
 	const connect = (): Db => {
 		proc.db ??= new Db(proc.launch.db, { create: false });
@@ -119,7 +119,7 @@ export default function (pi: ExtensionAPI) {
 	const fail = (error: unknown) => {
 		proc.failure = error instanceof Error ? error.message : String(error);
 		showFailure();
-		ui?.notify(`swb: session tracking stopped. ${failureText()} Pi's transcript is still saved.`, "error");
+		ui?.notify(`swb: not recording · ${failureText()}. Pi's transcript is still saved.`, "error");
 	};
 
 	// A busy db holds pi's writes for a later try, and says so; any other failure stops the line recording.
@@ -216,7 +216,7 @@ export default function (pi: ExtensionAPI) {
 			invalidate() {},
 			render(width: number) {
 				return [
-					...wrapTextWithAnsi(theme.fg("accent", `↘ ${details.title}`), Math.max(1, width - 1)).map((line) => ` ${line}`),
+					...wrapTextWithAnsi(`↘ from ${theme.bold(details.title)}`, Math.max(1, width - 1)).map((line) => ` ${line}`),
 					...wrapTextWithAnsi(details.body, Math.max(1, width - 3)).map((line) => `   ${line}`),
 				];
 			},
@@ -350,7 +350,7 @@ export default function (pi: ExtensionAPI) {
 						0,
 						0,
 					);
-					return name === "session_send_message"
+					return name === "session_send_message" || name === "session_list"
 						? { invalidate() {}, render: (width: number) => (context.state.receipt ? [] : call.render(width)) }
 						: call;
 				},
@@ -365,18 +365,18 @@ export default function (pi: ExtensionAPI) {
 						const heading = `${theme.bold("Message")} → ${label} · ${details.delivered ? "delivered" : "queued"}`;
 						return new Text(options.expanded ? `${heading}\n${output}` : heading, 0, 0);
 					}
-					if (options.expanded) return new Text(theme.fg("dim", output), 0, 0);
 					if (name === "session_list") {
 						const { sessions } = result.details as { sessions: { id: string; title: string | null }[] };
-						if (sessions.length > 0)
-							return {
-								invalidate() {},
-								render: (width: number) => [
-									...sessions.map((s) => `  ${truncateToWidth(s.title ?? s.id, Math.max(1, width - 2), "…")}`),
-									`  ${theme.fg("muted", context.keyHint("app.tools.expand", "details"))}`,
-								],
-							};
+						context.state.receipt = !options.expanded;
+						return new Text(
+							options.expanded
+								? output
+								: `${theme.bold("Sessions")} · ${sessions.length} found · ${context.keyHint("app.tools.expand", "details")}`,
+							0,
+							0,
+						);
 					}
+					if (options.expanded) return new Text(theme.fg("dim", output), 0, 0);
 					const lines = output.split("\n");
 					const { summary } = result.details as { summary?: string };
 					const hidden = summary === undefined ? lines.length - 1 : lines.length;

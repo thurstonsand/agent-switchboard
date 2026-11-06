@@ -21,7 +21,7 @@ Sleep 1s
 Type "/name Simulated: mid-turn when killed" Sleep 300ms Enter
 Sleep 1s
 Type "hold long-build" Sleep 300ms Enter
-Wait+Screen /─ cut off ─/
+Wait+Screen /cut off · .*resume unfinished turn/
 Sleep 3s
 Alt+a
 Type "h"
