@@ -4,6 +4,8 @@ import { UnixWebSocket } from "./ws.ts";
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void };
 export type Notification = { method: string; params: Record<string, unknown> };
 
+const CLOSED = "codex app-server closed the connection";
+
 /** A client of a Codex app-server, over its unix socket. */
 export class CodexClient {
 	serverVersion: string | null = null;
@@ -11,7 +13,8 @@ export class CodexClient {
 	#id = 0;
 	readonly #pending = new Map<number, Pending>();
 	#listener: (note: Notification) => void = () => {};
-	#closed: () => void = () => {};
+	#closed = false;
+	#onClosed: () => void = () => {};
 	#request: ((request: Notification) => unknown | Promise<unknown>) | null = null;
 
 	private constructor(ws: UnixWebSocket) {
@@ -43,9 +46,10 @@ export class CodexClient {
 			}
 		});
 		ws.onClose(() => {
-			for (const pending of this.#pending.values()) pending.reject(new SwbError("codex app-server closed the connection"));
+			this.#closed = true;
+			for (const pending of this.#pending.values()) pending.reject(new SwbError(CLOSED));
 			this.#pending.clear();
-			this.#closed();
+			this.#onClosed();
 		});
 	}
 
@@ -66,7 +70,7 @@ export class CodexClient {
 	}
 
 	onClose(listener: () => void): void {
-		this.#closed = listener;
+		this.#onClosed = listener;
 	}
 
 	onRequest(handler: (request: Notification) => unknown | Promise<unknown>): void {
@@ -74,6 +78,7 @@ export class CodexClient {
 	}
 
 	request<T = unknown>(method: string, params: unknown): Promise<T> {
+		if (this.#closed) return Promise.reject(new SwbError(CLOSED));
 		const id = ++this.#id;
 		const { promise, resolve, reject } = Promise.withResolvers<unknown>();
 		this.#pending.set(id, { resolve, reject });
