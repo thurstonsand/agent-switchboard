@@ -4,6 +4,10 @@
 
 Schema v11: update swb and the pi line together.
 
+### Added
+
+- `db-waits.jsonl`, beside swb's database, logs every database call from swb or a line that takes 200 ms or more, or gives up on a busy database: which process waited, for how long, and on what. It's there to tell whether a hitch in pi is swb's database before anything changes for it.
+
 ### Fixed
 
 - A message reaches its session once while swb's database is busy for longer than five seconds. Claude Code could take it twice, Codex was steered with it again every few seconds until the database freed up, and pi stopped recording altogether: its session read as working for good, and took the message a second time once it restarted. Every line now marks a message delivered before handing it over, and holds its records until the database takes them, saying so meanwhile.

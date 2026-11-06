@@ -166,7 +166,7 @@ test("a db busy past busy_timeout while messages are in flight delivers each onc
 	s.save("busy.txt", [pane(s, pi.id), pane(s, claude.id), pane(s, codex.id)].join("\n=====\n"));
 });
 
-test("a turn that starts while the db is busy past busy_timeout is recorded once it lets go, in every line", async () => {
+test("a turn that starts while the db is busy past busy_timeout is recorded once it lets go, in every line, and each logs its wait", async () => {
 	s = scenario("harnesses", "busy-records", { packages: [], recorder: true, harnesses: ["claude", "codex"] });
 	const [pi, claude, codex] = await Promise.all([
 		launched(s, "pi", "reply pi-up"),
@@ -190,6 +190,13 @@ test("a turn that starts while the db is busy past busy_timeout is recorded once
 		);
 	for (const e of Object.values(all)) expect(pane(s, e.id)).not.toContain("not recording");
 	expect(pane(s, pi.id)).not.toContain("swb: db busy");
+	// Each line logged the try that waited out busy_timeout: pi, Claude Code's hook, and Codex's host.
+	const waits = readFileSync(join(s.env.XDG_STATE_HOME as string, "agent-switchboard/db-waits.jsonl"), "utf8")
+		.trim()
+		.split("\n")
+		.map((line) => JSON.parse(line) as { who: string; op: string; ms: number; busy: boolean });
+	const timedOut = waits.filter((w) => w.op === "begin" && w.busy && w.ms >= 5000).map((w) => w.who);
+	expect(timedOut).toEqual(expect.arrayContaining(["pi", "__record", "__codex"]));
 });
 
 test("agents use swb's tools across harnesses: list, message, launch, and cancel, with the caller as the sender", async () => {

@@ -1,6 +1,7 @@
-import { closeSync, existsSync, linkSync, mkdirSync, openSync, unlinkSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, linkSync, mkdirSync, openSync, unlinkSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { isMainThread } from "node:worker_threads";
 
 export type Param = string | number | null;
 export type Row = Record<string, Param>;
@@ -54,8 +55,15 @@ export function isBusy(error: unknown): boolean {
 	return typeof code === "string" && code.startsWith("SQLITE_BUSY");
 }
 
+/** A call slower than this is logged to db-waits.jsonl beside the db. */
+const SLOW_MS = 200;
+
+/** Which process waited: pi's line runs in pi on Node; everything else is swb, named by its subcommand. */
+const who = `${process.versions.bun ? (process.argv[2] ?? "swb") : "pi"}${isMainThread ? "" : "/worker"}`;
+
 export class Db {
 	readonly #driver: Driver;
+	readonly #waits: string;
 
 	constructor(
 		readonly path: string,
@@ -64,23 +72,24 @@ export class Db {
 		if (create) make(path);
 		else if (!existsSync(path)) throw new Error(`no db at ${path}`);
 		this.#driver = connect(path);
+		this.#waits = join(dirname(path), "db-waits.jsonl");
 		this.#driver.exec("PRAGMA busy_timeout = 5000; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON;");
 	}
 
 	get(sql: string, ...params: Param[]): Row | undefined {
-		return this.#driver.prepare(sql).get(...params) ?? undefined;
+		return this.#timed("get", sql, () => this.#driver.prepare(sql).get(...params) ?? undefined);
 	}
 
 	all(sql: string, ...params: Param[]): Row[] {
-		return this.#driver.prepare(sql).all(...params);
+		return this.#timed("all", sql, () => this.#driver.prepare(sql).all(...params));
 	}
 
 	run(sql: string, ...params: Param[]): void {
-		this.#driver.prepare(sql).run(...params);
+		this.#timed("run", sql, () => this.#driver.prepare(sql).run(...params));
 	}
 
 	exec(sql: string): void {
-		this.#driver.exec(sql);
+		this.#timed("exec", sql, () => this.#driver.exec(sql));
 	}
 
 	userVersion(): number {
@@ -94,8 +103,10 @@ export class Db {
 	/** A read-then-write transaction: takes the write lock up front. One begun inside another is part of it. */
 	tx<T>(body: () => T): T {
 		if (this.#inTx) return body();
-		this.#driver.exec("BEGIN IMMEDIATE");
+		// begin is the wait for the write lock; tx is how long this connection then held it.
+		this.#timed("begin", "BEGIN IMMEDIATE", () => this.#driver.exec("BEGIN IMMEDIATE"));
 		this.#inTx = true;
+		const at = performance.now();
 		try {
 			const result = body();
 			this.#driver.exec("COMMIT");
@@ -105,9 +116,42 @@ export class Db {
 			throw error;
 		} finally {
 			this.#inTx = false;
+			this.#slow("tx", "", at, false);
 		}
 	}
 	#inTx = false;
+
+	#timed<T>(op: string, sql: string, call: () => T): T {
+		const at = performance.now();
+		try {
+			const result = call();
+			this.#slow(op, sql, at, false);
+			return result;
+		} catch (error) {
+			this.#slow(op, sql, at, isBusy(error));
+			throw error;
+		}
+	}
+
+	/**
+	 * A plain file rather than a table, so a db too busy to write to can still say so. Each entry names the process that
+	 * waited; the one holding the lock shows as a long tx around the same time.
+	 */
+	#slow(op: string, sql: string, at: number, busy: boolean): void {
+		const ms = Math.round(performance.now() - at);
+		if (ms < SLOW_MS && !busy) return;
+		const line = {
+			at: Date.now(),
+			db: basename(this.path),
+			who,
+			pid: process.pid,
+			op,
+			ms,
+			busy,
+			sql: sql.replace(/\s+/g, " ").trim().slice(0, 80),
+		};
+		appendFileSync(this.#waits, `${JSON.stringify(line)}\n`, { mode: 0o600 });
+	}
 
 	close(): void {
 		this.#driver.close();
