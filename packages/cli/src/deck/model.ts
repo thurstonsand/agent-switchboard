@@ -161,6 +161,7 @@ type PeekState = {
 	/** Where the Peek is, once the pointer rested there and what it shows came in or stopped being waited for. */
 	settled: PeekSpot | null;
 	pending: PendingPeek | null;
+	expires: Timer | null;
 	/** Where the last render wanted the Peek. */
 	spot: PeekSpot | null;
 	/** The Peek put away when the keyboard went to the Stage; it stays away until its row changes. */
@@ -331,6 +332,7 @@ export type Part = [text: string, command: Command | null];
 /** `m`'s picker: the sessions it moves, the Group it renames when it started on one's header, and the highlighted choice. */
 export type NameMode = {
 	kind: "name";
+	at: { x: number; y: number };
 	ids: string[];
 	renaming: { projectKey: string } | null;
 	project: string;
@@ -340,7 +342,7 @@ export type NameMode = {
 };
 
 /** `s`'s menu for a session: how long to snooze it. */
-export type SnoozeMode = { kind: "snooze"; id: string; title: string; choice: number };
+export type SnoozeMode = { kind: "snooze"; at: { x: number; y: number }; id: string; title: string; choice: number };
 
 /** Named as `deck state` reports them. */
 export type Mode =
@@ -352,7 +354,7 @@ export type Mode =
 	 * `a`'s prompt: first whether its family or worktree goes too, then, once `chosen` holds that answer, the
 	 * schedules archiving cancels. A session with schedules but neither family nor worktree starts at the second.
 	 */
-	| { kind: "archive"; id: string; chosen: { all: boolean; deleteWorktree: boolean } | null }
+	| { kind: "archive"; at: { x: number; y: number }; id: string; chosen: { all: boolean; deleteWorktree: boolean } | null }
 	/** The directory picker, `n` and `N`, which takes over the whole roster while it's open. */
 	| { kind: "picker"; picker: Choosing }
 	/** Settings, which takes over the whole Deck while it's open. */

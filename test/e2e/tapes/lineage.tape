@@ -10,7 +10,7 @@ Type "j"
 Sleep 300ms
 Type "k"
 Wait+Screen /started by/
-Sleep 1.5s
+Sleep 300ms
 Screenshot ../artifacts/phase6/videos/lineage-peek.png
 Type "p"
 Sleep 2s
@@ -20,8 +20,10 @@ Sleep 400ms
 Type "k"
 Sleep 800ms
 Type "h"
+Type "j"
+Type "k"
 Wait+Screen /folded \+3/
-Sleep 2s
+Sleep 300ms
 Screenshot ../artifacts/phase6/videos/lineage-folded.png
 Type "l"
 Sleep 1s
@@ -40,7 +42,7 @@ Wait+Screen /Fix flaky fold test/
 Sleep 2s
 Screenshot ../artifacts/phase6/videos/lineage-launch-groups.png
 Type "a"
-Wait+Screen /A all 8/
+Wait+Screen /Archive family \(8\)/
 Sleep 2s
 Screenshot ../artifacts/phase6/videos/lineage-archive-prompt.png
 Type "A"

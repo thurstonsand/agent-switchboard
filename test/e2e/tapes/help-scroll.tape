@@ -15,7 +15,7 @@ Screenshot ../artifacts/phase6/videos/help-scroll-tall.png
 Type "x"
 Sleep 2s
 Type "?"
-Wait+Screen /↓ 12 · j k, wheel scroll/
+Wait+Screen /↓ 12 more lines · j k, wheel scroll/
 Sleep 1s
 Screenshot ../artifacts/phase6/videos/help-scroll-short.png
 Wait+Screen /↑ 4 ↓ 8/

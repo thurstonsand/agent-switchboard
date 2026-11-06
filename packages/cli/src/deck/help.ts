@@ -41,7 +41,7 @@ function lines(prefix: string, columns = Infinity): string[] {
 		row(",", "Settings"),
 		row("q", "Close Deck; sessions keep running"),
 	];
-	const right = [
+	const states = [
 		bold("  State marks"),
 		"  ○ idle                 ◌ dormant (not running)",
 		`  ${cyan("◐")} working              ${green("●")} Unseen (finished since Visit)`,
@@ -50,6 +50,10 @@ function lines(prefix: string, columns = Infinity): string[] {
 		`  ${dim("⎇")} worktree`,
 		`  ${blue("⌁")} started by Operator  ↳ started by session`,
 		"  +N folded family       ◷ once / ↻ recurring schedule",
+		"  stopped: turn ended on purpose; opening won't retry",
+	];
+	const right = [
+		...states,
 		"",
 		bold("  Views"),
 		row(`${prefix} e`, "Swap agent / editor"),
@@ -72,7 +76,7 @@ function lines(prefix: string, columns = Infinity): string[] {
 		row(`${prefix} ${prefix}`, `Send literal ${prefix}`),
 	];
 	const width = Math.max(...left.map(visibleWidth)) + 4;
-	if (width + Math.max(...right.map(visibleWidth)) > columns) return ["", ...left, "", ...right];
+	if (width + Math.max(...right.map(visibleWidth)) > columns) return ["", ...states, "", ...left, ...right.slice(states.length)];
 	return ["", ...left.map((line, i) => `${line}${" ".repeat(width - visibleWidth(line))}${right[i] ?? ""}`)];
 }
 
@@ -93,9 +97,9 @@ export async function help(): Promise<void> {
 		all = lines(prefix, process.stdout.columns);
 		top = Math.max(0, Math.min(overflow(), top));
 		const below = all.length - top - room();
-		const more = [top > 0 ? `↑ ${top}` : "", below > 0 ? `↓ ${below}` : ""].filter(Boolean).join(" ");
+		const more = [top > 0 ? `↑ ${top}` : "", below > 0 ? `↓ ${below} more lines` : ""].filter(Boolean).join(" ");
 		const hint = overflow() === 0 ? CLOSES : `${more} · j k, wheel scroll · any other key or click closes`;
-		const shown = [...all.slice(top, top + room()), "", `  ${dim(hint)}`];
+		const shown = [...all.slice(top, top + room()), "", `  ${hint}`];
 		process.stdout.write(`\x1b[H\x1b[2J${shown.map((line) => truncateToWidth(line, process.stdout.columns, "")).join("\r\n")}`);
 	};
 	// Mouse reporting on, so a click and the wheel reach stdin like keys.

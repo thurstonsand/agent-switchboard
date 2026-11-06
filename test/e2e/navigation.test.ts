@@ -112,9 +112,9 @@ test("roster navigation: h l space and a header click fold projects; g G jump; M
 	s.keys("M-a", "l");
 	await waitState(s, "pi again", (x) => x.focus === "stage");
 	const lines = s.screen().split("\n");
-	const hint = lines.findIndex((line) => line.includes("hide list"));
+	const hint = lines.findIndex((line) => line.includes("hide"));
 	expect(hint).toBeGreaterThan(-1);
-	s.swb("drive", "click", String((lines[hint] as string).indexOf("hide list")), String(hint));
+	s.swb("drive", "click", String((lines[hint] as string).indexOf("hide")), String(hint));
 	await waitState(s, "the legend's hide list clicked", (x) => x.layout.rosterHidden);
 	s.keys("M-a", "z");
 	await waitState(s, "the roster back", (x) => !x.layout.rosterHidden);
@@ -151,7 +151,7 @@ test("? fits every key in a tall Deck, and in a short one scrolls them by wheel 
 	await Bun.sleep(500);
 	const cursor = state(s).cursor;
 	s.keys("M-a", "?");
-	await until(() => /↓ \d+ · j k, wheel scroll/.test(s.screen()), budgets.settle, "the short help, its end below");
+	await until(() => /↓ \d+ more lines · j k, wheel scroll/.test(s.screen()), budgets.settle, "the short help, its end below");
 	expect(s.screen()).toContain(first);
 	expect(s.screen()).not.toContain(last);
 	for (let i = 0; i < 3; i++) s.swb("drive", "wheel", "down", "70", "12");
@@ -162,9 +162,9 @@ test("? fits every key in a tall Deck, and in a short one scrolls them by wheel 
 	s.keys(" ", " ");
 	await until(() => s.screen().includes(last) && /↑ \d+ ·/.test(s.screen()), budgets.settle, "space pages to the end");
 	s.keys("k", "k", "Up");
-	await until(() => s.screen().includes("↓ 3 ·"), budgets.settle, "k and ↑ back up");
+	await until(() => s.screen().includes("↓ 3 more lines ·"), budgets.settle, "k and ↑ back up");
 	s.keys("j");
-	await until(() => s.screen().includes("↓ 2 ·"), budgets.settle, "j down");
+	await until(() => s.screen().includes("↓ 2 more lines ·"), budgets.settle, "j down");
 	expect(state(s).cursor).toBe(cursor);
 	s.keys("q");
 	await until(() => !s.screen().includes("wheel scroll"), budgets.settle, "q closes it");
@@ -226,9 +226,9 @@ test("[ and ] step back and forward through the sessions I visited, from the ros
 	);
 	expect(state(s).cursor).toBe(b);
 	const screen = s.screen().split("\n");
-	const legendY = screen.findLastIndex((line) => line.includes("‹ ›"));
+	const legendY = screen.findLastIndex((line) => line.includes("[ ]"));
 	s.save("history-legend.txt", screen[legendY] as string);
-	s.swb("drive", "click", String((screen[legendY] as string).indexOf("›")), String(legendY));
+	s.swb("drive", "click", String((screen[legendY] as string).indexOf("]")), String(legendY));
 	await waitState(s, "the legend's › forward to c", (x) => x.staged.id === c && x.cursor === c);
 
 	// A snoozed session is still somewhere I've been.

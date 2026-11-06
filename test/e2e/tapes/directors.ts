@@ -1821,7 +1821,7 @@ export const directors: Record<string, Director> = {
 			await waitDrive(s, "the Deck up", (x) => x.ready);
 			await click("Refactor");
 			await waitDrive(s, "its pi focused by a click", (x) => x.focus === "stage" && x.staged.kind === "live");
-			await click("hide list");
+			await click("hide");
 			await waitDrive(s, "the roster hidden", (x) => x.layout.rosterHidden);
 			await Bun.sleep(1000);
 			await click("show list");
@@ -1837,10 +1837,10 @@ export const directors: Record<string, Director> = {
 			await until(() => !s.swb("drive", "capture").includes("key or click closes"), TAPE, "help closed by a click");
 			s.swb("drive", "resize", "90x30");
 			await waitDrive(s, "a narrow Deck, the roster alone", (x) => x.layout.rosterOnly && x.focus === "roster");
-			// No Stage beside the roster: the roster draws the Peek itself, at its right edge.
+			// No Stage beside the roster: hovering leaves the list unobstructed.
 			const [dx, dy] = await onScreen(s, "Draft", 90);
 			s.swb("drive", "move", String(dx), String(dy));
-			await waitDrive(s, "Draft's Peek in the narrow roster", (x) => x.peek?.lines[0]?.startsWith("╭") === true);
+			await waitDrive(s, "no Peek over the narrow roster", (x) => x.peek === null);
 			await Bun.sleep(3000);
 			await click("Refactor", 20);
 			await waitDrive(s, "pi alone", (x) => x.focus === "stage");
@@ -1864,7 +1864,7 @@ export const directors: Record<string, Director> = {
 			await until(() => shows("j k ↑ ↓") && shows("Send literal Alt+a"), TAPE, "every key on a tall Deck");
 			await until(() => !shows("any key or click closes"), TAPE, "the help closed");
 			s.swb("drive", "resize", "140x24");
-			await until(() => shows("↓ 12 · j k, wheel scroll"), TAPE, "the short Deck's help, its end below");
+			await until(() => shows("↓ 12 more lines · j k, wheel scroll"), TAPE, "the short Deck's help, its end below");
 			await Bun.sleep(1500);
 			for (const direction of ["down", "down", "down", "down", "up"]) {
 				s.swb("drive", "wheel", direction, "70", "12");

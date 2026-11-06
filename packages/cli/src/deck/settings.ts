@@ -1325,6 +1325,7 @@ export class SettingsPane {
 		this.targets = [];
 		this.itemRows.clear();
 		this.narrow = width < NARROW_BELOW;
+		width = Math.min(width, RAIL + 101);
 		const now = Date.now();
 		const lines: string[] = [this.header(width)];
 		const bodyHeight = Math.max(3, height - 7);
@@ -1422,9 +1423,7 @@ export class SettingsPane {
 			Math.max(12, ...items.map((i) => (i.kind === "setting" && i.s.control.kind !== "paths" ? visibleWidth(i.s.label) : 0))),
 		);
 		const rows: string[] = [];
-		const harnessHelp = this.current()?.kind === "harness";
 		for (let i = this.scroll; rows.length < listHeight && i < items.length; i++) {
-			if (harnessHelp && items[i]?.kind === "shortlist") rows.push(...this.footer(Math.min(80, listWidth), null), "");
 			const y = this.listTop + rows.length;
 			this.itemRows.set(y, i);
 			rows.push(this.itemLine(items[i] as Item, i, y, left, listWidth, labelWidth));
@@ -1440,7 +1439,7 @@ export class SettingsPane {
 					});
 			}
 		}
-		if (!harnessHelp) rows.push("", ...this.footer(Math.min(80, listWidth), null));
+		rows.push("", ...this.footer(Math.min(80, listWidth), null));
 		while (rows.length < height) rows.push("");
 		if (items.length === 0) rows[0] = gray(this.changedOnly && this.query() === "" ? "   nothing changed yet" : "   no settings match");
 		return this.railed(rows.slice(0, height));
@@ -1501,7 +1500,7 @@ export class SettingsPane {
 				parts.push(...this.harnessParts(item.harness, i));
 				break;
 			case "shortlist":
-				parts.push(...this.shortlistParts(i, width));
+				parts.push(...this.shortlistParts(i));
 				break;
 			case "preset":
 				parts.push(...this.presetParts(item.index, i, width));
@@ -1573,13 +1572,12 @@ export class SettingsPane {
 		];
 	}
 
-	shortlistParts(i: number, width: number): Part[] {
+	shortlistParts(i: number): Part[] {
 		const custom = this.host.loaded().config.presets !== null;
 		const title = ` ${bold("Shortlist")}`;
 		const right: Part = custom ? [gray("↺"), { kind: "reset", at: i }] : [gray("from installed harnesses"), null];
-		const pad = Math.max(1, width - 3 - visibleWidth(title) - visibleWidth(right[0]));
 		const listed = this.host.catalog() === null && !custom ? [gray("   finding harnesses…"), null] : null;
-		return [[title, null], ...(listed ? [listed as [string, null]] : []), [" ".repeat(pad), null], right];
+		return [[title, null], ...(listed ? [listed as [string, null]] : []), [" ", null], right];
 	}
 
 	presetParts(index: number, i: number, width: number): Part[] {
@@ -1711,6 +1709,7 @@ export class SettingsPane {
 				.slice(0, 2);
 		}
 		const item = this.current();
+		if (item?.kind === "harness") return [];
 		const s = this.settingOf(item);
 		let text = s?.description ?? (this.searching ? "" : SECTION_ABOUT[SECTIONS[this.section] as Section]);
 		const editing = this.editing;
@@ -1722,10 +1721,6 @@ export class SettingsPane {
 					: `   ${gray("Press the new prefix. The current one and C-h j k l reach tmux first, so they can't be pressed here.")}`,
 				"",
 			];
-		if (item?.kind === "harness") {
-			const status = this.host.catalog()?.status[item.harness];
-			text = `${item.harness}${status?.version ? ` ${status.version}` : ""}. ${s?.description ?? ""}`;
-		}
 		if (item?.kind === "preset") {
 			const choice = this.choices()[item.index];
 			text = choice?.reason ?? choice?.note ?? "";

@@ -59,7 +59,7 @@ export type OverlayHost = {
 	/** One that `leaves` went without the roster: the UI server saw the pointer or a key go elsewhere. */
 	left: () => void;
 	/** A click on a button. */
-	pressed: (command: Command) => void;
+	pressed: (command: Command, at: { x: number; y: number }) => void;
 	/** The pointer moving over one that hovers a row. */
 	hovered: (row: string) => void;
 	/** Something shown went by itself. */
@@ -330,7 +330,7 @@ export class Overlays {
 				if (!this.want.includes(s.overlay)) continue;
 				const hit = s.overlay.view.buttons.find((b) => b.y === at.y && at.x >= b.from && at.x < b.to);
 				if (!hit) continue;
-				this.host.pressed(hit.command);
+				this.host.pressed(hit.command, { x: s.x + at.x, y: s.y + at.y });
 			}
 		}
 	}

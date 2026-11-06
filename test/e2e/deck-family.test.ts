@@ -99,6 +99,16 @@ test("a session an agent started nests under it; its Peek's started-by line and 
 	s.save("families.txt", s.screen());
 	s.save("families.ansi", s.swb("drive", "capture", "--ansi"));
 
+	s.keys("/", "-l", "g1", "Enter");
+	await waitState(s, "the matching child with its ancestors", (x) => x.filter === "g1" && sessionRows(x).length === 3);
+	expect(lineage(state(s))).toEqual(["root", "  c1", "    g1"]);
+	expect(rosterLine(" g1")).toContain("     └─ ● g1");
+	expect(s.screen()).not.toContain("Operators (0)");
+	expect(s.screen()).not.toContain("Archived (0)");
+	s.keys("Escape");
+	await waitState(s, "all families again", (x) => x.filter === "" && sessionRows(x).length === 7);
+	s.keys("g");
+
 	const peekOf = async (id: string) => {
 		await cursorTo(s, id);
 		return (await waitState(s, `${id}'s Peek`, (x) => x.peek?.id === id && x.peek.lines.some((l) => l.includes("pi ·")))).peek

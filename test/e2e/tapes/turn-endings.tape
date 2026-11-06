@@ -36,7 +36,7 @@ Sleep 1s
 Type "k"
 Sleep 800ms
 Type "j"
-Wait+Screen /errored · not running/
+Wait+Screen /errored · dormant/
 Sleep 800ms
 Screenshot ../artifacts/phase6/videos/turn-endings-errored-peek.png
 Sleep 1.5s

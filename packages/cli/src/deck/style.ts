@@ -4,7 +4,13 @@ import type { RgbColor } from "@earendil-works/pi-tui";
 const sgr = (open: string, close: string) => (s: string) => `\x1b[${open}m${s}\x1b[${close}m`;
 
 export const bold = sgr("1", "22");
-export const dim = sgr("2", "22");
+let muted: string | null = null;
+export const dim = (s: string): string => (muted ? `\x1b[${muted}m${s}\x1b[39m` : sgr("2", "22")(s));
+
+export function dimColors(background: RgbColor, foreground: RgbColor, light: boolean): void {
+	muted = light ? mix(38, background, foreground, 0.6) : null;
+}
+
 export const red = sgr("31", "39");
 export const green = sgr("32", "39");
 export const yellow = sgr("33", "39");

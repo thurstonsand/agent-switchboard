@@ -3,7 +3,7 @@ import { matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@ea
 import { span } from "@swb/shared/trace";
 import { UsageError } from "../errors.ts";
 import type { Card, Turn } from "./protocol.ts";
-import { cyan, dim, gray, yellow } from "./style.ts";
+import { bold, dim, gray, yellow } from "./style.ts";
 
 const { values: args } = parseArgs({ args: process.argv.slice(3), options: { sock: { type: "string" } } });
 if (!args.sock) throw new UsageError("__placeholder: --sock is required");
@@ -44,7 +44,7 @@ async function follow(): Promise<never> {
 function turnLines(turn: Turn, width: number): string[] {
 	const wrapped = turn.text.split("\n").flatMap((line) => (line === "" ? [""] : wrapTextWithAnsi(line, width - 5)));
 	const who = turn.who === "you" ? "you" : card.agent;
-	const label = turn.who === "you" ? cyan(who) : gray(who);
+	const label = bold(who);
 	// One column for both labels, so the conversation lines up.
 	const pad = Math.max(4, card.agent.length) + 1;
 	return wrapped.map((line, i) => `${i === 0 ? `${label}${" ".repeat(pad - who.length)}` : " ".repeat(pad)}${line}`);
@@ -75,7 +75,7 @@ function draw(): void {
 		const all = [
 			...card.turns.flatMap((turn, i) => [...(i > 0 ? [""] : []), ...turnLines(turn, width)]),
 			// The calls it was making hang off its last text, so an unfinished turn reads as one.
-			...card.tail.map((step) => gray(`${pad}${step}`)),
+			...card.tail.map((step) => `${pad}${step}`),
 			...(card.ending ? ["", endingRule(card.ending, width)] : []),
 		];
 		conversation = ["", ...(all.length > room - 1 ? [gray("…"), ...all.slice(all.length - (room - 2))] : all)];

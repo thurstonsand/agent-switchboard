@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { cursorTo, entry, rowIndex, seed, state, waitState } from "./harness/deck.ts";
+import { cursorTo, entry, launched, rowIndex, seed, state, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -70,12 +70,12 @@ test("the mouse reaches everything the keys do: a row's Peek, the hidden or narr
 	await peekButton("alpha", a, "m Group…");
 	await waitState(s, "the Group picker", (x) => x.mode === "name");
 	s.save("group-picker.txt", s.screen());
-	await click(" ✕ ");
+	await click("✕", 140);
 	await waitState(s, "the Group picker closed by its ✕", (x) => x.mode === "roster");
 
 	await click("alpha");
 	await waitState(s, "alpha's pi focused", (x) => x.staged.id === a && x.staged.kind === "live" && x.focus === "stage", budgets.piReady);
-	await click("hide list");
+	await click("hide");
 	await waitState(s, "the roster hidden", (x) => x.layout.rosterHidden);
 	await onScreen("show list", "the way back on the status line");
 	s.save("hidden.txt", s.screen());
@@ -115,20 +115,14 @@ test("the mouse reaches everything the keys do: a row's Peek, the hidden or narr
 
 	s.swb("drive", "resize", "60x20");
 	await waitState(s, "the roster alone", (x) => x.layout.rosterOnly && x.focus === "roster");
-	// No Stage beside the roster: the roster draws the Peek itself, over its own right edge, and it works the same.
+	// No Stage beside the roster: hovering never covers the list; the selected session has particulars below it.
 	await onScreen("alpha", "the narrow roster drawn");
 	s.swb("drive", "move", ...find("alpha", 60));
-	const narrowPeek = await waitState(s, "alpha's Peek in the narrow roster", (x) => x.peek?.id === a);
-	expect(narrowPeek.peek?.lines[0]?.startsWith("╭")).toBe(true);
-	const [stopX, stopY] = find("x Stop", 60);
-	// Right-aligned, leaving each row's glyph and the start of its title showing.
-	expect(Number(stopX)).toBeGreaterThan(16);
-	expect(s.screen().split("\n")[Number(find("alpha", 16)[1])]?.slice(0, 16)).toContain("alpha");
-	expect(s.screen().split("\n")[Number(stopY)]?.length).toBeLessThanOrEqual(60);
-	s.save("narrow-peek.txt", s.screen());
-	s.swb("drive", "move", stopX, stopY);
-	s.swb("drive", "click", stopX, stopY);
-	await until(() => !entry(s, a).live, budgets.settle, "alpha stopped from the narrow Peek");
+	await Bun.sleep(500);
+	expect(state(s).peek).toBeNull();
+	expect(s.screen()).toContain("bravo");
+	expect(s.screen()).not.toContain("a Archive");
+	s.save("narrow-roster.txt", s.screen());
 	await click("alpha", 20);
 	await waitState(s, "alpha's pi filling the Deck", (x) => x.staged.id === a && x.focus === "stage", budgets.piReady);
 	await onScreen("show list", "the way back on the status line");
@@ -151,6 +145,11 @@ test("a blocked Peek focuses its own session to respond, even while another row 
 	await onScreen("Confirm deploy?", "the dialog");
 	s.keys("M-a", "h");
 	await waitState(s, "the roster", (x) => x.focus === "roster");
+	await cursorTo(s, b);
+	await cursorTo(s, a);
+	await Bun.sleep(500);
+	expect(state(s).peek).toBeNull();
+	expect(s.screen()).toContain("Confirm deploy?");
 	await cursorTo(s, b);
 	await peekButton("alpha", a, "⏎ Focus to respond");
 	await waitState(s, "alpha, not bravo, focused", (x) => x.staged.id === a && x.focus === "stage");
@@ -178,7 +177,7 @@ test("a Peek follows the pointer and the cursor keys, leaves with the pointer, a
 	expect(hovered.peek?.lines.join("\n")).toContain("pi  bravo");
 	// The state names the Peek before its popup, a process of its own, has drawn it.
 	await onScreen("a Archive", "bravo's Peek drawn");
-	await until(() => findRight("bravo")[1] === find("bravo")[1], budgets.settle, "the Peek's title level with bravo's row");
+	expect(hovered.peek?.lines.some((line) => line.trim() === "bravo")).toBe(false);
 	s.save("peek-hover.txt", s.screen());
 
 	// On the Peek itself it stays; onto pi it goes, and the row's hover with it.
@@ -201,6 +200,11 @@ test("a Peek follows the pointer and the cursor keys, leaves with the pointer, a
 	await waitState(s, "the cursor's Peek", (x) => x.cursor === b && x.peek?.id === b && x.peek.source === "cursor");
 	s.keys(toA);
 	await waitState(s, "the Peek following the cursor", (x) => x.cursor === a && x.peek?.id === a);
+	s.keys("Escape");
+	await waitState(s, "Escape dismisses the Peek", (x) => x.peek === null);
+	s.keys(toB);
+	await waitState(s, "another cursor Peek", (x) => x.peek?.id === b);
+	await waitState(s, "the cursor Peek expires without a mouse", (x) => x.peek === null);
 
 	// Clicking a row focuses its pi and puts its Peek away, though the pointer still rests on the row.
 	await click("bravo");
@@ -213,4 +217,36 @@ test("a Peek follows the pointer and the cursor keys, leaves with the pointer, a
 	s.keys("-l", "typed past the peek");
 	await waitState(s, "the Peek closed by the first key", (x) => x.peek === null);
 	await onScreen("typed past the peek", "every key in pi");
+});
+
+test("Archive stays at its clicked action, Snooze stays at its row, and the Stage's last message is not repeated", async () => {
+	s = scenario("phase6", "anchored-prompts");
+	const parent = await launched(s, "reply parent response", { cwd: s.project, title: "parent" });
+	await launched(s, "reply descendant response", { from: parent, title: "child" });
+	s.swb("drive", "start", "--size", "175x48");
+	await waitState(s, "the Deck", (x) => x.ready);
+	await cursorTo(s, parent);
+	await onScreen("parent response", "the parent's Stage");
+	s.swb("drive", "move", ...find("parent"));
+	const shown = await waitState(s, "the parent's Peek", (x) => x.peek?.id === parent);
+	expect(shown.peek?.lines.join("\n")).not.toContain("parent response");
+	await onScreen("a Archive", "the Archive action");
+	const [x, y] = findRight("a Archive");
+	s.swb("drive", "move", x, y);
+	s.swb("drive", "click", x, y);
+	await waitState(s, "the Archive form", (st) => st.mode === "archive");
+	await onScreen("Archive parent", "the anchored form drawn");
+	const [formX, formY] = find("Archive parent", 175);
+	expect(Math.abs(Number(formY) - Number(y))).toBeLessThanOrEqual(1);
+	expect(Math.abs(Number(formX) - Number(x))).toBeLessThanOrEqual(3);
+	await click("✕", 175);
+	await waitState(s, "the form closed without archiving", (st) => st.mode === "roster");
+	expect(entry(s, parent).open).toBe(true);
+	const row = Number(find("parent")[1]);
+	s.keys("s");
+	await waitState(s, "Snooze", (st) => st.mode === "snooze");
+	await onScreen("Snooze parent", "the Snooze form drawn");
+	expect(Number(find("Snooze parent")[1])).toBe(row + 1);
+	s.keys("Escape");
+	await waitState(s, "Snooze canceled", (st) => st.mode === "roster");
 });
