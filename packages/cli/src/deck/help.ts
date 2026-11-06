@@ -1,55 +1,69 @@
 import { decodeKittyPrintable, matchesKey, StdinBuffer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { loadConfig } from "../config.ts";
-import { bold, dim } from "./style.ts";
-
-function keys(prefix: string): [string, string][] {
-	return [
-		["j k ↑ ↓", "move"],
-		["g G", "first, last"],
-		["⏎", "focus the session (wakes it)"],
-		["l →", "focus the session; expand a header or a fold"],
-		["h ←", "fold what a session started; collapse a header"],
-		["space", "toggle a header or a fold"],
-		["w", "wake without focusing"],
-		["x", "stop a running session; it stays open"],
-		["R", "reload: restart its agent on fresh config, and carry on"],
-		["n", "new session: pick a directory, and with ⇥ a preset"],
-		["N", "new session in a directory to add"],
-		["a", "archive, asking about what it started; unarchive"],
-		["p", "the session that started this one"],
-		["[ ]", "back, forward through the sessions I visited"],
-		["s", "snooze into Snoozed for a while, or until a message; unsnooze"],
-		["u", "mark Unseen until I leave it and come back; unmark"],
-		["y Y", "copy swb open <id>; @session:<id>"],
-		["m", "pick the session's Group; rename a Group"],
-		[",", "settings"],
-		["hover", "a session's Peek beside it; its buttons are these keys"],
-		["drag", "into a Group, or out onto its Project"],
-		["/", "filter; esc clears"],
-		["q", "close the Deck (sessions keep running)"],
-		["", ""],
-		["C-h j k l", "move between panes, through nvim's windows"],
-		[`${prefix} h j k l`, `the pane whose label shows that key while ${prefix} is down`],
-		[`${prefix} J K`, "the next or previous session; j k too, in the sidebar"],
-		[`${prefix} Tab`, "the sidebar, or back to the pane you left"],
-		[`${prefix} e`, "swap the agent and the editor"],
-		[`${prefix} v`, "split the editor beside the agent"],
-		[`${prefix} s`, "a shell beside, below, or in place of the agent; ctrl-d closes it"],
-		[`${prefix} z`, "hide or show the sidebar; click ◂ to show it"],
-		[`${prefix} S`, "snooze or unsnooze, as s in the sidebar"],
-		[`${prefix} <key>`, "n N w x R a p u [ ] y Y / m , as in the sidebar"],
-		[`${prefix} d`, "in the directory picker, remove the highlighted one"],
-		[`${prefix} q`, "close the Deck from anywhere"],
-		[`${prefix} ?`, "these keys"],
-		[`${prefix} ${prefix}`, `a literal ${prefix}`],
-	];
-}
+import { attention, blue, bold, cyan, dim, green, magenta, red } from "./style.ts";
 
 const CLOSES = "any key or click closes";
 
 /** The popup's lines, the hint under them aside: a blank line, then a key and what it does on each. */
-function lines(prefix: string): string[] {
-	return ["", ...keys(prefix).map(([k, label]) => (k === "" ? "" : `  ${bold(k.padEnd(12))} ${label}`))];
+function lines(prefix: string, columns = Infinity): string[] {
+	const row = (k: string, label: string) => `  ${bold(k.padEnd(14))} ${label}`;
+	const left = [
+		bold("  Navigate"),
+		row("j k ↑ ↓", "Move"),
+		row("g G", "First / last"),
+		row("⏎", "Focus session; wake if dormant"),
+		row("l →", "Focus session / expand"),
+		row("h ←", "Fold family / collapse header"),
+		row("space", "Toggle header or family fold"),
+		row("p", "Session that started this one"),
+		row("[ ]", "Back / forward through Visits"),
+		row("/", "Filter; esc clears"),
+		row("hover", "Peek; its actions use these keys"),
+		row("drag", "Move into Group / onto Project"),
+		"",
+		bold("  Sessions"),
+		row("w / x", "Wake / stop; session stays open"),
+		row("R", "Reload agent on fresh config"),
+		row("n / N", "New in known / added directory"),
+		row("⇥", "Choose preset in directory picker"),
+		row("a", "Archive family or session / unarchive"),
+		row("s", "Snooze / unsnooze"),
+		row("u", "Mark / unmark Unseen"),
+		row("y / Y", "Copy swb open <id> / @session:<id>"),
+		row("m", "Pick or rename Group"),
+		row(",", "Settings"),
+		row("q", "Close Deck; sessions keep running"),
+	];
+	const right = [
+		bold("  State marks"),
+		`  ○ idle                 ${dim("○")} dormant (not running)`,
+		`  ${cyan("◐")} working              ${green("●")} Unseen (finished since Visit)`,
+		`  ${bold(attention("◆"))} blocked              ${red("⚠")} cut off or errored`,
+		`  ${dim("✓")} archived             ${magenta("⎇")} worktree`,
+		`  ${blue("⌁")} started by Operator  ↳ started by session`,
+		"  +N folded family       ◷ once / ↻ recurring schedule",
+		"",
+		bold("  Views"),
+		row(`${prefix} e`, "Swap agent / editor"),
+		row(`${prefix} v`, "Split editor beside agent"),
+		row(`${prefix} s`, "Shell beside / below / instead; ctrl-d closes"),
+		row(`${prefix} z`, "Hide / show roster; click ◂ to show"),
+		"",
+		bold("  From any pane"),
+		`  ${prefix.replaceAll("M-", "Alt+").replaceAll("C-", "Ctrl+")} = ${prefix} · hold to reveal pane keys`,
+		row("C-h j k l", "Move through panes and nvim windows"),
+		row(`${prefix} h j k l`, "Focus the pane bearing that key"),
+		row(`${prefix} J K`, "Next / previous session; j k in roster"),
+		row(`${prefix} Tab`, "Roster / pane you left"),
+		row(`${prefix} S`, "Snooze / unsnooze"),
+		row(`${prefix} <key>`, "n N w x R a p u [ ] y Y / m , as in roster"),
+		row(`${prefix} d`, "Remove highlighted directory in picker"),
+		row(`${prefix} q / ?`, "Close Deck / help"),
+		row(`${prefix} ${prefix}`, `Send literal ${prefix}`),
+	];
+	const width = Math.max(...left.map(visibleWidth)) + 4;
+	if (width + Math.max(...right.map(visibleWidth)) > columns) return ["", ...left, "", ...right];
+	return ["", ...left.map((line, i) => `${line}${" ".repeat(width - visibleWidth(line))}${right[i] ?? ""}`)];
 }
 
 /** The popup that shows every line, its border and the hint below included, with room to its right. */
@@ -60,11 +74,13 @@ export function helpSize(prefix: string): { width: number; height: number } {
 
 /** `?`'s popup. Shorter than its lines, it scrolls by j k ↑ ↓, a page by space and PgUp PgDn, and by the wheel. */
 export async function help(): Promise<void> {
-	const all = lines(loadConfig().prefix);
+	const prefix = loadConfig().prefix;
+	let all = lines(prefix, process.stdout.columns);
 	let top = 0;
 	const room = () => Math.max(1, process.stdout.rows - 2);
 	const overflow = () => Math.max(0, all.length - room());
 	const draw = () => {
+		all = lines(prefix, process.stdout.columns);
 		top = Math.max(0, Math.min(overflow(), top));
 		const below = all.length - top - room();
 		const more = [top > 0 ? `↑ ${top}` : "", below > 0 ? `↓ ${below}` : ""].filter(Boolean).join(" ");

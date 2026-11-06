@@ -59,15 +59,15 @@ test("the mouse reaches everything the keys do: a row's Peek, the hidden or narr
 	await cursorTo(s, a);
 
 	// A Peek's buttons act on its own row, wherever the cursor is.
-	await peekButton("bravo", b, "Wake w");
+	await peekButton("bravo", b, "w Wake");
 	await until(() => entry(s, b).live, budgets.piReady, "bravo woken from its Peek");
 	expect(state(s)).toMatchObject({ cursor: a, focus: "roster" });
 	s.save("peek-woke.txt", s.screen());
-	await peekButton("bravo", b, "Stop x");
+	await peekButton("bravo", b, "x Stop");
 	await until(() => !entry(s, b).live, budgets.settle, "bravo stopped from its Peek");
 	expect(state(s).cursor).toBe(a);
 
-	await peekButton("alpha", a, "Group… m");
+	await peekButton("alpha", a, "m Group…");
 	await waitState(s, "the Group picker", (x) => x.mode === "name");
 	s.save("group-picker.txt", s.screen());
 	await click(" ✕ ");
@@ -100,7 +100,7 @@ test("the mouse reaches everything the keys do: a row's Peek, the hidden or narr
 	await waitState(s, "filtering", (x) => x.mode === "filter");
 	s.keys("-l", "a");
 	await waitState(s, "typed into the filter", (x) => x.filter === "a");
-	await peekButton("bravo", b, "Mark Unseen u");
+	await peekButton("bravo", b, "u Mark Unseen");
 	await waitState(s, "the filter closed by the Peek's button", (x) => x.mode === "roster" && x.filter === "a");
 	await until(() => entry(s, b).markedUnseen, budgets.settle, "bravo marked Unseen from its Peek");
 	s.keys("Escape");
@@ -120,7 +120,7 @@ test("the mouse reaches everything the keys do: a row's Peek, the hidden or narr
 	s.swb("drive", "move", ...find("alpha", 60));
 	const narrowPeek = await waitState(s, "alpha's Peek in the narrow roster", (x) => x.peek?.id === a);
 	expect(narrowPeek.peek?.lines[0]?.startsWith("╭")).toBe(true);
-	const [stopX, stopY] = find("Stop x", 60);
+	const [stopX, stopY] = find("x Stop", 60);
 	// Right-aligned, leaving each row's glyph and the start of its title showing.
 	expect(Number(stopX)).toBeGreaterThan(16);
 	expect(s.screen().split("\n")[Number(find("alpha", 16)[1])]?.slice(0, 16)).toContain("alpha");
@@ -156,17 +156,17 @@ test("a Peek follows the pointer and the cursor keys, leaves with the pointer, a
 	expect(hovered).toMatchObject({ cursor: a, staged: { id: staged } });
 	expect(hovered.peek?.lines.join("\n")).toContain("pi  bravo");
 	// The state names the Peek before its popup, a process of its own, has drawn it.
-	await onScreen("Archive a", "bravo's Peek drawn");
+	await onScreen("a Archive", "bravo's Peek drawn");
 	await until(() => findRight("bravo")[1] === find("bravo")[1], budgets.settle, "the Peek's title level with bravo's row");
 	s.save("peek-hover.txt", s.screen());
 
 	// On the Peek itself it stays; onto pi it goes, and the row's hover with it.
-	s.swb("drive", "move", ...findRight("Archive a"));
+	s.swb("drive", "move", ...findRight("a Archive"));
 	await Bun.sleep(400);
 	expect(state(s).peek?.id).toBe(b);
 	s.swb("drive", "move", "100", "35");
 	await waitState(s, "the Peek gone with the pointer", (x) => x.peek === null && x.hover === null);
-	expect(s.screen()).not.toContain("Archive a");
+	expect(s.screen()).not.toContain("a Archive");
 
 	// A control lights only while the pointer is on it: leaving the roster for pi puts it out.
 	const [tabX, tabY] = find(" editor ");

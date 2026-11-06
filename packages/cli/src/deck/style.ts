@@ -11,19 +11,13 @@ export const yellow = sgr("33", "39");
 export const magenta = sgr("35", "39");
 export const blue = sgr("34", "39");
 export const cyan = sgr("36", "39");
-export const gray = sgr("90", "39");
-/** The glimpse companion's attention purple, #c084fc. */
-export const attention = sgr("38;2;192;132;252", "39");
+export const gray = dim;
+export const attention = magenta;
 
 const SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
 
 export function spinnerFrame(now: number): string {
 	return SPINNER[Math.floor(now / 80) % SPINNER.length] as string;
-}
-
-/** The blocked glyph flashes at about 1 Hz. */
-export function flashOn(now: number): boolean {
-	return Math.floor(now / 500) % 2 === 0;
 }
 
 export function key(name: string, label: string): string {
@@ -42,14 +36,15 @@ export function age(at: number, now: number): string {
 	return `${Math.floor(d / DAY)}d`;
 }
 
-/** When a snooze ends, as short as a roster row takes it: "14:30" today, "Sun 9a" within the week, "Oct 25" after. */
+/** When a snooze ends: "2:30p" today, "Sun 9a" within the week, "Oct 25" after. */
 export function wakeAt(at: number, now: number): string {
 	const d = new Date(at);
 	const [h, m] = [d.getHours(), d.getMinutes()];
-	if (d.toDateString() === new Date(now).toDateString()) return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+	const time = `${h % 12 || 12}${m ? `:${String(m).padStart(2, "0")}` : ""}${h < 12 ? "a" : "p"}`;
+	if (d.toDateString() === new Date(now).toDateString()) return time;
 	if (at - now < 6 * DAY) {
 		const day = d.toLocaleDateString("en-US", { weekday: "short" });
-		return `${day} ${h % 12 || 12}${m ? `:${String(m).padStart(2, "0")}` : ""}${h < 12 ? "a" : "p"}`;
+		return `${day} ${time}`;
 	}
 	return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }

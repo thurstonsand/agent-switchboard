@@ -12,7 +12,7 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { type Harness, VIEWS } from "@swb/shared";
+import { VIEWS } from "@swb/shared";
 import { harnessName } from "@swb/shared/mailbox";
 import { mark } from "@swb/shared/trace";
 import { displayName, openDescendants, projectName } from "../derive.ts";
@@ -109,7 +109,6 @@ import {
 	breathe,
 	cyan,
 	dim,
-	flashOn,
 	gray,
 	green,
 	key,
@@ -120,14 +119,14 @@ import {
 	wakeAt,
 } from "./style.ts";
 
-function glyph(state: State, now: number): string {
+function glyph(state: State, now: number, selected = false): string {
 	switch (state) {
 		case "loading":
 			return cyan(spinnerFrame(now));
 		case "blocked":
-			return flashOn(now) ? bold(attention("◆")) : dim(attention("◆"));
+			return bold(attention("◆"));
 		case "working":
-			return model.breath ? breathe(model.breath.faint, model.breath.strong, now, "◐") : cyan("◐");
+			return selected ? "◐" : model.breath ? breathe(model.breath.faint, model.breath.strong, now, "◐") : cyan("◐");
 		case "unseen":
 			return green("●");
 		case "idle":
@@ -318,7 +317,7 @@ function snoozeMenu(width: number): Part[] {
 	];
 	SNOOZE_CHOICES.forEach((choice, i) => {
 		const until = presetUntil(choice.snooze, now);
-		const at = gray(until === null ? "↘" : wakeAt(until, now));
+		const at = until === null ? "↘" : wakeAt(until, now);
 		const label = `   ${choice.label}`;
 		const line = `${label}${" ".repeat(Math.max(1, width - visibleWidth(label) - visibleWidth(at) - 1))}${at} `;
 		out.push([i === snoozing.choice ? cursorLine(line, true) : line, { kind: "choose", index: i }]);
@@ -432,7 +431,7 @@ function list(rows: Row[], index: number, width: number, full: number, now: numb
 			continue;
 		}
 		const y = frame.listTop + out.length;
-		const line = truncateToWidth(rowLine(row, width, now), width, "…", true);
+		const line = truncateToWidth(rowLine(row, width, now, i === index || row.key === model.hover), width, "…", true);
 		if (dragging()?.drop?.header.key === row.key) out.push(cursorLine(line, true));
 		else if (i === index) out.push(cursorLine(line, model.focus === "roster"));
 		else out.push(row.key === model.hover ? hoverLine(line) : line);
@@ -452,27 +451,26 @@ function archiveNotes(e: Entry): string[] {
 	const mode = model.mode;
 	if (mode.kind === "archive" && mode.chosen) {
 		const groups = archiveCancels(e, mode.chosen.all);
+		const recurring = new Set(
+			[...model.entries.values()].flatMap((entry) => entry.schedules.filter((s) => s.cron !== null).map((s) => s.id)),
+		);
 		return [
 			"Cancels schedules:",
 			...groups.flatMap(({ entry, schedules }) => [
 				// One session's schedules need no title; several are told apart by theirs.
 				...(groups.length > 1 ? [` ${displayName(entry)}`] : []),
-				...schedules.slice(0, ARCHIVE_SCHEDULES).map((p) => `  ${gray("◷")} ${p.scheduleLabel}`),
+				...schedules.slice(0, ARCHIVE_SCHEDULES).map((p) => `  ${recurring.has(p.id) ? cyan("↻") : "◷"} ${p.scheduleLabel}`),
 				...(schedules.length > ARCHIVE_SCHEDULES ? [gray(`  … ${schedules.length - ARCHIVE_SCHEDULES} more`)] : []),
 			]),
 		];
 	}
 	const family = openDescendants(model.entries.values(), e.id);
-	return [family.length > 0 ? familyTally(family) : "Branch kept; clean worktree only"];
+	return [family.length > 0 ? `${family.length} child session${family.length === 1 ? "" : "s"}` : "Branch kept"];
 }
 
 /** The prompt's borders, notes, answers, and a line for each way to delete the worktree too. */
 function archivePromptHeight(e: Entry): number {
-	return (
-		3 +
-		archiveNotes(e).length +
-		keymap().filter((b) => b.command?.kind === "archiveAnswer" && b.command.deleteWorktree && b.label !== null).length
-	);
+	return 2 + archiveNotes(e).length + keymap().filter((b) => b.label !== null).length;
 }
 
 /** Archive alone, with its family, or delete this linked worktree as well: the archive keymap's answers, as buttons. */
@@ -481,26 +479,16 @@ function archivePrompt(e: Entry, width: number, top: number): string[] {
 	const box = (text: string) => ` │${truncateToWidth(text, inner, "…", true)}│`;
 	const notes = archiveNotes(e);
 	const answers = keymap().filter((b) => b.label !== null);
-	const keep = answers.filter((b) => b.command?.kind !== "archiveAnswer" || !b.command.deleteWorktree);
-	const deleting = answers.filter((b) => b.command?.kind === "archiveAnswer" && b.command.deleteWorktree);
-	const anyway = model.mode.kind === "archive" && model.mode.chosen !== null;
-	const choice = clickable(top + 1 + notes.length, [
-		[anyway ? " │ Archive anyway " : " │ Archive  ", null],
-		...keep.flatMap((b, i): Part[] => [
-			...(i > 0 ? ([["  ", null]] as Part[]) : []),
-			[b.label ? key(b.name, b.label) : bold(b.name), b.command],
-		]),
-	]);
-	const lines = deleting.map((b, i) =>
-		clickable(top + 2 + notes.length + i, [
+	const lines = answers.map((b, i) =>
+		clickable(top + 1 + notes.length + i, [
 			[" │ ", null],
-			[key(b.name, b.label as string), b.command],
+			[`${bold(b.name.padEnd(3))} ${b.label}`, b.command],
 		]),
 	);
 	return [
 		` ┌${"─".repeat(inner)}┐`,
 		...notes.map((note) => box(` ${note}`)),
-		...[choice, ...lines].map((line) => `${truncateToWidth(line, inner + 2, "…", true)}│`),
+		...lines.map((line) => `${truncateToWidth(line, inner + 2, "…", true)}│`),
 		` └${"─".repeat(inner)}┘`,
 	];
 }
@@ -637,7 +625,7 @@ function overlayConfirm(
 	}
 }
 
-function rowLine(row: Row, width: number, now: number): string {
+function rowLine(row: Row, width: number, now: number, selected: boolean): string {
 	if (row.kind === "header") {
 		const count = gray(` (${row.count})`);
 		const name = row.group === null ? bold(projectName(row.project)) : row.group;
@@ -660,30 +648,31 @@ function rowLine(row: Row, width: number, now: number): string {
 			? e.snoozedUntil === null
 				? "↘"
 				: wakeAt(e.snoozedUntil, now)
-			: e.activity !== "idle"
+			: e.activity === "working"
 				? ""
 				: age(e.activityAt, now);
 	const worktree = e.cwd !== e.project ? magenta("⎇") : " ";
-	const right = ` ${worktree} ${gray(when.padStart(3))} `;
+	const right = ` ${worktree} ${e.open && e.activity === "blocked" ? attention(when.padStart(3)) : when.padStart(3)} `;
 	const hidden = row.folded ? ` ${foldedTally(row.family.map((p) => p.entry))}` : "";
 	const titleWidth = width - visibleWidth(lead) - 2 - visibleWidth(hidden) - visibleWidth(right);
-	const title = truncateToWidth(e.provisional ? gray(displayName(e)) : displayName(e), titleWidth, "…", true);
-	return `${lead}${glyph(stateOf(e), now)} ${title}${hidden}${right}`;
+	const state = stateOf(e);
+	const paint = ["blocked", "unseen", "cut-off", "errored"].includes(state) ? bold : e.provisional ? gray : (s: string) => s;
+	const title = truncateToWidth(paint(displayName(e)), titleWidth, "…", true);
+	return `${lead}${glyph(state, now, selected)} ${title}${hidden}${right}`;
 }
 
 /**
  * A session row's left edge, after the cursor's bar: a nested row hangs from its parent's glyph on its family's guides;
- * a family's root says who started it, if a session did, and has the family's fold.
+ * a family's root says who started it, if a session did. Folded counts sit beside the age.
  */
 function rowLead(row: SessionRow): string {
 	const indent = " ".repeat(row.depth * 2);
-	const fold = row.family.length === 0 ? null : gray(row.folded ? "▸" : "▾");
 	if (row.nest) {
 		const guides = row.nest.continues.map((on) => (on ? "│  " : "   ")).join("");
-		return `${indent}  ${gray(`${guides}${row.nest.last ? "└" : "├"}`)}${fold ?? gray("─")} `;
+		return `${indent}  ${gray(`${guides}${row.nest.last ? "└" : "├"}─`)} `;
 	}
 	const from = origin(row.entry);
-	return `${indent}${originMark(from)}${fold ?? " "}`;
+	return `${indent}${originMark(from)} `;
 }
 
 function originMark(from: "session" | "operator" | null): string {
@@ -695,14 +684,14 @@ function foldColumn(row: SessionRow): number {
 	return row.nest ? 4 + row.depth * 2 + 3 * row.nest.continues.length : 2 + row.depth * 2;
 }
 
-/** What a family is doing, by state; ○ is every one finished, idle or not running. */
+/** State counts exposed by deck state; the confirmation itself names the family in words. */
 function familyTally(family: Entry[]): string {
 	const states = family.map(stateOf);
 	const tally: [State[], string][] = [
-		[["working", "loading"], cyan("◐")],
-		[["blocked"], attention("◆")],
-		[["cut-off", "errored"], red("⚠")],
-		[["unseen"], green("●")],
+		[["working", "loading"], "◐"],
+		[["blocked"], "◆"],
+		[["cut-off", "errored"], "⚠"],
+		[["unseen"], "●"],
 		[["idle", "dormant"], "○"],
 	];
 	return tally
@@ -729,7 +718,7 @@ function foldedTally(hidden: Entry[]): string {
 // covers the roster, or on a narrow Deck, which has no Stage beside the roster, over the roster's right edge. The UI
 // server puts it away when the pointer leaves (see deck.ts).
 
-const PEEK_COLS = 48;
+const PEEK_COLS = 54;
 
 /** The most of a folded family a Peek lists. */
 const PEEK_FOLD_ROWS = 8;
@@ -876,7 +865,7 @@ function launchCard(choosing: Choosing, width: number, open: "left" | "right"): 
 }
 
 /**
- * The launch card's menu, hung from its field: every preset, a harness at a time, numbered for one key to pick until
+ * The launch card's menu, hung from its field: every preset in shortlist order, numbered for one key to pick until
  * something's typed, and the highlighted one's note. Too long for the room it has, it scrolls to keep its highlight in view.
  */
 function launchMenu(choosing: Choosing, width: number, maxHeight: number): OverlayView {
@@ -887,28 +876,21 @@ function launchMenu(choosing: Choosing, width: number, maxHeight: number): Overl
 	const shown = menuPresets(menu.query);
 	const items: string[] = [];
 	const itemAt: number[] = [];
-	let harness: Harness | null = null;
 	shown.forEach((index, n) => {
 		const p = (presets[index] as Choice).preset;
-		if (p.harness !== harness) {
-			harness = p.harness;
-			items.push(cyan(harnessName(harness)));
-		}
 		const name = p.agent ?? p.model ?? "";
 		const pad = " ".repeat(Math.max(1, 21 - visibleWidth(name)));
 		const effort = (p.agent ? "agent" : (p.effort ?? "default")).padEnd(8);
 		itemAt.push(items.length);
 		items.push(
-			`${menu.query === "" && n < 9 ? cyan(String(n + 1)) : " "} ${p.default ? "★" : " "} ${index === chosen ? cyan(name) : name}${pad}${gray(effort)}${gray(p.provider ?? "")}`,
+			`${menu.query === "" && n < 9 ? bold(String(index + 1)) : " "} ${p.default ? "★" : " "} ${p.harness.padEnd(7)} ${index === chosen ? cyan(name) : name}${pad}${effort}${p.provider ?? ""}`,
 		);
 	});
 	if (shown.length === 0) items.push(gray("nothing matches"));
 	// Its frame, and the rule and note under the list.
 	const room = Math.max(1, maxHeight - 4);
 	const from = Math.min(Math.max(0, (itemAt[menu.cursor] ?? 0) - room + 1), Math.max(0, items.length - room));
-	let to = Math.min(items.length, from + room);
-	// A harness's name at the foot of the window, with none of its presets under it, says nothing.
-	if (to < items.length && !itemAt.includes(to - 1)) to--;
+	const to = Math.min(items.length, from + room);
 	const row = (content: string) => `${gray("│")} ${truncateToWidth(content, inner, "…", true)} ${gray("│")}`;
 	const lines = [gray(`┌${"─".repeat(width - 2)}┐`)];
 	const buttons: OverlayButton[] = [];
@@ -919,11 +901,7 @@ function launchMenu(choosing: Choosing, width: number, maxHeight: number): Overl
 			buttons.push({ y: lines.length, from: 2, to: 2 + inner, command: { kind: "choose", index: n }, hot: row(hoverLine(content)) });
 		lines.push(row(n === menu.cursor ? cursorLine(content, true) : content));
 	});
-	lines.push(
-		gray(`├${"─".repeat(width - 2)}┤`),
-		row(gray(presets[shown[menu.cursor] ?? -1]?.note ?? "")),
-		gray(`└${"─".repeat(width - 2)}┘`),
-	);
+	lines.push(gray(`├${"─".repeat(width - 2)}┤`), row(presets[shown[menu.cursor] ?? -1]?.note ?? ""), gray(`└${"─".repeat(width - 2)}┘`));
 	return { lines, buttons };
 }
 
@@ -947,7 +925,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 			`created ${ago(e.createdAt, now)} · ${e.open ? `active ${e.activity !== "idle" ? "now" : ago(e.activityAt, now)}` : `archived ${ago(archivedKey(e), now)}`}`,
 		),
 	);
-	head.push(rule, gray(tailOf(`${e.harness} · ${shortPath(e.cwd)}`, inner)));
+	head.push(rule, tailOf(`${e.harness} · ${shortPath(e.cwd)}`, inner));
 	const info = model.peek.info.get(e.id)?.info;
 	if (e.branch) {
 		const diff = info?.diff;
@@ -986,10 +964,10 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 		for (const v of shown) {
 			const line =
 				v.nextAt === null
-					? `${green("✓")} ${v.scheduleLabel}${gray(` · ran ${ago(v.lastFiredAt as number, now)}`)}`
+					? `${green("✓")} ${v.scheduleLabel} · ran ${ago(v.lastFiredAt as number, now)}`
 					: v.cron
-						? `${cyan("↻")} ${v.scheduleLabel}${gray(` · next ${wakeAt(v.nextAt, now)}${v.lastFiredAt === null ? "" : ` · last ${ago(v.lastFiredAt, now)}`}`)}`
-						: `${gray("◷")} ${v.scheduleLabel}${gray(` · ${wakeAt(v.nextAt, now)}`)}`;
+						? `${cyan("↻")} ${v.scheduleLabel} · next ${wakeAt(v.nextAt, now)}${v.lastFiredAt === null ? "" : ` · last ${ago(v.lastFiredAt, now)}`}`
+						: `◷ ${v.scheduleLabel} · ${wakeAt(v.nextAt, now)}`;
 			head.push(truncateToWidth(` ${line}`, inner, "…"));
 		}
 	}
@@ -1002,25 +980,22 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 		const shown = text.length > 3 ? [...text.slice(0, 2), truncateToWidth(text.slice(2).join(" "), inner - pad, "…")] : text;
 		turn.push(rule, ...shown.map((line, i) => `${gray(i === 0 ? label : " ".repeat(pad))}${line}`));
 	}
-	// The buttons, wrapped; each is the row's key, so the Peek teaches them too.
+	// Short actions share three columns; creation and copy actions each get a full row.
 	const buttons: { y: number; from: number; to: number; command: Command; text: string }[] = [];
 	const buttonLines: string[] = [];
 	let line = "";
 	let x = 0;
 	for (const [label, k, act] of peekButtons(row)) {
-		const text = ` ${label} ${dim(k)} `;
-		const w = visibleWidth(text);
-		if (x > 0 && x + 1 + w > inner) {
+		const text = ` ${bold(k)} ${label} `;
+		const long = act === "new" || act === "copyOpen" || act === "copyMention";
+		const w = long ? inner : Math.max(visibleWidth(text), Math.floor(inner / 3));
+		if (x > 0 && x + w > inner) {
 			buttonLines.push(line);
 			line = "";
 			x = 0;
 		}
-		if (x > 0) {
-			line += " ";
-			x += 1;
-		}
 		buttons.push({ y: buttonLines.length, from: x, to: x + w, command: { kind: "row", act, row: row.key }, text });
-		line += text;
+		line += text + " ".repeat(Math.max(0, w - visibleWidth(text)));
 		x += w;
 	}
 	if (line !== "") buttonLines.push(line);

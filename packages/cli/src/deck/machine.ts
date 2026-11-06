@@ -1082,12 +1082,13 @@ function groupKey(group: string): string {
 }
 
 export function cursorLine(line: string, focused: boolean): string {
+	line = line.replaceAll("\x1b[2m", "");
 	if (!m.cursorBg) return focused ? sgrBg("7", line) : sgrBg("4", line);
 	return sgrBg(focused ? m.cursorBg.focused : m.cursorBg.unfocused, line);
 }
 
 export function hoverLine(line: string): string {
-	return m.cursorBg ? sgrBg(m.cursorBg.hover, line) : line;
+	return m.cursorBg ? sgrBg(m.cursorBg.hover, line.replaceAll("\x1b[2m", "")) : line;
 }
 
 export const frame: Frame = {
@@ -2302,7 +2303,7 @@ export function chosenPreset(choosing: Choosing): number {
 	return Math.max(0, presetLabels(pickerPresets().map((c) => c.preset)).indexOf(choosing.preset));
 }
 
-/** What the menu shows, as indexes into pickerPresets: a harness at a time, in the order they first appear, narrowed by `query`. */
+/** What the menu shows, in shortlist order, narrowed by `query`. */
 export function menuPresets(query: string): number[] {
 	const presets = pickerPresets();
 	const words = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -2311,9 +2312,7 @@ export function menuPresets(query: string): number[] {
 		const text = `${p.harness} ${harnessName(p.harness)} ${p.provider ?? ""} ${p.model ?? ""} ${p.effort ?? ""} ${p.agent ?? ""} ${c.note}`;
 		return words.every((w) => text.toLowerCase().includes(w));
 	};
-	return [...new Set(presets.map((c) => c.preset.harness))].flatMap((h) =>
-		presets.flatMap((c, i) => (c.preset.harness === h && matches(c) ? [i] : [])),
-	);
+	return presets.flatMap((c, i) => (matches(c) ? [i] : []));
 }
 
 /**
@@ -2490,18 +2489,21 @@ export function keymap(): Binding<Command>[] {
 				bind(["escape", "q", "s"], "esc", "cancel", CANCEL),
 			];
 		case "archive": {
-			if (mode.chosen) {
-				const { all, deleteWorktree } = mode.chosen;
-				return [bind(["a"], "a", "", { kind: "archiveAnswer", all, deleteWorktree }), bind(["escape"], "esc", "abort", CANCEL)];
-			}
 			const e = m.entries.get(mode.id);
 			const family = e ? openDescendants(m.entries.values(), e.id).length : 0;
+			if (mode.chosen) {
+				const { all, deleteWorktree } = mode.chosen;
+				return [
+					bind(["a"], "a", `Archive ${all ? family + 1 : 1}; cancel schedules`, { kind: "archiveAnswer", all, deleteWorktree }),
+					bind(["escape"], "esc", "Cancel", CANCEL),
+				];
+			}
 			const answer = (all: boolean, deleteWorktree: boolean): Command => ({ kind: "archiveAnswer", all, deleteWorktree });
-			const out = [bind(["a"], "a", "this", answer(false, false))];
-			if (family > 0) out.push(bind(["A"], "A", `all ${family + 1}`, answer(true, false)));
-			out.push(bind(["escape"], "esc", "abort", CANCEL));
-			if (e?.worktree) out.push(bind(["d"], "d", "archive + delete worktree", answer(false, true)));
-			if (e?.worktree && family > 0) out.push(bind(["D"], "D", `all ${family + 1} + delete this worktree`, answer(true, true)));
+			const out = [bind(["a"], "a", e?.worktree ? "Archive; keep worktree" : "Archive this session", answer(false, false))];
+			if (family > 0) out.push(bind(["A"], "A", `Archive family (${family + 1})`, answer(true, false)));
+			if (e?.worktree) out.push(bind(["d"], "d", "Archive; delete clean worktree", answer(false, true)));
+			if (e?.worktree && family > 0) out.push(bind(["D"], "D", `Family (${family + 1}); delete clean worktree`, answer(true, true)));
+			out.push(bind(["escape"], "esc", "Cancel", CANCEL));
 			return out;
 		}
 		case "picker":

@@ -31,10 +31,10 @@ import { type Catalog, type Choice, effortLevels, effortMark, type Model, preset
 import { setOrReset, withValue } from "../write-config.ts";
 import { type Binding, bindingFor, legendParts } from "./model.ts";
 import type { SettingsState } from "./protocol.ts";
-import { bold, cyan, dim, gray, green, key, red, shortPath, yellow } from "./style.ts";
+import { bold, cyan, dim, gray, green, red, shortPath, yellow } from "./style.ts";
 
-// Settings: every key of config.toml as a list to read and change, drawn by the roster across the whole Deck. A value is
-// dim while it's the default and bright once it's set; setting it back to the default takes the key out of the file.
+// Settings: every key of config.toml as a list to read and change, drawn by the roster across the whole Deck.
+// Setting a value back to the default takes the key out of the file.
 
 /** What Settings needs from the roster that draws it. */
 export type SettingsHost = {
@@ -395,9 +395,14 @@ export class SettingsPane {
 			if (s.control.kind === "presets") {
 				if (out.length > 0) out.push({ kind: "blank" });
 				const count = this.presets().length;
-				out.push({ kind: "shortlist" }, ...Array.from({ length: count }, (_, index): Item => ({ kind: "preset", index })), {
-					kind: "addPreset",
-				});
+				out.push(
+					{ kind: "shortlist" },
+					{ kind: "heading", text: "Key  Harness   Model                     Effort" },
+					...Array.from({ length: count }, (_, index): Item => ({ kind: "preset", index })),
+					{
+						kind: "addPreset",
+					},
+				);
 				continue;
 			}
 			if (s.key.join(".") === "warn_long_shortlist") {
@@ -919,7 +924,10 @@ export class SettingsPane {
 	keymap(): Binding<SettingsCommand>[] {
 		const error = this.host.error();
 		if (error)
-			return [bind(["O", "enter"], "O", "open it", { kind: "open", line: error.line }), bind(["escape"], "esc", "sessions", CLOSE)];
+			return [
+				bind(["O", "enter"], "O", "open config.toml at that line", { kind: "open", line: error.line }),
+				bind(["escape"], "esc", "sessions", CLOSE),
+			];
 		const adding = this.adding;
 		if (adding?.step === "search") {
 			const page = Math.max(1, this.listHeight - 2);
@@ -1337,7 +1345,7 @@ export class SettingsPane {
 		lines.push(...body);
 		const rule =
 			this.narrow || error || this.adding ? "─".repeat(width) : `${"─".repeat(RAIL)}┴${"─".repeat(Math.max(0, width - RAIL - 1))}`;
-		if (!prose) lines.push(gray(rule), ...this.footer(width, error));
+		if (!prose) lines.push(gray(rule), ...(this.adding ? this.footer(width, error) : ["", ""]));
 		lines.push(this.messageLine(now), this.clickable(height - 1, 0, legendParts(this.keymap(), width)));
 		return lines.map((line) => truncateToWidth(line, width, "…", true));
 	}
@@ -1402,7 +1410,8 @@ export class SettingsPane {
 		// The rows an open choice list adds, below its setting.
 		const extra =
 			this.editing?.kind === "choices" ? (this.editing.s.control.kind === "enum" ? this.editing.s.control.choices.length : 0) : 0;
-		const room = Math.max(1, height - extra);
+		const listHeight = Math.max(1, height - 4);
+		const room = Math.max(1, listHeight - extra);
 		if (!this.scrolledAway) {
 			if (this.cursor < this.scroll) this.scroll = this.cursor;
 			if (this.cursor >= this.scroll + room) this.scroll = this.cursor - room + 1;
@@ -1416,14 +1425,14 @@ export class SettingsPane {
 			Math.max(12, ...items.map((i) => (i.kind === "setting" && i.s.control.kind !== "paths" ? visibleWidth(i.s.label) : 0))),
 		);
 		const rows: string[] = [];
-		for (let i = this.scroll; rows.length < height && i < items.length; i++) {
+		for (let i = this.scroll; rows.length < listHeight && i < items.length; i++) {
 			const y = this.listTop + rows.length;
 			rows.push(this.itemLine(items[i] as Item, i, y, left, listWidth, labelWidth));
 			if (this.editing?.kind === "choices" && i === this.cursor && this.editing.s.control.kind === "enum") {
 				const editing = this.editing;
 				editing.s.control.kind === "enum" &&
 					editing.s.control.choices.forEach((c, ci) => {
-						if (rows.length >= height) return;
+						if (rows.length >= listHeight) return;
 						const line = truncateToWidth(`      ${ci === editing.choice ? "●" : "○"} ${c.value}  ${gray(c.about)}`, listWidth, "…", true);
 						const cy = this.listTop + rows.length;
 						this.targets.push({ y: cy, from: left, to: width, command: { kind: "choose", index: ci } });
@@ -1431,9 +1440,10 @@ export class SettingsPane {
 					});
 			}
 		}
+		rows.push("", "", ...this.footer(Math.min(80, listWidth), null));
 		while (rows.length < height) rows.push("");
 		if (items.length === 0) rows[0] = gray(this.changedOnly && this.query() === "" ? "   nothing changed yet" : "   no settings match");
-		return this.railed(rows);
+		return this.railed(rows.slice(0, height));
 	}
 
 	/** The list's rows with the section rail beside them, when there's room for it. */
@@ -1477,7 +1487,7 @@ export class SettingsPane {
 			case "entry": {
 				const value = (this.valueOf(item.s) as string[])[item.index] ?? "";
 				const editing = this.editing?.kind === "text" && this.editing.target.kind === "entry" && i === this.cursor;
-				parts.push([`    ${editing ? this.inputCell(width - 6) : this.isSet(item.s) ? value : dim(value)}`, null]);
+				parts.push([`    ${editing ? this.inputCell(width - 6) : value}`, null]);
 				if (lit && !editing) parts.push(["   ", null], [gray("x remove · J K move"), null]);
 				break;
 			}
@@ -1532,10 +1542,9 @@ export class SettingsPane {
 			];
 		}
 		const value = show(s, this.valueOf(s));
-		const shown = set ? value : dim(value);
 		const parts: Part[] = [
 			[label, null],
-			[shown, s.control.kind === "paths" ? null : { kind: "activate", at: i }],
+			[value, s.control.kind === "paths" ? null : { kind: "activate", at: i }],
 		];
 		if (lit && s.control.kind !== "prose") {
 			const fallback = s.fallback();
@@ -1553,14 +1562,13 @@ export class SettingsPane {
 
 	harnessParts(harness: Harness, i: number): Part[] {
 		const on = this.host.loaded().config.harnesses.includes(harness);
-		const set = this.isSet(setting("harnesses"));
 		const status = this.host.catalog()?.status[harness];
 		const box = `[${on ? "x" : " "}]`;
 		const note = status === undefined ? gray("finding…") : status.problem ? red(status.problem) : "";
 		return [
 			[" ", null],
-			[set ? box : dim(box), { kind: "activate", at: i }],
-			[` ${(set ? (s: string) => s : dim)(harness.padEnd(8))} `, null],
+			[box, { kind: "activate", at: i }],
+			[` ${harness.padEnd(8)} `, null],
 			[note, null],
 		];
 	}
@@ -1578,22 +1586,17 @@ export class SettingsPane {
 		const choice = this.choices()[index];
 		if (!choice) return [];
 		const p = choice.preset;
-		const custom = this.host.loaded().config.presets !== null;
-		const paint = custom ? (s: string) => s : dim;
 		const star = p.default ? (choice.reason ? red("★") : "★") : choice.reason ? red("✗") : " ";
-		const where = p.provider ? `${p.harness} · ${p.provider}` : p.harness;
-		// The picker draws a harness's own effort as it draws medium; here, where it's set, it says so.
-		const model = p.agent ?? (p.effort === null ? `${p.model} ${gray("default")}` : `${p.model}${effortMark(p.effort)}`);
-		const noteWidth = Math.max(0, width - 48);
-		const note = choice.reason && i === this.cursor ? red(choice.reason) : gray(truncateToWidth(choice.note, noteWidth, "…"));
+		const model = p.agent ?? p.model ?? "";
 		const editing = this.editing?.kind === "text" && this.editing.target.kind === "note" && i === this.cursor;
 		return [
 			[`${String(index + 1).padStart(2)} `, null],
 			[star, { kind: "star", at: i }],
-			[` ${paint(where.padEnd(16).slice(0, 16))} `, null],
-			[paint(`${model}${" ".repeat(Math.max(0, 22 - visibleWidth(model)))}`), { kind: "adjust", by: 1, at: i, wrap: true }],
-			[" ", null],
-			[editing ? this.inputCell(noteWidth) : note, null],
+			[` ${p.harness.padEnd(9)} `, null],
+			[truncateToWidth(model, 25, "…", true), null],
+			[` ${(p.agent ? "agent" : (p.effort ?? "default")).padEnd(8)}`, { kind: "adjust", by: 1, at: i, wrap: true }],
+			[` ${p.provider ?? ""}`, null],
+			[editing ? this.inputCell(Math.max(1, width - 53)) : "", null],
 		];
 	}
 
@@ -1603,16 +1606,9 @@ export class SettingsPane {
 			`  ${red(`✗ ${shortPath(error.file)}${error.line === null ? "" : `:${error.line}`}`)}`,
 			...wrapTextWithAnsi(`  ${error.problem}`, width - 2),
 			"",
-			`  ${gray("This Deck keeps the settings it had until the file is fixed; new swb commands stop on it.")}`,
+			...wrapTextWithAnsi("  This Deck keeps the settings it had until the file is fixed; new swb commands stop on it.", width - 2),
 			"",
 		];
-		const y = this.listTop + rows.length;
-		rows.push(
-			this.clickable(y, 0, [
-				["  ", null],
-				[key("O", "open config.toml at that line"), { kind: "open", line: error.line }],
-			]),
-		);
 		while (rows.length < height) rows.push("");
 		return rows.slice(0, height);
 	}
@@ -1730,8 +1726,7 @@ export class SettingsPane {
 		}
 		if (item?.kind === "preset") {
 			const choice = this.choices()[item.index];
-			// The row says the note, or why it can't start; the footer, what the shortlist is.
-			if (choice?.reason) text = s?.description ?? "";
+			text = choice?.reason ?? choice?.note ?? "";
 		}
 		return wrapTextWithAnsi(`   ${text}`, width).concat("", "").slice(0, 2);
 	}

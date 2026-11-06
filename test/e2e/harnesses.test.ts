@@ -83,15 +83,15 @@ test("the Deck's n opens on the default preset, puts its real TUI on the Stage, 
 	// The launch card on the Stage says what runs: the harness, then the model.
 	const card = await waitState(s, "the launch card", (x) => (x.launch?.card ?? null) !== null);
 	expect(card.launch?.card?.[1]).toMatch(/Claude Code {2}opus/);
-	// Tab drops the menu, a harness at a time; a number moves the card to Codex, and Esc in a reopened menu keeps it.
+	// The menu keeps the shortlist's numbers; a number picks Codex, and Esc in a reopened menu keeps it.
 	s.keys("Tab");
-	const menu = await waitState(s, "the menu", (x) => x.launch?.menu?.some((l) => l.includes("Codex")) ?? false);
-	// The automatic shortlist takes turns, Claude Code's then Codex's; the menu gathers each harness's together.
+	const menu = await waitState(s, "the menu", (x) => x.launch?.menu?.some((l) => l.includes("codex")) ?? false);
+	// The automatic shortlist interleaves harnesses, and every digit keeps that association.
 	const shown = menu.picker?.menu?.shown ?? [];
 	const gpts = shown.filter((label) => label.startsWith("gpt"));
 	const codex = shown.indexOf(gpts[0] as string);
 	expect(codex).toBeGreaterThan(0);
-	expect(shown.slice(codex, codex + gpts.length)).toEqual(gpts);
+	expect(shown).toEqual(opened.picker?.presets ?? []);
 	s.keys(String(codex + 1));
 	await waitState(s, "Codex chosen", (x) => x.picker?.harness === "codex" && x.picker.menu === null);
 	s.keys("Tab");

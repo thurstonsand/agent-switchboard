@@ -46,7 +46,7 @@ swb send --from ID --to ID [--report-back] [--cancel]   message a session; the b
 
 ### Harnesses
 
-swb runs Claude Code (2.1.300 or later) and Codex CLI (0.149 or later) the way it runs pi: the real TUI, in swb's tmux server, on the roster. Each plugs in through a **line** that swb ships and loads itself, so there is nothing else to install: Claude Code gets a plugin with a mod, and Codex runs on a private app-server that swb starts with it. For Codex, swb adds a switched-off `[mcp_servers.swb]` to `~/.codex/config.toml` when it's missing, which only swb's own Codex sessions switch on; a plain `codex` never offers swb's tools. `n`'s picker shows the preset a new session starts on, harness and model, on a card on the Stage; it opens on the default, and `Tab` drops the rest of the shortlist, a harness at a time, numbered for one key to pick (see Settings).
+swb runs Claude Code (2.1.300 or later) and Codex CLI (0.149 or later) the way it runs pi: the real TUI, in swb's tmux server, on the roster. Each plugs in through a **line** that swb ships and loads itself, so there is nothing else to install: Claude Code gets a plugin with a mod, and Codex runs on a private app-server that swb starts with it. For Codex, swb adds a switched-off `[mcp_servers.swb]` to `~/.codex/config.toml` when it's missing, which only swb's own Codex sessions switch on; a plain `codex` never offers swb's tools. `n`'s picker shows the preset a new session starts on, harness and model, on a card on the Stage; it opens on the default, and `Tab` drops the rest of the shortlist in Settings' order, with the same numbers for one key to pick (see Settings).
 
 Every managed session's agent gets the same tools, whatever its harness:
 
@@ -89,7 +89,7 @@ The Operators section sits atop the roster: sessions that coordinate the others 
 
 ## Settings
 
-`,` in the roster, or `M-a ,` from anywhere, opens Settings across the whole Deck: every setting by section, with search (`/`) over names, descriptions, and the words you'd look for. A value is dim while it's the default and bright once you set it, and setting it back to the default takes it out of the file. Toggles and choices save at once; the rest edit in place and save on `⏎`. Every key works by mouse too. Changes apply to every open Deck as soon as they're saved, whether from Settings or by hand.
+`,` in the roster, or `M-a ,` from anywhere, opens Settings across the whole Deck: every setting by section, with search (`/`) over names, descriptions, and the words you'd look for. The selected value says whether it is the default or offers a reset; setting it back to the default takes it out of the file. Its explanation sits below the list. Toggles and choices save at once; the rest edit in place and save on `⏎`. Every key works by mouse too. Changes apply to every open Deck as soon as they're saved, whether from Settings or by hand.
 
 Behind it is `${XDG_CONFIG_HOME:-~/.config}/agent-switchboard/config.toml`, which Settings edits in place, so your comments stay, except the ones on a key it removes. A file swb can't read stops every new swb command with the line at fault; an open Deck keeps what it had, says so in red, and `O` opens the file at that line.
 

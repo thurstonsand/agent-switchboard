@@ -123,7 +123,7 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 	const ask = async () => {
 		s.keys("a");
 		await waitState(s, "archive choice", (st) => st.mode === "archive");
-		await until(() => s.screen().includes("archive + delete worktree"), budgets.settle, "delete button");
+		await until(() => s.screen().includes("Archive; delete clean worktree"), budgets.settle, "delete button");
 	};
 	// A row moving into Archived shifts the prompt under a click aimed from the screen before it, so each waits.
 	const archive = async (other: string) => {
@@ -136,8 +136,8 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 	};
 	const clickDelete = () => {
 		const lines = s.screen().split("\n");
-		const y = lines.findIndex((line) => line.includes("archive + delete worktree"));
-		s.swb("drive", "click", String((lines[y] as string).indexOf("archive + delete worktree") + 1), String(y));
+		const y = lines.findIndex((line) => line.includes("Archive; delete clean worktree"));
+		s.swb("drive", "click", String((lines[y] as string).indexOf("Archive; delete clean worktree") + 1), String(y));
 	};
 	await ask();
 	s.keys("Escape");
@@ -236,11 +236,11 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 	await cursorTo(s, id);
 	await ask();
 	// The prompt counts the family as the Deck sees it, which can be a snapshot behind the launches.
-	await until(() => s.screen().includes("all 3 + delete this worktree"), budgets.settle, "the whole family offered");
+	await until(() => s.screen().includes("Family (3); delete clean worktree"), budgets.settle, "the whole family offered");
 	const lines = s.screen().split("\n");
-	const y = lines.findIndex((line) => line.includes("all 3 + delete this worktree"));
+	const y = lines.findIndex((line) => line.includes("Family (3); delete clean worktree"));
 	expect(y).toBeGreaterThan(0);
-	s.swb("drive", "click", String((lines[y] as string).indexOf("all 3") + 1), String(y));
+	s.swb("drive", "click", String((lines[y] as string).indexOf("Family (3)") + 1), String(y));
 	// Its own scheduled launch goes with it, once it says so.
 	await waitState(s, "the schedule it cancels", (st) => st.archive?.cancels?.includes("Own follow-up") ?? false);
 	s.keys("a");

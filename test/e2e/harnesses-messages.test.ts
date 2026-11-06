@@ -266,8 +266,10 @@ test("agents use swb's tools across harnesses: list, message, launch, and cancel
 	await until(
 		() => {
 			const others = s.ls().filter((e) => e.id !== pi.id && e.open);
-			const row = /Sessions\s*\n\s*(.*)/.exec(pane(s, pi.id))?.[1] ?? "";
-			return others.length === 2 && others.every((e) => row.includes(e.title ?? e.id)) && row.includes("more lines, ctrl+o to expand");
+			const rows = pane(s, pi.id)
+				.split("\n")
+				.map((line) => line.trim());
+			return others.length === 2 && others.every((e) => rows.includes(e.title ?? e.id)) && rows.includes("ctrl+o details");
 		},
 		budgets.settle,
 		"pi's listing row",

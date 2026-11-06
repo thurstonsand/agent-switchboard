@@ -90,9 +90,9 @@ test("a session an agent started nests under it; its Peek's started-by line and 
 	// Families go by their newest member; within one, so do siblings. Another Project, or an Operator, marks the row instead.
 	let st = await waitState(s, "the families on the roster", (x) => x.ready && sessionRows(x).length === 7);
 	expect(lineage(st)).toEqual(["op", "↳ port", "⌁ bump", "root", "  c2", "  c1", "    g1"]);
-	expect(rosterLine(" root")).toContain("▾● root");
+	expect(rosterLine(" root")).toContain(" ● root");
 	expect(rosterLine(" c2")).toContain("  ├─ ● c2");
-	expect(rosterLine(" c1")).toContain("  └▾ ● c1");
+	expect(rosterLine(" c1")).toContain("  └─ ● c1");
 	expect(rosterLine(" g1")).toContain("     └─ ● g1");
 	expect(rosterLine(" port")).toContain("↳ ● port");
 	expect(rosterLine(" bump")).toContain("⌁ ● bump");
@@ -123,7 +123,7 @@ test("a session an agent started nests under it; its Peek's started-by line and 
 	st = await waitState(s, "root folded", (x) => sessionRows(x).find((r) => r.id === root)?.folded === true);
 	expect(lineage(st)).toEqual(["op", "↳ port", "⌁ bump", "root +3"]);
 	// The fold counts what it hides, and of those, what needs me: all three are Unseen.
-	expect(rosterLine(" root")).toMatch(/▸● root\s+\+3 ●3/);
+	expect(rosterLine(" root")).toMatch(/ ● root\s+\+3 ●3/);
 	s.keys("j", "k");
 	const folded = (await waitState(s, "the folded Peek", (x) => x.peek?.id === root && x.peek.lines.some((l) => l.includes("folded")))).peek
 		?.lines as string[];
