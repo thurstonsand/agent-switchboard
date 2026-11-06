@@ -2,7 +2,7 @@
 # Deck in other terminals' themes. Frames, not a demo: each Screenshot is one surface, held still. It picks each
 # session with the roster's filter; where the director also has to act (a hover, a terminal theme or size), the tape
 # leaves the filter up for the director to clear, and waits for the whole roster to come back before going on.
-Set Theme { "name": "City Ruins", "background": "#101315", "foreground": "#cacccc", "selection": "#343d41", "cursor": "#a5aeb4", "black": "#101315", "red": "#de6145", "green": "#5abb88", "yellow": "#E5A72A", "blue": "#9cc4dd", "magenta": "#aeaeae", "purple": "#aeaeae", "cyan": "#707070", "white": "#cacccc", "brightBlack": "#4b4e55", "brightRed": "#de6145", "brightGreen": "#5abb88", "brightYellow": "#c9c2b4", "brightBlue": "#9cc4dd", "brightMagenta": "#9a9a9a", "brightPurple": "#9a9a9a", "brightCyan": "#707070", "brightWhite": "#a5aeb4" }
+Set Theme { "name": "City Ruins", "background": "#101315", "foreground": "#cacccc", "selection": "#343d41", "cursor": "#a5aeb4", "black": "#101315", "red": "#de6145", "green": "#5abb88", "yellow": "#E5A72A", "blue": "#9cc4dd", "magenta": "#c39acc", "purple": "#c39acc", "cyan": "#70c1c1", "white": "#cacccc", "brightBlack": "#4b4e55", "brightRed": "#de6145", "brightGreen": "#5abb88", "brightYellow": "#dfd19d", "brightBlue": "#9cc4dd", "brightMagenta": "#c39acc", "brightPurple": "#c39acc", "brightCyan": "#70c1c1", "brightWhite": "#a5aeb4" }
 Source common.tape
 
 Hide
