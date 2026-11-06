@@ -118,40 +118,46 @@ export async function clock(): Promise<void> {
 	log(`clock started (pid ${process.pid})`);
 	for (;;) {
 		const now = Date.now();
-		const current = db.dataVersion();
-		if (current !== version) {
-			version = current;
-			stale = true;
-			due = nextDue(db);
-			settleHosts();
-			if (reloadWaiting()) wakeWaiting(now);
-		}
-		if (due !== null && due <= now) {
-			const fired = fire(db, now);
-			// This connection's own writes don't move data_version.
-			version = -1;
-			log(`fired ${fired.targets.length} message(s), ${fired.launches.length} launch(es)`);
-			for (const l of fired.launches) {
-				launchSession(db, {
-					from: l.source,
-					harness: l.launch.harness,
-					model: l.launch.model,
-					effort: l.launch.effort,
-					agent: l.launch.agent,
-					briefing: l.body,
-					cwd: l.launch.cwd,
-					title: l.launch.title,
-					group: l.launch.group,
-					reportBack: l.reportBack,
-					scheduled: { id: l.scheduleId, at: l.scheduledFor },
-				}).then(
-					(result) => log(result.text),
-					(error: Error) => launchFailed(l, error),
-				);
+		// A tick that fails, as one reading an invalid config.toml does, is tried again: a clock that exited would leave
+		// every schedule unfired, with nothing on screen to say so.
+		try {
+			const current = db.dataVersion();
+			if (current !== version) {
+				version = current;
+				stale = true;
+				due = nextDue(db);
+				settleHosts();
+				if (reloadWaiting()) wakeWaiting(now);
 			}
-			wakeWaiting(now);
-		} else if (now - reconciled > RECONCILE_MS) wakeWaiting(now);
-		warm(now);
+			if (due !== null && due <= now) {
+				const fired = fire(db, now);
+				// This connection's own writes don't move data_version.
+				version = -1;
+				log(`fired ${fired.targets.length} message(s), ${fired.launches.length} launch(es)`);
+				for (const l of fired.launches) {
+					launchSession(db, {
+						from: l.source,
+						harness: l.launch.harness,
+						model: l.launch.model,
+						effort: l.launch.effort,
+						agent: l.launch.agent,
+						briefing: l.body,
+						cwd: l.launch.cwd,
+						title: l.launch.title,
+						group: l.launch.group,
+						reportBack: l.reportBack,
+						scheduled: { id: l.scheduleId, at: l.scheduledFor },
+					}).then(
+						(result) => log(result.text),
+						(error: Error) => launchFailed(l, error),
+					);
+				}
+				wakeWaiting(now);
+			} else if (now - reconciled > RECONCILE_MS) wakeWaiting(now);
+			warm(now);
+		} catch (error) {
+			log(`tick failed: ${(error as Error).message}`);
+		}
 		await Bun.sleep(TICK_MS);
 	}
 }

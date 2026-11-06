@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { entry, waitState } from "./harness/deck.ts";
+import { config, entry, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 import { host, launched, pane, ready, scheduled, snoozeOf, swbIn, type } from "./harness/schedules.ts";
 
@@ -182,6 +182,27 @@ test("a schedule launches a new session, refuses what can't work, unschedules, a
 	};
 	expect(await inNewYork(`${year}-12-15T09:00`)).toBe(Date.parse(`${year}-12-15T09:00:00-05:00`));
 	expect(await inNewYork(`${year}-12-15T09:00Z`)).toBe(Date.parse(`${year}-12-15T09:00:00Z`));
+});
+
+test("an invalid config.toml doesn't stop the clock: it says why, and wakes the session with mail once the file is fixed", async () => {
+	s = scenario("schedules", "bad-config");
+	const pi = await launched(s, "pi", "reply up");
+	s.tmux(s.servers.sessions, "kill-session", "-t", `=${host(s, pi.id)}`);
+	await until(() => !entry(s, pi.id).live, budgets.settle, "dormant");
+	const { details } = await scheduled(s, "reply mail", "--from", pi.id, "--at", "PT3S", "--schedule-label", "in 3 seconds");
+	config(s, "bogus = 1\n");
+	await until(
+		() => s.query("select 1 from messages where schedule_id = ?", details.id).length === 1,
+		ready,
+		"the schedule fired into an invalid config",
+	);
+	const clock = () => s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-t", "=swb-ctl:");
+	await until(() => clock().includes("config.toml"), budgets.settle, "the clock saying why it can't wake the session");
+	expect(s.tmux(s.servers.sessions, "display", "-p", "-t", "=swb-ctl:", "#{pane_dead}")).toBe("0");
+	expect(s.signal("replied.mail")).toBe("");
+
+	rmSync(join(s.env.XDG_CONFIG_HOME as string, "agent-switchboard/config.toml"));
+	await until(() => s.signal("replied.mail") !== "", ready, "the mail answered once the config is fixed");
 });
 
 test("swb quit refuses a running turn, then stops everything, leaving sessions open; any swb restarts a dead clock, with or without a locale", async () => {
