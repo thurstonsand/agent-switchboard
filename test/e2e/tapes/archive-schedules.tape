@@ -7,7 +7,7 @@ Wait+Screen /Review the changelog/
 Sleep 2s
 Alt+a
 Type "a"
-Wait+Screen /A all 2/
+Wait+Screen /Archive family \(2\)/
 Sleep 2s
 Screenshot ../artifacts/phase6/videos/archive-schedules-family.png
 Type "A"

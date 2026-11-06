@@ -1257,12 +1257,12 @@ export const directors: Record<string, Director> = {
 			s.keys("a");
 			await waitDrive(s, "family and worktree choices", (st) => st.archive?.all === 2);
 			await Bun.sleep(3000);
-			for (const text of ["a this", "esc abort", "archive + delete worktree", "all 2 + delete this worktree"]) {
+			for (const text of ["Archive; keep worktree", "esc Cancel", "Archive; delete clean", "Family (2); delete"]) {
 				const [x, y] = await onScreen(s, text, 42);
 				s.swb("drive", "move", String(x), String(y));
 				await Bun.sleep(700);
 			}
-			const [x, y] = await onScreen(s, "all 2 + delete this worktree", 42);
+			const [x, y] = await onScreen(s, "Family (2); delete", 42);
 			s.swb("drive", "click", String(x), String(y));
 			await waitLs(s, "archived and deleted", (ls) => ls.find((e) => e.id === id)?.open === false);
 			expect(s.ls().find((e) => e.id === child)?.open).toBe(false);
@@ -1920,11 +1920,11 @@ export const directors: Record<string, Director> = {
 			await point("Refactor");
 			await waitDrive(s, "Refactor's Peek, the cursor still on Fix", (x) => x.peek?.id === refactor && x.cursor === flaky);
 			await Bun.sleep(2500);
-			await point("Wake w", true);
+			await point("w Wake", true);
 			await Bun.sleep(2500);
-			const [x, y] = await onScreen(s, "Wake w", 1000, 43);
+			const [x, y] = await onScreen(s, "w Wake", 1000, 43);
 			s.swb("drive", "click", String(x), String(y));
-			await waitDrive(s, "Refactor woken from its Peek", (st) => st.peek?.lines.some((line) => line.includes("Stop x")) === true);
+			await waitDrive(s, "Refactor woken from its Peek", (st) => st.peek?.lines.some((line) => line.includes("x Stop")) === true);
 			await Bun.sleep(2500);
 			s.swb("drive", "move", "100", "30");
 			await waitDrive(s, "the Peek gone with the pointer", (st) => st.peek === null && st.hover === null);
