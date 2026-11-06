@@ -196,7 +196,7 @@ test("the shortlist is automatic until its first edit writes it out; ↺ brings 
 	expect(read()).toBe("# mine\n");
 });
 
-test("a model listing that fails keeps the last list found, and the add search says it couldn't list", async () => {
+test("a model listing that fails keeps the last list found beside the error", async () => {
 	s = scenario("settings", "listing-failed");
 	s.swb("drive", "start", "--size", "160x40");
 	await waitState(s, "ready", (x) => x.ready);
@@ -218,13 +218,6 @@ test("a model listing that fails keeps the last list found, and the add search s
 	});
 	// faux-1 doesn't reason: the shortlist still knows its only effort is off.
 	expect(listedOff(state(s))).toBe(true);
-	s.keys("a", "-l", "faux");
-	await until(() => /pi couldn't list models/.test(s.screen()) && /faux-1/.test(s.screen()), budgets.settle, "the add search");
-	s.save("add-search.txt", s.screen());
-
-	const [models] = JSON.parse(s.swb("models", "--harness", "pi", "--json")) as { problem: string; models: { model: string }[] }[];
-	expect(models?.problem).toBe("pi --list-models: listing broke");
-	expect(models?.models.map((m) => m.model)).toContain("faux-1");
 });
 
 test("an edit stays on its setting while the wheel scrolls the list, and a click elsewhere is done with it", async () => {

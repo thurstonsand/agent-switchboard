@@ -18,7 +18,7 @@ Schema v11: update swb and the pi line together.
 - `swb_update_session` that refuses one change makes none. Retitling and snoozing an archived session in one call used to keep the new title while refusing the snooze.
 - Renaming a Codex session whose app-server went away just then fails instead of waiting forever.
 - A harness whose model listing fails keeps the list it found last, beside the error. The shortlist lost which efforts each model takes, and the add search offered none of its models.
-- Two swbs that take a lock at once can't both get it after the swb that held it died, which could declare swb's MCP server twice in Codex's config.toml and stop Codex. A lock left by a swb that died before a reboot no longer holds up the next one for three minutes.
+- A lock left by a swb that died before a reboot no longer holds up the next swb for three minutes, and two swbs can no longer both take over a lock whose holder died.
 - An invalid config.toml no longer stops swb's clock. It exited the first time a dormant session had a message waiting, and no schedule fired again; it now says why in its pane and wakes the session once the file is fixed.
 
 ## [0.12.0] - 2026-11-05
