@@ -388,7 +388,7 @@ function writeAtomic(path: string, text: string): void {
  * Makes this the only swb reading model lists until the returned release: Codex app-servers starting together on one
  * CODEX_HOME fail to open its state db.
  */
-const lockCatalog = () => lock(join(stateDir(), "catalog.lock"), "reading model lists for 3 minutes", 3 * 60_000);
+const lockCatalog = () => lock("catalog", "reading model lists for 3 minutes", 3 * 60_000);
 
 /**
  * Finds what each harness can start. Statuses come back first, through `onStatus`, since the slow part is the model

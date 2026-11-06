@@ -72,7 +72,7 @@ export async function declareCodexServer(): Promise<void> {
 	const path = codexConfig();
 	// Discovery and every Codex swb starts check at once; two that both find it missing would declare it twice, and
 	// Codex refuses a config.toml that does.
-	const release = await lock(join(stateDir(), "codex-config.lock"), `declaring swb's MCP server in ${path} for 10 seconds`, 10_000);
+	const release = await lock("codex-config", `declaring swb's MCP server in ${path} for 10 seconds`, 10_000);
 	try {
 		const text = existsSync(path) ? readFileSync(path, "utf8") : "";
 		let config: { mcp_servers?: Record<string, unknown> };

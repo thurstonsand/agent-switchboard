@@ -1,35 +1,38 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
-import { pidAlive } from "@swb/shared";
+import { Database } from "bun:sqlite";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { isBusy, stateDir } from "@swb/shared";
 import { SwbError } from "./errors.ts";
 
 /**
- * Makes this the only swb holding `path` until the returned release. The lock holds its owner's pid, so one left by a
- * process that died is taken over; one held longer than `waitMs` is an error saying what its holder was `doing`.
+ * Makes this the only swb holding the lock `name` until the returned release; one held longer than `waitMs` is an
+ * error saying what its holder was `doing`.
+ *
+ * The hold is SQLite's exclusive lock on the file, an fcntl lock the kernel drops when its process ends, however it
+ * ends. A holder that dies leaves nothing to take over, so there's no check of a dead holder for two waiters to race.
  */
-export async function lock(path: string, doing: string, waitMs: number): Promise<() => void> {
-	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-	const mine = `${process.pid} ${crypto.randomUUID()}`;
+export async function lock(name: string, doing: string, waitMs: number): Promise<() => void> {
+	const dir = join(stateDir(), "locks");
+	mkdirSync(dir, { recursive: true, mode: 0o700 });
+	const db = new Database(join(dir, `${name}.db`), { create: true });
 	const until = Date.now() + waitMs;
 	for (;;) {
 		try {
-			writeFileSync(path, mine, { flag: "wx", mode: 0o600 });
+			db.exec("BEGIN EXCLUSIVE");
 			return () => {
-				if (readFileSync(path, "utf8") === mine) rmSync(path);
+				db.exec("ROLLBACK");
+				db.close();
 			};
 		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			if (!isBusy(error)) {
+				db.close();
+				throw error;
+			}
 		}
-		let holder = 0;
-		try {
-			holder = Number(readFileSync(path, "utf8").split(" ")[0]);
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-			continue;
+		if (Date.now() > until) {
+			db.close();
+			throw new SwbError(`another swb has been ${doing}`);
 		}
-		// An empty file is a lock being written.
-		if (holder > 0 && !pidAlive(holder)) rmSync(path, { force: true });
-		else if (Date.now() > until) throw new SwbError(`swb ${holder} has been ${doing}; remove ${path} if it's stuck`);
-		else await Bun.sleep(100);
+		await Bun.sleep(100);
 	}
 }
