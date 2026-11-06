@@ -587,6 +587,19 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"listing-failed": {
+		setup: async (s) => {
+			await seed(s, { turns: ["plan the v3 migration"], title: "Plan the v3 migration" });
+		},
+		run: async (s) => {
+			await waitDeck(s, "pi's models listed", (x) => x.settings?.items.find((i) => i.kind === "preset")?.value?.endsWith(" off") ?? false);
+			// pi still starts; only its listing breaks, before the tape's R lists again.
+			const pi = join(s.bin, "pi");
+			writeFileSync(pi, readFileSync(pi, "utf8").replace("\n", '\n[ "$1" = --list-models ] && { echo "listing broke" >&2; exit 1; }\n'));
+			await waitDeck(s, "the add search", (x) => x.settings?.adding != null);
+		},
+	},
+
 	"db-busy": {
 		run: async (s) => {
 			await waitLs(s, "the first turn done", (ls) => ls[0]?.activity === "idle");

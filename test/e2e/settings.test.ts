@@ -196,6 +196,37 @@ test("the shortlist is automatic until its first edit writes it out; ↺ brings 
 	expect(read()).toBe("# mine\n");
 });
 
+test("a model listing that fails keeps the last list found, and the add search says it couldn't list", async () => {
+	s = scenario("settings", "listing-failed");
+	s.swb("drive", "start", "--size", "160x40");
+	await waitState(s, "ready", (x) => x.ready);
+	s.keys(",", "]");
+	const listedOff = (x: DeckState) => x.settings?.items.find((i) => i.kind === "preset")?.value?.endsWith(" off") ?? false;
+	await waitState(s, "pi's models listed", listedOff, budgets.piReady);
+
+	// pi still starts; only its listing breaks.
+	const pi = join(s.bin, "pi");
+	writeFileSync(pi, readFileSync(pi, "utf8").replace("\n", '\n[ "$1" = --list-models ] && { echo "listing broke" >&2; exit 1; }\n'));
+	const catalog = join(s.env.XDG_STATE_HOME as string, "agent-switchboard/catalog.json");
+	const listedAt = JSON.parse(readFileSync(catalog, "utf8")).listedAt.pi;
+	s.keys("R");
+	await until(() => JSON.parse(readFileSync(catalog, "utf8")).errors.pi !== null, budgets.piReady, "pi's listing failed");
+	expect(JSON.parse(readFileSync(catalog, "utf8"))).toMatchObject({
+		errors: { pi: "pi --list-models: listing broke" },
+		listedAt: { pi: listedAt },
+		models: { pi: [expect.objectContaining({ model: "faux-1" })] },
+	});
+	// faux-1 doesn't reason: the shortlist still knows its only effort is off.
+	expect(listedOff(state(s))).toBe(true);
+	s.keys("a", "-l", "faux");
+	await until(() => /pi couldn't list models/.test(s.screen()) && /faux-1/.test(s.screen()), budgets.settle, "the add search");
+	s.save("add-search.txt", s.screen());
+
+	const [models] = JSON.parse(s.swb("models", "--harness", "pi", "--json")) as { problem: string; models: { model: string }[] }[];
+	expect(models?.problem).toBe("pi --list-models: listing broke");
+	expect(models?.models.map((m) => m.model)).toContain("faux-1");
+});
+
 test("an edit stays on its setting while the wheel scrolls the list, and a click elsewhere is done with it", async () => {
 	s = scenario("settings", "edit-wheel");
 	config(s, COMMENTED);

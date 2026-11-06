@@ -447,6 +447,9 @@ export async function discover(
 					listedAt[h] = Date.now();
 				} catch (error) {
 					errors[h] = (error as Error).message;
+					// The last list found stands until one comes; the error sends this harness back to be listed again.
+					const last = latest ?? previous;
+					if (last) take(last, h);
 				}
 			}),
 		);
