@@ -94,8 +94,8 @@ test("a session an agent started nests under it; its Peek's Parent action and p 
 	expect(rosterLine(" c2")).toContain("  ├─ ● c2");
 	expect(rosterLine(" c1")).toContain("  └─ ● c1");
 	expect(rosterLine(" g1")).toContain("     └─ ● g1");
-	expect(rosterLine(" port")).toContain("↳ ● port");
-	expect(rosterLine(" bump")).toContain("⌁ ● bump");
+	expect(rosterLine(" port")).toMatch(/● port\s+↳/);
+	expect(rosterLine(" bump")).toMatch(/● bump\s+⌁/);
 	s.save("families.txt", s.screen());
 	s.save("families.ansi", s.swb("drive", "capture", "--ansi"));
 

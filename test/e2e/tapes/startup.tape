@@ -8,7 +8,7 @@ Sleep 1.5s
 Type "g"
 Sleep 600ms
 Type "n"
-Wait+Screen /starts/
+Wait+Screen /Preset/
 Sleep 1.5s
 Enter
 Wait+Screen /(?s)Operators \(1\).*faux-1/

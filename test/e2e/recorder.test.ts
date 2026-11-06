@@ -146,7 +146,7 @@ test("a migration under a running recorder turns its footer red at the next writ
 	conn.exec("PRAGMA user_version = 99");
 	conn.close();
 	await prompt(s, "reply two");
-	await until(() => s.screen().includes(`swb: not recording · db v99; line expects v${SCHEMA_VERSION}`), budgets.settle, "the red footer");
+	await until(() => s.screen().includes(`db v99; line expects v${SCHEMA_VERSION}`), budgets.settle, "the red footer");
 	expect(s.screen()).toContain("update swb + pi; roster: R reload");
 	expect(s.screen()).toContain("Ctrl+b h roster");
 	expect(s.screen()).toContain("transcript saved");
@@ -205,7 +205,11 @@ test("swb refuses a db newer than itself, and a recorder started against a misma
 	const screen = await until(
 		() => {
 			const text = s.tmux(server, "capture-pane", "-p", "-t", "pi");
-			return text.includes(`swb: not recording · db v${SCHEMA_VERSION + 1}; line expects v${SCHEMA_VERSION}`) && text;
+			return (
+				text.includes(
+					`swb: not recording · update swb + pi; roster: R reload · db v${SCHEMA_VERSION + 1}; line expects v${SCHEMA_VERSION}`,
+				) && text
+			);
 		},
 		budgets.piReady,
 		"the red footer",

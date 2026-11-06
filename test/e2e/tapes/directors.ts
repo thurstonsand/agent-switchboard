@@ -1864,7 +1864,7 @@ export const directors: Record<string, Director> = {
 			await until(() => shows("j k ↑ ↓") && shows("Send literal Alt+a"), TAPE, "every key on a tall Deck");
 			await until(() => !shows("any key or click closes"), TAPE, "the help closed");
 			s.swb("drive", "resize", "140x24");
-			await until(() => shows("↓ 14 more lines · j k, wheel scroll"), TAPE, "the short Deck's help, its end below");
+			await until(() => shows("↓ 14 more lines · j/k ↑/↓ scroll"), TAPE, "the short Deck's help, its end below");
 			await Bun.sleep(1500);
 			for (const direction of ["down", "down", "down", "down", "up"]) {
 				s.swb("drive", "wheel", direction, "70", "12");
@@ -1873,7 +1873,7 @@ export const directors: Record<string, Director> = {
 			await until(() => shows("↑ 3 ↓ 11"), TAPE, "four turns of the wheel down, one up");
 			await until(() => shows("Send literal Alt+a") && shows("↑ 14 ·"), TAPE, "j j and space to the end");
 			await until(() => shows("↑ 11 ↓ 3"), TAPE, "k k and ↑ back up");
-			await until(() => !shows("wheel scroll"), TAPE, "q closes it");
+			await until(() => !shows("PgUp/PgDn page"), TAPE, "q closes it");
 		},
 	},
 

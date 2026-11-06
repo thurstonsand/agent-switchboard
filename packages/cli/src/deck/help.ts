@@ -12,7 +12,7 @@ function lines(prefix: string, columns = Infinity): string[] {
 		bold("  Move"),
 		row("j k ↑ ↓", "Move"),
 		row("g G", "First / last"),
-		row("⏎", "Focus session; wake if dormant"),
+		row("Enter", "Focus session; wake if dormant"),
 		row("l →", "Focus session / expand"),
 		row("h ←", "Fold family / collapse header"),
 		row("space", "Toggle header or family fold"),
@@ -32,7 +32,7 @@ function lines(prefix: string, columns = Infinity): string[] {
 		row("w / x", "Wake in background / stop"),
 		row("R", "Reload agent on fresh config"),
 		row("n / N", "New in known / added directory"),
-		row("⇥", "Choose preset in directory picker"),
+		row("Tab", "Choose preset in directory picker"),
 		row("a", "Archive family or session / unarchive"),
 	];
 	const organize = [bold("  Organize"), row("s", "Snooze / unsnooze"), row("u", "Mark / unmark Unseen"), row("m", "Pick or rename Group")];
@@ -45,14 +45,14 @@ function lines(prefix: string, columns = Infinity): string[] {
 	const left = [...move, "", ...relationships, "", ...lifecycle, "", ...organize, "", ...settings];
 	const states = [
 		bold("  State marks"),
-		"  ○ idle                 ◌ dormant (not running)",
+		"  ○ idle / stopped       – dormant / stopped",
 		`  ${bold(cyan("◐"))} working              ${green("●")} Unseen (finished since Visit)`,
 		`  ${blockedMark("◆")} blocked              ${bold(red("!"))} cut off · resume unfinished turn`,
 		`  ✓ archived             ${bold(red("×"))} errored · inspect and retry`,
 		`  ${dim("⎇")} worktree`,
 		`  ${blue("⌁")} started by Operator  ↳ started by session`,
 		"  +N folded family       ◷ once / ↻ recurring schedule",
-		"  stopped: turn ended on purpose; opening won't retry",
+		"  dormant: not running · stopped: no unfinished turn",
 	];
 	const right = [
 		...states,
@@ -119,7 +119,7 @@ export async function help(): Promise<void> {
 		top = Math.max(0, Math.min(overflow(), top));
 		const below = all.length - top - room();
 		const more = [top > 0 ? `↑ ${top}` : "", below > 0 ? `↓ ${below} more lines` : ""].filter(Boolean).join(" ");
-		const hint = overflow() === 0 ? CLOSES : `${more} · j k, wheel scroll · any other key or click closes`;
+		const hint = overflow() === 0 ? CLOSES : `${more} · j/k ↑/↓ scroll · PgUp/PgDn page · Esc closes`;
 		const shown = [...all.slice(top, top + room()), "", `  ${hint}`];
 		const framed = [
 			`${gray("╭─")} Keys ${gray("─".repeat(Math.max(0, width - 12)))} ✕ ${gray("╮")}`,

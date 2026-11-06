@@ -394,7 +394,7 @@ function syncTitle(): void {
 function ending(e: Entry, read: Transcript | null): string | null {
 	const wake = e.open && m.mode.kind === "roster" ? ` · ${bold("⏎")} ${e.cutOff ? "resume unfinished turn" : "wake & focus"}` : "";
 	if (e.cutOff) return `${bold(red("cut off"))}${wake}`;
-	if (read?.ending?.kind === "stopped") return `◌ dormant · stopped${wake}`;
+	if (read?.ending?.kind === "stopped") return `– dormant · stopped${wake}`;
 	if (read?.ending?.kind === "error") return `${bold(red("errored"))}${wake}`;
 	return null;
 }
@@ -2650,7 +2650,7 @@ function pickerKeys(choosing: Choosing): Binding<Command>[] {
 		];
 	return [
 		bind(["enter"], "⏎", "start", CHOOSE),
-		...(pickerPresets().length > 0 ? [bind(["tab", "shift+tab"], "⇥", "preset", { kind: "menu" })] : []),
+		...(pickerPresets().length > 0 ? [bind(["tab", "shift+tab"], "⇥", null, { kind: "menu" })] : []),
 		bind(["escape"], "esc", "cancel", CANCEL),
 		// The prefix key, which reaches the roster through the UI server.
 		bind([], `${keyName(m.config.prefix)} d`, "remove", { kind: "remove" }),

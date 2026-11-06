@@ -151,9 +151,14 @@ test("? fits every key in a tall Deck, and in a short one scrolls them by wheel 
 	await Bun.sleep(500);
 	const cursor = state(s).cursor;
 	s.keys("M-a", "?");
-	await until(() => /↓ \d+ more lines · j k, wheel scroll/.test(s.screen()), budgets.settle, "the short help, its end below");
+	await until(() => /↓ \d+ more lines · j\/k ↑\/↓ scroll/.test(s.screen()), budgets.settle, "the short help, its end below");
 	expect(s.screen()).toContain(first);
 	expect(s.screen()).not.toContain(last);
+	expect(s.screen()).toContain("PgUp/PgDn page · Esc closes");
+	s.keys("PageDown");
+	await until(() => s.screen().includes(last), budgets.settle, "PageDown reaches the last keys");
+	s.keys("PageUp");
+	await until(() => s.screen().includes(first), budgets.settle, "PageUp returns to Move");
 	for (let i = 0; i < 3; i++) s.swb("drive", "wheel", "down", "70", "12");
 	await until(() => s.screen().includes("↑ 3 ↓"), budgets.settle, "three wheel turns down");
 	expect(s.screen()).not.toContain(first);
@@ -167,7 +172,7 @@ test("? fits every key in a tall Deck, and in a short one scrolls them by wheel 
 	await until(() => s.screen().includes("↓ 2 more lines ·"), budgets.settle, "j down");
 	expect(state(s).cursor).toBe(cursor);
 	s.keys("q");
-	await until(() => !s.screen().includes("wheel scroll"), budgets.settle, "q closes it");
+	await until(() => !s.screen().includes("PgUp/PgDn page"), budgets.settle, "q closes it");
 	expect(state(s).ready).toBe(true);
 });
 

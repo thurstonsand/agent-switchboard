@@ -7,7 +7,7 @@ Type "swb" Sleep 400ms Enter
 Wait+Screen /Plan the v3 migration/
 Sleep 1.5s
 Type "n"
-Wait+Screen /starts/
+Wait+Screen /Preset/
 Sleep 2s
 Screenshot ../artifacts/phase6/videos/harness-picker-card.png
 Enter
@@ -20,7 +20,7 @@ Alt+a
 Type "h"
 Sleep 800ms
 Type "n"
-Wait+Screen /starts/
+Wait+Screen /Preset/
 Sleep 1s
 Tab
 Wait+Screen /codex/

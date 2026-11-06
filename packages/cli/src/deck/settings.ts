@@ -982,7 +982,7 @@ export class SettingsPane {
 		});
 		const tail = [
 			bind(["escape"], "esc", this.query() !== "" || this.changedOnly ? "clear" : "sessions", CANCEL),
-			bind(["/"], "/", "search", { kind: "search" }),
+			bind(["/"], "/", null, { kind: "search" }),
 			bind(["O"], "O", "file", { kind: "open", line: s ? lineOf(this.host.loaded().text, s.key) : null }),
 			bind(["c"], "c", null, { kind: "filter", changed: !this.changedOnly }),
 			bind(["?"], "?", null, { kind: "help" }),
@@ -1330,12 +1330,12 @@ export class SettingsPane {
 		width = Math.min(width, RAIL + 101);
 		const now = Date.now();
 		const lines: string[] = [this.header(width)];
-		const bodyHeight = Math.max(3, height - 7);
+		const bodyHeight = Math.max(3, height - (this.adding ? 7 : 5));
 		const error = this.host.error();
 		// An editor takes the rule and the footer's rows too: its own bottom rule stands in for the one under the list.
 		const prose = !error && !this.adding && this.proseShown() !== null;
 		this.listTop = 2;
-		this.listHeight = prose ? bodyHeight + 3 : bodyHeight;
+		this.listHeight = prose ? Math.max(3, height - 4) : bodyHeight;
 		let body: string[];
 		if (error) {
 			lines.push(gray("─".repeat(width)));
@@ -1352,7 +1352,7 @@ export class SettingsPane {
 			this.narrow || error || this.adding
 				? "─".repeat(terminalWidth)
 				: `${"─".repeat(RAIL)}┴${"─".repeat(Math.max(0, terminalWidth - RAIL - 1))}`;
-		if (!prose) lines.push(gray(rule), ...(this.adding ? this.footer(width, error) : ["", ""]));
+		if (!prose) lines.push(gray(rule), ...(this.adding ? this.footer(width, error) : []));
 		lines.push(this.messageLine(now), this.clickable(height - 1, 0, legendParts(this.keymap(), width)));
 		return lines.map((line) => truncateToWidth(line, terminalWidth, "…", true));
 	}
@@ -1515,7 +1515,7 @@ export class SettingsPane {
 				parts.push(...this.presetParts(item.index, i, width));
 				break;
 			case "addPreset":
-				parts.push(["  ", null], [green("+ add a preset"), { kind: "activate", at: i }]);
+				parts.push([" ", null], [green("+ add a preset"), { kind: "activate", at: i }]);
 				break;
 		}
 		line = this.clickable(y, left + 1, parts);
@@ -1583,7 +1583,7 @@ export class SettingsPane {
 
 	shortlistParts(i: number): Part[] {
 		const custom = this.host.loaded().config.presets !== null;
-		const title = ` ${bold("Shortlist")}`;
+		const title = bold("Shortlist");
 		const right: Part = custom ? [gray("↺"), { kind: "reset", at: i }] : ["", null];
 		const listed = this.host.catalog() === null && !custom ? [gray("   finding harnesses…"), null] : null;
 		return [[title, null], ...(listed ? [listed as [string, null]] : []), [" ", null], right];
