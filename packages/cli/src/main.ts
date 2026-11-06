@@ -75,8 +75,8 @@ const USAGE = `swb: Agent Switchboard
   swb update --from ID         swb_update_session as a line calls it; its arguments as JSON on stdin
   swb mcp --harness claude|codex
                                the MCP server a Claude Code or Codex session lists swb's tools from
-  swb drive start [--size COLSxROWS] [--theme light|dark] [-- swb-args]
-  swb drive keys [--delay MS] [-l TEXT]… [KEY…] | capture [--ansi] | theme light|dark | focus in|out
+  swb drive start [--size COLSxROWS] [--theme THEME] [-- swb-args]
+  swb drive keys [--delay MS] [-l TEXT]… [KEY…] | capture [--ansi] | theme THEME | focus in|out
             | click X Y | wheel up|down X Y | move X Y | drag X1 Y1 X2 Y2 [--hold] | release X Y (0-based cells) | resize COLSxROWS | clipboard | stop
   swb drive state | wait PATH=VALUE [--timeout MS]
   swb deck state [--deck NAME] [--json]
