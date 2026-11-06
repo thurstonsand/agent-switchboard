@@ -101,6 +101,7 @@ export type Command =
 	| { kind: "shell" }
 	| { kind: "details" }
 	| { kind: "detailScroll"; by: number }
+	| { kind: "dismissPeek" }
 	/** The roster back on screen with the keyboard, back on screen without it, or off it. */
 	| { kind: "roster"; to: "focus" | "show" | "hide" }
 	| { kind: "settings" }
@@ -132,10 +133,10 @@ export function bindingFor<C>(bindings: Binding<C>[], data: string): Binding<C> 
 /** A keymap's labelled bindings as legend buttons, in its order. What doesn't fit in `room` goes whole, from the end. */
 export function legendParts<C>(bindings: Binding<C>[], room: number): [text: string, command: C | null][] {
 	const shown = bindings.filter((b) => b.label !== null);
-	const width = () => shown.reduce((n, b) => n + 1 + visibleWidth(key(b.name, b.label as string)), 0);
+	const width = () => shown.reduce((n, b) => n + 2 + visibleWidth(key(b.name, b.label as string)), -1);
 	while (shown.length > 1 && width() > room) shown.pop();
-	return shown.flatMap((b): [string, C | null][] => [
-		[" ", null],
+	return shown.flatMap((b, i): [string, C | null][] => [
+		[i === 0 ? " " : "  ", null],
 		[key(b.name, b.label as string), b.command],
 	]);
 }

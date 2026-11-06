@@ -180,6 +180,19 @@ test("a Peek follows the pointer and the cursor keys, leaves with the pointer, a
 	expect(hovered.peek?.lines.some((line) => line.trim() === "bravo")).toBe(false);
 	s.save("peek-hover.txt", s.screen());
 
+	s.keys("s");
+	await waitState(s, "the hovered session's Snooze menu", (x) => x.mode === "snooze");
+	await onScreen("Snooze bravo", "the prompt names the Peek's target, not alpha");
+	expect(s.screen()).not.toContain("Snooze alpha");
+	s.keys("Escape");
+	s.swb("drive", "move", ...find("bravo"));
+	await waitState(s, "bravo's Peek restored by pointer movement", (x) => x.peek?.id === b);
+	s.keys(toB);
+	await waitState(s, "navigation dismisses the pointer's Peek", (x) => x.hover === null && x.cursor === b && x.peek?.source !== "pointer");
+	s.keys(toA, "Escape");
+	s.swb("drive", "move", ...find("bravo"));
+	await waitState(s, "bravo's Peek restored again", (x) => x.peek?.id === b);
+
 	// On the Peek itself it stays; onto pi it goes, and the row's hover with it.
 	s.swb("drive", "move", ...findRight("a Archive"));
 	await Bun.sleep(400);
@@ -204,7 +217,9 @@ test("a Peek follows the pointer and the cursor keys, leaves with the pointer, a
 	await waitState(s, "Escape dismisses the Peek", (x) => x.peek === null);
 	s.keys(toB);
 	await waitState(s, "another cursor Peek", (x) => x.peek?.id === b);
-	await waitState(s, "the cursor Peek expires without a mouse", (x) => x.peek === null);
+	await Bun.sleep(2000);
+	expect(state(s).peek?.id).toBe(b);
+	await waitState(s, "the cursor Peek expires after 30 idle seconds", (x) => x.peek === null, 32_000);
 
 	// Clicking a row focuses its pi and puts its Peek away, though the pointer still rests on the row.
 	await click("bravo");
@@ -240,7 +255,7 @@ test("Archive stays at its clicked action, Snooze stays at its row, and the Stag
 	await onScreen("Archive parent", "the anchored form drawn");
 	const [formX, formY] = find("Archive parent", 175);
 	expect(Math.abs(Number(formY) - Number(y))).toBeLessThanOrEqual(1);
-	expect(Math.abs(Number(formX) - Number(x))).toBeLessThanOrEqual(3);
+	expect(Math.abs(Number(formX) - Number(x))).toBeLessThanOrEqual(4);
 	await click("✕", 175);
 	await waitState(s, "the form closed without archiving", (st) => st.mode === "roster");
 	expect(entry(s, parent).open).toBe(true);

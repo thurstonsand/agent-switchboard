@@ -1392,6 +1392,11 @@ function input(data: string): void {
 	if (isKeyRelease(data)) return;
 	// A key reaches the roster only while its pane has the keyboard, ahead of the focus hook saying so.
 	focusOn(rosterPane);
+	const peek = m.mode.kind === "roster" ? m.peek.settled : null;
+	const binding = bindingFor(keymap(), data);
+	let command = binding?.command;
+	if (peek && command?.kind === "row") command = { ...command, row: peek.id };
+	if (peek && command?.kind === "activate" && command.enter) command = { kind: "row", act: "focus", row: peek.id };
 	m.hover = null;
 	m.pointer = null;
 	m.peek.byKeys = false;
@@ -1405,8 +1410,7 @@ function input(data: string): void {
 		settings.handleInput(data);
 		return;
 	}
-	const binding = bindingFor(keymap(), data);
-	if (binding?.command) run(binding.command);
+	if (command) run(command);
 	else if (!binding && typing()) run({ kind: "type", data });
 }
 
@@ -1494,6 +1498,11 @@ function run(c: Command): void {
 			break;
 		case "detailScroll":
 			if (frame.details) m.details.top = Math.max(0, Math.min(frame.details.total - frame.details.height, m.details.top + c.by));
+			break;
+		case "dismissPeek":
+			m.peek.dismissed = m.peek.settled?.id ?? null;
+			m.peek.byKeys = false;
+			syncPeek(null);
 			break;
 		case "roster":
 			if (c.to === "hide") {
@@ -1705,6 +1714,8 @@ function mouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
 		screen.pointerAway();
 		const before = targetAt(m.pointer);
 		m.pointer = { x: event.x, y: event.y };
+		m.peek.dismissed = null;
+		if (m.peek.settled) expirePeek();
 		relit = targetAt(m.pointer) !== before;
 	}
 	// A prompt answers to its own buttons, never the rows underneath it.
@@ -2468,7 +2479,7 @@ function wantPeek(want: PeekSpot | null): PeekSpot | null {
 
 /** Settles the Peek on `spot`: at once to close, after the pointer rests, and what it shows comes in, to open or move. */
 function syncPeek(spot: PeekSpot | null): void {
-	if (m.peek.expires && (spot === null || spot.source === "pointer")) {
+	if (m.peek.expires && spot === null) {
 		clearTimeout(m.peek.expires);
 		m.peek.expires = null;
 	}
@@ -2501,18 +2512,20 @@ function settlePeek(): void {
 	clearTimeout(pending.timer);
 	m.peek.pending = null;
 	m.peek.settled = pending.spot;
+	expirePeek();
+}
+
+function expirePeek(): void {
 	if (m.peek.expires) clearTimeout(m.peek.expires);
-	m.peek.expires =
-		pending.spot.source === "cursor"
-			? setTimeout(
-					() =>
-						dispatch(() => {
-							m.peek.byKeys = false;
-							syncPeek(null);
-						}),
-					1500,
-				)
-			: null;
+	m.peek.expires = setTimeout(
+		() =>
+			dispatch(() => {
+				m.peek.dismissed = m.peek.settled?.id ?? null;
+				m.peek.byKeys = false;
+				syncPeek(null);
+			}),
+		30_000,
+	);
 }
 
 /** Whether the UI server reports the pointer leaving: while something under it is lit, or something leaves with it. */
@@ -2610,7 +2623,7 @@ export function keymap(): Binding<Command>[] {
 		case "picker":
 			return pickerKeys(mode.picker);
 		case "roster":
-			return rosterKeys(selected());
+			return rosterKeys(m.peek.settled ? rosterRows().find((row) => row.key === m.peek.settled?.id) : selected());
 	}
 }
 
@@ -2648,7 +2661,7 @@ function pickerKeys(choosing: Choosing): Binding<Command>[] {
 /** The roster's own keys, on its cursor's row; the legend shows what that row's are. */
 function rosterKeys(row: Row | undefined): Binding<Command>[] {
 	const session = row?.kind === "session" ? row.entry : null;
-	const onRow = (act: RowAct): Command => ({ kind: "row", act, row: null });
+	const onRow = (act: RowAct): Command => ({ kind: "row", act, row: row?.key ?? null });
 	let enter: string | null = null;
 	if (row?.kind === "header") enter = row.collapsed ? "expand" : "collapse";
 	else if (row?.kind === "section") enter = row.expanded ? "collapse" : "expand";
@@ -2759,9 +2772,13 @@ function prefixKeymap(row: string | null): Binding<Command>[] {
  */
 function prefixKey(k: string, row: string | undefined): void {
 	if (row !== undefined && !rosterRows().some((r) => r.key === row)) throw new Error(`no session ${row} in the roster`);
-	const command = bindingFor(prefixKeymap(row ?? null), k)?.command;
+	const command = bindingFor(prefixKeymap(row ?? m.peek.settled?.id ?? null), k)?.command;
 	if (!command) throw new Error(`unknown deck key ${k}`);
 	if (settingsPane()) return;
+	m.hover = null;
+	m.pointer = null;
+	m.peek.byKeys = false;
+	syncPeek(null);
 	if (command.kind !== "remove") leave();
 	run(command);
 }
@@ -2781,7 +2798,7 @@ async function showHelp(): Promise<void> {
 	const [client, cols, rows] = line.split("\t") as [string, string, string];
 	const size = helpSize(m.config.prefix);
 	const fit = ["-w", String(Math.min(size.width, Number(cols))), "-h", String(Math.min(size.height, Number(rows)))];
-	await tmuxAsync(UI, "display-popup", "-c", client, "-E", ...fit, ...HELP_POPUP);
+	await tmuxAsync(UI, "display-popup", "-c", client, "-E", "-B", ...fit, ...HELP_POPUP);
 }
 
 /** A Peek's buttons: each one's label, the roster key that does the same, and what it does. */
@@ -3302,6 +3319,7 @@ export function onOverlayPress(command: Command, at: { x: number; y: number }): 
 
 /** The pointer on an overlay that belongs to a row, as a Peek does: the row stays hovered. */
 export function onOverlayHover(row: string): void {
+	if (m.peek.settled) expirePeek();
 	if (m.hover === row && !m.peek.pending) return;
 	dispatch(() => {
 		cancelPendingPeek();

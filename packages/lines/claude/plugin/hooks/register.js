@@ -239,8 +239,40 @@ async function ack($, batch) {
  */
 function receipt($, m) {
 	// Claude Code draws a log's trailing newline as �.
-	const body = m.body.trim();
-	$.ui.log(`↘ ${m.title} (mid-turn): ${body.length > 200 ? `${body.slice(0, 200)}…` : body}`);
+	$.ui.log(
+		`↘ from \x1b[1m${m.title}\x1b[22m\n${m.body
+			.trim()
+			.split("\n")
+			.map((line) => `  ${line}`)
+			.join("\n")}`,
+	);
+}
+
+/** The persisted mailbox frame, including launch briefings, drawn without its model-only reply address. */
+function drawMessage($, e, next) {
+	const messages = e.props.text
+		.split(/\n\n---\n\n(?=Message from session ")/)
+		.map((text) => /^Message from session "(.*?)" \(session: ([^,)]+)[^\n]*\):?[^\n]*\n\n([\s\S]*)$/.exec(text));
+	if (messages.some((message) => message === null)) return next(e);
+	const { Box, Text } = $.ui.resolve(e);
+	return Box({
+		flexDirection: "column",
+		children: messages.map((message, i) =>
+			Box({
+				key: String(i),
+				flexDirection: "column",
+				children: [
+					Text({ children: ["↘ from ", Text({ bold: true, children: [message[1]] })] }),
+					Box({
+						paddingLeft: 2,
+						children: [
+							Text({ children: [message[3].replace(`\n\nReport back: reply with session_send_message to session ${message[2]}.`, "")] }),
+						],
+					}),
+				],
+			}),
+		),
+	});
 }
 
 /** The held messages for the session this process shows now; any others wait for theirs. */
@@ -637,6 +669,7 @@ export function register(on) {
 		if (e.props.isExpanded || !e.props.calls.every(ours)) return next(e);
 		return drawCalls($, e);
 	});
+	on("ui.render", { component: "UserMessage" }, drawMessage);
 
 	// A typed edit raises prompt.edit; a submit, a clear, a recall, or a fill raises prompt.change.
 	on("prompt.edit", trackDraft);

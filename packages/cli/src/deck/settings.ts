@@ -1412,7 +1412,8 @@ export class SettingsPane {
 		// The rows an open choice list adds, below its setting.
 		const extra =
 			this.editing?.kind === "choices" ? (this.editing.s.control.kind === "enum" ? this.editing.s.control.choices.length : 0) : 0;
-		const listHeight = Math.max(1, height - 4);
+		const description = this.footer(Math.min(80, listWidth), null);
+		const listHeight = Math.max(1, height - description.length - 1);
 		const room = Math.max(1, listHeight - extra);
 		if (!this.scrolledAway) {
 			if (this.cursor < this.scroll) this.scroll = this.cursor;
@@ -1443,7 +1444,7 @@ export class SettingsPane {
 					});
 			}
 		}
-		rows.push("", ...this.footer(Math.min(80, listWidth), null));
+		rows.push("", ...description);
 		while (rows.length < height) rows.push("");
 		if (items.length === 0) rows[0] = gray(this.changedOnly && this.query() === "" ? "   nothing changed yet" : "   no settings match");
 		return this.railed(rows.slice(0, height));
@@ -1468,7 +1469,7 @@ export class SettingsPane {
 	itemLine(item: Item, i: number, y: number, left: number, width: number, labelWidth: number): string {
 		const selected = i === this.cursor && this.area === "list" && !this.searching;
 		const lit = selected || i === this.hover;
-		const mark = i === this.cursor ? "▸" : " ";
+		const mark = i === this.cursor ? "▌" : " ";
 		const dropping = this.gesture.kind === "drag" && this.gesture.over === i && this.gesture.item !== i;
 		let line: string;
 		const parts: Part[] = [];
@@ -1547,7 +1548,7 @@ export class SettingsPane {
 		const value = show(s, this.valueOf(s));
 		const parts: Part[] = [
 			[label, null],
-			[set ? bold(value) : value, s.control.kind === "paths" ? null : { kind: "activate", at: i }],
+			[bold(value), s.control.kind === "paths" ? null : { kind: "activate", at: i }],
 		];
 		if (!set && s.fallback().from && s.control.kind !== "prose") parts.push([`  ${gray(`(${s.fallback().from})`)}`, null]);
 		if (lit && s.control.kind !== "prose") {
@@ -1595,8 +1596,8 @@ export class SettingsPane {
 			[`${String(index + 1).padStart(2)} `, null],
 			[star, { kind: "star", at: i }],
 			[` ${cells.harness}`, null],
-			[cells.model, null],
-			[cells.effort, { kind: "adjust", by: 1, at: i, wrap: true }],
+			[bold(cells.model), null],
+			[bold(cells.effort), { kind: "adjust", by: 1, at: i, wrap: true }],
 			[cells.provider, null],
 			[editing ? `  ${this.inputCell(Math.max(1, width - 45 - visibleWidth(cells.provider)))}` : "", null],
 		];
@@ -1729,10 +1730,7 @@ export class SettingsPane {
 			const choice = this.choices()[item.index];
 			text = choice?.reason ?? choice?.note ?? "";
 		}
-		return wrapTextWithAnsi(text, width - 2)
-			.map((line) => `  ${line}`)
-			.concat("", "")
-			.slice(0, 2);
+		return wrapTextWithAnsi(text, width - 2).map((line) => `  ${gray(line)}`);
 	}
 
 	/** The config error has the whole list's place while it stands, so the message line doesn't repeat it. */

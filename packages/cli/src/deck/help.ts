@@ -1,6 +1,6 @@
 import { decodeKittyPrintable, matchesKey, StdinBuffer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { loadConfig } from "../config.ts";
-import { blockedMark, blue, bold, cyan, dim, green, keyName, red } from "./style.ts";
+import { blockedMark, blue, bold, cyan, dim, gray, green, keyName, red } from "./style.ts";
 
 const CLOSES = "any key or click closes";
 
@@ -45,7 +45,7 @@ function lines(prefix: string, columns = Infinity): string[] {
 	const left = [...move, "", ...relationships, "", ...lifecycle, "", ...organize, "", ...settings];
 	const states = [
 		bold("  State marks"),
-		`  ○ idle                 ${dim("◌ dormant (not running)")}`,
+		"  ○ idle                 ◌ dormant (not running)",
 		`  ${bold(cyan("◐"))} working              ${green("●")} Unseen (finished since Visit)`,
 		`  ${blockedMark("◆")} blocked              ${bold(red("!"))} cut off · resume unfinished turn`,
 		`  ✓ archived             ${bold(red("×"))} errored · inspect and retry`,
@@ -79,7 +79,24 @@ function lines(prefix: string, columns = Infinity): string[] {
 	];
 	const width = Math.max(...left.map(visibleWidth)) + 4;
 	if (width + Math.max(...right.map(visibleWidth)) > columns)
-		return ["", ...move, "", ...lifecycle, "", ...organize, "", ...settings, "", ...relationships, "", ...right];
+		return [
+			"",
+			...move,
+			row("/", "Filter; esc clears"),
+			row(`${prefix} Tab`, "Roster / pane you left"),
+			"",
+			...states,
+			"",
+			...lifecycle,
+			"",
+			...organize,
+			"",
+			...settings,
+			"",
+			...relationships.filter((line) => line !== row("/", "Filter; esc clears")),
+			"",
+			...right.slice(states.length + 1).filter((line) => line !== row(`${prefix} Tab`, "Roster / pane you left")),
+		];
 	return ["", ...left.map((line, i) => `${line}${" ".repeat(width - visibleWidth(line))}${right[i] ?? ""}`)];
 }
 
@@ -92,18 +109,24 @@ export function helpSize(prefix: string): { width: number; height: number } {
 /** `?`'s popup. Shorter than its lines, it scrolls by j k ↑ ↓, a page by space and PgUp PgDn, and by the wheel. */
 export async function help(): Promise<void> {
 	const prefix = loadConfig().prefix;
-	let all = lines(prefix, process.stdout.columns);
+	let all = lines(prefix, process.stdout.columns - 2);
 	let top = 0;
-	const room = () => Math.max(1, process.stdout.rows - 2);
+	const room = () => Math.max(1, process.stdout.rows - 4);
 	const overflow = () => Math.max(0, all.length - room());
 	const draw = () => {
-		all = lines(prefix, process.stdout.columns);
+		const width = process.stdout.columns;
+		all = lines(prefix, width - 2);
 		top = Math.max(0, Math.min(overflow(), top));
 		const below = all.length - top - room();
 		const more = [top > 0 ? `↑ ${top}` : "", below > 0 ? `↓ ${below} more lines` : ""].filter(Boolean).join(" ");
 		const hint = overflow() === 0 ? CLOSES : `${more} · j k, wheel scroll · any other key or click closes`;
 		const shown = [...all.slice(top, top + room()), "", `  ${hint}`];
-		process.stdout.write(`\x1b[H\x1b[2J${shown.map((line) => truncateToWidth(line, process.stdout.columns, "")).join("\r\n")}`);
+		const framed = [
+			`${gray("╭─")} Keys ${gray("─".repeat(Math.max(0, width - 12)))} ✕ ${gray("╮")}`,
+			...shown.map((line) => `${gray("│")}${truncateToWidth(line, width - 2, "", true)}${gray("│")}`),
+			gray(`╰${"─".repeat(width - 2)}╯`),
+		];
+		process.stdout.write(`\x1b[H\x1b[2J${framed.join("\r\n")}`);
 	};
 	// Mouse reporting on, so a click and the wheel reach stdin like keys.
 	process.stdout.write("\x1b[?25l\x1b[?1000h\x1b[?1006h");

@@ -33,12 +33,12 @@ test("pi, Claude Code, and Codex message each other: idle sessions start a turn,
 	// Idle: the message is the next turn, in every direction.
 	expect((await send(s, claude.id, pi.id, "reply SWB-c2p")).details.delivered).toBe(true);
 	await until(() => s.signal("replied.SWB-c2p") !== "", budgets.settle, "pi's answer to Claude");
-	expect(pane(s, pi.id)).toContain("↘ from");
+	await until(() => pane(s, pi.id).includes("↘ from"), budgets.settle, "pi's Message drawn");
 	expect(pane(s, pi.id)).not.toContain("Message from session");
 	expect((await send(s, codex.id, claude.id, "SWB-x2c please ack")).details.delivered).toBe(true);
 	await until(() => pane(s, claude.id).includes("got SWB-x2c please ack"), budgets.settle, "Claude's answer to Codex");
-	// The message shows once, as the turn's prompt, with no receipt beside it.
-	expect(pane(s, claude.id)).not.toContain("↘");
+	// Claude Code bypasses UserMessage hooks for plugin-submitted prompts; no duplicate receipt beside it.
+	expect(pane(s, claude.id)).not.toContain("↘ from");
 	expect((await send(s, pi.id, codex.id, "SWB-p2x please ack")).details.delivered).toBe(true);
 	await until(() => pane(s, codex.id).includes("got SWB-p2x please ack"), budgets.settle, "Codex's answer to pi");
 	s.save("idle.txt", [pane(s, pi.id), pane(s, claude.id), pane(s, codex.id)].join("\n=====\n"));
@@ -56,7 +56,7 @@ test("pi, Claude Code, and Codex message each other: idle sessions start a turn,
 		budgets.settle,
 		"Claude's next request in that turn to carry the message",
 	);
-	await until(() => pane(s, claude.id).includes("(mid-turn): SWB-mid-claude"), budgets.settle, "Claude's visible receipt");
+	await until(() => pane(s, claude.id).includes("  SWB-mid-claude"), budgets.settle, "Claude's visible receipt");
 
 	type(s, codex.id, "hold x1");
 	await until(() => s.signal("x1.entered") !== "", ready, "Codex holding");
@@ -78,6 +78,22 @@ test("pi, Claude Code, and Codex message each other: idle sessions start a turn,
 	await until(() => s.signal("replied.SWB-wake-pi") !== "", budgets.settle, "pi answering after wake");
 	expect(pane(s, pi.id)).toContain("↘ from");
 	expect(pane(s, pi.id)).not.toContain("Message from session");
+});
+
+test("agent launch briefings render as Messages without losing their body or reply address", async () => {
+	s = scenario("harnesses", "launch-messages", { packages: [], recorder: true, harnesses: ["claude"] });
+	const parent = await launched(s, "pi", "reply parent-ready", undefined, ["--title", "Coordinator"]);
+	for (const harness of ["pi", "claude"] as const) {
+		const child = await launched(s, harness, `reply SWB-child-${harness}\n\n---\n\nKeep this separator.`, parent.id);
+		await until(() => pane(s, child.id).includes("↘ from Coordinator"), ready, `${harness}'s launch Message`);
+		const screen = pane(s, child.id);
+		expect(screen).toContain(`  reply SWB-child-${harness}`);
+		expect(screen).toContain("  Keep this separator.");
+		expect(screen).not.toContain("Message from session");
+		expect(screen).not.toContain(parent.id);
+		if (harness === "claude") expect(sawMarker("claude", parent.id)).toBe(true);
+		else await until(() => s.signal("replied.SWB-child-pi") !== "", ready, "pi answered its briefing");
+	}
 });
 
 test("a message Codex refuses mid-compaction is delivered once the compaction ends, with nothing else written", async () => {

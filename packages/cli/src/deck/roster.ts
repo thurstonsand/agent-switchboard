@@ -133,7 +133,7 @@ function glyph(state: State, now: number): string {
 		case "idle":
 			return "○";
 		case "dormant":
-			return dim("◌");
+			return "◌";
 		case "cut-off":
 			return bold(red("!"));
 		case "errored":
@@ -246,7 +246,7 @@ class Roster implements Component, Focusable {
 			}
 		}
 		lines.push(
-			overflowRule(rows.slice(frame.scrollTop + frame.listHeight), "▼", width),
+			overflowRule(rows.slice(frame.scrollTop + frame.listHeight), "↓", width),
 			...tabs,
 			...(detail?.lines ?? []),
 			messageLine(now, height - 2),
@@ -321,7 +321,7 @@ function pickerParts(width: number, height: number): Part[] {
 		const e = model.entries.get(model.mode.id);
 		if (!e) return [];
 		return [
-			[promptTitle(`Archive ${displayName(e)}`, width), null],
+			[`Archive ${displayName(e)}`, null],
 			...archiveNotes(e).map((note): Part => [` ${note}`, null]),
 			...keymap()
 				.filter((b) => b.label !== null && b.command?.kind !== "cancel")
@@ -339,7 +339,7 @@ function pickerParts(width: number, height: number): Part[] {
 	const shown = Math.max(1, Math.min(choices.length, height - 3));
 	const from = Math.max(0, Math.min(naming.choice - shown + 1, choices.length - shown));
 	const title = `${naming.renaming ? "Rename Group" : "Group for"} ${naming.title}`;
-	const out: Part[] = [[promptTitle(title, width), null]];
+	const out: Part[] = [[title, null]];
 	for (let i = from; i < from + shown; i++) {
 		const choice = choices[i] as { label: string; name: string | null };
 		const label = choice.name === null ? dim(choice.label) : choice.label.startsWith("+ ") ? green(choice.label) : choice.label;
@@ -352,8 +352,8 @@ function pickerParts(width: number, height: number): Part[] {
 }
 
 function promptTitle(title: string, width: number): string {
-	const label = truncateToWidth(` ${title} `, width - 4, "…");
-	return `${gray("─")}${bold(label)}${gray("─".repeat(Math.max(0, width - visibleWidth(label) - 4)))} ✕ `;
+	const label = truncateToWidth(` ${title} `, width - 6, "…");
+	return `${gray("╭─")}${label}${gray("─".repeat(Math.max(0, width - visibleWidth(label) - 6)))} ✕ ${gray("╮")}`;
 }
 
 function promptOverlay(width: number, height: number): Overlay[] {
@@ -362,12 +362,15 @@ function promptOverlay(width: number, height: number): Overlay[] {
 	const rosterWidth = width;
 	const insert = panes.narrow || mode.kind === "name";
 	width = insert ? width : Math.min(Math.max(width, PEEK_COLS), panes.width - rosterWidth - 1);
-	const parts = pickerParts(width, height - 2);
-	const lines = [...parts.map(([line]) => truncateToWidth(line, width, "…", true)), gray("─".repeat(width))];
+	if (width < PEEK_MIN_COLS) return [];
+	const parts = pickerParts(width - 2, height - 2);
+	const row = (line: string) => `${gray("│")}${truncateToWidth(line, width - 2, "…", true)}${gray("│")}`;
+	const title = parts[0]?.[0] ?? "";
+	const lines = [promptTitle(title, width), ...parts.slice(1).map(([line]) => row(line)), gray(`╰${"─".repeat(width - 2)}╯`)];
 	const buttons: OverlayButton[] = parts.flatMap(([line, command], y) =>
-		command ? [{ y, from: 0, to: width, command, hot: cursorLine(truncateToWidth(line, width, "…", true), true) }] : [],
+		command ? [{ y, from: 1, to: width - 1, command, hot: row(cursorLine(truncateToWidth(line, width - 2, "…", true), true)) }] : [],
 	);
-	buttons.push({ y: 0, from: width - 3, to: width, command: { kind: "cancel" }, hot: lines[0] as string });
+	buttons.push({ y: 0, from: width - 4, to: width - 1, command: { kind: "cancel" }, hot: lines[0] as string });
 	const x = insert ? 0 : Math.max(rosterWidth + 1, Math.min(mode.at.x, panes.width - width));
 	const y = insert
 		? frame.listTop + rosterRows().findIndex((r) => r.key === mode.at.row) - frame.scrollTop + 1
@@ -379,7 +382,7 @@ function snoozeMenu(width: number): Part[] {
 	const snoozing = snoozeMode();
 	if (!snoozing) return [];
 	const now = Date.now();
-	const out: Part[] = [[promptTitle(`Snooze ${snoozing.title}`, width), null]];
+	const out: Part[] = [[`Snooze ${snoozing.title}`, null]];
 	SNOOZE_CHOICES.forEach((choice, i) => {
 		const until = presetUntil(choice.snooze, now);
 		const at = until === null ? "↘" : wakeAt(until, now);
@@ -483,7 +486,7 @@ function list(rows: Row[], index: number, width: number, full: number, now: numb
 		const first = rows[frame.scrollTop];
 		const header = first?.kind === "session" ? rows.find((r) => r.key === first.header) : first;
 		const name = header?.kind === "header" ? (header.group ?? projectName(header.project)) : header?.kind === "section" ? header.label : "";
-		pinned.push(overflowRule(rows.slice(0, frame.scrollTop), "▲", width, name));
+		pinned.push(overflowRule(rows.slice(0, frame.scrollTop), "↑", width, name));
 		frame.listTop++;
 	}
 	frame.listHeight = height;
@@ -497,7 +500,12 @@ function list(rows: Row[], index: number, width: number, full: number, now: numb
 		const y = frame.listTop + out.length;
 		const line = truncateToWidth(rowLine(row, width, now), width, "…", true);
 		if (dragging()?.drop?.header.key === row.key) out.push(cursorLine(line, true));
-		else if (i === index) out.push(cursorLine(line, model.focus === "roster"));
+		else if (i === index)
+			out.push(
+				row.kind === "session"
+					? cursorLine(line, model.focus === "roster")
+					: line.replace(/[▸▾]/, (mark) => cursorLine(mark, model.focus === "roster")),
+			);
 		else out.push(line);
 		if (row.kind === "session" && row.family.length > 0) {
 			const at = foldColumn(row);
@@ -644,6 +652,16 @@ function hints(y: number, cols: number): string {
  * from the end.
  */
 function legend(y: number, bindings: Binding<Command>[], cols: number, trailing: Part[]): string {
+	if (model.mode.kind === "roster" && model.focus === "roster") {
+		const shown = bindings.filter((b) => b.label !== null);
+		const used = () => shown.reduce((n, b) => n + visibleWidth(key(b.name, b.label as string)) + 2, -1);
+		if (used() + trailing.reduce((n, [text]) => n + visibleWidth(text), 2) > cols) trailing = [];
+		if (used() > cols) {
+			const archive = shown.findIndex((b) => b.command?.kind === "row" && b.command.act === "archive");
+			if (archive !== -1) shown.splice(archive, 1);
+		}
+		bindings = shown;
+	}
 	const end = trailing.reduce((n, [text]) => n + visibleWidth(text), 0);
 	// Trailing parts keep a column of their own either side.
 	const parts = legendParts(bindings, trailing.length === 0 ? cols : cols - end - 2);
@@ -730,11 +748,11 @@ function rowLine(row: Row, width: number, now: number): string {
 	const state = stateOf(e);
 	const paint = ["blocked", "unseen", "cut-off", "errored"].includes(state)
 		? bold
-		: e.provisional || state === "dormant"
+		: e.provisional || state === "archived"
 			? gray
 			: (s: string) => s;
 	const title = truncateToWidth(paint(displayName(e)), titleWidth, "…", true);
-	return `${lead}${glyph(state, now)} ${title}${hidden}${state === "dormant" ? dim(right) : right}`;
+	return `${lead}${glyph(state, now)} ${title}${hidden}${state === "dormant" || state === "archived" ? dim(right) : right}`;
 }
 
 /**
@@ -880,19 +898,19 @@ function ago(at: number, now: number): string {
 	return a === "now" ? "just now" : `${a} ago`;
 }
 
-/** A line of a Peek, or of the launch card, on its three framed sides: open to the left beside the roster, to the right in it. */
+/** Floating boxes have closed sides; expanded narrow details stay open at the terminal's edge. */
 function peekFrame(open: "left" | "right", inner: number): (content: string) => string {
 	return (content) =>
 		open === "left"
-			? ` ${truncateToWidth(content, inner, "…", true)} ${gray("│")}`
+			? `${gray("│")} ${truncateToWidth(content, inner, "…", true)} ${gray("│")}`
 			: `${gray("│")} ${truncateToWidth(content, inner, "…", true)} `;
 }
 
 /** What a session from the picker starts on, as the launch card's field says it. */
 function presetField(c: Choice): string {
 	const p = c.preset;
-	const what = p.agent ? `${bold(p.agent)} · agent` : `${bold(p.model ?? "")} · ${p.effort ?? "default"} effort`;
-	return `${harnessName(p.harness)} · ${what}${p.provider ? gray(` · ${p.provider}`) : ""}`;
+	const name = model.config.presets === null && p.harness === "claude" && !p.agent ? c.note.split(" · ")[0] : (p.agent ?? p.model);
+	return `${harnessName(p.harness)} · ${bold(name ?? "")}${p.agent ? " · agent" : ""}`;
 }
 
 function presetNote(note: string, width: number): string[] {
@@ -905,12 +923,12 @@ function presetNote(note: string, width: number): string[] {
  * the menu. On the Stage it opens to the left, onto the roster's border; in a narrow Deck's roster, to the right.
  */
 function launchCard(choosing: Choosing, width: number, open: "left" | "right"): OverlayView {
-	const inner = width - (open === "right" ? 4 : 3);
+	const inner = width - 4;
 	const presets = pickerPresets();
 	const chosen = presets[chosenPreset(choosing)];
 	const menu = choosing.menu;
 	let value: string;
-	if (menu && menu.query !== "") value = `${menu.query}▌`;
+	if (menu) value = menu.query === "" ? gray("type to filter presets") : `${menu.query}▌`;
 	else if (chosen) value = presetField(chosen);
 	else {
 		const target = pickerTarget(choosing);
@@ -927,24 +945,33 @@ function launchCard(choosing: Choosing, width: number, open: "left" | "right"): 
 		open === "left"
 			? peekFrame(open, inner)
 			: (content: string) => `${gray("│")} ${truncateToWidth(content, inner, "…", true)} ${gray("│")}`;
-	const edge = `${gray("─")} starts ${gray("─".repeat(Math.max(0, width - (open === "right" ? 11 : 10))))}`;
 	const lines = [
-		open === "left" ? `${edge}${gray("╮")}` : `${gray("╭")}${edge}${gray("╮")}`,
+		promptTitle("starts", width),
 		frame(field),
 		...(menu
 			? []
 			: [
-					...presetNote(chosen?.note ?? "", inner).map(frame),
-					gray(open === "left" ? `${"─".repeat(width - 1)}╯` : `╰${"─".repeat(width - 2)}╯`),
+					...presetNote(
+						chosen && model.config.presets === null && chosen.preset.harness === "claude" && !chosen.preset.agent
+							? chosen.note.split(" · ").slice(1).join(" · ")
+							: (chosen?.note ?? ""),
+						inner,
+					).map(frame),
+					...(chosen
+						? [frame(gray(`${chosen.preset.effort ?? "default"} effort${chosen.preset.provider ? ` · ${chosen.preset.provider}` : ""}`))]
+						: []),
+					gray(`╰${"─".repeat(width - 2)}╯`),
 				]),
 	];
-	const margin = open === "left" ? 1 : 2;
+	const margin = 2;
 	return {
 		lines,
-		buttons:
-			presets.length === 0
+		buttons: [
+			{ y: 0, from: width - 4, to: width - 1, command: { kind: "cancel" }, hot: lines[0] as string },
+			...(presets.length === 0
 				? []
-				: [{ y: 1, from: margin, to: margin + inner, command: { kind: "menu" }, hot: frame(cursorLine(field, true)) }],
+				: [{ y: 1, from: margin, to: margin + inner, command: { kind: "menu" } as Command, hot: frame(cursorLine(field, true)) }]),
+		],
 	};
 }
 
@@ -964,7 +991,7 @@ function launchMenu(choosing: Choosing, width: number, maxHeight: number): Overl
 		const cells = presetColumns(p.harness, p.agent ?? p.model ?? "", p.agent ? "agent" : (p.effort ?? "default"), p.provider ?? "");
 		itemAt.push(items.length);
 		items.push(
-			`${menu.query === "" && n < 9 ? bold(String(index + 1)) : " "} ${p.default ? "★" : " "} ${cells.harness}${cells.model}${cells.effort}${cells.provider}`,
+			`${menu.query === "" && n < 9 ? bold(String(index + 1)) : " "} ${p.default ? "★" : " "} ${cells.harness}${bold(cells.model)}${cells.effort}${cells.provider}`,
 		);
 	});
 	if (shown.length === 0) items.push(gray("nothing matches"));
@@ -982,7 +1009,7 @@ function launchMenu(choosing: Choosing, width: number, maxHeight: number): Overl
 			buttons.push({ y: lines.length, from: 2, to: 2 + inner, command: { kind: "choose", index: n }, hot: row(hoverLine(content)) });
 		lines.push(row(n === menu.cursor ? cursorLine(content, true) : content));
 	});
-	lines.push(gray(`├${"─".repeat(width - 2)}┤`), ...note.map(row), gray(`└${"─".repeat(width - 2)}┘`));
+	lines.push(gray(`├${"─".repeat(width - 2)}┤`), ...note.map(row), gray(`╰${"─".repeat(width - 2)}╯`));
 	return { lines, buttons };
 }
 
@@ -994,7 +1021,7 @@ function launchMenu(choosing: Choosing, width: number, maxHeight: number): Overl
 function peekView(row: SessionRow, width: number, maxHeight: number, open: "left" | "right"): OverlayView {
 	const e = row.entry;
 	const now = Date.now();
-	const inner = width - 3;
+	const inner = width - (open === "left" ? 4 : 3);
 	const rule = gray("─".repeat(inner));
 	const head: string[] = [];
 	const title = wrapTextWithAnsi(displayName(e), inner);
@@ -1099,14 +1126,17 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	const frame = peekFrame(open, inner);
 	const edge = "─".repeat(width - 1);
 	const lines = [
-		gray(open === "left" ? `${edge}╮` : `╭${edge}`),
+		open === "left" ? promptTitle("Peek", width) : gray(`╭${edge}`),
 		...body.slice(0, maxHeight - 2).map(frame),
-		gray(open === "left" ? `${edge}╯` : `╰${edge}`),
+		gray(open === "left" ? `╰${"─".repeat(width - 2)}╯` : `╰${edge}`),
 	];
-	const margin = open === "left" ? 1 : 2;
+	const margin = 2;
 	return {
 		lines,
 		buttons: [
+			...(open === "left"
+				? [{ y: 0, from: width - 4, to: width - 1, command: { kind: "dismissPeek" } as Command, hot: lines[0] as string }]
+				: []),
 			...links
 				.filter((link) => 1 + link.at < lines.length - 1)
 				.map((link) => ({
