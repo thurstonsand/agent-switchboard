@@ -796,7 +796,7 @@ function rowLine(row: Row, width: number, now: number): string {
 			: (s: string) => s;
 	const hovered = model.peek.settled?.source === "pointer" && model.peek.settled.id === e.id;
 	const name = hovered ? displayName(e) : matchedText(displayName(e));
-	let title = truncateToWidth(matches(e) ? paint(name) : gray(name), titleWidth, "…");
+	let title = truncateToWidth(matches(e) || !e.live ? paint(name) : gray(name), titleWidth, "…");
 	if (hovered) title = underline(title);
 	title += " ".repeat(Math.max(0, titleWidth - visibleWidth(title)));
 	return `${lead}${glyph(state, now)} ${title}${hidden}${right}`;
