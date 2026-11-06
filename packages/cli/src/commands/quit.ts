@@ -5,7 +5,7 @@ import { displayName, type RuntimeRow, runtimeLive, states } from "../derive.ts"
 import { SwbError } from "../errors.ts";
 import { stopPis } from "../sessions.ts";
 import { openStore } from "../store.ts";
-import { killServer, listHosts, SESSIONS, tmuxTry, UI } from "../tmux.ts";
+import { killServer, listHosts, SESSIONS, tmuxTry } from "../tmux.ts";
 
 /**
  * Stops everything swb runs: every harness, saving drafts as an upgrade does, then the Deck, the Editors, and the
@@ -28,7 +28,6 @@ export function quit(args: string[]): void {
 	// The clock first, so it can't wake a session this is stopping.
 	tmuxTry(SESSIONS, "kill-session", "-t", "=swb-ctl");
 	stopPis(live);
-	killServer(UI);
 	killServer(SESSIONS);
 	console.log(`Stopped ${live.length} session${live.length === 1 ? "" : "s"}, the Deck, and swb's clock. swb starts them again.`);
 }

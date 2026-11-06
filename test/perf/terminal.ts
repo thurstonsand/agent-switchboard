@@ -122,7 +122,7 @@ export class Terminal {
 	attached(): boolean {
 		const tty = this.s.tmux(this.server, "display", "-p", "-t", "=t:", "#{pane_tty}");
 		try {
-			return this.s.tmux(this.s.servers.ui, "list-clients", "-F", "#{client_tty}").split("\n").includes(tty);
+			return this.s.tmux(this.s.servers.sessions, "list-clients", "-F", "#{client_tty}").split("\n").includes(tty);
 		} catch {
 			return false;
 		}

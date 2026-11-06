@@ -1,6 +1,6 @@
 import { openSync, writeSync } from "node:fs";
 import tty from "node:tty";
-import { tmuxAsync, tmuxTry, UI } from "../tmux.ts";
+import { SESSIONS, tmuxAsync, tmuxTry } from "../tmux.ts";
 import type { Command } from "./model.ts";
 
 // Overlays are boxes the roster puts over the Deck: a Peek, the launch card, its menu. What lies over the roster's own
@@ -18,7 +18,7 @@ export type OverlayView = { lines: string[]; buttons: OverlayButton[] };
 /**
  * A box over the Stage. Its corner is in the roster pane's cells; columns past the roster's own width are the Stage's.
  * One that `leaves` goes when the pointer leaves the roster for anywhere but an overlay, or a key goes elsewhere, which
- * only the UI server sees soon enough: it kills it there, and tells the roster.
+ * only tmux sees soon enough: it kills it there, and tells the roster.
  */
 export type Overlay = {
 	id: string;
@@ -53,10 +53,10 @@ type Shown = {
 export type OverlayHost = {
 	/** The roster's pane: overlays go in its window, and their corners count from its top-left. */
 	pane: string;
-	/** The Deck's session, which holds the command the UI server runs to put away what `leaves`. */
+	/** The Deck's session, which holds the command tmux runs to put away what `leaves`. */
 	deck: string;
 	failed: (message: string) => void;
-	/** One that `leaves` went without the roster: the UI server saw the pointer or a key go elsewhere. */
+	/** One that `leaves` went without the roster: tmux saw the pointer or a key go elsewhere. */
 	left: () => void;
 	/** A click on a button. */
 	pressed: (command: Command) => void;
@@ -79,9 +79,9 @@ export class Overlays {
 	constructor(private readonly host: OverlayHost) {
 		// A roster that died left its overlays behind; this one starts with none.
 		// biome-ignore-start lint/plugin: before the roster's first frame, when nothing waits on its keys yet.
-		const stray = tmuxTry(UI, "list-panes", "-t", host.pane, "-f", "#{pane_floating_flag}", "-F", "#{pane_id}");
-		for (const pane of stray.ok ? stray.out.split("\n").filter(Boolean) : []) tmuxTry(UI, "kill-pane", "-t", pane);
-		tmuxTry(UI, "set", "-u", "-t", host.deck, "@swb_leave");
+		const stray = tmuxTry(SESSIONS, "list-panes", "-t", host.pane, "-f", "#{pane_floating_flag}", "-F", "#{pane_id}");
+		for (const pane of stray.ok ? stray.out.split("\n").filter(Boolean) : []) tmuxTry(SESSIONS, "kill-pane", "-t", pane);
+		tmuxTry(SESSIONS, "set", "-u", "-t", host.deck, "@swb_leave");
 		// biome-ignore-end lint/plugin: startup
 	}
 
@@ -105,7 +105,7 @@ export class Overlays {
 		return s && s.painted !== "" ? { about: s.overlay.about, lines: s.overlay.view.lines.map((line) => Bun.stripANSI(line)) } : null;
 	}
 
-	/** The UI server ran @swb_leave, which killed what leaves with the pointer and unset the option. */
+	/** tmux ran @swb_leave, which killed what leaves with the pointer and unset the option. */
 	disarmed(): void {
 		this.leave = "";
 	}
@@ -124,13 +124,13 @@ export class Overlays {
 	 * tmux resize the zoomed pane twice. The next sync puts back what's still wanted.
 	 */
 	async closeAll(): Promise<void> {
-		await Promise.allSettled(this.forgetAll().map((args) => tmuxAsync(UI, ...args)));
+		await Promise.allSettled(this.forgetAll().map((args) => tmuxAsync(SESSIONS, ...args)));
 	}
 
 	/** closeAll at exit, which can't wait for it. */
 	closeAllNow(): void {
 		// biome-ignore lint/plugin: the roster is exiting, and nothing waits on its keys any more.
-		for (const args of this.forgetAll()) tmuxTry(UI, ...args);
+		for (const args of this.forgetAll()) tmuxTry(SESSIONS, ...args);
 	}
 
 	/** Forgets every overlay shown, returning the tmux commands that take them off screen. */
@@ -168,7 +168,7 @@ export class Overlays {
 					await this.place(this.want);
 					failures = 0;
 				} catch (error) {
-					// A float the UI server killed a moment ago fails a move in the same breath; the next pass knows it's gone.
+					// A float tmux killed a moment ago fails a move in the same breath; the next pass knows it's gone.
 					await this.forgetDead();
 					if (++failures > 1) {
 						this.host.failed(`overlay: ${(error as Error).message}`);
@@ -199,11 +199,11 @@ export class Overlays {
 		const origin =
 			making.length + moving.length === 0
 				? { left: 0, top: 0 }
-				: await tmuxAsync(UI, "display", "-p", "-t", this.host.pane, "#{pane_left} #{pane_top}").then((out) => {
+				: await tmuxAsync(SESSIONS, "display", "-p", "-t", this.host.pane, "#{pane_left} #{pane_top}").then((out) => {
 						const [left, top] = out.split(" ").map(Number) as [number, number];
 						return { left, top };
 					});
-		// What went while this awaited, killed by the UI server or forgotten by closeAll, is the next pass's to place.
+		// What went while this awaited, killed by tmux or forgotten by closeAll, is the next pass's to place.
 		if (this.generation !== generation) {
 			this.dirty = true;
 			return;
@@ -253,7 +253,7 @@ export class Overlays {
 			commands.push(["move-pane", "-t", s.pane, "-z", "0"]);
 		}
 		if (commands.length > 0) {
-			const out = await tmuxAsync(UI, ...commands.flatMap((command, i) => (i === 0 ? command : [";", ...command])));
+			const out = await tmuxAsync(SESSIONS, ...commands.flatMap((command, i) => (i === 0 ? command : [";", ...command])));
 			const made = out
 				.split("\n")
 				.filter(Boolean)
@@ -261,7 +261,7 @@ export class Overlays {
 			// Forgotten meanwhile: what this pass made is no one's, so it goes too.
 			if (this.generation !== generation) {
 				this.dirty = true;
-				await Promise.allSettled(made.map(([pane]) => tmuxAsync(UI, "kill-pane", "-t", pane)));
+				await Promise.allSettled(made.map(([pane]) => tmuxAsync(SESSIONS, "kill-pane", "-t", pane)));
 				return;
 			}
 			making.forEach((o, i) => {
@@ -376,16 +376,16 @@ export class Overlays {
 	 * as one made or left behind before the failure.
 	 */
 	private async forgetDead(): Promise<void> {
-		const alive = await tmuxAsync(UI, "list-panes", "-t", this.host.pane, "-f", "#{pane_floating_flag}", "-F", "#{pane_id}").catch(
+		const alive = await tmuxAsync(SESSIONS, "list-panes", "-t", this.host.pane, "-f", "#{pane_floating_flag}", "-F", "#{pane_id}").catch(
 			() => "",
 		);
 		const panes = new Set(alive.split("\n").filter(Boolean));
 		for (const s of [...this.shown.values()]) if (!panes.has(s.pane)) this.drop(s);
 		const ours = new Set([...this.shown.values()].map((s) => s.pane));
-		await Promise.allSettled([...panes].filter((pane) => !ours.has(pane)).map((pane) => tmuxAsync(UI, "kill-pane", "-t", pane)));
+		await Promise.allSettled([...panes].filter((pane) => !ours.has(pane)).map((pane) => tmuxAsync(SESSIONS, "kill-pane", "-t", pane)));
 	}
 
-	/** The UI server's command that puts away what leaves with the pointer; see LEAVE in deck.ts. */
+	/** tmux's command that puts away what leaves with the pointer; see LEAVE in conf.ts. */
 	private async syncLeave(): Promise<void> {
 		const leave = [...this.shown.values()]
 			.filter((s) => s.overlay.leaves)
@@ -393,6 +393,6 @@ export class Overlays {
 			.join(" ; ");
 		if (leave === this.leave) return;
 		this.leave = leave;
-		await tmuxAsync(UI, "set", "-t", this.host.deck, ...(leave === "" ? ["-u", "@swb_leave"] : ["@swb_leave", leave]));
+		await tmuxAsync(SESSIONS, "set", "-t", this.host.deck, ...(leave === "" ? ["-u", "@swb_leave"] : ["@swb_leave", leave]));
 	}
 }

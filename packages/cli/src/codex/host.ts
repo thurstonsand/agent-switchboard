@@ -21,9 +21,8 @@ import { readTranscript } from "../deck/transcript.ts";
 import { SwbError, UsageError } from "../errors.ts";
 import { codexServerOverrides, declareCodexServer } from "../lines.ts";
 import { codexOperatorConfig } from "../operator.ts";
-import { SWB } from "../sessions.ts";
 import { openStore } from "../store.ts";
-import { listHosts } from "../tmux.ts";
+import { listHosts, SWB } from "../tmux.ts";
 import { archivedInCodex, codexProvider } from "../transcripts/codex.ts";
 import { CodexClient, type Notification } from "./client.ts";
 

@@ -156,7 +156,7 @@ type PeekState = {
 	dismissed: string | null;
 	/** Set by a navigation key: the cursor's row has a Peek while the roster has the keyboard. */
 	byKeys: boolean;
-	/** Whether the UI server reports the pointer leaving; it stops by itself when it reports. */
+	/** Whether tmux reports the pointer leaving; it stops by itself when it reports. */
 	watching: boolean;
 	info: Map<string, { info: PeekInfo; at: number }>;
 	asked: Set<string>;

@@ -78,7 +78,7 @@ test("Enter on a dormant row puts the keyboard on its pi as it comes up; Enter t
 	s.keys("M-a", "q");
 	await until(() => s.swbTry("drive", "state").code !== 0, 5000, "M-a q takes the terminal off the Deck from pi");
 	s.save("prefix-q.txt", s.screen());
-	expect(s.tmux(s.servers.ui, "list-sessions", "-F", "#{session_name}").split("\n")).toContain("deck");
+	expect(s.tmux(s.servers.sessions, "list-sessions", "-F", "#{session_name}").split("\n")).toContain("deck");
 	expect(entry(s, a).live && entry(s, b).live).toBe(true);
 });
 

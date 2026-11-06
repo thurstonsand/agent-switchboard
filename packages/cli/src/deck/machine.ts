@@ -20,13 +20,14 @@ import { SwbError } from "../errors.ts";
 import { unnameable } from "../groups.ts";
 import { type Choice, defaultLaunch, fromDefault, type LaunchTarget, presetLabels, shortlist } from "../harnesses.ts";
 import { ensureOperatorDir } from "../operator.ts";
-import { loginShell, nvimEditor } from "../sessions.ts";
+import { loginShell } from "../sessions.ts";
 import type { DeckLayout } from "../store.ts";
-import { quote, tmuxAsync, UI } from "../tmux.ts";
+import { quote, SESSIONS, tmuxAsync } from "../tmux.ts";
 import { writeConfig } from "../write-config.ts";
+import { DECK, PLACEHOLDER } from "./conf.ts";
 import { Control } from "./control.ts";
-import { DECK, type DeckIntent, HELP_POPUP, PLACEHOLDER, rosterCols, SPLIT_FROM } from "./deck.ts";
-import { rosterPane, stagePane, stageTty, startIntent } from "./env.ts";
+import { type DeckIntent, HELP_POPUP, rosterCols, SPLIT_FROM } from "./deck.ts";
+import { rosterPane, stagePane, stageShows, startIntent } from "./env.ts";
 import { helpSize } from "./help.ts";
 import {
 	type Binding,
@@ -171,12 +172,7 @@ export const perf = { render: new Stat(), switchClient: new Stat(), keyToSwitch:
 
 // ── tmux ────────────────────────────────────────────────────────────────
 
-export const ctl = new Control((line) => {
-	const [kind, tty, , session] = line.split(" ");
-	if (kind !== "%client-session-changed" || !tty) return;
-	dispatch(() => stageUp([tty]));
-	if (session === PLACEHOLDER) panes.parked(tty, PLACEHOLDER);
-});
+export const ctl = new Control();
 
 /** The last request id handed out; see FromWorker. */
 let lastReq = 0;
@@ -320,10 +316,8 @@ function piShown(a: Applied): boolean {
 /** The Stage's panes, and the roster's place beside them. */
 export const panes = new StagePanes(
 	{
-		deck: DECK,
+		deck: `=${DECK}:`,
 		rosterPane,
-		stagePane,
-		stageTty,
 		ctl,
 		focusedPane: () => m.focusedPane,
 		configuredCols: (width) => rosterCols(m.config.rosterWidth, width),
@@ -334,11 +328,14 @@ export const panes = new StagePanes(
 		switched: (ms, keyAt) => {
 			perf.switchClient.add(ms);
 			if (keyAt > 0) perf.keyToSwitch.add(performance.now() - keyAt);
+			if (!m.ready) dispatch(checkReady);
 		},
+		swapped: () => void withFocus(null).catch((error: Error) => toast(`focus: ${error.message}`, "error")),
 		resized: () => commit(),
 		rosterPlaced: () => commit(),
 	},
 	onCard("empty", null, EMPTY),
+	{ pane: stagePane, shows: stageShows || null },
 );
 
 const rosterOffScreen = () => panes.narrow || panes.rosterHidden;
@@ -353,7 +350,7 @@ function syncStatus(): void {
 	if (want === statusShown) return;
 	statusShown = want;
 	statusOps = statusOps.then(() =>
-		tmuxAsync(UI, "set", "-t", DECK, "status", want ? "on" : "off").then(
+		tmuxAsync(SESSIONS, "set", "-t", `=${DECK}:`, "status", want ? "on" : "off").then(
 			() => {},
 			(error: Error) => toast(`status: ${error.message}`, "error"),
 		),
@@ -375,7 +372,7 @@ function syncTitle(): void {
 	if (want === titleShown) return;
 	titleShown = want;
 	titleOps = titleOps.then(() =>
-		tmuxAsync(UI, "set", "-t", DECK, "set-titles-string", want).then(
+		tmuxAsync(SESSIONS, "set", "-t", `=${DECK}:`, "set-titles-string", want).then(
 			() => {},
 			(error: Error) => toast(`title: ${error.message}`, "error"),
 		),
@@ -556,7 +553,7 @@ function afterCommit(effect: () => void): void {
 
 /**
  * Settles what the changes left: the roster's cursor and mode first, then the Stage, the status line, and the screen,
- * then the tmux work they started. Also runs on its own after a tmux command the UI server sent finishes.
+ * then the tmux work they started. Also runs on its own after a tmux command a key sent finishes.
  */
 export function commit(): void {
 	if (dispatching) throw new Error("a Deck commit inside a change");
@@ -576,7 +573,7 @@ function apply(): void {
 	const d = desired();
 	span("roster.card", () => setStageCard(d));
 	const prev = panes.applied;
-	panes.sync(d, stageLabel(d), { editor: nvimEditor(m.config.editor) && editorShown(d), starting: harnessStarting(d) });
+	panes.sync(d, stageLabel(d));
 	syncVisit();
 	const e = d.id === null ? undefined : m.entries.get(d.id);
 	if (d.host && e?.open && viewOf(e) !== "agent" && m.snapshot && !m.snapshot.editors[e.cwd]) {
@@ -612,14 +609,14 @@ export function editorShown(a: Applied): boolean {
 /** The pane the shell is in: its own, or pi's when it replaces pi. */
 export function shellShownIn(): string | null {
 	const a = panes.applied;
-	if (a.shell?.at === "replace") return a.side !== null ? (panes.side?.pane ?? null) : stagePane;
+	if (a.shell?.at === "replace") return a.side !== null ? (panes.side?.pane ?? null) : panes.main.pane;
 	return panes.shellPane?.pane ?? null;
 }
 
 function watching(): string | null {
 	const a = panes.applied;
 	if (!m.terminalFocused || m.focus !== "stage" || !piShown(a)) return null;
-	if (a.view === "split" && m.focusedPane === stagePane) return null;
+	if (a.view === "split" && m.focusedPane === panes.main.pane) return null;
 	return a.id;
 }
 
@@ -745,7 +742,7 @@ function newSession(cwd: string, group: string | null, target: LaunchTarget | nu
 	m.stage.staged = null;
 	m.stage.ended = null;
 	post({ type: "new", req, cwd, group, target, harness });
-	focusOnceShown(() => panes.side?.pane ?? stagePane);
+	focusOnceShown(() => panes.side?.pane ?? panes.main.pane);
 }
 
 /** Launches whose host is now live resolve; one whose host vanished first failed to start. */
@@ -2438,11 +2435,11 @@ function settlePeek(): void {
 	m.peek.settled = pending.spot;
 }
 
-/** Whether the UI server reports the pointer leaving: while something under it is lit, or something leaves with it. */
+/** Whether tmux reports the pointer leaving: while something under it is lit, or something leaves with it. */
 function syncWatch(want: boolean): void {
 	if (want === m.peek.watching) return;
 	m.peek.watching = want;
-	void tmuxAsync(UI, "set", "-t", DECK, ...(want ? ["@swb_watch", "1"] : ["-u", "@swb_watch"])).catch((error: Error) =>
+	void tmuxAsync(SESSIONS, "set", "-t", `=${DECK}:`, ...(want ? ["@swb_watch", "1"] : ["-u", "@swb_watch"])).catch((error: Error) =>
 		toast(`peek: ${error.message}`, "error"),
 	);
 }
@@ -2461,7 +2458,7 @@ function onPeekInfo(id: string, info: PeekInfo): void {
 	if (m.peek.pending?.waiting && m.peek.pending.spot.id === id) settlePeek();
 }
 
-/** The pointer or the keyboard went elsewhere, as the UI server saw it, and took the Peek with it. */
+/** The pointer or the keyboard went elsewhere, as tmux saw it, and took the Peek with it. */
 function pointerOut(): void {
 	m.hover = null;
 	m.pointer = null;
@@ -2556,7 +2553,7 @@ function pickerKeys(choosing: Choosing): Binding<Command>[] {
 	return [
 		bind(["enter"], "⏎", "start", CHOOSE),
 		...(pickerPresets().length > 0 ? [bind(["tab", "shift+tab"], "⇥", "preset", { kind: "menu" })] : []),
-		// The prefix key, which reaches the roster through the UI server.
+		// The prefix key, which reaches the roster through tmux.
 		bind([], `${m.config.prefix} d`, "remove", { kind: "remove" }),
 		bind(["escape"], "esc", "cancel", CANCEL),
 		...ARROWS,
@@ -2607,7 +2604,7 @@ function rosterKeys(row: Row | undefined): Binding<Command>[] {
 }
 
 /**
- * While the Stage has the keyboard, the legend shows the prefix keys that bring the roster back, which the UI server
+ * While the Stage has the keyboard, the legend shows the prefix keys that bring the roster back, which tmux
  * binds; a click runs what they do.
  */
 export function stageKeys(): Binding<Command>[] {
@@ -2668,7 +2665,7 @@ function prefixKey(k: string, row: string | undefined): void {
 /** The terminal on the Deck I used last, which tmux picks to the microsecond: its name, width, and height. */
 async function deckClient(): Promise<[name: string, cols: string, rows: string] | undefined> {
 	const [name, cols, rows] = (
-		await tmuxAsync(UI, "display", "-p", "-t", `=${DECK}:`, "#{client_name}\t#{client_width}\t#{client_height}")
+		await tmuxAsync(SESSIONS, "display", "-p", "-t", `=${DECK}:`, "#{client_name}\t#{client_width}\t#{client_height}")
 	).split("\t");
 	return name && cols && rows ? [name, cols, rows] : undefined;
 }
@@ -2678,7 +2675,7 @@ async function deckClient(): Promise<[name: string, cols: string, rows: string] 
  * none is once the last one leaves, so no Visit lands while I'm away.
  */
 async function countTerminals(): Promise<void> {
-	const focused = (await tmuxAsync(UI, "list-clients", "-t", `=${DECK}`, "-F", "#{client_flags}"))
+	const focused = (await tmuxAsync(SESSIONS, "list-clients", "-t", `=${DECK}`, "-F", "#{client_flags}"))
 		.split("\n")
 		.some((flags) => flags.split(",").includes("focused"));
 	if (focused !== m.terminalFocused)
@@ -2694,7 +2691,7 @@ async function showHelp(): Promise<void> {
 	const [client, cols, rows] = found;
 	const size = helpSize(m.config.prefix);
 	const fit = ["-w", String(Math.min(size.width, Number(cols))), "-h", String(Math.min(size.height, Number(rows)))];
-	await tmuxAsync(UI, "display-popup", "-c", client, "-E", ...fit, ...HELP_POPUP);
+	await tmuxAsync(SESSIONS, "display-popup", "-c", client, "-E", ...fit, ...HELP_POPUP);
 }
 
 /** A Peek's buttons: each one's label, the roster key that does the same, and what it does. */
@@ -2725,7 +2722,7 @@ process.stdout.on("resize", () => void panes.noteDrag());
 /** Takes the terminal I used last off the Deck, which keeps running for the next swb. */
 function quit(): void {
 	void deckClient().then((client) => {
-		if (client) return tmuxAsync(UI, "detach-client", "-t", client[0]);
+		if (client) return tmuxAsync(SESSIONS, "detach-client", "-t", client[0]);
 	});
 }
 
@@ -2738,7 +2735,7 @@ let focusReads = Promise.resolve();
  */
 function withFocus(then: (() => void) | null): Promise<void> {
 	const read = focusReads.then(async () => {
-		const pane = await tmuxAsync(UI, "display", "-p", "-t", DECK, "#{pane_id}");
+		const pane = await tmuxAsync(SESSIONS, "display", "-p", "-t", `=${DECK}:`, "#{pane_id}");
 		dispatch(() => {
 			focusOn(pane);
 			then?.();
@@ -2772,7 +2769,7 @@ function focusOn(pane: string): void {
 }
 
 /**
- * A command the UI server sent. What it asks of the Deck's state goes through dispatch; what it asks of the Stage's
+ * A command tmux sent, from a key or a hook. What it asks of the Deck's state goes through dispatch; what it asks of the Stage's
  * panes goes straight to them, and the server's commit settles the rest once it's done.
  */
 export async function handleCommand(cmd: string, argv: string[]): Promise<void> {
@@ -2818,7 +2815,7 @@ export async function handleCommand(cmd: string, argv: string[]): Promise<void> 
 		case "help":
 			await showHelp();
 			break;
-		// The UI server saw the pointer leave both the roster and its overlays, or a key typed elsewhere; it put away
+		// tmux saw the pointer leave both the roster and its overlays, or a key typed elsewhere; it put away
 		// what leaves with them, and stopped watching, on its way here.
 		case "pointer-out":
 			dispatch(pointerOut);
@@ -2899,24 +2896,27 @@ function showShell(dir: string): void {
 /**
  * Puts the keyboard on a pane once the Stage's pending changes have placed it, unless the keyboard moved meanwhile: a
  * key that went elsewhere after asking for this wins, whether the Deck has heard of the move yet or only tmux has. Off a
- * pane those changes closed, tmux moved it, not a key.
+ * pane those changes closed, sent home, or moved to another slot, tmux moved it, not a key.
  */
 function focusOnceShown(pane: () => string | null): void {
 	const asked = m.focusMoves;
 	const from = m.focusedPane;
+	const slot = from === panes.main.pane ? "main" : from === panes.side?.pane ? "side" : from === panes.shellPane?.pane ? "shell" : "";
 	afterCommit(() =>
 		panes.queue(async () => {
 			const target = pane();
 			if (!target) return;
 			try {
-				// tmux answers a pane id that's gone with an empty line, not an error.
+				// tmux answers a pane id that's gone with an empty line, not an error. A pane the Stage sent home, or moved to
+				// another of its slots, is gone from where it was too.
+				const there = `#{?#{&&:#{==:#{session_name},${DECK}},#{==:#{@swb_slot},${slot}}},#{pane_id},}`;
 				const [now, still] = (
-					await tmuxAsync(UI, "display", "-p", "-t", DECK, "#{pane_id}", ";", "display", "-p", "-t", from, "#{pane_id}")
+					await tmuxAsync(SESSIONS, "display", "-p", "-t", `=${DECK}:`, "#{pane_id}", ";", "display", "-p", "-t", from, there)
 				).split("\n");
 				if ((asked !== m.focusMoves || now !== from) && still === from) return;
 				// A key can still move it between that read and this move, so tmux checks again as it moves.
 				const select = `select-pane ${panes.narrow ? "-Z " : ""}-t ${target}`;
-				await tmuxAsync(UI, "if", "-F", "-t", DECK, `#{==:#{pane_id},${now}}`, select);
+				await tmuxAsync(SESSIONS, "if", "-F", "-t", `=${DECK}:`, `#{==:#{pane_id},${now}}`, select);
 			} catch (error) {
 				toast(`focus: ${(error as Error).message}`, "error");
 			}
@@ -2940,7 +2940,7 @@ function changeView(swap: boolean): void {
 	let next: View;
 	if (swap) next = showing === "editor" ? "agent" : "editor";
 	else if (saved !== "split") next = "split";
-	else next = showing === "split" && m.focus === "stage" && m.focusedPane === stagePane ? "editor" : "agent";
+	else next = showing === "split" && m.focus === "stage" && m.focusedPane === panes.main.pane ? "editor" : "agent";
 	showView(e, next);
 }
 
@@ -2964,7 +2964,7 @@ function setView(e: Entry, next: View): void {
 	const req = nextReq();
 	m.localViews.set(e.id, { view: next, req });
 	post({ type: "view", req, id: e.id, view: next });
-	focusOnceShown(() => (inShell && shellShownIn()) || stagePane);
+	focusOnceShown(() => (inShell && shellShownIn()) || panes.main.pane);
 }
 
 // ── settings ────────────────────────────────────────────────────────────
@@ -3023,7 +3023,7 @@ function openConfig(line: number | null): void {
 		// biome-ignore lint/plugin: a getent, on opening config.toml.
 		const shell = loginShell();
 		await tmuxAsync(
-			UI,
+			SESSIONS,
 			"display-popup",
 			"-c",
 			client[0],
@@ -3107,20 +3107,13 @@ function takeColors({ foreground, background, palette }: TerminalColors, scheme:
 	}
 }
 
-function stageUp(ttys: string[]): void {
-	panes.clientsUp(ttys);
-	checkReady();
-}
-
-/** Ready once the first snapshot is in and the Stage's nested client is attached to the sessions server. */
+/** Ready once the first snapshot is in and the Stage's first slot shows a session's pane. */
 function checkReady(): void {
-	if (m.ready || m.snapshot === null || !panes.main.up) return;
+	if (m.ready || m.snapshot === null || panes.main.shows === null) return;
 	m.ready = true;
 	mark("roster.ready");
 	if (m.continueTo) focusEntry(m.continueTo);
 }
-
-let listingClients = false;
 
 /** What the Deck's state machine asks of the screen it drives, which the roster's view hands it at boot. */
 type Screen = {
@@ -3128,10 +3121,10 @@ type Screen = {
 	closeOverlays(): Promise<void>;
 	/** The pointer moved over the roster, off any overlay. */
 	pointerAway(): void;
-	/** The UI server stopped watching the pointer leave, as it does once it reports it. */
+	/** tmux stopped watching the pointer leave, as it does once it reports it. */
 	disarmed(): void;
 	message(now: number, withConfigError: boolean): string;
-	/** The terminal reported its scheme to the UI server, which asked it for its colors again. */
+	/** The terminal reported its scheme to tmux, which asked it for its colors again. */
 	recheckColors(scheme: "light" | "dark"): void;
 };
 
@@ -3148,25 +3141,7 @@ export function boot(on: Screen): void {
 	}
 	void panes.layout();
 	void countTerminals().catch((error: Error) => toast(`terminals: ${error.message}`, "error"));
-	// Attached before it lists them, the control client hears every client that attaches after the list.
-	void ctl.run("list-clients -F '#{client_tty}'").then(
-		(out) => dispatch(() => stageUp(out.split("\n"))),
-		(error: Error) => toast(`stage: ${error.message}`, "error"),
-	);
 	setInterval(() => {
-		// The control client misses attaches while it respawns after the sessions server restarts.
-		if (!listingClients && (!panes.main.up || (panes.side && !panes.side.up))) {
-			listingClients = true;
-			void ctl
-				.run("list-clients -F '#{client_tty}'")
-				.then(
-					(out) => dispatch(() => stageUp(out.split("\n"))),
-					() => {},
-				)
-				.finally(() => {
-					listingClients = false;
-				});
-		}
 		const now = Date.now();
 		keepLayout(now);
 		syncTitle();
@@ -3192,7 +3167,7 @@ export function onMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
 }
 
 /**
- * A frame is out: the Peek settles where the frame wanted it, and the UI server watches for the pointer leaving while
+ * A frame is out: the Peek settles where the frame wanted it, and tmux watches for the pointer leaving while
  * something leaves with it. Returns whether the Peek moved, which the next frame shows. It doesn't commit, since that
  * draws another frame.
  */
@@ -3205,7 +3180,7 @@ export function onFrame(spot: PeekSpot | null, leaves: boolean): boolean {
 	});
 }
 
-/** The UI server saw the pointer leave the roster and its overlays, or a key typed elsewhere. */
+/** tmux saw the pointer leave the roster and its overlays, or a key typed elsewhere. */
 export function onPointerOut(): void {
 	dispatch(pointerOut);
 }

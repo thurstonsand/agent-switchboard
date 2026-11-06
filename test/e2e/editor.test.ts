@@ -45,7 +45,7 @@ test("M-a e swaps the Stage to nvim in the session's directory, and back", async
 	expect(more).toEqual([]);
 	expect(editor?.dir).toBe(entry(s, id).cwd);
 	const where = () =>
-		s.tmux(s.servers.sessions, "display", "-p", "-t", `=${editor?.name}:`, "#{pane_current_command}\t#{pane_current_path}");
+		s.tmux(s.servers.sessions, "display", "-p", "-t", s.pane(editor?.name as string), "#{pane_current_command}\t#{pane_current_path}");
 	await until(() => where() === `nvim\t${entry(s, id).cwd}`, budgets.settle, `nvim in the session's cwd, not ${where()}`);
 	await until(() => s.screen().includes("NVIM v"), budgets.settle, "nvim's intro on the Stage");
 	await until(() => savedView(s, id) === "editor", budgets.settle, "marks.view = editor");
@@ -155,7 +155,7 @@ end })
 	// netrw's line highlight shows while nvim has the keyboard, goes while it hasn't, and comes back to netrw alone: the
 	// empty buffer never had one. Unfocused windows' statuslines share its grey, so look only at the lines themselves.
 	const editor = (editors(s)[0] as { name: string }).name;
-	const rows = () => s.tmux(s.servers.sessions, "capture-pane", "-p", "-e", "-t", `=${editor}:`).split("\n");
+	const rows = () => s.tmux(s.servers.sessions, "capture-pane", "-p", "-e", "-t", s.pane(editor)).split("\n");
 	const netrwRow = () => {
 		const right = rows()
 			.find((row) => row.includes("../"))

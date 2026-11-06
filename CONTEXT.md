@@ -59,7 +59,7 @@ The process in swb's tmux server that fires Schedules and starts dormant session
 What a live session's agent is doing right now: **working**, **blocked** on me (e.g. permission prompt), or **idle**, its turn finished and waiting for my next prompt.
 
 **Visit**:
-The moment I last looked at a session, by focusing its agent for a second, on the **Stage** or in any other tmux client attached to it; a timestamp watermark.
+The moment I last looked at a session, by focusing its agent on the **Stage** for a second; a timestamp watermark.
 
 **Unseen**:
 A session whose agent finished a turn after my last **Visit**, or one I marked Unseen. A mark made on the **Stage** holds until the Stage leaves the session and a later Visit comes back to it.

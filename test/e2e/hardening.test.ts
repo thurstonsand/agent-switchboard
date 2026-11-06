@@ -102,7 +102,7 @@ test("a pi that dies before it's ready says failed to start, and w retries once 
 
 test("a newer swb takes over: idle pis stop, a working one keeps its turn, and empty servers restart; an older swb leaves a newer server alone and its Deck says so", async () => {
 	s = scenario("phase5", "upgrade");
-	const { sessions, ui } = s.servers;
+	const { sessions } = s.servers;
 	const [a, b] = (await seed(s, { turns: ["a"] }, { turns: ["b"] })) as [string, string];
 	s.swb("drive", "start");
 	s.swb("drive", "stop");
@@ -125,8 +125,8 @@ test("a newer swb takes over: idle pis stop, a working one keeps its turn, and e
 	const names = (server: string) => s.tmux(server, "list-sessions", "-F", "#{session_name}").split("\n");
 	const pid = (server: string) => s.tmux(server, "display", "-p", "#{pid}");
 
-	for (const server of [sessions, ui]) s.tmux(server, "set", "-gu", "@swb_version");
-	const uiBefore = pid(ui);
+	s.tmux(sessions, "set", "-gu", "@swb_version");
+	const before = pid(sessions);
 	s.swb("drive", "start");
 	await waitState(s, "the Deck up", (x) => sessionRows(x).length === 2);
 	expect(names(sessions)).not.toContain(hostA);
@@ -135,7 +135,8 @@ test("a newer swb takes over: idle pis stop, a working one keeps its turn, and e
 	await until(() => existsSync(draft) && readFileSync(draft, "utf8") === "half a thought", budgets.settle, "a's draft saved");
 	expect(entry(s, b).activity).toBe("working");
 	expect(s.tmux(sessions, "show", "-gv", "@swb_version")).toBe(VERSION);
-	expect(pid(ui)).not.toBe(uiBefore);
+	// A working harness keeps the server up, reloaded in place.
+	expect(pid(sessions)).toBe(before);
 	release(s, "u1");
 	await until(() => entry(s, b).activity === "idle", budgets.settle, "b's turn done");
 	s.save("upgraded.txt", s.screen());
@@ -154,15 +155,19 @@ test("a newer swb takes over: idle pis stop, a working one keeps its turn, and e
 	expect(existsSync(draft)).toBe(false);
 
 	s.swb("drive", "stop");
-	await until(() => s.tmux(ui, "list-clients") === "", budgets.settle, "no terminal on the Deck");
-	// What's left is swb's own: its clock, and the Deck's placeholder.
-	for (const name of names(sessions)) if (name !== "swb-ctl" && name !== "placeholder") s.tmux(sessions, "kill-session", "-t", `=${name}`);
-	for (const server of [sessions, ui]) s.tmux(server, "set", "-gu", "@swb_version");
-	const before = [pid(sessions), pid(ui)];
+	await until(() => s.tmux(sessions, "list-clients", "-t", "=deck") === "", budgets.settle, "no terminal on the Deck");
+	// What's left is swb's own: its clock, and the Deck with its placeholder.
+	for (const id of [a, b]) s.swb("archive", id);
+	await until(
+		() => names(sessions).every((name) => ["swb-ctl", "placeholder", "deck"].includes(name)),
+		budgets.settle,
+		"only swb's own sessions",
+	);
+	s.tmux(sessions, "set", "-gu", "@swb_version");
+	const idle = pid(sessions);
 	s.swb("drive", "start");
-	await waitState(s, "the Deck up again", (x) => sessionRows(x).length === 2);
-	expect([pid(sessions), pid(ui)]).not.toContain(before[0]);
-	expect(pid(ui)).not.toBe(before[1]);
+	await waitState(s, "the Deck up again", (x) => x.ready);
+	expect(pid(sessions)).not.toBe(idle);
 });
 
 test("cleanup leaves nothing running: a Deck open on a live pi can't restart the sessions server, and a late gc can't recreate the db", async () => {

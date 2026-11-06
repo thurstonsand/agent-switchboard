@@ -63,7 +63,7 @@ Some scenarios install pi-sessions and pi-wt from `node_modules`, at the version
 - Deck layout: the `deck_layout` table, one row: the cursor, folds, and roster width the Deck starts from when its server does
 - Drafts: `${XDG_STATE_HOME:-~/.local/state}/agent-switchboard/drafts/<session_id>`, an unsent prompt saved when an upgrade stops its pi
 - Deck socket: `${XDG_STATE_HOME:-~/.local/state}/agent-switchboard/deck.sock`
-- tmux servers: `tmux -L swb` (sessions) and `tmux -L swb-ui` (the Deck), each suffixed `-<SWB_INSTANCE>` when that is set. Tests always set it. The sessions server's `swb-ctl` pane runs the clock, `swb __clock`, which any swb respawns if it's dead or another build, as it does the Deck's roster
+- tmux server: `tmux -L swb`, suffixed `-<SWB_INSTANCE>` when that is set. Tests always set it. Each session has a tmux session of its own, and the Deck is the `deck` session: the Stage swaps a session's pane into one of its slots, tagged `@swb_slot`, leaving a stand-in in its place, so a pane is always found by its `@swb_home`, never by the session it sits in. The `swb-ctl` pane runs the clock, `swb __clock`, which any swb respawns if it's dead or another build, as it does the Deck's roster
 
 ## Code style
 

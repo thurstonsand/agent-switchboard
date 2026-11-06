@@ -1,7 +1,8 @@
 import type { View } from "@swb/shared";
-import { quote, tmuxAsync, UI } from "../tmux.ts";
+import { quote, SESSIONS, tmuxAsync } from "../tmux.ts";
+import { DECK, deckWindow } from "./conf.ts";
 import type { Control } from "./control.ts";
-import { deckEnv, NARROW_BELOW, stageScript } from "./deck.ts";
+import { NARROW_BELOW, STAND_IN } from "./deck.ts";
 import type { Card, ShellAt } from "./protocol.ts";
 
 export type Applied = {
@@ -13,25 +14,27 @@ export type Applied = {
 	card: Card | null;
 	/** What is showing, which can differ from the session's saved view. */
 	view: View;
-	/** The Stage's first pane. */
+	/** The session whose pane the Stage's first slot shows. */
 	target: string;
-	/** The Stage's second pane, which only split has. */
+	/** The session whose pane its second slot shows, which only split has. */
 	side: string | null;
 	/** The directory's shell, and where it sits against pi's pane; replacing pi, the shell is that pane's target. */
 	shell: { target: string; at: ShellAt } | null;
 };
 
-/** A nested client of the sessions server in one of the Stage's panes. */
-type StageClient = { pane: string; tty: string; up: boolean };
+type SlotName = "main" | "side" | "shell";
 
-/** What the UI server's keys read off the Stage's pane: an nvim Editor in it, and a harness starting there. */
-export type StageTags = { editor: boolean; starting: boolean };
+/**
+ * One of the Stage's slots: the pane in it, as last placed, and the session that pane belongs to, or null while the
+ * slot's own stand-in holds it. A session's pane is in one place at a time, its own window or a slot; while it's in a
+ * slot, that slot's stand-in holds its window, so the session lives on. tmux tags each slot's pane with @swb_slot,
+ * which is what any swb reads back, as one that kills a session on view does.
+ */
+type Slot = { name: SlotName; pane: string; shows: string | null };
 
 export type StageHost = {
 	deck: string;
 	rosterPane: string;
-	stagePane: string;
-	stageTty: string;
 	ctl: Control;
 	/** The pane the keyboard is on, as last read. */
 	focusedPane: () => string;
@@ -41,8 +44,10 @@ export type StageHost = {
 	scheme: () => string | null;
 	closeOverlays: () => Promise<void>;
 	toast: (text: string, level: "info" | "error") => void;
-	/** A switch-client took ms; keyAt is when the key that asked for it came in, or 0. */
+	/** A swap into the Stage's first slot took ms; keyAt is when the key that asked for it came in, or 0. */
 	switched: (ms: number, keyAt: number) => void;
+	/** A slot's pane changed, which tmux reports to no focus hook: the keyboard's pane may be another now. */
+	swapped: () => void;
 	/** The window's size changed, and with it what the Stage should show. */
 	resized: () => void;
 	/** The roster may have come on screen or gone off it, or become the only pane shown. */
@@ -58,10 +63,10 @@ export class StagePanes {
 	applied: Applied;
 	/** When the key that last moved the Stage came in, for the switch it causes; 0 once spent. */
 	keyAt = 0;
-	readonly main: StageClient;
-	side: (StageClient & { target: string }) | null = null;
-	/** The shell's pane, against whichever pane holds pi. It closes with its shell, so it needs no client tracking. */
-	shellPane: { pane: string; target: string; at: ShellAt; parent: string } | null = null;
+	readonly main: Slot;
+	side: Slot | null = null;
+	/** The shell's slot, beside or below the slot that holds pi: main, or side in split. */
+	shellPane: (Slot & { at: ShellAt; parent: "main" | "side" }) | null = null;
 	/** Below NARROW_BELOW columns the roster stands alone. */
 	narrow = false;
 	/** `narrow` as the screen shows it, once a layout has put the zoom in place; what `deck state` reports. */
@@ -88,14 +93,16 @@ export class StagePanes {
 	private shellKeys = false;
 	/** The labels the Stage's panes wear on their top edges, as last set. */
 	private labels = "";
-	private tags: StageTags = { editor: false, starting: false };
+	/** What each slot was last asked to show, until a placing fails; undefined asks again. */
+	private asked: { main?: string; side?: string | null } = {};
 
 	constructor(
 		private readonly host: StageHost,
 		applied: Applied,
+		stage: { pane: string; shows: string | null },
 	) {
 		this.applied = applied;
-		this.main = { pane: host.stagePane, tty: host.stageTty, up: false };
+		this.main = { name: "main", ...stage };
 	}
 
 	rosterWidth(): number {
@@ -105,23 +112,22 @@ export class StagePanes {
 	}
 
 	/** Puts the Stage's panes in line with d; label names the harness its agent pane shows. */
-	sync(d: Applied, label: string, tags: StageTags): void {
+	sync(d: Applied, label: string): void {
 		const prev = this.applied;
 		this.applied = d;
 		// Split's pane is cut from the whole Stage, and leaving split gives its columns back to the Editor's pane, so a shell's pane
 		// beside or below either goes first; syncShell puts it back where it now belongs.
 		if ((d.side === null) !== (prev.side === null)) this.queue(() => this.dropShellPane());
-		if (d.side !== prev.side || d.side !== (this.side?.target ?? null)) this.syncSide();
+		if (d.side !== this.asked.side) this.syncSide();
 		const shellMoved = d.shell?.target !== prev.shell?.target || d.shell?.at !== prev.shell?.at;
 		if (shellMoved || d.side !== prev.side) this.syncShell(prev.shell?.at === "replace" && d.shell?.target === prev.shell.target);
-		if (tags.editor !== this.tags.editor) this.tag("@swb_editor", tags.editor);
-		if (tags.starting !== this.tags.starting) this.tag("@swb_starting", tags.starting);
-		this.tags = tags;
+		if (d.target !== this.asked.main) {
+			this.asked.main = d.target;
+			const keyAt = this.keyAt;
+			this.keyAt = 0;
+			this.queue(() => this.showMain(keyAt));
+		}
 		this.syncLabels(label);
-		if (d.target === prev.target) return;
-		const keyAt = this.keyAt;
-		this.keyAt = 0;
-		this.switchTo(this.main, d.target, false, keyAt);
 	}
 
 	/** Runs op once every change queued before it is in place. */
@@ -132,7 +138,8 @@ export class StagePanes {
 	/** In split, the keyboard goes to pi. */
 	async focusStage(): Promise<void> {
 		await this.ops;
-		await tmuxAsync(UI, "select-pane", ...(this.narrow ? ["-Z"] : []), "-t", this.side?.pane ?? this.host.stagePane);
+		await this.read();
+		await tmuxAsync(SESSIONS, "select-pane", ...(this.narrow ? ["-Z"] : []), "-t", this.side?.pane ?? this.main.pane);
 	}
 
 	/** Brings the roster on screen, with the keyboard if focus. */
@@ -168,11 +175,11 @@ export class StagePanes {
 		this.queue(() =>
 			this.sizingRoster(async () => {
 				if (this.narrow || this.rosterHidden) return;
-				const zoomed = (await tmuxAsync(UI, "display", "-p", "-t", rosterPane, "#{window_zoomed_flag}")) === "1";
+				const zoomed = (await tmuxAsync(SESSIONS, "display", "-p", "-t", rosterPane, "#{window_zoomed_flag}")) === "1";
 				if (on && !zoomed) await this.host.closeOverlays();
-				if (on !== zoomed) await tmuxAsync(UI, "resize-pane", "-Z", "-t", rosterPane);
+				if (on !== zoomed) await tmuxAsync(SESSIONS, "resize-pane", "-Z", "-t", rosterPane);
 				// Back beside the Stage, at whatever width Settings left it.
-				if (!on) await tmuxAsync(UI, "resize-pane", "-t", rosterPane, "-x", String(this.rosterWidth()));
+				if (!on) await tmuxAsync(SESSIONS, "resize-pane", "-t", rosterPane, "-x", String(this.rosterWidth()));
 				// Bun's stdout keeps the size from before a zoom until a SIGWINCH reads it again; tmux's own one can land first.
 				process.kill(process.pid, "SIGWINCH");
 			}).catch((error: Error) => this.host.toast(`settings: ${error.message}`, "error")),
@@ -183,30 +190,26 @@ export class StagePanes {
 	async noteDrag(): Promise<void> {
 		const before = this.sizings;
 		if (this.sizing > 0 || this.narrow || this.rosterHidden) return;
-		const sizes = await tmuxAsync(UI, "display", "-p", "-t", this.host.rosterPane, "#{window_width}\t#{pane_width}\t#{window_zoomed_flag}");
+		const sizes = await tmuxAsync(
+			SESSIONS,
+			"display",
+			"-p",
+			"-t",
+			this.host.rosterPane,
+			"#{window_width}\t#{pane_width}\t#{window_zoomed_flag}",
+		);
 		const [window, pane, zoomed] = sizes.split("\t").map(Number) as [number, number, number];
-		if (this.sizing > 0 || this.sizings !== before || window !== this.width || zoomed === 1 || pane === this.rosterWidth()) return;
+		// A roster as wide as its window has lost the Stage beside it, which no drag does.
+		if (
+			this.sizing > 0 ||
+			this.sizings !== before ||
+			window !== this.width ||
+			zoomed === 1 ||
+			pane === window ||
+			pane === this.rosterWidth()
+		)
+			return;
 		this.dragged = pane;
-	}
-
-	/** A Stage client on the placeholder unasked, as one that dropped and parked there is, goes back to what it shows. */
-	parked(tty: string, placeholder: string): void {
-		const { main, side } = this;
-		if (tty === main.tty && main.up && this.applied.target !== placeholder) this.switchTo(main, this.applied.target, true, 0);
-		if (side && tty === side.tty && side.up && side.target !== placeholder) this.switchTo(side, side.target, true, 0);
-	}
-
-	/** A Stage's nested client is up once it attaches to the sessions server, which the control client hears. */
-	clientsUp(ttys: string[]): void {
-		const { main, side } = this;
-		if (!main.up && ttys.includes(main.tty)) {
-			main.up = true;
-			this.switchTo(main, this.applied.target, true, 0);
-		}
-		if (side && !side.up && ttys.includes(side.tty)) {
-			side.up = true;
-			this.switchTo(side, side.target, true, 0);
-		}
 	}
 
 	private async sizingRoster(work: () => Promise<void>): Promise<void> {
@@ -221,14 +224,16 @@ export class StagePanes {
 	}
 
 	private layoutOnce(): Promise<void> {
-		const { deck, rosterPane, stagePane } = this.host;
+		const { deck, rosterPane } = this.host;
+		// The Deck's current window is the one on screen, whose size tmux keeps; a Stage pane can go home mid-pass, and a
+		// hidden roster's window keeps its old size.
 		return this.sizingRoster(async () => {
 			const size = await tmuxAsync(
-				UI,
+				SESSIONS,
 				"display",
 				"-p",
 				"-t",
-				stagePane,
+				`=${DECK}:`,
 				"#{window_width}\t#{window_height}\t#{client_cell_width}\t#{client_cell_height}",
 			);
 			const [width, height, cellWidth, cellHeight] = size.split("\t").map(Number) as [number, number, number, number];
@@ -238,27 +243,26 @@ export class StagePanes {
 			const wasNarrow = this.narrow;
 			// The prefix keys read @swb_narrow, so it changes before `deck state` can say the Deck did.
 			if (width < NARROW_BELOW !== wasNarrow) {
-				if (wasNarrow) await tmuxAsync(UI, "set", "-u", "-t", deck, "@swb_narrow");
-				else await tmuxAsync(UI, "set", "-t", deck, "@swb_narrow", "1");
+				if (wasNarrow) await tmuxAsync(SESSIONS, "set", "-u", "-t", deck, "@swb_narrow");
+				else await tmuxAsync(SESSIONS, "set", "-t", deck, "@swb_narrow", "1");
 			}
 			this.narrow = width < NARROW_BELOW;
 			this.host.resized();
 			await this.ops;
-			const [zoomFlag, active] = (await tmuxAsync(UI, "display", "-p", "-t", stagePane, "#{window_zoomed_flag}\t#{pane_active}")).split(
-				"\t",
-			);
 			if (this.narrow) await this.syncRoster(false);
+			const zoomFlag = await tmuxAsync(SESSIONS, "display", "-p", "-t", `=${DECK}:`, "#{window_zoomed_flag}");
 			if (this.narrow !== wasNarrow) {
 				// What floats over the Stage goes before a zoom: the roster draws a narrow Deck's overlays itself.
 				if (this.narrow) await this.host.closeOverlays();
-				if (this.narrow && zoomFlag !== "1") await tmuxAsync(UI, "resize-pane", "-Z", "-t", active === "1" ? stagePane : rosterPane);
-				if (!this.narrow && zoomFlag === "1") await tmuxAsync(UI, "resize-pane", "-Z", "-t", rosterPane);
+				// The pane with the keyboard takes the window.
+				if (this.narrow && zoomFlag !== "1") await tmuxAsync(SESSIONS, "resize-pane", "-Z", "-t", `=${DECK}:`);
+				if (!this.narrow && zoomFlag === "1") await tmuxAsync(SESSIONS, "resize-pane", "-Z", "-t", rosterPane);
 			}
 			// tmux scales every pane with the window; the roster keeps its configured or dragged width instead.
-			const zoomed = (await tmuxAsync(UI, "display", "-p", "-t", stagePane, "#{window_zoomed_flag}")) === "1";
+			const zoomed = (await tmuxAsync(SESSIONS, "display", "-p", "-t", `=${DECK}:`, "#{window_zoomed_flag}")) === "1";
 			if (!this.narrow && !this.rosterHidden && !zoomed) {
-				if (this.host.settingsOpen()) await tmuxAsync(UI, "resize-pane", "-Z", "-t", rosterPane);
-				else await tmuxAsync(UI, "resize-pane", "-t", rosterPane, "-x", String(this.rosterWidth()));
+				if (this.host.settingsOpen()) await tmuxAsync(SESSIONS, "resize-pane", "-Z", "-t", rosterPane);
+				else await tmuxAsync(SESSIONS, "resize-pane", "-t", rosterPane, "-x", String(this.rosterWidth()));
 			}
 			this.shownNarrow = this.narrow;
 			this.host.rosterPlaced();
@@ -271,14 +275,16 @@ export class StagePanes {
 	 * and the bindings count on the roster being pane 0. A narrow Deck has no hidden roster.
 	 */
 	private syncRoster(toRoster: boolean): Promise<void> {
-		const { deck, rosterPane, stagePane } = this.host;
+		const { deck, rosterPane } = this.host;
 		this.queue(() =>
 			this.sizingRoster(async () => {
+				await this.read();
+				const stagePane = this.main.pane;
 				if (this.narrow) this.hideWanted = false;
 				const want = this.hideWanted;
 				let failed = false;
 				if (want === this.rosterHidden) {
-					if (toRoster && !want) await tmuxAsync(UI, "select-pane", ...(this.narrow ? ["-Z"] : []), "-t", rosterPane);
+					if (toRoster && !want) await tmuxAsync(SESSIONS, "select-pane", ...(this.narrow ? ["-Z"] : []), "-t", rosterPane);
 					return;
 				}
 				const { side, shellPane } = this;
@@ -287,9 +293,11 @@ export class StagePanes {
 						// Focus moves first: breaking the active roster away hands focus to the window's last pane, and that pane's
 						// focus hook can land after pi's.
 						const focusPi = this.host.focusedPane() === rosterPane ? ["select-pane", "-t", side?.pane ?? stagePane, ";"] : [];
-						await tmuxAsync(UI, ...focusPi, "set", "-t", deck, "@swb_hidden", "1", ";", "break-pane", "-d", "-s", rosterPane);
+						// The roster's new window is the one the Stage's panes join back into, so it wears the Deck's options from the start.
+						const out = ["set", "-t", deck, "@swb_hidden", "1", ";", "break-pane", "-d", "-s", rosterPane, ";", ...deckWindow(rosterPane)];
+						await tmuxAsync(SESSIONS, ...focusPi, ...out);
 					} else {
-						const active = await tmuxAsync(UI, "list-panes", "-t", stagePane, "-f", "#{pane_active}", "-F", "#{pane_id}");
+						const active = await tmuxAsync(SESSIONS, "list-panes", "-t", stagePane, "-f", "#{pane_active}", "-F", "#{pane_id}");
 						const join = [
 							"join-pane",
 							"-h",
@@ -302,13 +310,14 @@ export class StagePanes {
 							rosterPane,
 						];
 						if (side) {
-							const width = await tmuxAsync(UI, "display", "-p", "-t", side.pane, "#{pane_width}");
+							const width = await tmuxAsync(SESSIONS, "display", "-p", "-t", side.pane, "#{pane_width}");
 							join.push(";", "join-pane", "-h", "-d", "-l", width, "-s", side.pane, "-t", stagePane);
 						}
 						if (shellPane) {
 							const beside = shellPane.at === "beside";
-							const size = await tmuxAsync(UI, "display", "-p", "-t", shellPane.pane, beside ? "#{pane_width}" : "#{pane_height}");
-							join.push(";", "join-pane", beside ? "-h" : "-v", "-d", "-l", size, "-s", shellPane.pane, "-t", shellPane.parent);
+							const size = await tmuxAsync(SESSIONS, "display", "-p", "-t", shellPane.pane, beside ? "#{pane_width}" : "#{pane_height}");
+							const parent = shellPane.parent === "side" && side ? side.pane : stagePane;
+							join.push(";", "join-pane", beside ? "-h" : "-v", "-d", "-l", size, "-s", shellPane.pane, "-t", parent);
 						}
 						const scheme = this.host.scheme();
 						if (scheme) join.push(";", "set", "-w", "-t", rosterPane, "@swb_scheme", scheme);
@@ -316,7 +325,7 @@ export class StagePanes {
 						// l and Tab to return to.
 						const back = toRoster ? [";", "select-pane", "-t", rosterPane] : [];
 						await tmuxAsync(
-							UI,
+							SESSIONS,
 							"set",
 							"-u",
 							"-t",
@@ -341,12 +350,12 @@ export class StagePanes {
 				} finally {
 					// A tmux sequence can fail halfway, so the windows say whether the roster is hidden, and the option follows them.
 					const [rosterWindow, stageWindow] = await Promise.all(
-						[rosterPane, stagePane].map((pane) => tmuxAsync(UI, "display", "-p", "-t", pane, "#{window_id}")),
+						[rosterPane, stagePane].map((pane) => tmuxAsync(SESSIONS, "display", "-p", "-t", pane, "#{window_id}")),
 					);
 					this.rosterHidden = rosterWindow !== stageWindow;
 					// What failed isn't still wanted; a toggle queued behind this one keeps its own.
 					if (failed) this.hideWanted = this.rosterHidden;
-					await tmuxAsync(UI, "set", ...(this.rosterHidden ? ["-t", deck, "@swb_hidden", "1"] : ["-u", "-t", deck, "@swb_hidden"]));
+					await tmuxAsync(SESSIONS, "set", ...(this.rosterHidden ? ["-t", deck, "@swb_hidden", "1"] : ["-u", "-t", deck, "@swb_hidden"]));
 					this.host.rosterPlaced();
 				}
 			}),
@@ -354,81 +363,218 @@ export class StagePanes {
 		return this.ops;
 	}
 
-	private switchTo(client: StageClient, target: string, force: boolean, keyAt: number): void {
-		this.queue(async () => {
-			if (!client.up && !force) return;
-			const t0 = performance.now();
-			try {
-				await this.host.ctl.run(`switch-client -c ${quote(client.tty)} -t ${quote(`=${target}`)}`);
-				this.host.switched(performance.now() - t0, keyAt);
-			} catch {
-				// A Stage client that drops parks on the placeholder, which parked() hears and puts right.
-			}
+	/** The panes in the Stage's slots, as tmux has them now: another swb can send a session home from one. */
+	private async read(): Promise<void> {
+		const listed = await this.host.ctl.run(`list-panes -s -t ${quote(`=${DECK}`)} -F '#{@swb_slot}\t#{pane_id}\t#{@swb_home}'`);
+		let main = false;
+		for (const [name, pane, home] of listed.split("\n").map((line) => line.split("\t"))) {
+			const slot = name === "main" ? this.main : name === "side" ? this.side : name === "shell" ? this.shellPane : null;
+			if (!slot || !pane) continue;
+			main ||= slot === this.main;
+			slot.pane = pane;
+			slot.shows = home || null;
+		}
+		if (!main) await this.remakeMain();
+	}
+
+	/**
+	 * The Stage's first slot again, beside the roster, holding a stand-in, after something outside swb closed its pane
+	 * outright; what the Stage shows goes back into it with the next sync.
+	 */
+	private async remakeMain(): Promise<void> {
+		const cols = String(Math.max(1, this.width - this.rosterWidth() - 1));
+		const pane = await tmuxAsync(
+			SESSIONS,
+			"split-window",
+			"-h",
+			"-d",
+			"-l",
+			cols,
+			"-t",
+			this.host.rosterPane,
+			"-P",
+			"-F",
+			"#{pane_id}",
+			STAND_IN,
+		);
+		await tmuxAsync(SESSIONS, "set", "-p", "-t", pane, "@swb_slot", "main");
+		this.main.pane = pane;
+		this.main.shows = null;
+		this.asked.main = undefined;
+		this.labels = "";
+		this.host.rosterPlaced();
+	}
+
+	/** Every pane on the server, by what the Stage needs to know of it to place it. */
+	private async panes(): Promise<{ pane: string; session: string; home: string; slot: string; width: string; height: string }[]> {
+		const listed = await this.host.ctl.run(
+			"list-panes -a -F '#{pane_id}\t#{session_name}\t#{@swb_home}\t#{@swb_slot}\t#{pane_width}\t#{pane_height}'",
+		);
+		return listed.split("\n").map((line) => {
+			const [pane = "", session = "", home = "", slot = "", width = "", height = ""] = line.split("\t");
+			return { pane, session, home, slot, width, height };
 		});
 	}
 
-	/** Creates, retargets, or kills the Stage's second pane to match what is applied. Leaving it keeps the keyboard on the Stage. */
+	/**
+	 * Swaps the pane of session `target` into a slot, and what held the slot back where it belongs: to its own window, kept
+	 * at the slot's size so its program doesn't redraw for nothing, or to the slot the target's pane came from. Returns false
+	 * while the target has no pane to show.
+	 */
+	private async place(slot: Slot, target: string, retried = false): Promise<boolean> {
+		const panes = await this.panes();
+		const held = panes.find((p) => p.session === DECK && p.slot === slot.name);
+		const wanted = panes.find((p) => p.home === target);
+		if (!held && slot === this.main) {
+			await this.remakeMain();
+			return this.place(slot, target);
+		}
+		if (!held) throw new Error(`the Stage has no ${slot.name} slot`);
+		if (!wanted) return false;
+		if (wanted.pane !== held.pane) {
+			const commands = [`swap-pane -d -Z -s ${wanted.pane} -t ${held.pane}`, `set -p -t ${wanted.pane} @swb_slot ${slot.name}`];
+			if (wanted.session === DECK) commands.push(`set -p -t ${held.pane} @swb_slot ${wanted.slot}`);
+			else if (held.home) {
+				const home = quote(`=${held.home}:`);
+				// First, so a home that closed meanwhile fails the list before anything moves.
+				commands.unshift(`resize-window -t ${home} -x ${held.width} -y ${held.height}`);
+				commands.push(`swap-pane -d -s ${held.pane} -t ${home}`);
+			}
+			try {
+				await this.host.ctl.run(commands.join(" ; "));
+			} catch (error) {
+				// Another swb sent a pane home between the listing and the swap: the listing is stale, not the Stage.
+				if (retried) throw error;
+				return this.place(slot, target, true);
+			}
+			if (wanted.session === DECK) {
+				const other = [this.main, this.side, this.shellPane].find((s) => s?.name === wanted.slot);
+				if (other) {
+					other.pane = held.pane;
+					other.shows = held.home || null;
+				}
+			}
+			this.host.swapped();
+		}
+		slot.pane = wanted.pane;
+		slot.shows = target;
+		return true;
+	}
+
+	/** Sends what holds a slot home, its stand-in coming back to the slot, and closes the slot. */
+	private async release(slot: Slot, retried = false): Promise<void> {
+		const panes = await this.panes();
+		const held = panes.find((p) => p.session === DECK && p.slot === slot.name);
+		if (!held) return;
+		const standIn = held.home ? panes.find((p) => p.session === held.home)?.pane : undefined;
+		if (!standIn) {
+			await tmuxAsync(SESSIONS, "kill-pane", "-t", held.pane);
+			return;
+		}
+		const home = `=${held.home}:`;
+		try {
+			await tmuxAsync(
+				SESSIONS,
+				...["resize-window", "-t", home, "-x", held.width, "-y", held.height, ";"],
+				...["swap-pane", "-d", "-s", held.pane, "-t", standIn, ";", "kill-pane", "-t", standIn],
+			);
+		} catch (error) {
+			// Another swb closed the held pane meanwhile, leaving its stand-in in the slot instead.
+			if (retried) throw error;
+			await this.release(slot, true);
+		}
+	}
+
+	/** Puts what's applied in the Stage's first slot; one that has no pane to show yet is asked again by the next sync. */
+	private async showMain(keyAt: number): Promise<void> {
+		const target = this.applied.target;
+		const t0 = performance.now();
+		try {
+			if (!(await this.place(this.main, target))) {
+				if (this.asked.main === target) this.asked.main = undefined;
+				return;
+			}
+			this.host.switched(performance.now() - t0, keyAt);
+		} catch (error) {
+			if (this.asked.main === target) this.asked.main = undefined;
+			this.host.toast(`stage: ${(error as Error).message}`, "error");
+		}
+	}
+
+	/** Creates, refills, or closes the Stage's second slot to match what is applied. Leaving it keeps the keyboard on the Stage. */
 	private syncSide(): void {
-		const { stagePane } = this.host;
+		this.asked.side = this.applied.side;
 		this.queue(async () => {
 			const want = this.applied.side;
 			try {
+				await this.read();
 				if (want === null) {
 					if (!this.side) return;
 					const { pane } = this.side;
 					// Gone once tmux says so: until then, `deck state` still shows it.
-					await tmuxAsync(UI, "kill-pane", "-t", pane).finally(() => {
+					await this.release(this.side).finally(() => {
 						this.side = null;
 					});
-					if (this.host.focusedPane() === pane) await tmuxAsync(UI, "select-pane", "-t", stagePane);
+					if (this.host.focusedPane() === pane) await tmuxAsync(SESSIONS, "select-pane", "-t", this.main.pane);
 					return;
 				}
-				if (this.side?.target === want) return;
-				if (this.side) {
-					this.side.target = want;
-					if (this.side.up) await this.host.ctl.run(`switch-client -c ${quote(this.side.tty)} -t ${quote(`=${want}`)}`);
-					return;
+				if (!this.side) {
+					const pane = await tmuxAsync(
+						SESSIONS,
+						"split-window",
+						"-h",
+						"-d",
+						"-l",
+						"35%",
+						"-t",
+						this.main.pane,
+						"-P",
+						"-F",
+						"#{pane_id}",
+						STAND_IN,
+					);
+					await tmuxAsync(SESSIONS, "set", "-p", "-t", pane, "@swb_slot", "side");
+					this.side = { name: "side", pane, shows: null };
 				}
-				const created = await tmuxAsync(
-					UI,
-					...["split-window", "-h", "-d", "-l", "35%", "-t", stagePane, "-P", "-F", "#{pane_id}\t#{pane_tty}"],
-					...deckEnv(),
-					stageScript(want),
-				);
-				const [pane, tty] = created.split("\t") as [string, string];
-				this.side = { pane, tty, up: false, target: want };
+				if (!(await this.place(this.side, want)) && this.asked.side === want) this.asked.side = undefined;
 			} catch (error) {
+				if (this.asked.side === want) this.asked.side = undefined;
 				this.host.toast(`split: ${(error as Error).message}`, "error");
 			}
 		});
 	}
 
 	/**
-	 * Creates, moves, or kills the shell's pane to match what is applied, against pi's pane. A shell that moves keeps the keyboard if it
+	 * Creates, moves, or closes the shell's slot to match what is applied, against pi's. A shell that moves keeps the keyboard if it
 	 * had it, out of pi's pane too; one that goes leaves it on pi.
 	 */
 	private syncShell(fromOver: boolean): void {
-		const { stagePane } = this.host;
 		this.queue(async () => {
 			const want = this.applied.shell?.at === "replace" ? null : this.applied.shell;
-			const parent = this.side?.pane ?? stagePane;
-			const refocus = fromOver && this.host.focusedPane() === parent;
+			const parent: "main" | "side" = this.side ? "side" : "main";
 			try {
+				await this.read();
+				const parentPane = this.side?.pane ?? this.main.pane;
+				const refocus = fromOver && this.host.focusedPane() === parentPane;
 				const shellPane = this.shellPane;
-				if (shellPane && (want?.target !== shellPane.target || want.at !== shellPane.at || parent !== shellPane.parent)) {
-					const moving = want?.target === shellPane.target;
+				if (shellPane && (want?.target !== shellPane.shows || want.at !== shellPane.at || parent !== shellPane.parent)) {
+					const moving = want?.target === shellPane.shows;
 					await this.dropShellPane();
 					if (!moving) this.shellKeys = false;
 				}
 				if (want === null || this.shellPane) return;
 				const created = await tmuxAsync(
-					UI,
-					...["split-window", want.at === "beside" ? "-h" : "-v", "-d", "-l", "50%", "-t", parent, "-P", "-F", "#{pane_id}"],
-					...deckEnv(),
-					stageScript(want.target, true),
+					SESSIONS,
+					...["split-window", want.at === "beside" ? "-h" : "-v", "-d", "-l", "50%", "-t", parentPane, "-P", "-F", "#{pane_id}", STAND_IN],
 				);
-				this.shellPane = { pane: created, target: want.target, at: want.at, parent };
-				if (refocus || this.shellKeys) await tmuxAsync(UI, "select-pane", "-t", created);
+				await tmuxAsync(SESSIONS, "set", "-p", "-t", created, "@swb_slot", "shell");
+				const slot: Slot & { at: ShellAt; parent: "main" | "side" } = { name: "shell", pane: created, shows: null, at: want.at, parent };
+				this.shellPane = slot;
+				if (!(await this.place(slot, want.target))) {
+					await this.dropShellPane();
+					return;
+				}
+				if (refocus || this.shellKeys) await tmuxAsync(SESSIONS, "select-pane", "-t", slot.pane);
 			} catch (error) {
 				this.host.toast(`shell: ${(error as Error).message}`, "error");
 			} finally {
@@ -439,45 +585,33 @@ export class StagePanes {
 
 	private async dropShellPane(): Promise<void> {
 		if (!this.shellPane) return;
-		const { pane, parent } = this.shellPane;
+		const { pane } = this.shellPane;
 		this.shellKeys ||= this.host.focusedPane() === pane;
-		// Ctrl-D in the shell already closed it.
-		await tmuxAsync(UI, "kill-pane", "-t", pane).catch(() => {});
+		const parent = this.shellPane.parent === "side" && this.side ? this.side.pane : this.main.pane;
+		// The shell exiting already sent its pane home.
+		await this.release(this.shellPane).catch(() => {});
 		this.shellPane = null;
-		if (this.host.focusedPane() === pane) await tmuxAsync(UI, "select-pane", "-t", parent).catch(() => {});
+		if (this.host.focusedPane() === pane) await tmuxAsync(SESSIONS, "select-pane", "-t", parent).catch(() => {});
 	}
 
-	/** Names each of the Stage's panes after what it shows, once any pane split or killed ahead of it is in place. */
+	/** Names each of the Stage's panes after what it shows, once any pane split, swapped, or closed ahead of it is in place. */
 	private syncLabels(harness: string): void {
 		const a = this.applied;
 		this.queue(async () => {
 			const replaced = a.shell?.at === "replace";
-			const want: [string, string][] = [
-				[this.host.stagePane, replaced && a.side === null ? "shell" : a.view === "agent" ? harness : "editor"],
-			];
+			const want: [string, string][] = [[this.main.pane, replaced && a.side === null ? "shell" : a.view === "agent" ? harness : "editor"]];
 			if (this.side) want.push([this.side.pane, replaced ? "shell" : harness]);
 			if (this.shellPane) want.push([this.shellPane.pane, "shell"]);
 			const key = JSON.stringify(want);
 			if (key === this.labels) return;
-			// One command per pane: a shell's pane closes with its shell, ahead of the apply that forgets it.
-			const results = await Promise.allSettled(want.map(([pane, label]) => tmuxAsync(UI, "set", "-p", "-t", pane, "@swb_label", label)));
+			// One command per pane: a pane can close ahead of the apply that forgets it.
+			const results = await Promise.allSettled(
+				want.map(([pane, label]) => tmuxAsync(SESSIONS, "set", "-p", "-t", pane, "@swb_label", label)),
+			);
 			const failed = results.flatMap((r) => (r.status === "rejected" && !String(r.reason).includes("can't find pane") ? [r.reason] : []));
 			// Only labels that took are remembered, so the next apply tries the rest again.
 			this.labels = failed.length === 0 ? key : "";
 			for (const error of failed) this.host.toast(`label: ${(error as Error).message}`, "error");
 		});
-	}
-
-	/**
-	 * What the UI server's keys do on the Stage's pane: ctrl-hjkl reach an nvim Editor in it, which hands moves off its own edge
-	 * back through `swb __nav`; Esc goes back to the list from a harness that's starting there, as it does from a card.
-	 */
-	private tag(option: "@swb_editor" | "@swb_starting", on: boolean): void {
-		this.queue(() =>
-			tmuxAsync(UI, "set", "-p", "-t", this.host.stagePane, ...(on ? [option, "1"] : ["-u", option])).then(
-				() => {},
-				(error: Error) => this.host.toast(`${option}: ${error.message}`, "error"),
-			),
-		);
 	}
 }

@@ -3,17 +3,14 @@ import { CLIENT_CWD, cleanEnv, SESSIONS, tmuxClient } from "../tmux.ts";
 type Pending = { resolve: (out: string) => void; reject: (error: Error) => void };
 
 /**
- * One control-mode client on the sessions server, attached to its swb-ctl session: a command costs about a
- * millisecond, against ~11 ms to spawn tmux. It respawns on the next command after the server dies, and a command while
- * the server is down fails: the Deck's worker is what starts it again. It also hears
- * the server's notifications, such as another client attaching, from when it attaches until the server dies.
+ * One control-mode client on swb's server, attached to its swb-ctl session: a command costs about a millisecond, against
+ * ~11 ms to spawn tmux. It respawns on the next command after the server dies, and a command while the server is down
+ * fails: the Deck's worker is what starts it again.
  */
 export class Control {
 	private proc: Bun.Subprocess<"pipe", "pipe", "ignore"> | null = null;
 	private pending: Pending[] = [];
 	private block: { flags: number; lines: string[] } | null = null;
-
-	constructor(private readonly notified: (line: string) => void) {}
 
 	private spawn(): Bun.Subprocess<"pipe", "pipe", "ignore"> {
 		const proc = Bun.spawn([...tmuxClient(SESSIONS), "-C", "attach", "-f", "ignore-size,no-output", "-t", "=swb-ctl"], {
@@ -60,7 +57,6 @@ export class Control {
 			return;
 		}
 		if (line.startsWith("%begin ")) this.block = { flags: Number(line.split(" ")[3]), lines: [] };
-		else this.notified(line);
 	}
 
 	run(command: string): Promise<string> {

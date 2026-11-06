@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { cursorTo, entry, reply, seed, waitState } from "./harness/deck.ts";
+import { closeDeck, cursorTo, entry, reply, seed, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -128,7 +128,7 @@ test("a pi woken with w and never viewed reports the terminal's background and p
 	const [{ tmux_session: host }] = s.query<{ tmux_session: string }>("SELECT tmux_session FROM runtimes WHERE session_id = ?", a) as [
 		{ tmux_session: string },
 	];
-	expect(s.tmux(s.servers.sessions, "list-sessions", "-F", "#{session_name} #{session_attached}")).toContain(`${host} 0`);
+	expect(s.tmux(s.servers.sessions, "list-panes", "-a", "-F", "#{session_name} #{@swb_host}")).toContain(`${host} ${host}`);
 	expect(await piColor(host, "11")).toBe(LIGHT_BG);
 	expect(await piColor(host, "4;9")).toBe(LIGHT_RED);
 	s.swb("drive", "theme", "dark");
@@ -137,13 +137,23 @@ test("a pi woken with w and never viewed reports the terminal's background and p
 	await until(async () => (await piColor(host, "4;9")) === DARK_RED, budgets.settle, "the unviewed pi's dark palette");
 
 	// Solarized Dark, with the report Ghostty sends on any palette change. The drive server, being tmux, sends none
-	// while the scheme stays dark, and swb's UI server would pass this one on to no pane either.
+	// while the scheme stays dark.
 	s.tmux(s.servers.drive, "set", "-g", "pane-colours[9]", "#cb4b16");
 	for (const option of ["window-style", "window-active-style"]) s.tmux(s.servers.drive, "set", "-g", option, "bg=#002b36,fg=#839496");
 	s.tmux(s.servers.drive, "send-keys", "-t", "=drive:", "-H", ...[...Buffer.from("\x1b[?997;1n")].map((b) => b.toString(16)));
 	await waitState(s, "the roster's other dark background", (x) => x.colors.background === "#002b36");
 	await until(async () => (await piColor(host, "11")) === "\x1b]11;rgb:0000/2b2b/3636\x1b\\", budgets.settle, "the other dark background");
 	await until(async () => (await piColor(host, "4;9")) === "\x1b]4;9;rgb:cbcb/4b4b/1616\x1b\\", budgets.settle, "the other dark palette");
+
+	// A pi asks as it starts, before the roster's worker could mirror the palette onto its pane: with no roster at all, it
+	// still gets the Deck's last palette, which its pane was created with.
+	closeDeck(s);
+	s.swb("wake", b);
+	await until(() => entry(s, b).live, budgets.piReady, "b live");
+	const [{ tmux_session: other }] = s.query<{ tmux_session: string }>("SELECT tmux_session FROM runtimes WHERE session_id = ?", b) as [
+		{ tmux_session: string },
+	];
+	expect(await piColor(other, "4;9")).toBe("\x1b]4;9;rgb:cbcb/4b4b/1616\x1b\\");
 });
 
 test("a working session's frames reach the terminal synchronized through both tmux layers, the cursor shown only inside one", async () => {

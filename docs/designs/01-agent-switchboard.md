@@ -83,7 +83,7 @@ swb drive stop
 swb migrate                  create or upgrade the db (also implicit on every invocation)
 ```
 
-These are called only by tmux hooks or by `swb` itself, never by a person: `swb visit`, `swb detached`, `swb gc`, `swb __roster`, `swb __placeholder`, `swb __deck <deck> <command>` (posts to a Deck socket), `swb __help`. Hidden subcommands carry a `__` prefix.
+These are called only by tmux hooks or by `swb` itself, never by a person: `swb gc`, `swb __roster`, `swb __placeholder`, `swb __deck <deck> <command>` (posts to a Deck socket), `swb __help`. Hidden subcommands carry a `__` prefix.
 
 Exit codes: 0 means success. 1 means a failed action, with the reason on stderr; that includes "turn running: wait for it to complete" from `archive`. 2 means usage. JSON output uses stable field names, documented in `swb ls --help`.
 
@@ -106,7 +106,7 @@ Exit codes: 0 means success. 1 means a failed action, with the reason on stderr;
 The Stage shows one of three **views** of the selected session, and each session remembers the one it was left on (`marks.view`):
 - **pi**: the session alone.
 - **editor**: its directory's Editor alone.
-- **split**: the Editor on the left at 65% and pi on the right at 35%, as `ide` laid them out. In split view the Stage is two panes, each its own nested client of the sessions server.
+- **split**: the Editor on the left at 65% and pi on the right at 35%, as `ide` laid them out. In split view the Stage is two panes, each holding one of those sessions' own panes.
 
 **Layout rules**, which the Deck state reports as `layout`:
 - The roster is `roster_width` wide (42 columns by default, at most half the Deck), re-asserted on every resize because tmux would otherwise scale it with the window. A width I drag the border to replaces it for the life of that Deck. A Deck narrower than 100 columns shows the roster alone, and Enter zooms the Stage to full width; `M-a z` or `M-a h` returns, as does a click on the status line's `◂`.
@@ -133,13 +133,13 @@ The final visual spec comes from the Deck mock rounds (see [ticket 09](../wayfin
 - Controls have no background at rest. The one under the pointer, a Peek's button, a view tab, a legend key, or the filter's tag, takes the focused cursor's fill.
 - `l` on a session row is Enter, unless it's folded, when `l` opens the fold; on a collapsed header it expands. `h` on an expanded header collapses it, and on a session row folds its family; otherwise it does nothing. Space, or a click on the fold's `▾`/`▸`, toggles a fold. Clicking, Enter, or space on a header toggles it. Clicking a session row is Enter: a click is a choice, unlike the cursor passing over it. `q` quits the Deck.
 
-**Prefix** (`M-a`, rebindable), handled by the UI server:
+**Prefix** (`M-a`, rebindable), handled by swb's tmux server:
 - `Tab` toggles focus between the roster and the Stage. `h` and `l` move focus one pane left or right: roster, then editor and pi in split view.
 - `e` swaps the view between pi and the Editor. In split it does nothing.
 - `v` toggles split view. Entering split puts the keyboard on the editor; leaving it shows the pane that had the keyboard, full width.
 - `z` hides the roster, so the Stage fills the Deck. While it does, in a narrow Deck too, the Deck turns on its status line, `◂ <prefix> z show list`, and a click there brings the roster back.
 - `?` shows help; any key or click closes it.
-- `M-a` sends a literal `M-a` to pi. The sessions server has no prefix, so nothing in between catches it.
+- `M-a` sends a literal `M-a` to pi.
 
 Clicking a pane focuses it. The bindings target panes by index rather than `{left}`/`{right}`, which stop resolving while a pane is zoomed.
 
@@ -161,7 +161,7 @@ Clicking a pane focuses it. The bindings target panes by index rather than `{lef
 
 **The dormant card** shows the whole conversation: every prompt of mine and every text reply from pi, newest at the bottom, cropped from the top to fit, with no keys of its own: the legend carries them. The keyboard can still land on it, by `M-a j` from pi onto a dormant session; there, `esc` goes back to the roster and any other key wakes pi, as Enter would have. While the roster is on screen the card is the transcript alone; when the roster is hidden or the Deck is narrow, the card heads it with the title, the status word, and the path, since nothing else on screen says them. It skips tool calls and thinking for now; tool-call summaries may come later. It is read from the session's transcript by a small read-only adapter in `packages/cli` for pi's v3 session format: JSONL entries linked by `parentId`, walked back from the last entry so only the active branch shows, keeping `message` entries with role `user` or `assistant` and their text parts. The adapter lives in the roster's worker, cached by the file's mtime, so the card appears at once and fills in when the parse lands. Importing pi's `SessionManager` instead would compile pi's whole coding-agent graph into `swb`, and pin it to whatever pi version `swb` happened to bundle.
 
-**Copying** works by dragging, through both tmux layers. In pi's fullscreen mode the drag reaches pi, which copies natively. In regular mode the sessions server's copy mode takes the drag and emits OSC 52, which the UI server passes on (`set-clipboard on`). Ghostty's shift+drag selects across panes as a fallback.
+**Copying** works by dragging. In pi's fullscreen mode the drag reaches pi, which copies natively. In regular mode tmux's copy mode takes the drag and emits OSC 52 to the terminal (`set-clipboard on`). Ghostty's shift+drag selects across panes as a fallback.
 
 ### Settings
 
@@ -256,45 +256,36 @@ Derived, never stored:
 
 Every tmux name below takes a suffix of `-<SWB_INSTANCE>` when that variable is set. Tests always set it.
 
-- **Sessions server**, `tmux -L swb`.
+- **swb's server**, `tmux -L swb`, the only one.
   - It is started by `swb` from a scrubbed environment (`mise -C / hook-env` and `direnv exec /`, as ansiblonomicon's zshenv `tmux()` wrapper does). That keeps project credentials out of the server.
-  - It loads **only an embedded `swb` config**, never the user's tmux config. tmux reads `-f` only when a server first starts, and this server outlives `swb` upgrades, so every `ensureSessionsServer` compares the server's `@swb_conf_version` with the binary's and, if they differ, re-sources the config. Hooks are set at a fixed index (`set-hook -g client-detached[0] …`), so re-sourcing replaces them and they always call the current `swb` path. The UI server does the same. The user's config binds keys in the root table (`M-z`, `M-0`…`M-9`, vim-tmux-navigator's `C-h/j/k/l`) that tmux would take before pi saw them, paints pane backgrounds, and adds hooks that bring the status bar back. The embedded config:
-    - terminal: `default-terminal tmux-256color`, `terminal-features` with RGB, hyperlinks, and `extkeys`, `extended-keys always`, `extended-keys-format csi-u`, `escape-time 0`, `focus-events on`;
-    - behavior: `mouse on` with tmux's stock mouse bindings, `mode-keys vi`, `history-limit 50000`, `set -s set-clipboard on`;
-    - no prefix (`prefix None`, `prefix2 None`) and no other key bindings, so every key reaches pi;
-    - hooks: `client-focus-in`/`client-focus-out` run `swb visit`, `client-detached` runs `swb detached`, and `session-closed` runs `swb gc`;
-    - lifecycle: `remain-on-exit off`, `destroy-unattached off`, `exit-unattached off`, `exit-empty off`, `detach-on-destroy on` (otherwise a Stage whose session dies lands on some other session);
-    - chrome off: `status off`, `pane-border-status off`, `set-titles off`;
-    - colors: no foreground and no `pane-colours`, so those queries fall through to the real terminal; the background is mirrored in by the roster (see Theme below);
-    - one key correction, because nested tmux turns Alt+Enter into legacy `ESC CR`, which pi reads as Enter. It must live on this inner server; an outer-only binding doesn't help:
-      `bind-key -n M-Enter if-shell -F '#{m:*Ext*,#{pane_key_mode}}' 'send-keys -H 1b 5b 31 33 3b 33 75' 'send-keys M-Enter'`
+  - It loads **only an embedded `swb` config**, never the user's tmux config. tmux reads `-f` only when a server first starts, and this server outlives `swb` upgrades, so every `ensureSessionsServer` compares the server's `@swb_conf_version` with the binary's and, if they differ, re-sources the config. Hooks are set at a fixed index (`set-hook -g client-detached[0] …`), so re-sourcing replaces them and they always call the current `swb` path. The user's config binds keys in the root table (`M-z`, `M-0`…`M-9`, vim-tmux-navigator's `C-h/j/k/l`) that tmux would take before pi saw them, paints pane backgrounds, and adds hooks that bring the status bar back. The embedded config:
+    - terminal: `default-terminal tmux-256color`, `terminal-features` with RGB, hyperlinks, `extkeys`, and `sync`, `extended-keys always`, `extended-keys-format csi-u`, `escape-time 0`, `focus-events on`;
+    - behavior: `mouse on`, with tmux's mouse bindings redefined for overlays (below), `mode-keys vi`, `history-limit 50000`, `set -s set-clipboard on`;
+    - the prefix table, and the root bindings the Deck needs: ctrl-hjkl, Escape while a harness starts, `Any` for overlays;
+    - hooks: focus, attach, and detach of a terminal, and its light/dark reports, run `swb __deck`; pane and layout changes in the Deck's window do too; `session-closed` runs `swb gc`;
+    - lifecycle: `remain-on-exit off`, `destroy-unattached off`, `exit-unattached off`, `exit-empty off`, `detach-on-destroy on`;
+    - chrome: `status off` (on for the Deck while the Stage fills it), pane border labels on the Deck's windows only;
+    - colors: no foreground and no `pane-colours` for the server, so the Deck's panes ask the real terminal; the background is mirrored in by the roster (see Theme below);
     - managed pi gets `PI_IMAGE_PROTOCOL=none`, which makes pi's existing text fallback for images explicit.
-  - Hooks call the absolute path of the running `swb` executable.
-  - It holds three kinds of tmux session, tagged with user options:
-    - **Harness sessions**, one per harness process, named `<project>-<4 hex>` (its host), never renamed. The harness's pane carries `@swb_host=<host>`, and every command for the harness finds it by that, so it can move to another session's window. Which session one hosts comes from `runtimes`, never from tmux.
-    - **Editor sessions**: `@swb_kind=editor`, `@swb_dir=<dir>`. Named `<dirname>-edit-<4 hex>`.
+  - Hooks call the absolute path of the running `swb` executable, through `run-shell -b`, with its output redirected, because a failed `run-shell -b` paints its error over the active pane.
+  - It holds five kinds of tmux session, tagged with user options. Each one's own pane carries `@swb_home=<session>`, and every command finds a pane by that, never by the session it sits in, because the Deck moves it:
+    - **Harness sessions**, one per harness process, named `<project>-<4 hex>` (its host), never renamed. The harness's pane also carries `@swb_host=<host>`. Which session one hosts comes from `runtimes`, never from tmux.
+    - **Editor and shell sessions**: `@swb_kind=editor|shell`, `@swb_dir=<dir>`. Named `<dirname>-edit-<4 hex>` and `<dirname>-sh-<4 hex>`.
     - **The placeholder session**, `placeholder` (`@swb_kind=placeholder`). It renders the Stage's cards.
-    - **The control session**, `swb-ctl` (`@swb_kind=control`). Each Deck's control-mode client attaches here. A `tmux -C` client is an attached client like any other, so attached to a pi session it would make that session look viewed and never reapable.
-- **UI server**, `tmux -L swb-ui`.
-  - Owned entirely by `swb` through an embedded config: `default-terminal tmux-256color`, `extended-keys always` with `csi-u`, `terminal-features` with `extkeys`, RGB and hyperlinks, `allow-passthrough all`, `focus-events on`, `escape-time 0`, `status off` (on per Deck while the Stage fills it), `mouse on`, `set -s set-clipboard on` (its default, `external`, drops the inner server's OSC 52), no color styles, and the prefix table. `destroy-unattached` is set **per Deck session** from a `client-attached` hook, because setting it globally kills a new Deck before its client attaches.
-  - It has its own `swb-ctl` control session, for the same reason: a control client attached to a Deck would keep `destroy-unattached` from ever destroying it.
+    - **The control session**, `swb-ctl` (`@swb_kind=control`). Its pane runs the clock, and the roster's control-mode client attaches here.
+    - **The Deck**, `deck` (`@swb_kind=deck`): the roster's pane, and one pane per Stage slot (`@swb_slot=main|side|shell`). Showing a session in a slot is `swap-pane`: its own pane comes into the slot, and what held the slot goes back where it belongs. A session whose pane is on the Deck keeps a **stand-in** (`tail -f /dev/null`) in its own window meanwhile, so the session lives on; the session's window is resized to the slot's size as its pane goes home, so its program doesn't redraw for nothing.
+  - The Deck's windows set `remain-on-exit on`: a harness that exits on the Stage, however it ends, leaves its dead pane in place, and the roster's worker sends it home and closes it there on its next tick, the stand-in taking its slot back. The Deck's layout never moves. Its windows also dim every pane but the active one, the roster, and overlays.
   - Overlays (a Peek, the picker's launch card, its menu) are tmux 3.8 floating panes in the Deck's window, `new-pane -d -A -B none`: above the tiled panes without resizing them, above a narrow Deck's zoomed roster, and borderless, so each draws its own frame. Each runs `tail -f /dev/null`; the roster opens its `pane_tty` itself, paints it, and reads its mouse there (mode 1003, SGR), so a button is a closure in the roster and nothing crosses a process. One tmux command per change kills, moves (`move-pane -X -Y`), resizes, makes, and restacks (`move-pane -z 0`) them. They are not popups: a client shows one popup at a time, and a popup owns its client's keyboard and mouse. A float never takes the keyboard: tmux's default mouse bindings are redefined so a click over one (`#{pane_floating_flag}` names the pane under the pointer) goes to it without selecting it. A root `Any` binding sees every event before it goes on: pointer motion or a mouse button outside both the roster and its overlays, or a key typed outside the roster, runs `@swb_leave`, the kill-panes of the overlays that go with the pointer (the Peek), then forwards the event and tells the roster `pointer-out`. The roster names its pane in `@swb_roster` and sets `@swb_watch` while it wants to hear of the pointer leaving. A pointer that leaves the terminal itself goes unreported; the Peek stays until the next event.
-  - Prefix bindings and focus hooks talk to the roster through `run-shell -b 'swb __deck <deck> <command>'`, which posts to the roster's Deck socket. Its output is redirected, because a failed `run-shell -b` paints its error over the active pane.
-  - The Stage's `tmux attach` has its stdout sent to `/dev/null` (drawing goes to the tty), so tmux's `[detached (from session <name>)]` line never leaks internal names.
-  - Each Deck is one disposable tmux session, `deck-<6 hex>`, with the roster pane (`swb __roster --deck <id>`) and one Stage pane per visible view pane (`env -u TMUX tmux -L swb attach -t <target>`): one for pi or editor view, two for split.
-  - Stage panes are created only after the Deck's outer client has attached, from the Deck's `client-attached` hook. A nested client that attaches first finds no terminal colors to inherit; in the theme probe that left pi without colors in 2 of 3 runs.
+  - A direct `tmux attach` to a session isn't supported: while the Stage shows a session, its own window holds a stand-in.
 - `swb` always unsets `$TMUX` for clients it starts, so it behaves the same inside or outside another tmux.
 
 ### Theme
 
-tmux 3.7c relays the real terminal's colors through both layers by itself, so `swb` copies no color values anywhere:
-- each tmux answers a pane's OSC 10/11 (foreground and background) from the colors its own client reported at attach;
-- OSC 4 palette queries are forwarded live to the outermost terminal;
-- a light/dark change (mode 2031, report 997) flows down: Ghostty tells the UI server, which re-queries and tells its panes and the Stage clients, and the sessions server does the same for pi, which re-queries.
+Every pane on the Deck has the real terminal as its client, so tmux answers its OSC 10/11 from the colors that terminal reported, forwards OSC 4 palette queries to it, and passes it light/dark reports (mode 2031, report 997) when the scheme flips. The roster re-queries colors on every report, as pi does.
 
-What `swb` must do is not get in the way: no color styles on either server, Stage panes created after the outer client attaches, and the roster re-querying colors on every 997, as pi does.
+A pane off the Deck has no terminal to ask, so tmux answers from what the roster's worker mirrors in: the terminal's background and foreground as the server's `window-style`, which the Deck's windows override with their dimming, and its palette as each session's own pane's `pane-colours`, which the pane takes along onto the Deck. Set for the whole server, the palette would answer the roster's own query too, and the roster would never see the terminal change again. Each pane mirrored anew whose program subscribes to light/dark reports then gets a 997, written straight to the program with `paste-buffer -S`, so it re-queries even under copy mode, and even when the scheme stayed the same.
 
-The relay has one gap: a pane with no client attached. tmux has no terminal to ask, so it answers no color query at all, and pi falls back to its default dark theme. That's every pi woken with `w`, by eager hover, or after reaping, until someone views it, and glimpse-companion mirrors pi's theme, so its pill goes black too. Thurston's own tmux hit exactly this with pi-sessions subagents, which run detached. So the roster mirrors the terminal's **background only** into the sessions server: `set -g window-style bg=<color>` and `window-active-style` likewise, at Deck start and again after every 997. tmux answers OSC 11 from that style for every pane, viewed or not, and a `window-style` change makes tmux send each pane whose theme changed a 997, so unviewed pis re-theme live as well. The mirrored color equals the terminal's, so painting it changes nothing visible. Foreground and palette stay relayed. With no Deck open nothing updates the mirror, and the next Deck refreshes it at start. `COLORFGBG` is not set: the mirrored background makes it redundant. Verified in a probe with a fake Ghostty, including a live light→dark flip reaching both the roster and real pi; a real Ghostty run is still pending.
+A terminal that reports every theme change, as Ghostty does, reaches the roster through tmux's `client-light-theme` and `client-dark-theme` hooks, which fire on every report; tmux passes a report on to panes only when the scheme flips, so between two light themes these hooks are the roster's only word of it.
 
 ### Pi ↔ swb contract (the recorder)
 
@@ -345,7 +336,6 @@ Failure: the recorder shows a persistent red footer status (`swb: not recording:
 - `drive keys` sends tmux key names to that pane, exactly as a terminal would deliver them.
 - `drive capture` is `capture-pane -p [-e]` of that pane: the composited Deck as a human sees it.
 - Each roster serves a **Deck socket** at `${XDG_STATE_HOME}/agent-switchboard/decks/<deck>.sock`, speaking HTTP over a unix socket. `GET /state` returns the view state, which is always current. `POST /cmd` takes the prefix and hook commands. `swb deck state` and `drive state` read `GET /state`. The state holds: `deck`, `cursor` (session id), `staged` (session id, Stage state, and `view`), `focus` (`roster`, `stage`, or `editor`), `zoomed`, `mode` (`roster`, `filter`, `name`), `filter`, `toasts`, `waking` (pending or loading ids, and whether the keyboard is waiting on one), `drop` (mid-drag, the Project and Group a release would land in), `rows` (the visible rows in order: kind, id, title, glyph, and the Group label it sits under for sessions; project, group, and expanded for headers), `colors` (the terminal background the roster last read), `terminalFocused`, and `ready`.
-- A socket whose Deck session no longer exists on the UI server is reported as gone and removed.
 - `drive wait <path>=<value> [--timeout]` polls `GET /state` until it matches. It proved the most useful verb in the mock (e.g. `drive wait staged.kind=live`).
 
 The Deck state, which `swb deck state --json` prints. Field names and types are the contract; values are illustrative:
@@ -404,29 +394,27 @@ swb [new|open <id>]
   config.load()                          fails loudly on a bad key
   db.open(); db.migrate()                user_version
   tmux.ensureSessionsServer()            scrubbed env, embedded conf
-  tmux.ensureUiServer()                  embedded conf
-  deck = tmux.createDeck(size)           deck-<hex>: roster pane only
-    placeholder = tmux.createPlaceholder(deck)   `swb __placeholder --deck`
-  [new]  pi = sessions.launch(cwd, resume=null)  then stage(pi)
-  [open] stage(id)
-  exec env -u TMUX tmux -L swb-ui attach -t deck  this terminal becomes the Deck
-    client-attached hook → Stage pane(s): env -u TMUX tmux -L swb attach -t <placeholder or session>
+  set the prefix                         from config.toml
+  no Deck yet → createDeck(size)         `deck`: the Stage's first slot holding a stand-in, the roster beside it
+  a roster dead or older → respawn it in its pane, the Stage's sessions sent home
+  otherwise → POST the intent (open, new, continue) to the roster
+  tmux -L swb attach -t deck             this terminal joins the Deck
 ```
 
 ### Roster loop (packages/cli/src/deck/roster.ts)
 
 ```text
 start: render from db snapshot, write state (ready=true)
-one tmux control-mode client (`tmux -C`) per server, attached to that server's swb-ctl session:
-  commands go over it (switch-client ~0.9 ms, versus ~11 ms to spawn a tmux process)
-  its notifications (%sessions-changed, %session-window-changed, pane exits) drive liveness
+one tmux control-mode client (`tmux -C`), attached to swb-ctl:
+  the Stage's commands go over it (~1 ms, versus ~11 ms to spawn a tmux process)
 one Bun Worker owns the db connection and the transcript cache; the TUI thread only messages it
 every 250 ms (in the worker):
   db.dataVersion() changed?  → post fresh rows to the TUI thread
   derive states → TUI thread diffs → render if changed
   reapable sessions → re-read phase, then
-    tmux if-shell -F -t =<s> '#{?session_attached,0,1}' "run-shell -b 'kill -TERM <pid>'"
-    the attached check runs inside tmux, so a Deck that attached since the poll keeps it
+    tmux if-shell -F -t <pane> '#{!=:#{session_name},deck}' "run-shell -b 'kill -TERM <pid>'"
+    the check runs inside tmux, so a pane the Stage took since the poll keeps it
+  a harness that died on the Stage → send its pane home, its stand-in back to the slot, and close it
 on key:
   update view model synchronously → render → schedule effects (never awaited by the input handler)
 on cursor change:
@@ -444,23 +432,23 @@ With no Deck open, nothing reaps. That's fine: a reaped session only matters for
 
 ```text
 stage(id)
-  live?          → switchClient each Stage client to its view's target (pi session, editor session)   ~50 ms
+  live?          → swap each slot's target pane into it (pi, editor, shell), what held it going home
   starting?      → placeholder shows "loading"; switch to placeholder
   dormant / not running / archived / empty → placeholder shows that card; switch to placeholder
 sessions.launch(cwd, resume)
   tmux new-session -d … (as in the recorder contract)    returns in ~10 ms; pi starts in the pane
   set @swb_launch_id                                     resume only
   row.loading = true                                     cleared when the runtime row for that tmux session appears
-when that runtime appears and the cursor is still on it → switchClient to the pi session
+when that runtime appears and the cursor is still on it → swap pi's pane into the Stage
   the keyboard was on the loading card (Enter, no esc since) → it stays on the Stage, now pi
 a staged host's runtime changes session_id (/new, /resume, /fork inside pi)
   → the selection follows the host: cursor and staged.id move to the new id, provisional or not,
-    and the Stage client is left where it is
+    and the Stage's pane is left where it is
 ```
 
 A new session from `swb new` or `n` is ready, and selectable, as soon as its `session_start` writes the runtime row; it doesn't wait for a first turn.
 
-The placeholder is `swb`'s own process, so it can bind `esc` on the loading card without touching pi. Stage clients are the Stage panes' nested clients, found by tty from `list-clients` when each pane is created.
+The placeholder is `swb`'s own process, so it can bind `esc` on the loading card without touching pi.
 
 ### Visit
 
@@ -468,8 +456,6 @@ The placeholder is `swb`'s own process, so it can bind `esc` on the loading card
 roster loop: selected session S live, its pi pane holding the keyboard, terminalFocused = true, for ≥ 1 s
   db.tx: marks.visited_at = now                once per 1 s dwell, again on leaving if the dwell completed, and again when a turn settles on it
 the dwell timer carries the session it started for, so a stale timer never visits a later one
-tmux client-focus-in / client-focus-out on the sessions server (plain attach viewers):
-  swb visit --client <tty> --in|--out  → resolve client → session → visited_at = now
 ```
 
 ### Archive
@@ -499,22 +485,15 @@ gc()
     no open session has cwd = D → kill E
 ```
 
-### Detach and never-started cleanup
-
-```text
-client-detached hook → swb detached --session <name>
-  its pane has @swb_host, its runtime is provisional (no turn yet), and no clients left → kill its pane
-```
-
 ### Views: editor swap and split
 
 ```text
-M-a e | M-a v (UI server bindings) → run-shell -b "swb __deck <deck> view-swap|view-split" → POST /cmd
+M-a e | M-a v (prefix bindings) → run-shell -b "swb __deck view-swap|view-split" → POST /cmd
   selected session S, dir D = S.cwd
   editor for D exists? else tmux new-session -d -c D (@swb_kind=editor, @swb_dir=D) "$SHELL -lic 'exec <editor>'"
   db.tx: marks.view = pi | editor | split
-  pi | editor: one Stage pane, switchClient to that target
-  split:       a second Stage pane at 35% on the right; editor client on the left (65%), pi client on the right
+  pi | editor: one Stage slot, that target's pane swapped into it
+  split:       a second Stage slot at 35% on the right; the editor's pane on the left (65%), pi's on the right
                only when live and the Deck is ≥ 160 columns; otherwise pi view, with marks.view unchanged
   state.staged.savedView = marks.view; state.staged.view = what is showing
 ```
@@ -531,17 +510,17 @@ next swb invocation: runtime rows with a stale boot_id or dead pid → not live
 
 ## Design Decisions
 
-### 1. The Deck: a nested tmux client, not a dispatcher or an emulator
+### 1. The Deck: the session's own pane, swapped into a tmux window
 
-The Stage is `tmux attach` running inside a Deck pane, and the roster drives it with `switch-client`.
-- The spike measured a 52 ms switch with a clean screen.
-- Truecolor, Shift+Enter, resize, copy mode, mouse, focus hooks, and OSC 8 links all survive both layers.
+The Stage is a slot in the Deck's tmux window, and showing a session swaps that session's own pane into it.
+- There is one tmux between the terminal and the harness, so keys, colors, mouse, focus, synchronized output, and OSC 8 links reach the harness as they do in any tmux.
+- A switch is a `swap-pane` over a control-mode client, about a millisecond of tmux work.
 
-The first design opened Ghostty tabs through GhosttyKit. That made the product depend on one terminal and a helper daemon, broke over SSH, and showed no live preview. Rendering `capture-pane` snapshots gives a read-only preview with lag. An emulator inside pi-tui gives the most control, but it's a large build with real fidelity risk. The escape hatch, if tmux ever proves inadequate, is libghostty embedding, to be avoided if at all possible.
+The first design opened Ghostty tabs through GhosttyKit. That made the product depend on one terminal and a helper daemon, broke over SSH, and showed no live preview. Rendering `capture-pane` snapshots gives a read-only preview with lag. An emulator inside pi-tui gives the most control, but it's a large build with real fidelity risk. A nested `tmux attach` in the Stage, which the Deck used at first, put two tmux layers in the way: a light/dark report, colors, Alt+Enter, and images each needed relaying through the inner one. The escape hatch, if tmux ever proves inadequate, is libghostty embedding, to be avoided if at all possible.
 
-### 2. Two tmux servers, both owned by `swb`
+### 2. One tmux server, owned by `swb`
 
-tmux is an execution engine here, not something people interact with. Both servers load only configs that `swb` embeds. Ticket 08 first had the sessions server inherit the user's config, so copy mode and root bindings would feel familiar. Round 3 of the mock showed what that costs. The user's root bindings take keys before pi does: `M-z` collides with pi's own `alt+z`. Its `window-style` freezes pane colors and blocks live light/dark switching. Its hooks bring the status bar back. The overlay that fought all that is gone. The embedded config copies only the settings fidelity needs, and the nested-tmux research validated those. Two servers stay separate because Decks are disposable UI and sessions are durable.
+tmux is an execution engine here, not something people interact with. The server loads only a config that `swb` embeds. Ticket 08 first had the sessions server inherit the user's config, so copy mode and root bindings would feel familiar. Round 3 of the mock showed what that costs. The user's root bindings take keys before pi does: `M-z` collides with pi's own `alt+z`. Its `window-style` freezes pane colors and blocks live light/dark switching. Its hooks bring the status bar back. The embedded config copies only the settings fidelity needs. The Deck once had a server of its own, because each terminal's Deck was disposable and sessions durable; with one Deck that outlives its terminals, nothing is left to keep apart, and swapping a pane needs both ends on one server.
 
 ### 3. No daemon; the db and the tmux servers are the truth
 
@@ -559,7 +538,7 @@ Enter is an explicit "I want to talk to it", so it takes the keyboard straight t
 
 ### 6. Editors are per directory, and each session remembers its view
 
-Sessions sharing a directory share files, so they share one editor. Worktrees get their own, because they're different directories. An editor is a separate tmux session, so swapping is one `switch-client`, and the editor survives pi quitting. Split view puts editor and pi side by side as two nested clients, which keeps the editor a single shared session instead of a pane that one pi session would have to own. The view lives in `marks.view` because it's my intent for that session: every Deck agrees on it, and it survives restarts. `gc` reaps it once no open session uses its directory. nvim keeps swap files on SIGHUP, so a reaped editor's unsaved edits stay recoverable.
+Sessions sharing a directory share files, so they share one editor. Worktrees get their own, because they're different directories. An editor is a separate tmux session, so swapping is one `swap-pane`, and the editor survives pi quitting. Split view puts the editor's pane and pi's side by side, each swapped in from its own session, which keeps the editor a single shared session instead of a pane that one pi session would have to own. The view lives in `marks.view` because it's my intent for that session: every Deck agrees on it, and it survives restarts. `gc` reaps it once no open session uses its directory. nvim keeps swap files on SIGHUP, so a reaped editor's unsaved edits stay recoverable.
 
 ### 7. Archive never force-stops a turn
 
@@ -606,15 +585,14 @@ CI sets versions from the tag; nothing is bumped locally. Following pi-sessions'
 - **pi never becomes ready** (crash on start). The placeholder shows "failed to start" with the pane's last lines, captured before it disappears. Set `remain-on-exit` per pane for the launch window, then turn it off. The toast names the cause.
 - **The transcript is missing on resume.** That's the accepted `--session-id` risk: pi creates an empty session. The roster keeps showing the row. The dormant card shows "transcript not found" with the path.
 - **The transcript fails to parse** (a pi format change). The card shows the parse error and the path, and everything else keeps working. The adapter checks the header's `version` and names it when it isn't 3.
-- **Two Decks on terminals with different themes.** The background mirror is server-wide, so the last Deck to see a 997 sets every pi's background. Accepted: one person, one appearance setting.
 - **The user's own tmux** still paints whatever it likes. Nothing in it reaches `swb`'s servers.
 - **The db is missing, or newer than the binary.** `swb` refuses with the version numbers. The recorder goes red in the footer.
 - **Running pi processes during an upgrade** keep the old recorder. They go red at their next write after a migration, until restarted. Each server carries `@swb_version`; the first newer `swb` to touch an older server stops its idle live pis with SIGTERM before taking the write lock, so their next wake runs the new recorder, and restarts the server if only `swb-ctl` remains, otherwise re-sources the config in place. Re-sourcing is additive, so a binding or hook a release removes lingers until that restart. Working and blocked pis keep running. A stopped pi's recorder saves its unsent prompt to `drafts/<session_id>` beside the db, and puts it back in the editor when that session next starts; closing the pane instead would hang pi up before its shutdown hooks run. A pi killed outright loses its draft. An older `swb` never touches a newer server, and its Deck shows a red "reopen the Deck" line. `mise run install` stamps the release it builds on, so a dev install doesn't yield to that release.
-- **The sessions server dies** (`kill-server`, or a crash). Every session derives dormant or interrupted, and the next `w` or Enter restarts it. Decks show the placeholder and recover once the server is back, because `ensureSessionsServer` runs on every effect.
+- **swb's server dies** (`kill-server`, or a crash). The Deck goes with it, and every terminal on it returns to its shell. Every session derives dormant or interrupted; the next `swb` starts the server and the Deck again, and `w` or Enter restarts a session.
 - **`swb` inside another tmux.** Identical behavior: `$TMUX` is unset for every client `swb` starts. The outer tmux grabs its own prefix first; if that's also `M-a`, rebind `swb`'s prefix in config. Its color styles, if any, become the Deck's outer terminal colors.
 - **Terminal too narrow.** The mocks set the breakpoint. Below it, the Deck shows the roster alone, and `Enter` zooms the Stage. Split view falls back to pi view below its own breakpoint, without changing `marks.view`.
-- **Alt+Enter through two layers** used to arrive as `ESC CR`. The sessions-server `M-Enter` binding re-emits CSI-u `13;3u`; real pi 0.99.2 passed with Shift+Enter, Enter, Escape, and Ctrl+C unchanged ([research](../wayfinding/session-manager/research/nested-tmux-alt-enter-and-images.md)). An e2e scenario guards it.
-- **Images in the Stage**: pi disables images under `TERM=tmux-256color` and renders a text fallback (path, MIME type, dimensions, an OSC 8 link). Kitty graphics can't cross two tmux layers by configuration alone, because tmux 3.7c has no Kitty graphics feature and pi doesn't double-wrap. That's accepted degradation, and `PI_IMAGE_PROTOCOL=none` makes it explicit.
+- **Alt+Enter** arrives as CSI-u `13;3u` under `extended-keys always`. Through the nested tmux the Deck used at first it arrived as `ESC CR`, which an inner binding corrected ([research](../wayfinding/session-manager/research/nested-tmux-alt-enter-and-images.md)). An e2e scenario guards it.
+- **Images in the Stage**: pi disables images under `TERM=tmux-256color` and renders a text fallback (path, MIME type, dimensions, an OSC 8 link). Kitty graphics can't cross tmux by configuration alone, because tmux has no Kitty graphics feature. That's accepted degradation, and `PI_IMAGE_PROTOCOL=none` makes it explicit.
 - **The power-loss window.** The db can run one message ahead of the transcript. Accepted: the db is never treated as the transcript.
 - **Subagents and handoffs** from a managed session have no `SWB_MANAGED`, so they're never Sessions. The e2e suite proves it with real pi-sessions subagents.
 
@@ -634,9 +612,9 @@ CI sets versions from the tag; nothing is bumped locally. Following pi-sessions'
 ### Terminal emulator inside pi-tui, or libghostty
 
 - **Status:** Open, as an escape hatch only
-- **Open Issue:** None, unless nested tmux proves inadequate.
+- **Open Issue:** None, unless tmux proves inadequate.
 - **Discussion:** Most control, highest cost, and fidelity risk with keyboard protocols, images, and mouse.
-- **Next step:** Revisit only if the nested-tmux defects can't be resolved.
+- **Next step:** Revisit only if tmux's defects can't be resolved.
 
 ### Pre-minted session ids
 

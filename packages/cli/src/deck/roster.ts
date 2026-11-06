@@ -20,10 +20,10 @@ import { targetName } from "../dirs.ts";
 import { type Choice, presetLabels } from "../harnesses.ts";
 import { presetUntil } from "../schedules.ts";
 import { newer } from "../sessions.ts";
-import { tmux, UI } from "../tmux.ts";
+import { SESSIONS, tmux } from "../tmux.ts";
 import { VERSION } from "../version.ts";
-import { DECK } from "./deck.ts";
-import { rosterPane, sock, stagePane } from "./env.ts";
+import { DECK } from "./conf.ts";
+import { rosterPane, sock } from "./env.ts";
 import {
 	addTarget,
 	archiveCancels,
@@ -258,7 +258,7 @@ function place(lines: string[], want: Overlay[], width: number, spot: PeekSpot |
 	queueMicrotask(() => afterFrame());
 }
 
-/** Puts in place what the last frame wants: the Peek, the UI server's pointer watch, and what floats over the Stage. */
+/** Puts in place what the last frame wants: the Peek, tmux's pointer watch, and what floats over the Stage. */
 function afterFrame(): void {
 	frame.frameQueued = false;
 	const { floats, leaves, spot } = frame.wanted;
@@ -727,7 +727,7 @@ function foldedTally(hidden: Entry[]): string {
 // ── Peek ────────────────────────────────────────────────────────────────
 
 // A Peek is a session's particulars and keys in an overlay beside its row (see overlay.ts): on the Stage, so it never
-// covers the roster, or on a narrow Deck, which has no Stage beside the roster, over the roster's right edge. The UI
+// covers the roster, or on a narrow Deck, which has no Stage beside the roster, over the roster's right edge. tmux
 // server puts it away when the pointer leaves (see deck.ts).
 
 const PEEK_COLS = 48;
@@ -1191,7 +1191,7 @@ function viewState(): DeckState {
 				? "roster"
 				: model.focusedPane === shellShownIn()
 					? "shell"
-					: model.focusedPane === stagePane && editorShown(applied)
+					: model.focusedPane === panes.main.pane && editorShown(applied)
 						? "editor"
 						: "stage",
 		staged: {
@@ -1252,7 +1252,7 @@ tui.setLayoutRoot(roster);
 
 const overlays = new Overlays({
 	pane: rosterPane,
-	deck: DECK,
+	deck: `=${DECK}:`,
 	failed: (message) => toast(message, "error"),
 	left: onPointerOut,
 	pressed: onOverlayPress,
@@ -1265,7 +1265,7 @@ tui.setFocus(roster);
 tui.start();
 
 // Inside tmux pi-tui asks only for motion with a button down. The roster wants every motion, for the hover, the Peek,
-// and the picker's highlight, and asking for it here is what makes tmux pass the pointer's motion to the UI server.
+// and the picker's highlight, and asking for it here is what makes tmux pass the pointer's motion on.
 process.stdout.write("\x1b[?1003h");
 
 async function queryColors(scheme: "light" | "dark" | null): Promise<void> {
@@ -1289,7 +1289,7 @@ tui.setTerminalColorSchemeNotifications(true);
 void queryColors(null);
 
 // biome-ignore-start lint/plugin: before the roster's first frame, when nothing waits on its keys yet.
-tmux(UI, "set", "-p", "-t", rosterPane, "@swb_label", "swb");
+tmux(SESSIONS, "set", "-p", "-t", rosterPane, "@swb_label", "swb");
 
 rmSync(sock, { force: true });
 

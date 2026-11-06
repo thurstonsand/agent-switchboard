@@ -3,8 +3,20 @@ import { instanced } from "@swb/shared";
 import { SwbError } from "./errors.ts";
 
 export const SESSIONS = instanced("swb");
-export const UI = instanced("swb-ui");
 export const DRIVE = instanced("swb-drive");
+
+export const SWB = process.execPath;
+
+/** Runs an swb command from tmux; its output and exit status are dropped, because `run-shell -b` paints either over the pane. */
+export function notify(command: string): string {
+	if (!/^[A-Za-z0-9/._+@-]+$/.test(SWB))
+		throw new SwbError(`swb's path ${SWB} has characters tmux hooks can't quote; move it somewhere plainer`);
+	return `run-shell -b "${SWB} ${command} >/dev/null 2>&1 || true"`;
+}
+
+export function hook(name: string, command: string): string {
+	return `set-hook -g ${name}[0] '${notify(command)}'`;
+}
 
 const MIN_MAJOR = 3;
 const MIN_MINOR = 8;
@@ -130,10 +142,40 @@ export function hostPane(host: string): string | null {
 	return listHosts("#{pane_id}").find(([name]) => name === host)?.[1] ?? null;
 }
 
-/** Ends a host's harness, closing its pane wherever it is; a session left with no pane goes with it. */
-export function killHost(host: string): void {
-	const pane = hostPane(host);
-	if (pane) tmuxTry(SESSIONS, "kill-pane", "-t", pane);
+/**
+ * Ends the pane whose own session is `home`, wherever it is, and with it that session. One on the Deck's Stage goes home
+ * first, and the stand-in that held its place there takes its slot back, so the Deck's layout never moves.
+ */
+export function killHome(home: string): void {
+	for (let tries = 0; tries < 5; tries++) {
+		const pane = listPanes(SESSIONS, "#{pane_id}", "#{session_name}", "#{@swb_home}", "#{@swb_slot}").find(([, , owner]) => owner === home);
+		if (!pane) return;
+		const [id, at, , slot] = pane as [string, string, string, string];
+		// The Stage may move the pane between that listing and this, so tmux checks it's still where it was as it acts.
+		const away = [
+			`set -p -t ${quote(`=${home}:`)} @swb_slot ${quote(slot)}`,
+			`swap-pane -d -Z -s ${id} -t ${quote(`=${home}:`)}`,
+			`kill-pane -t ${id}`,
+		].join(" ; ");
+		const result = tmuxTry(
+			SESSIONS,
+			...["if", "-F", "-t", id, `#{==:#{session_name},${home}}`, `kill-pane -t ${id}`],
+			`if -F -t ${id} ${quote(`#{&&:#{==:#{session_name},${at}},#{==:#{@swb_slot},${slot}}}`)} ${quote(away)} 'display -p moved'`,
+		);
+		if (!result.ok || result.out !== "moved") return;
+	}
+	throw new Error(`${home}'s pane kept moving while swb closed it`);
+}
+
+/**
+ * Commands, to follow the one creating a session, that give its pane the palette the Deck last mirrored: tmux handles the
+ * whole list before the pane's program can ask, so its first OSC 4 query is answered with the terminal's colors rather
+ * than none, which it would get off the Deck until the worker's next tick.
+ */
+export function seedPalette(session: string): string[] {
+	const target = quote(`=${session}:`);
+	const seeds = Array.from({ length: 16 }, (_, i) => `set -pF -t ${target} 'pane-colours[${i}]' '#{@swb_palette_${i}}'`);
+	return [";", "if", "-F", "#{@swb_palette_0}", seeds.join(" ; ")];
 }
 
 /** Quotes one argument for a tmux command string. */

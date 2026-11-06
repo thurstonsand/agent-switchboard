@@ -23,9 +23,10 @@ import {
 	wake,
 } from "../sessions.ts";
 import { loadLayout, markUnseen, markVisited, openStore, saveLayout, setGroup, setView } from "../store.ts";
-import { hostPane, killHost, listPanes, SESSIONS, tmux, tmuxTry, UI } from "../tmux.ts";
+import { hostPane, killHome, listPanes, SESSIONS, tmux, tmuxTry } from "../tmux.ts";
 import { locateTranscript } from "../transcripts/read.ts";
-import { DECK, ensurePlaceholder, ensureUiServer, PLACEHOLDER } from "./deck.ts";
+import { applyPrefix, DECK, PLACEHOLDER } from "./conf.ts";
+import { ensurePlaceholder } from "./deck.ts";
 import type { Diff, Entry, FromWorker, NewSession, Snapshot, TerminalProfile, ToWorker, Transcript, Turn } from "./protocol.ts";
 import { readTranscript } from "./transcript.ts";
 
@@ -57,7 +58,7 @@ let pending = new Map<string, Pending[]>();
 /** What each launch left for the first session its process records, by tmux session, until that session takes it. */
 let launches = new Map<string, { parentId: string | null; group: string | null }>();
 let profile: TerminalProfile | null = null;
-/** The sessions server this Deck last mirrored its terminal into, by pid: a new one is mirrored again. */
+/** The server this Deck last mirrored its terminal's background into, by pid: a new one is mirrored again. */
 let mirroredServer = "";
 const transcripts = new Map<string, { mtimeMs: number; transcript: Transcript }>();
 /** Hosts this Deck launched whose pi hasn't registered yet. */
@@ -204,7 +205,18 @@ function worktreeOf(row: SessionRow): string | null {
 	return worktrees.get(cwd) ?? null;
 }
 
-type Polled = { snapshot: Snapshot; attached: Map<string, boolean>; reaped: Map<string, number>; names: Set<string>; serverPid: string };
+/** The kinds of session whose own pane the Stage can show. */
+const OWN_PANE = new Set(["harness", "editor", "shell", "placeholder"]);
+
+type Polled = {
+	snapshot: Snapshot;
+	staged: Map<string, boolean>;
+	reaped: Map<string, number>;
+	names: Set<string>;
+	serverPid: string;
+	/** Each running session's pane, its program's modes, and the colors last mirrored onto it. */
+	colorless: string[][];
+};
 
 function snapshot(): Polled {
 	readDb();
@@ -217,32 +229,47 @@ function snapshot(): Polled {
 		"#{pid}",
 		"#{@swb_version}",
 		"#{@swb_host}",
-		"#{?session_attached,1,0}",
+		`#{?#{==:#{session_name},${DECK}},1,0}`,
 		"#{pane_dead}",
 		"#{pane_dead_time}",
 		"#{@swb_reaped}",
 		"#{@swb_stopping}",
+		"#{@swb_home}",
+		"#{@swb_starting}",
+		"#{pane_id}",
+		"#{pane_private_modes}",
+		"#{@swb_colors}",
 	);
 	const listed = [...new Map(panes.map((row) => [row[0] as string, row])).values()];
+	// An Editor or a shell whose program exited, wherever the Stage has its pane, goes with its session.
+	const ended = new Set(panes.filter((row) => row[11] !== "" && row[5] === "" && row[7] === "1").map((row) => row[11] as string));
+	for (const home of ended) killHome(home);
+	// A session whose own pane closed outright while the Stage showed it is left holding a stand-in, which nothing else ends.
+	const homes = new Set(panes.map((row) => row[11]));
+	for (const [name, kind] of listed)
+		if (OWN_PANE.has(kind as string) && !homes.has(name)) tmuxTry(SESSIONS, "kill-session", "-t", `=${name}`);
 	const harnesses = panes.filter((row) => row[5] !== "");
 	const died: Record<string, string[]> = {};
-	for (const [, , , , , host, , dead, deadAt] of harnesses) {
+	for (const [, , , , , host, , dead, deadAt, , , , starting] of harnesses) {
 		if (dead !== "1") continue;
-		if (launched.has(host as string)) {
-			launched.delete(host as string);
-			died[host as string] = lastWords(host as string);
-		} else if (Date.now() / 1000 - Number(deadAt) < ORPHAN_DEAD_S) continue;
-		killHost(host as string);
+		// One that registered was kept only because it died on the Deck's Stage, and goes at once; its stand-in takes its slot back.
+		if (starting !== "") {
+			if (launched.has(host as string)) {
+				launched.delete(host as string);
+				died[host as string] = lastWords(host as string);
+			} else if (Date.now() / 1000 - Number(deadAt) < ORPHAN_DEAD_S) continue;
+		}
+		killHome(host as string);
 	}
 	const alive = harnesses.filter((row) => row[7] !== "1");
-	const attached = new Map(alive.map((row) => [row[5] as string, row[6] === "1"]));
+	const staged = new Map(alive.map((row) => [row[5] as string, row[6] === "1"]));
 	const reaped = new Map(alive.filter((row) => row[9]).map((row) => [row[5] as string, Number(row[9])]));
 	// A harness some swb is stopping reads as gone already: its session shows dormant, and its wake waits for it.
 	const quitting = new Set(alive.filter((row) => row[10]).map((row) => row[5] as string));
 	const w: World = {
 		now: Date.now(),
 		bootId: boot,
-		hosts: new Set([...attached.keys()].filter((host) => !quitting.has(host))),
+		hosts: new Set([...staged.keys()].filter((host) => !quitting.has(host))),
 		inactiveAfterMs: config.inactiveAfterMs,
 	};
 	const known = new Set(rows.map((row) => row.session_id));
@@ -299,17 +326,22 @@ function snapshot(): Polled {
 	return {
 		snapshot: {
 			entries,
-			hosts: [...attached.keys()],
-			editors: Object.fromEntries(listed.filter(([, kind]) => kind === "editor").map(([name, , dir]) => [dir, name])),
-			shells: Object.fromEntries(listed.filter(([, kind]) => kind === "shell").map(([name, , dir]) => [dir, name])),
+			hosts: [...staged.keys()],
+			editors: Object.fromEntries(
+				listed.filter(([name, kind]) => kind === "editor" && !ended.has(name as string)).map(([name, , dir]) => [dir, name]),
+			),
+			shells: Object.fromEntries(
+				listed.filter(([name, kind]) => kind === "shell" && !ended.has(name as string)).map(([name, , dir]) => [dir, name]),
+			),
 			died,
 			serverUp: listed.length > 0,
 			swbVersion: listed[0]?.[4] ?? "",
 		},
-		attached,
+		staged,
 		reaped,
 		names: new Set(listed.map(([name]) => name as string)),
 		serverPid: listed[0]?.[3] ?? "",
+		colorless: panes.filter((row) => row[11] !== "" && row[7] !== "1").map((row) => row.slice(13, 16)),
 	};
 }
 
@@ -319,15 +351,15 @@ function quietKill(signal: "TERM" | "KILL", pid: number): string {
 }
 
 /**
- * An idle live pi nobody is viewing stops after reap_after. A freshly started one counts from its start, so a
- * background wake isn't reaped on the spot. The attached check runs inside tmux, so a viewer that attached since
- * this poll keeps it.
+ * An idle live pi the Deck's Stage doesn't show stops after reap_after, whether or not a terminal is on the Deck. A
+ * freshly started one counts from its start, so a background wake isn't reaped on the spot. The Stage check runs inside
+ * tmux, so a pane the Stage took since this poll keeps it.
  *
  * A process gets one SIGTERM, from whichever roster's worker gets there first, as one replaces another: tmux marks its
  * pane @swb_reaped as it sends it. pi shuts down once and ignores every later SIGTERM, and the SIGHUP of a closed pane too, so a shutdown hook
  * that hangs would keep it forever; one still there REAP_GRACE_MS after its SIGTERM gets SIGKILL.
  */
-function reap(snap: Snapshot, attached: Map<string, boolean>, reaped: Map<string, number>): void {
+function reap(snap: Snapshot, staged: Map<string, boolean>, reaped: Map<string, number>): void {
 	const now = Date.now();
 	for (const host of killed) if (!reaped.has(host)) killed.delete(host);
 	const byId = new Map(rows.map((row) => [row.session_id, row]));
@@ -343,7 +375,7 @@ function reap(snap: Snapshot, attached: Map<string, boolean>, reaped: Map<string
 			tmuxTry(SESSIONS, "run-shell", "-b", quietKill("KILL", runtime.pid));
 			continue;
 		}
-		if (entry.activity !== "idle" || attached.get(entry.host)) continue;
+		if (entry.activity !== "idle" || staged.get(entry.host)) continue;
 		const row = byId.get(entry.id);
 		const lastTouched = Math.max(row?.last_settled_at ?? 0, row?.visited_at ?? 0, runtime.started_at);
 		if (now - lastTouched < config.reapAfterMs) continue;
@@ -356,46 +388,55 @@ function reap(snap: Snapshot, attached: Map<string, boolean>, reaped: Map<string
 			"-F",
 			"-t",
 			pane,
-			"#{?session_attached,0,1}",
+			`#{!=:#{session_name},${DECK}}`,
 			`set -p -t ${pane} @swb_reaped ${now} ; run-shell -b '${quietKill("TERM", runtime.pid)}'`,
 		);
 	}
 }
 
+function colorKey({ foreground, background, scheme, palette }: TerminalProfile): string {
+	return [foreground, background, scheme, ...(palette ?? [])].join(" ");
+}
+
 /**
- * Unviewed panes have no terminal to ask, so tmux answers their color queries from window-style and pane-colours: this
- * Deck's terminal is mirrored there, for every pane. The last Deck to report or regain focus owns it.
+ * A pane off the Deck has no terminal to ask, so tmux answers its color queries from window-style and pane-colours: the
+ * Deck's terminal is mirrored into them. The background goes in the server's window-style, which the Deck's own windows
+ * override. The palette goes on each session's own pane, which takes it along onto the Deck: set for the server, it
+ * would answer the roster's own palette query too, and the roster would never see the terminal's change again. It's
+ * also kept in server options, which a new pane's palette is seeded from as it's created (seedPalette).
  *
- * Then every program subscribed to light/dark reports (mode 2031) gets one, so its next query sees the new colors.
- * tmux 3.8 sends its own as soon as the Stage's client reports, before this mirror is current, and none again once it
- * is. paste-buffer -S writes straight to the program, even under copy mode, where send-keys would drive copy mode.
- * pane_private_modes reads the program's modes, not copy mode's; on 3.7c it's empty, and that tmux reports to panes
- * from the window-style change itself.
+ * Then each of those programs subscribed to light/dark reports (mode 2031) gets one, so its next query sees the new
+ * colors: tmux sends its own only to the panes a terminal shows, and only when the scheme flips. paste-buffer -S
+ * writes straight to the program, even under copy mode, where send-keys would drive copy mode. pane_private_modes reads
+ * the program's modes, not copy mode's.
  */
-function mirror(colors: TerminalProfile): void {
+function mirror(colors: TerminalProfile, stale: string[][], serverPid: string): void {
 	const { foreground, background, palette, scheme } = colors;
-	const key = [foreground, background, scheme, ...(palette ?? [])].join(" ");
-	const current = tmuxTry(SESSIONS, "show", "-gqv", "@swb_colors");
-	if (current.ok && current.out === key) return;
-	const style = `bg=${background},fg=${foreground}`;
-	const styles = ["window-style", "window-active-style"].flatMap((option) => [";", "set", "-g", option, style]);
-	const colours = palette
-		? palette.flatMap((color, i) => [";", "set", "-g", `pane-colours[${i}]`, color])
-		: [";", "set", "-gu", "pane-colours"];
-	tmux(SESSIONS, ...[...styles, ...colours, ";", "set", "-g", "@swb_colors", key].slice(1));
-	const subscribed = tmux(SESSIONS, "list-panes", "-a", "-F", "#{?pane_dead,,#{pane_id} #{pane_private_modes}}")
-		.split("\n")
-		.filter((line) => line.split(" ")[1]?.split(",").includes("2031"))
-		.map((line) => line.split(" ")[0] as string);
-	if (subscribed.length === 0) return;
-	tmux(SESSIONS, "set-buffer", "-b", "swb-theme", `\x1b[?997;${scheme === "dark" ? 1 : 2}n`);
+	const key = colorKey(colors);
+	if (serverPid !== mirroredServer) {
+		mirroredServer = serverPid;
+		const style = `bg=${background},fg=${foreground}`;
+		const seeds = Array.from({ length: 16 }, (_, i) =>
+			palette ? [";", "set", "-g", `@swb_palette_${i}`, palette[i] as string] : [";", "set", "-gu", `@swb_palette_${i}`],
+		).flat();
+		tmux(SESSIONS, "set", "-g", "window-style", style, ";", "set", "-g", "window-active-style", style, ...seeds);
+	}
+	if (stale.length === 0) return;
+	const report = `\x1b[?997;${scheme === "dark" ? 1 : 2}n`;
+	tmux(SESSIONS, "set-buffer", "-b", "swb-theme", report);
 	// One command per pane: a pane that exits in between fails only its own.
-	for (const pane of subscribed) tmuxTry(SESSIONS, "paste-buffer", "-S", "-b", "swb-theme", "-t", pane);
+	for (const [pane, modes] of stale) {
+		const colours = palette
+			? palette.flatMap((color, i) => [";", "set", "-p", "-t", pane as string, `pane-colours[${i}]`, color])
+			: [";", "set", "-pu", "-t", pane as string, "pane-colours"];
+		const told = modes?.split(",").includes("2031") ? [";", "paste-buffer", "-S", "-b", "swb-theme", "-t", pane as string] : [];
+		tmuxTry(SESSIONS, ...[...colours, ";", "set", "-p", "-t", pane as string, "@swb_colors", key, ...told].slice(1));
+	}
 	tmux(SESSIONS, "delete-buffer", "-b", "swb-theme");
 }
 
 function tick(): Set<string> {
-	const { snapshot: snap, attached, reaped, names, serverPid } = snapshot();
+	const { snapshot: snap, staged, reaped, names, serverPid, colorless } = snapshot();
 	for (const runtime of runtimes) {
 		if (!launched.has(runtime.tmux_session) || !runtimeLive(runtime, boot, new Set(snap.hosts))) continue;
 		launched.delete(runtime.tmux_session);
@@ -403,15 +444,19 @@ function tick(): Set<string> {
 	// A Deck without its placeholder shows a blank Stage, so a killed sessions server comes straight back.
 	if (!snap.serverUp) ensureSessionsServer();
 	if (!names.has(PLACEHOLDER)) ensurePlaceholder(false);
-	if (profile && serverPid !== mirroredServer) {
-		mirroredServer = serverPid;
+	if (profile) {
+		const key = colorKey(profile);
 		try {
-			mirror(profile);
+			mirror(
+				profile,
+				colorless.filter(([, , colors]) => colors !== key),
+				serverPid,
+			);
 		} catch (error) {
 			post({ type: "error", text: (error as Error).message });
 		}
 	}
-	reap(snap, attached, reaped);
+	reap(snap, staged, reaped);
 	if (asking.size > 0) return names;
 	const json = JSON.stringify(snap);
 	if (json === lastJson) return names;
@@ -495,10 +540,8 @@ async function handle(message: ToWorker): Promise<void> {
 			void posted.then(() => refresh(false));
 			break;
 		case "config": {
-			const prefixChanged = message.config.prefix !== config.prefix;
+			if (message.config.prefix !== config.prefix) tmux(SESSIONS, ...applyPrefix(message.config.prefix, config.prefix));
 			config = message.config;
-			// The prefix lives on the UI server's conf, which a reload moves every terminal on the Deck to.
-			if (prefixChanged) ensureUiServer(config);
 			announce();
 			break;
 		}
@@ -586,7 +629,7 @@ async function handle(message: ToWorker): Promise<void> {
 			return;
 		case "colors":
 			profile = message.colors;
-			tmux(UI, "set", "-w", "-t", `=${DECK}:`, "@swb_scheme", profile.scheme);
+			tmux(SESSIONS, "set", "-w", "-t", `=${DECK}:`, "@swb_scheme", profile.scheme);
 			mirroredServer = "";
 			break;
 		case "view":

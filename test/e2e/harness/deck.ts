@@ -17,7 +17,7 @@ export function state(s: Scenario): DeckState {
 
 /** The title the Deck's tmux gives its terminal. */
 export function title(s: Scenario): string {
-	return s.tmux(s.servers.ui, "display", "-p", "-t", "=deck:", "#{T:set-titles-string}");
+	return s.tmux(s.servers.sessions, "display", "-p", "-t", "=deck:", "#{T:set-titles-string}");
 }
 
 export function entry(s: Scenario, id: string): LsEntry {
@@ -137,10 +137,13 @@ export async function cursorTo(s: Scenario, id: string): Promise<void> {
 	}
 }
 
-/** Takes the Deck down with its terminal, as a reboot would, so the next `swb drive start` builds it afresh. */
+/**
+ * Takes the Deck's terminal off it, and its roster's pane with it, so the next `swb drive start` finds the Deck broken
+ * and builds it afresh, sending the sessions on its Stage home first.
+ */
 export function closeDeck(s: Scenario): void {
 	s.swb("drive", "stop");
-	s.tmux(s.servers.ui, "kill-server");
+	s.tmux(s.servers.sessions, "kill-pane", "-t", s.tmux(s.servers.sessions, "show", "-qv", "-t", "=deck:", "@swb_roster"));
 }
 
 export type Terminal = {
@@ -162,7 +165,7 @@ export function terminal(s: Scenario, name: string, command: string, size = "140
 	s.tmux(server, "set", "-s", "escape-time", "0", ";", "set", "-g", "status", "off", ";", "set", "-g", "remain-on-exit", "on");
 	const attached = () => {
 		const tty = s.tmux(server, "display", "-p", "-t", "=t:", "#{pane_tty}");
-		return s.tmux(s.servers.ui, "list-clients", "-F", "#{client_tty}").split("\n").includes(tty);
+		return s.tmux(s.servers.sessions, "list-clients", "-F", "#{client_tty}").split("\n").includes(tty);
 	};
 	const state = (): DeckState => {
 		if (!attached()) throw new Error(`no Deck on terminal ${name}`);

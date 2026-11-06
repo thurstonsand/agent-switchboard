@@ -6,7 +6,6 @@ import { archive } from "./commands/archive.ts";
 import { clock } from "./commands/clock.ts";
 import { launch, list, listSchedules, recall, schedule, search, send, show, unschedule, update } from "./commands/coordinate.ts";
 import { deckCommand, deckNotify } from "./commands/deck.ts";
-import { detached } from "./commands/detached.ts";
 import { dirs } from "./commands/dirs.ts";
 import { drive } from "./commands/drive.ts";
 import { gc } from "./commands/gc.ts";
@@ -20,7 +19,6 @@ import { quit } from "./commands/quit.ts";
 import { reload } from "./commands/reload.ts";
 import { snooze } from "./commands/snooze.ts";
 import { unarchive } from "./commands/unarchive.ts";
-import { visit } from "./commands/visit.ts";
 import { wake } from "./commands/wake.ts";
 import { readConfig } from "./config.ts";
 import { editorNav, openDeck } from "./deck/deck.ts";
@@ -173,10 +171,6 @@ async function main(args: string[]): Promise<void> {
 			return migrate();
 		case "drive":
 			return drive(rest);
-		case "visit":
-			return visit(rest);
-		case "detached":
-			return detached(rest);
 		case "gc":
 			return gc();
 		case "__deck":

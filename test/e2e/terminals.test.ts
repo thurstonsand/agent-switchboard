@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import type { DeckState } from "../../packages/cli/src/deck/protocol.ts";
-import { cursorTo, entry, seed, state, terminal, waitState } from "./harness/deck.ts";
+import { cursorTo, seed, state, terminal, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -128,33 +128,4 @@ test("every swb attaches its terminal to the one Deck: swb open in one moves it 
 	await waitState(s, "no focused terminal", (x) => !x.terminalFocused);
 	s.swb("drive", "focus", "in");
 	await waitState(s, "the drive terminal focused", (x) => x.terminalFocused);
-});
-
-test("a plain tmux attach shares a session with the Deck staging it, and detaching leaves it live", async () => {
-	s = scenario("phase5", "shared-viewer");
-	const [a] = (await seed(s, { turns: ["shared"] })) as [string];
-	s.swb("drive", "start");
-	await cursorTo(s, a);
-	s.keys("w");
-	const up = await waitState(s, "a live", (x) => x.staged.id === a && x.staged.kind === "live", budgets.piReady);
-	const host = up.staged.host as string;
-	const viewer = terminal(s, "viewer", `env -u TMUX tmux -L ${s.servers.sessions} attach -t =${host}`, "120x35");
-	await until(() => viewer.screen().includes("shared"), budgets.settle, "the conversation in the viewer");
-	expect(s.tmux(s.servers.sessions, "display", "-p", "-t", `=${host}:`, "#{session_attached}")).toBe("2");
-	viewer.keys("-l", "reply from-the-viewer", "Enter");
-	await until(() => s.signal("replied.from-the-viewer") !== "", budgets.settle, "the viewer's turn");
-	await until(() => s.screen().includes("from-the-viewer"), budgets.settle, "the turn on the Deck's Stage");
-	s.save("viewer.txt", viewer.screen());
-	s.save("deck.txt", s.screen());
-
-	s.tmux(viewer.server, "kill-server");
-	await until(
-		() => s.tmux(s.servers.sessions, "display", "-p", "-t", `=${host}:`, "#{session_attached}") === "1",
-		budgets.settle,
-		"one viewer left",
-	);
-	expect(entry(s, a).live).toBe(true);
-	expect(state(s).staged).toMatchObject({ id: a, kind: "live", host });
-	await until(() => !s.screen().includes("····"), budgets.settle, "the Stage back to its full size");
-	s.save("deck-after.txt", s.screen());
 });

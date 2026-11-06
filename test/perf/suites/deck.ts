@@ -1,23 +1,21 @@
 import { config } from "../../e2e/harness/deck.ts";
 import { type Scenario, which } from "../../e2e/harness/index.ts";
-import { dormant, fleet, launched, say, stop } from "../fleet.ts";
+import { dormant, fleet, killHome, launched, say, stop } from "../fleet.ts";
 import { cursorTo, focusRoster, onScreen, rowOf, suite, when } from "../probe.ts";
 import { Terminal } from "../terminal.ts";
 
 // The Deck as a person uses it: typed into a terminal, keys pressed, the screen watched until it stops changing.
 // `settled` is from the action to the last output before the screen went still with the expected state on it.
 
-function killServers(s: Scenario): void {
-	for (const server of [s.servers.ui, s.servers.sessions]) {
-		let pid: number;
-		try {
-			pid = Number(s.tmux(server, "display", "-p", "#{pid}"));
-		} catch {
-			continue;
-		}
-		s.tmux(server, "kill-server");
-		while (alive(pid)) Bun.sleepSync(10);
+function killServer(s: Scenario): void {
+	let pid: number;
+	try {
+		pid = Number(s.tmux(s.servers.sessions, "display", "-p", "#{pid}"));
+	} catch {
+		return;
 	}
+	s.tmux(s.servers.sessions, "kill-server");
+	while (alive(pid)) Bun.sleepSync(10);
 }
 
 function alive(pid: number): boolean {
@@ -48,7 +46,7 @@ export const deckOpen = suite({
 			runs: 6,
 			sample: async ({ s }, { t }) => {
 				await t.atPrompt();
-				killServers(s);
+				killServer(s);
 				await t.type("swb");
 				await Bun.sleep(50);
 				const t0 = await t.press("Enter");
@@ -205,7 +203,7 @@ export const deckNav = suite({
 					.tmux(s.servers.sessions, "list-sessions", "-F", "#{session_name}\t#{@swb_kind}")
 					.split("\n")
 					.map((l) => l.split("\t")))
-					if (kind === "editor") s.tmux(s.servers.sessions, "kill-session", "-t", `=${name}`);
+					if (kind === "editor") killHome(s, name as string);
 				await Bun.sleep(300);
 				const t0 = await t.press("M-a", "e");
 				const { last, doneAt } = await t.settle(

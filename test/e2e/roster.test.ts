@@ -28,7 +28,7 @@ test("the roster holds roster_width, or a dragged width, through resizes; clicki
 	await waitState(s, "240 columns", (x) => x.layout.width === 240);
 	await until(() => panes(s)[0]?.width === 60, budgets.settle, `a 60-column roster, not ${panes(s)[0]?.width}`);
 	s.save("240-cols.txt", s.screen());
-	s.tmux(s.servers.ui, "resize-pane", "-t", "=deck:.0", "-x", "80");
+	s.tmux(s.servers.sessions, "resize-pane", "-t", "=deck:.0", "-x", "80");
 	await Bun.sleep(300);
 	s.swb("drive", "resize", "200x50");
 	await waitState(s, "200 columns", (x) => x.layout.width === 200);
@@ -175,7 +175,7 @@ test("m names a session's Group, n joins it; dragging moves it between Groups, a
 	s.keys("-l", "review");
 	const nameLine = () =>
 		s
-			.tmux(s.servers.ui, "capture-pane", "-p", "-e", "-t", "=deck:.0")
+			.tmux(s.servers.sessions, "capture-pane", "-p", "-e", "-t", "=deck:.0")
 			.split("\n")
 			.find((line) => line.includes("> review"));
 	await until(() => nameLine() !== undefined, budgets.settle, "the name typed");

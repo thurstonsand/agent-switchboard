@@ -93,7 +93,7 @@ test("Settings edits config.toml by keyboard and mouse, keeps its comments, and 
 	s.keys("Escape");
 	st = await waitState(s, "back to the roster", (x) => x.mode === "roster");
 	await until(
-		() => s.tmux(s.servers.ui, "display", "-p", "-t", "=deck:", "#{window_zoomed_flag}") === "0",
+		() => s.tmux(s.servers.sessions, "display", "-p", "-t", "=deck:", "#{window_zoomed_flag}") === "0",
 		budgets.settle,
 		"the roster unzoomed",
 	);
@@ -146,7 +146,7 @@ test("a new prefix, pressed rather than typed, moves the open Deck to it at once
 	s.keys("Enter");
 	await waitState(s, "the prefix saved", (x) => item(x, "keys.prefix")?.value === "C-b");
 	expect(read()).toBe('[keys]\nprefix = "C-b"\n');
-	await until(() => s.tmux(s.servers.ui, "show", "-gv", "prefix") === "C-b", budgets.settle, "the UI server on C-b");
+	await until(() => s.tmux(s.servers.sessions, "show", "-gv", "prefix") === "C-b", budgets.settle, "the server on C-b");
 	// The new prefix's , comes back to Settings from the Stage.
 	s.keys("Escape");
 	await waitState(s, "the roster", (x) => x.mode === "roster");

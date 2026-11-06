@@ -20,9 +20,9 @@ const toolPath = [ttydDir, dirname(which("ffmpeg"))].join(":");
 /** The Deck as text and ANSI, taken when the director finishes, while the tape still holds the Deck open. */
 function snapshot(s: Scenario): void {
 	s.save("deck-state.json", s.swb("deck", "state", "--json"));
-	const panes = s.tmux(s.servers.ui, "list-panes", "-a", "-F", "#{pane_id}").split("\n").filter(Boolean);
+	const panes = s.tmux(s.servers.sessions, "list-panes", "-s", "-t", "=deck", "-F", "#{pane_id}").split("\n").filter(Boolean);
 	const capture = (...flags: string[]) =>
-		panes.map((pane) => s.tmux(s.servers.ui, "capture-pane", "-p", ...flags, "-t", pane)).join("\n----\n");
+		panes.map((pane) => s.tmux(s.servers.sessions, "capture-pane", "-p", ...flags, "-t", pane)).join("\n----\n");
 	s.save("screen.txt", capture());
 	s.save("screen.ansi", capture("-e"));
 }

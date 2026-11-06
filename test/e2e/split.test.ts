@@ -25,7 +25,7 @@ type Box = { id: string; left: number; top: number; width: number; height: numbe
 function boxes(s: Scenario): Box[] {
 	return s
 		.tmux(
-			s.servers.ui,
+			s.servers.sessions,
 			"list-panes",
 			"-t",
 			"=deck:",
@@ -172,7 +172,7 @@ test("split shows pi below 160 columns and returns on widening, survives reopeni
 	await waitState(s, "the roster alone at 90", (x) => x.layout.rosterOnly && !x.layout.split);
 	expect(panes(s).length).toBe(2);
 	await until(() => activePane(s) === 0 && !s.screen().includes("hello"), budgets.settle, "only the roster on screen");
-	expect(s.tmux(s.servers.ui, "display", "-p", "-t", "=deck:", "#{window_zoomed_flag}")).toBe("1");
+	expect(s.tmux(s.servers.sessions, "display", "-p", "-t", "=deck:", "#{window_zoomed_flag}")).toBe("1");
 	s.save("90-cols.txt", s.screen());
 
 	s.swb("drive", "resize", "200x50");

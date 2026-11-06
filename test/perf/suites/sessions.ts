@@ -2,7 +2,7 @@ import { cpSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { now } from "../../../packages/shared/src/trace.ts";
 import type { Scenario } from "../../e2e/harness/index.ts";
-import { dormant, entry, stop } from "../fleet.ts";
+import { dormant, entry, killHome, stop } from "../fleet.ts";
 import { cursorTo, exits, focusRoster, onScreen, type Probe, suite, when } from "../probe.ts";
 import { Terminal } from "../terminal.ts";
 
@@ -74,7 +74,7 @@ function probes(harness: Harness): Probe<Ctx>[] {
 					{ what: `the new ${name} live`, quietMs: QUIET[harness], timeoutMs: 60_000 },
 				);
 				const started = (await t.state())?.staged.host;
-				if (started) s.tmux(s.servers.sessions, "kill-session", "-t", `=${started}`);
+				if (started) killHome(s, started);
 				await focusRoster(t);
 				return { t0, metrics: { settled: last - t0, live: doneAt - t0 } };
 			},

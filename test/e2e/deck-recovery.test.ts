@@ -19,8 +19,8 @@ test("closing the Deck's terminal leaves the Deck and its roster for the next sw
 	s.swb("drive", "start");
 	const sock = join(s.env.XDG_STATE_HOME as string, "agent-switchboard/deck.sock");
 	expect(existsSync(sock)).toBe(true);
-	const roster = () => s.tmux(s.servers.ui, "show", "-qv", "-t", "deck", "@swb_roster");
-	const rosterPid = () => Number(s.tmux(s.servers.ui, "display", "-p", "-t", roster(), "#{pane_pid}"));
+	const roster = () => s.tmux(s.servers.sessions, "show", "-qv", "-t", "deck", "@swb_roster");
+	const rosterPid = () => Number(s.tmux(s.servers.sessions, "display", "-p", "-t", roster(), "#{pane_pid}"));
 	const first = rosterPid();
 	s.swb("drive", "stop");
 	await Bun.sleep(500);
@@ -38,7 +38,7 @@ test("closing the Deck's terminal leaves the Deck and its roster for the next sw
 	s.swb("drive", "stop");
 	process.kill(first, "SIGKILL");
 	await until(
-		() => s.tmux(s.servers.ui, "display", "-p", "-t", roster(), "#{pane_dead}") === "1",
+		() => s.tmux(s.servers.sessions, "display", "-p", "-t", roster(), "#{pane_dead}") === "1",
 		budgets.settle,
 		"the roster's pane dead",
 	);
@@ -48,8 +48,8 @@ test("closing the Deck's terminal leaves the Deck and its roster for the next sw
 	expect(alive(second)).toBe(true);
 
 	s.swb("drive", "stop");
-	const [version] = s.tmux(s.servers.ui, "show", "-qv", "-t", "deck", "@swb_roster_build").split(":");
-	s.tmux(s.servers.ui, "set", "-t", "deck", "@swb_roster_build", `${version}:0`);
+	const [version] = s.tmux(s.servers.sessions, "show", "-qv", "-t", "deck", "@swb_roster_build").split(":");
+	s.tmux(s.servers.sessions, "set", "-t", "deck", "@swb_roster_build", `${version}:0`);
 	s.swb("drive", "start");
 	expect(rosterPid()).not.toBe(second);
 	await until(() => !alive(second), budgets.settle, "the outdated roster gone");
@@ -78,7 +78,7 @@ test("a roster killed while its wake waits on the launch lock doesn't wedge late
 		await cursorTo(s, a);
 		s.keys("w");
 		await waitState(s, "loading", (x) => x.staged.kind === "loading", 2000);
-		const rosterPid = Number(s.tmux(s.servers.ui, "display", "-p", "-t", "=deck:.0", "#{pane_pid}"));
+		const rosterPid = Number(s.tmux(s.servers.sessions, "display", "-p", "-t", "=deck:.0", "#{pane_pid}"));
 		process.kill(rosterPid, "SIGKILL");
 		await until(() => !alive(rosterPid), budgets.settle, "the roster gone");
 	} finally {
@@ -95,14 +95,16 @@ test("a roster killed while its wake waits on the launch lock doesn't wedge late
 	s.save("woke-after-kill.txt", s.screen());
 });
 
-test("the sessions server killed under an open Deck recovers on the next w", async () => {
+test("swb's tmux server killed under an open Deck takes the Deck with it, and the next swb brings both back", async () => {
 	s = scenario("phase2", "server-killed");
 	const [a] = (await seed(s, { turns: ["a"] })) as [string];
 	s.swb("drive", "start");
 	await cursorTo(s, a);
 	s.tmux(s.servers.sessions, "kill-server");
-	await until(() => s.screen().includes("⏎ wake"), budgets.settle, "the dormant card back on the Stage");
-	s.save("killed.txt", s.screen());
+	await until(() => s.swbTry("deck", "state", "--json").code !== 0, budgets.settle, "the Deck gone");
+	s.swbTry("drive", "stop");
+	s.swb("drive", "start");
+	await cursorTo(s, a);
 	s.keys("w");
 	await waitState(s, "a live again", (x) => x.staged.id === a && x.staged.kind === "live", budgets.piReady);
 	expect(entry(s, a).live).toBe(true);

@@ -11,7 +11,7 @@ or {
 			`listPanes`,
 			`listHosts`,
 			`hostPane`,
-			`killHost`,
+			`killHome`,
 			`killServer`,
 			`ensureSessionsServer`,
 			`ensureServer`,

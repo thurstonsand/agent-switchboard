@@ -162,9 +162,9 @@ export const directors: Record<string, Director> = {
 			// A long style guide pasted in, as the tape can't: the shipped instructions, over and over, past the cap.
 			const paste = join(s.root, "paste.md");
 			writeFileSync(paste, `\n\n${shipped.repeat(Math.ceil(16_000 / shipped.length))}`);
-			const roster = s.tmux(s.servers.ui, "display", "-p", "-t", "=deck:.0", "#{pane_id}");
-			s.tmux(s.servers.ui, "load-buffer", "-b", "guide", paste);
-			s.tmux(s.servers.ui, "paste-buffer", "-p", "-b", "guide", "-t", roster);
+			const roster = s.tmux(s.servers.sessions, "display", "-p", "-t", "=deck:.0", "#{pane_id}");
+			s.tmux(s.servers.sessions, "load-buffer", "-b", "guide", paste);
+			s.tmux(s.servers.sessions, "paste-buffer", "-p", "-b", "guide", "-t", roster);
 			await waitDeck(s, "the paste cut at the cap", (x) => x.settings?.prose?.text.length === 16_000);
 			await waitDeck(s, "back to the roster", (x) => x.mode === "roster");
 			// What the tape typed at the cap never went in.
@@ -812,6 +812,25 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"stage-death": {
+		run: async (s) => {
+			const live = await waitDeck(s, "pi live", (x) => x.staged.kind === "live");
+			const layout = () =>
+				s.tmux(s.servers.sessions, "list-panes", "-t", "=deck:", "-F", "#{pane_left},#{pane_top} #{pane_width}x#{pane_height}");
+			// After the tape's reply and its first screenshot.
+			await Bun.sleep(6000);
+			const before = layout();
+			const host = live.staged.host as string;
+			process.kill(Number(s.tmux(s.servers.sessions, "display", "-p", "-t", s.pane(host), "#{pane_pid}")), "SIGKILL");
+			await waitDeck(
+				s,
+				"its card in its place",
+				(x) => x.staged.id === live.staged.id && x.staged.kind !== "live" && x.staged.kind !== "loading",
+			);
+			expect(layout()).toBe(before);
+		},
+	},
+
 	"pane-labels": {
 		setup: async (s) => {
 			files(s);
@@ -1302,7 +1321,7 @@ export const directors: Record<string, Director> = {
 		run: async (s) => {
 			await waitDeck(s, "the Deck up", () => true);
 			const pane = "=deck:.0";
-			const lines = () => s.tmux(s.servers.ui, "capture-pane", "-p", "-t", pane).split("\n");
+			const lines = () => s.tmux(s.servers.sessions, "capture-pane", "-p", "-t", pane).split("\n");
 			// The last picker: opened after matic-re was added, so it's listed.
 			const shown = await until(
 				() => {
@@ -1318,7 +1337,7 @@ export const directors: Record<string, Director> = {
 			const y = shown.findIndex((l) => /^\s*pi-sessions\b/.test(l)) + 1;
 			for (const x of [30, 20, 10]) {
 				const bytes = [...Buffer.from(`\x1b[<35;${x};${y}M`)].map((b) => b.toString(16).padStart(2, "0"));
-				s.tmux(s.servers.ui, "send-keys", "-t", pane, "-H", ...bytes);
+				s.tmux(s.servers.sessions, "send-keys", "-t", pane, "-H", ...bytes);
 				await Bun.sleep(150);
 			}
 			await until(() => lines().some((l) => /pi-sessions\s+✕/.test(l)), TAPE, "the highlight under the pointer");
@@ -1354,7 +1373,7 @@ export const directors: Record<string, Director> = {
 					const bytes = [...Buffer.from(`\x1b[<${button};${col + 1};${row + 1}${up ? "m" : "M"}`)].map((b) =>
 						b.toString(16).padStart(2, "0"),
 					);
-					s.tmux(s.servers.ui, "send-keys", "-t", "=deck:.0", "-H", ...bytes);
+					s.tmux(s.servers.sessions, "send-keys", "-t", "=deck:.0", "-H", ...bytes);
 					await Bun.sleep(120);
 				}
 			};

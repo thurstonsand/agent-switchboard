@@ -104,7 +104,7 @@ export type Scenario = {
 	screen: () => string;
 	keys: (...keys: string[]) => void;
 	signal: (name: string) => string;
-	servers: { sessions: string; ui: string; drive: string };
+	servers: { sessions: string; drive: string };
 	/** Every request the fake model servers saw, one JSON object each, for the harnesses this scenario runs. */
 	requests: (harness: "claude" | "codex") => Record<string, unknown>[];
 	/** Trusts a directory for Claude Code and Codex, as a person would have once. */
@@ -209,7 +209,7 @@ export function scenario(
 		servers.add(`${env.TMUX_TMPDIR}\0${server}`);
 		return run([tools.tmux, "-L", server, ...args], env);
 	};
-	const named = { sessions: `swb-${instance}`, ui: `swb-ui-${instance}`, drive: `swb-drive-${instance}` };
+	const named = { sessions: `swb-${instance}`, drive: `swb-drive-${instance}` };
 	for (const server of Object.values(named)) servers.add(`${env.TMUX_TMPDIR}\0${server}`);
 	const swbTry = (...args: string[]) => {
 		const result = Bun.spawnSync([join(bin, "swb"), ...args], { env, cwd: project, stdout: "pipe", stderr: "pipe" });
@@ -244,10 +244,10 @@ export function scenario(
 		project,
 		tmux,
 		pane: (host) => {
-			const line = tmux(named.sessions, "list-panes", "-a", "-F", "#{@swb_host}\t#{pane_id}")
+			const line = tmux(named.sessions, "list-panes", "-a", "-F", "#{@swb_home}\t#{pane_id}")
 				.split("\n")
 				.find((l) => l.startsWith(`${host}\t`));
-			if (!line) throw new Error(`no pane hosts ${host}`);
+			if (!line) throw new Error(`no pane belongs to ${host}`);
 			return line.split("\t")[1] as string;
 		},
 		swb,

@@ -3,9 +3,9 @@ import { PENDING_MESSAGE } from "@swb/shared/states";
 import { launchSession } from "../coordinate.ts";
 import { states } from "../derive.ts";
 import { type Fired, fire, newSessionName, nextDue } from "../schedules.ts";
-import { SWB, wake } from "../sessions.ts";
+import { wake } from "../sessions.ts";
 import { openStore, setReload } from "../store.ts";
-import { hostPane, SESSIONS, tmuxTry } from "../tmux.ts";
+import { hostPane, SESSIONS, SWB, tmuxTry } from "../tmux.ts";
 
 // `swb __clock`: the sessions server's control pane, which lives as long as the server does. It fires schedules on
 // time, starts any dormant session with mail waiting, and keeps the search index warm. It reads the wall clock every
@@ -33,7 +33,8 @@ export async function clock(): Promise<void> {
 
 	/**
 	 * A session starts with remain-on-exit on, so a harness that dies before it registers leaves its last words for the
-	 * Deck to show. Once registered, its pane goes when the harness quits, however it was started.
+	 * Deck to show. Once registered, its pane goes when the harness quits, however it was started, unless it's on the
+	 * Deck, whose window keeps it for the roster to swap out; and it's no longer starting.
 	 */
 	const settleHosts = () => {
 		const hosts = new Set(db.all("SELECT tmux_session FROM runtimes").map((row) => row.tmux_session as string));
@@ -42,7 +43,7 @@ export async function clock(): Promise<void> {
 			if (registered.has(host)) continue;
 			registered.add(host);
 			const pane = hostPane(host);
-			if (pane) tmuxTry(SESSIONS, "set", "-p", "-u", "-t", pane, "remain-on-exit");
+			if (pane) tmuxTry(SESSIONS, "set", "-p", "-u", "-t", pane, "remain-on-exit", ";", "set", "-p", "-u", "-t", pane, "@swb_starting");
 		}
 	};
 

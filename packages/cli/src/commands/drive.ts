@@ -2,10 +2,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { stateDir } from "@swb/shared";
+import { DECK } from "../deck/conf.ts";
 import { fetchState } from "../deck/deck.ts";
 import { SwbError, UsageError } from "../errors.ts";
-import { SWB } from "../sessions.ts";
-import { cleanEnv, DRIVE, killServer, quote, tmux, tmuxClient, tmuxTry, UI } from "../tmux.ts";
+import { cleanEnv, DRIVE, killServer, quote, SESSIONS, SWB, tmux, tmuxClient, tmuxTry } from "../tmux.ts";
 import { HARNESS_CONF, theme, themeCommands } from "./drive-terminal.ts";
 
 const PANE = "=drive:";
@@ -21,10 +21,10 @@ function sgr(button: number, col: number, row: number, release = false): string 
 
 const READY_MS = 15_000;
 
-/** Whether the drive pane's terminal is on the Deck: a client of the UI server with the pane's tty. */
+/** Whether the drive pane's terminal is on the Deck: a client of swb's server with the pane's tty. */
 function driven(): boolean {
 	const tty = harness("display", "-p", "-t", PANE, "#{pane_tty}");
-	const clients = tmuxTry(UI, "list-clients", "-F", "#{client_tty}");
+	const clients = tmuxTry(SESSIONS, "list-clients", "-t", `=${DECK}`, "-F", "#{client_tty}");
 	return clients.ok && clients.out.split("\n").includes(tty);
 }
 

@@ -5,6 +5,7 @@ import { isArchived, markArchived, recordTx, titleOf } from "@swb/shared/record"
 import { OPEN, PENDING_SCHEDULE } from "@swb/shared/states";
 import { now, since } from "@swb/shared/trace";
 import { type Effort, HARNESS_EFFORTS } from "./config.ts";
+import { DECK, deckConf } from "./deck/conf.ts";
 import { displayName, type RuntimeRow, runtimeLive, states } from "./derive.ts";
 import { SwbError } from "./errors.ts";
 import { writeClaudeLine } from "./lines.ts";
@@ -13,13 +14,16 @@ import { openStore, setReload } from "./store.ts";
 import {
 	CLIENT_CWD,
 	cleanEnv,
+	hook,
 	hostPane,
-	killHost,
+	killHome,
 	killServer,
 	listHosts,
 	listSessions,
 	quote,
 	SESSIONS,
+	SWB,
+	seedPalette,
 	tmux,
 	tmuxClient,
 	tmuxTry,
@@ -28,21 +32,8 @@ import { archivedInCodex } from "./transcripts/codex.ts";
 import { relocatePi } from "./transcripts/pi.ts";
 import { VERSION } from "./version.ts";
 
-export const SWB = process.execPath;
-
-/** Runs an swb command from tmux; its output and exit status are dropped, because `run-shell -b` paints either over the pane. */
-export function notify(command: string): string {
-	if (!/^[A-Za-z0-9/._+@-]+$/.test(SWB))
-		throw new SwbError(`swb's path ${SWB} has characters tmux hooks can't quote; move it somewhere plainer`);
-	return `run-shell -b "${SWB} ${command} >/dev/null 2>&1 || true"`;
-}
-
-export function hook(name: string, command: string): string {
-	return `set-hook -g ${name}[0] '${notify(command)}'`;
-}
-
-/** The whole config of the sessions server: the user's tmux config never loads here. */
-function sessionsConf(): string {
+/** The whole config of swb's server, the Deck's included: the user's tmux config never loads here. */
+function serverConf(): string {
 	return [
 		"set -g default-terminal tmux-256color",
 		"set -g default-shell /bin/sh",
@@ -51,12 +42,12 @@ function sessionsConf(): string {
 		"set -s extended-keys-format csi-u",
 		"set -s escape-time 0",
 		"set -s focus-events on",
+		// Its default, external, drops a pane's OSC 52.
 		"set -s set-clipboard on",
 		"set -s exit-empty off",
 		"set -g mouse on",
 		"set -g mode-keys vi",
 		"set -g history-limit 50000",
-		"set -g prefix None",
 		"set -g prefix2 None",
 		// -q: once emptied, the table no longer exists, and a re-source would fail on it.
 		"unbind -aq -T prefix",
@@ -66,19 +57,14 @@ function sessionsConf(): string {
 		"set -g detach-on-destroy on",
 		"set -g status off",
 		"set -g pane-border-status off",
-		// tmux 3.8 restyled popups and copy mode in its own theme colours, whatever the terminal's: the Peek a dark grey
+		// tmux 3.8 restyled popups and copy mode in its own theme colours, whatever the terminal's: help a dark grey
 		// box, copy mode's highlights fixed X11 colours. These are 3.7's, which take the terminal's palette.
 		"set -g popup-style default",
 		"set -g mode-style noattr,bg=yellow,fg=black",
 		"set -g copy-mode-match-style bg=cyan,fg=black",
 		"set -g copy-mode-current-match-style bg=magenta,fg=black",
 		"set -g copy-mode-mark-style bg=red,fg=black",
-		"set -g set-titles off",
-		// Nested tmux turns Alt+Enter into a legacy ESC CR, which pi reads as Enter.
-		"bind-key -n M-Enter if-shell -F '#{m:*Ext*,#{pane_key_mode}}' 'send-keys -H 1b 5b 31 33 3b 33 75' 'send-keys M-Enter'",
-		hook("client-focus-in", "visit --client #{client_tty} --in"),
-		hook("client-focus-out", "visit --client #{client_tty} --out"),
-		hook("client-detached", "detached --session #{session_name}"),
+		...deckConf(),
 		hook("session-closed", "gc"),
 	].join("\n");
 }
@@ -161,7 +147,7 @@ export function stopPis(stopping: RuntimeRow[]): void {
 	for (const runtime of stopping) term(runtime, deadline);
 	const hosts = stopping.map((runtime) => runtime.tmux_session);
 	while (stillRunning(hosts).length > 0 && Date.now() < deadline) Bun.sleepSync(20);
-	for (const host of hosts) killHost(host);
+	for (const host of hosts) killHome(host);
 }
 
 /** Claude Code's own shutdown failsafe fires at 5 s at the earliest, so this leaves its shutdown room to finish. */
@@ -206,7 +192,7 @@ async function stopInBackground(runtime: RuntimeRow): Promise<boolean> {
 	if (!term(runtime, deadline)) return false;
 	while (stillRunning([host]).length > 0 && Date.now() < deadline) await Bun.sleep(20);
 	const late = stillRunning([host]).length > 0;
-	killHost(host);
+	killHome(host);
 	return late;
 }
 
@@ -223,12 +209,19 @@ function awaitStop(db: Db, id: string): void {
 	const stop = beingStopped(db, id);
 	if (!stop) return;
 	while (stillRunning([stop.host]).length > 0 && Date.now() < stop.deadline) Bun.sleepSync(20);
-	killHost(stop.host);
+	killHome(stop.host);
 }
 
-/** Hosts nothing a restart would lose: swb's clock, and the Deck's placeholder, which both come back with it. */
+/**
+ * Hosts nothing a restart would lose: swb's clock, and the Deck with its placeholder, which come back with it, while no
+ * terminal shows the Deck.
+ */
 function onlySwb(): boolean {
-	return listSessions(SESSIONS, "#{@swb_kind}").every(([, kind]) => kind === "control" || kind === "placeholder");
+	const swb = new Set(["control", "deck", "placeholder"]);
+	return (
+		listSessions(SESSIONS, "#{@swb_kind}").every(([, kind]) => swb.has(kind as string)) &&
+		tmuxTry(SESSIONS, "list-clients", "-t", `=${DECK}`).out === ""
+	);
 }
 
 /** Starts the server from a scrubbed environment, so project credentials from mise or direnv stay out of it. */
@@ -252,7 +245,7 @@ export function ensureSessionsServer(): void {
 	if (running.ok && newer(VERSION, running.out)) stopIdlePis();
 	ensureServer(
 		SESSIONS,
-		sessionsConf(),
+		serverConf(),
 		(path) => startScrubbed(SESSIONS, ["-f", path, "new-session", "-d", "-s", CONTROL, ...clockArgs()]),
 		onlySwb,
 	);
@@ -470,7 +463,7 @@ export function launch(db: Db, spec: LaunchSpec): string {
 		...(spec.resume?.notice ? ["-e", `SWB_RECOVERY_NOTICE=${spec.resume.notice}`] : []),
 		"-e",
 		"PI_IMAGE_PROTOCOL=none",
-		// pi asks tmux whether its client forwards hyperlinks, but it starts with no client; both servers always forward them.
+		// pi asks tmux whether its client forwards hyperlinks, but it starts with no client; the server always forwards them.
 		"-e",
 		"PI_HYPERLINKS=1",
 		// The terminal attached to the Deck may be on another machine, which pi can't see through tmux; OSC 52 reaches it.
@@ -486,6 +479,27 @@ export function launch(db: Db, spec: LaunchSpec): string {
 		`=${name}:`,
 		"@swb_host",
 		name,
+		";",
+		"set",
+		"-p",
+		"-t",
+		`=${name}:`,
+		"@swb_home",
+		name,
+		";",
+		"set",
+		"-t",
+		name,
+		"@swb_kind",
+		"harness",
+		// Until it registers, Esc on the Stage goes back to the roster rather than to a harness that would take it as typeahead.
+		";",
+		"set",
+		"-p",
+		"-t",
+		`=${name}:`,
+		"@swb_starting",
+		"1",
 		// Kept until pi registers, so a pi that dies on startup leaves its last words for the Deck to show.
 		";",
 		"set",
@@ -501,6 +515,7 @@ export function launch(db: Db, spec: LaunchSpec): string {
 		`=${name}:`,
 		"remain-on-exit-format",
 		"",
+		...seedPalette(name),
 	);
 	since(`launch.${spec.harness}`, at);
 	return name;
@@ -508,12 +523,8 @@ export function launch(db: Db, spec: LaunchSpec): string {
 
 /** The Editor for a directory, started if missing. Two Decks asking at once serialize on the db's write lock. */
 export function ensureEditor(db: Db, dir: string, editor: string): string {
-	return ensureDirSession(
-		db,
-		"editor",
-		dir,
-		nvimEditor(editor) ? `${editor} -c ${quote(`lua dofile(${JSON.stringify(nvimNav())})`)}` : editor,
-	);
+	const nvim = nvimEditor(editor);
+	return ensureDirSession(db, "editor", dir, nvim ? `${editor} -c ${quote(`lua dofile(${JSON.stringify(nvimNav())})`)}` : editor, nvim);
 }
 
 /** Only nvim gets swb's ctrl-hjkl; any other Editor keeps those keys to itself. */
@@ -523,10 +534,11 @@ export function nvimEditor(editor: string): boolean {
 
 /** The directory's shell for the Stage; it ends with its shell, which hides it. */
 export function ensureShell(db: Db, dir: string): string {
-	return ensureDirSession(db, "shell", dir, null);
+	return ensureDirSession(db, "shell", dir, null, false);
 }
 
-function ensureDirSession(db: Db, kind: "editor" | "shell", dir: string, command: string | null): string {
+/** nav: the Deck's ctrl-hjkl reach the program, which hands moves off its own edge back through `swb __nav`. */
+function ensureDirSession(db: Db, kind: "editor" | "shell", dir: string, command: string | null, nav: boolean): string {
 	ensureSessionsServer();
 	return db.tx(() => {
 		const existing = listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_dir}").find(([, k, d]) => k === kind && d === dir);
@@ -557,6 +569,15 @@ function ensureDirSession(db: Db, kind: "editor" | "shell", dir: string, command
 			name,
 			"@swb_dir",
 			dir,
+			";",
+			"set",
+			"-p",
+			"-t",
+			`=${name}:`,
+			"@swb_home",
+			name,
+			...(nav ? [";", "set", "-p", "-t", `=${name}:`, "@swb_editor", "1"] : []),
+			...seedPalette(name),
 		);
 		return name;
 	});
@@ -652,7 +673,7 @@ export function wake(db: Db, id: string, then: Wake): string {
 		const resuming = new Set(db.all("SELECT tmux_session FROM launches WHERE resume_id = ?", id).map((row) => row.tmux_session as string));
 		// A pi that died before it registered leaves a dead pane behind its launch.
 		for (const [name, dead] of listed) {
-			if (resuming.has(name as string) && dead === "1") killHost(name as string);
+			if (resuming.has(name as string) && dead === "1") killHome(name as string);
 		}
 		const hosts = listed.filter(([, dead]) => dead !== "1");
 		const host = liveHost(db, id, new Set(hosts.map(([name]) => name as string)));
@@ -909,6 +930,6 @@ export function gc(db: Db): void {
 		.filter((row) => hosts.has(row.tmux_session as string));
 	const used = new Set([...open, ...provisional].map((row) => row.cwd as string));
 	for (const [name, , dir] of owned) {
-		if (!used.has(dir as string)) tmuxTry(SESSIONS, "kill-session", "-t", `=${name}`);
+		if (!used.has(dir as string)) killHome(name as string);
 	}
 }

@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { closeDeck } from "./harness/deck.ts";
+import { closeDeck, waitState } from "./harness/deck.ts";
 import { budgets, repo, type Scenario, scenario, until } from "./harness/index.ts";
 import { entry, prompt, runtimes, startManaged, waitFor } from "./harness/recorder.ts";
 
@@ -14,25 +14,15 @@ afterEach(async () => {
 	await s.cleanup();
 });
 
-test("a never-prompted session is killed when its last viewer detaches; a prompted one survives", async () => {
-	s = scenario("phase1", "detach");
+test("a session on the Stage outlives a Deck that starts over, and comes back to its Stage", async () => {
+	s = scenario("phase1", "deck-over");
 	const blank = await startManaged(s);
-	// The Deck outlives its terminal; only its going takes its Stage off the session.
+	const pane = s.pane(blank.tmux_session);
 	closeDeck(s);
-	await until(
-		() => !s.tmux(s.servers.sessions, "list-sessions", "-F", "#{session_name}").includes(blank.tmux_session),
-		budgets.settle,
-		"the provisional session to die",
-	);
-
-	s.swb("drive", "start", "--", "new");
-	const kept = await until(() => runtimes(s).find((r) => r.tmux_session !== blank.tmux_session), budgets.piReady, "second runtime");
-	await until(() => s.screen().includes("faux-1"), budgets.piReady, "pi ready");
-	await prompt(s, "reply keep me");
-	await until(() => entry(s, kept.session_id)?.activity === "idle", budgets.settle, "idle");
-	closeDeck(s);
-	await Bun.sleep(1000);
-	expect(entry(s, kept.session_id).live).toBe(true);
+	s.swb("drive", "start");
+	await waitState(s, "the session back on the Stage", (x) => x.ready && x.staged.host === blank.tmux_session && x.staged.kind === "live");
+	expect(s.pane(blank.tmux_session)).toBe(pane);
+	expect(s.tmux(s.servers.sessions, "display", "-p", "-t", pane, "#{session_name} #{pane_dead}")).toBe("deck 0");
 });
 
 test("re-running swb against a server started with an older embedded config re-sources it, and the hooks call the new path", async () => {
@@ -51,7 +41,7 @@ test("re-running swb against a server started with an older embedded config re-s
 
 	const hooks = s.tmux(s.servers.sessions, "show-hooks", "-g");
 	s.save("hooks.txt", hooks);
-	expect(hooks).toContain(`client-detached[0] run-shell -b "${moved} detached`);
+	expect(hooks).toContain(`client-detached[0] run-shell -b "${moved} __deck terminals`);
 	expect(hooks).not.toContain(`${repo}/dist/swb`);
 	expect(s.tmux(s.servers.sessions, "show", "-gqv", "@swb_conf_version")).not.toBe("stale");
 });

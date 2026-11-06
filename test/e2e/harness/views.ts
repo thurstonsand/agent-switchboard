@@ -7,7 +7,7 @@ type Pane = { index: number; width: number; active: boolean };
 function panes(s: Scenario): Pane[] {
 	return s
 		.tmux(
-			s.servers.ui,
+			s.servers.sessions,
 			"list-panes",
 			"-t",
 			"=deck:",

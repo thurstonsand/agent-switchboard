@@ -1,9 +1,10 @@
 import { parseArgs } from "node:util";
 import { UsageError } from "../errors.ts";
-import { tmux, UI } from "../tmux.ts";
+import { SESSIONS, tmux } from "../tmux.ts";
+import { DECK } from "./conf.ts";
 import { type DeckIntent, deckSocket } from "./deck.ts";
 
-// What this roster process was started with: the intent of the swb that started it, its panes, and its socket.
+// What this roster process was started with: the intent of the swb that started it, its pane, and its socket.
 
 const { values } = parseArgs({ args: process.argv.slice(3), options: { intent: { type: "string" } } });
 
@@ -14,19 +15,11 @@ if (!process.env.TMUX_PANE) throw new UsageError("__roster: runs only inside a D
 
 export const rosterPane = process.env.TMUX_PANE;
 
-/** The Stage's pane and its tty, from the window option the Deck set as it made the Stage. */
+/** The pane in the Stage's first slot, and the session it belongs to, or none for the slot's stand-in. */
 // biome-ignore lint/plugin: before the roster's first frame, when nothing waits on its keys yet.
-export const [stagePane, stageTty] = tmux(
-	UI,
-	"display",
-	"-p",
-	"-t",
-	rosterPane,
-	"#{P:#{?#{==:#{pane_id},#{@swb_stage}},#{pane_id} #{pane_tty},}}",
-)
-	.trim()
-	.split(" ") as [string, string];
+const mains = tmux(SESSIONS, "list-panes", "-s", "-t", `=${DECK}`, "-f", "#{==:#{@swb_slot},main}", "-F", "#{pane_id}\t#{@swb_home}");
+export const [stagePane, stageShows = ""] = (mains.split("\n")[0] as string).split("\t") as [string, string | undefined];
 
-if (!stagePane || !stageTty) throw new UsageError("__roster: its window names no Stage");
+if (!stagePane) throw new UsageError("__roster: the Deck has no Stage");
 
 export const sock = deckSocket();

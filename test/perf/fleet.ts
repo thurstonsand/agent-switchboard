@@ -37,11 +37,24 @@ export function host(s: Scenario, id: string): string | null {
 	return s.query<{ tmux_session: string }>("SELECT tmux_session FROM runtimes WHERE session_id = ?", id)[0]?.tmux_session ?? null;
 }
 
+/** Closes the pane of swb's tmux session `name`, wherever the Deck has put it, and with it the session. */
+export function killHome(s: Scenario, name: string): void {
+	const listed = Bun.spawnSync([`${s.bin}/tmux`, "-L", s.servers.sessions, "list-panes", "-a", "-F", "#{@swb_home}\t#{pane_id}"], {
+		env: s.env,
+	});
+	const pane = listed.stdout
+		.toString()
+		.split("\n")
+		.find((line) => line.startsWith(`${name}\t`))
+		?.split("\t")[1];
+	if (pane) Bun.spawnSync([`${s.bin}/tmux`, "-L", s.servers.sessions, "kill-pane", "-t", pane], { env: s.env });
+}
+
 /** Kills a session's harness, as a crash or reboot would, and waits until swb sees it dormant. */
 export function stop(s: Scenario, id: string): void {
 	const name = host(s, id);
 	// Already gone if its server went down with it; the runtime row outlives both.
-	if (name) Bun.spawnSync([`${s.bin}/tmux`, "-L", s.servers.sessions, "kill-session", "-t", `=${name}`], { env: s.env });
+	if (name) killHome(s, name);
 	const deadline = Date.now() + budgets.settle;
 	while (entry(s, id)?.live) {
 		if (Date.now() > deadline) throw new Error(`${id} still live after its host was killed`);
