@@ -20,7 +20,7 @@ function lines(prefix: string, columns = Infinity): string[] {
 	const relationships = [
 		bold("  Find & relationships"),
 		row("p", "Session that started this one"),
-		row("[ ]", "Back / forward through Visits"),
+		row("[ ]", "Back / forward through viewed sessions"),
 		row("/", "Filter; esc clears"),
 		row("hover", "Peek; its actions use these keys"),
 		row("i", "Expand / collapse narrow details"),
@@ -45,14 +45,14 @@ function lines(prefix: string, columns = Infinity): string[] {
 	const left = [...move, "", ...relationships, "", ...lifecycle, "", ...organize, "", ...settings];
 	const states = [
 		bold("  State marks"),
-		"  ○ idle / stopped       – dormant / stopped",
-		`  ${bold(cyan("◐"))} working              ${green("●")} Unseen (finished since Visit)`,
+		"  ○ idle · running       – dormant · not running",
+		`  ${bold(cyan("◐"))} working              ${green("●")} Unseen · finished since last viewed`,
 		`  ${blockedMark("◆")} blocked              ${bold(red("!"))} cut off · resume unfinished turn`,
 		`  ✓ archived             ${bold(red("×"))} errored · inspect and retry`,
-		`  ${dim("⎇")} worktree`,
-		`  ${blue("⌁")} started by Operator  ↳ started by session`,
+		`  ${dim("⎇")}  worktree`,
+		`  ${blue("⌁")}  started by Operator ↳ started by session`,
 		"  +N folded family       ◷ once / ↻ recurring schedule",
-		"  dormant: not running · stopped: no unfinished turn",
+		"  stopped: turn ended early on purpose; nothing to resume",
 	];
 	const right = [
 		...states,

@@ -390,10 +390,10 @@ function syncTitle(): void {
 	);
 }
 
-/** Where a conversation stopped short of a reply. Why it was cut off is its status's to say, not this. */
+/** Where a conversation stopped short of a reply, when no Peek already explains it. */
 function ending(e: Entry, read: Transcript | null): string | null {
 	const wake = e.open && m.mode.kind === "roster" ? ` · ${bold("⏎")} ${e.cutOff ? "resume unfinished turn" : "wake & focus"}` : "";
-	if (e.cutOff) return `${bold(red("cut off"))}${wake}`;
+	if (e.cutOff) return `${bold(red("! cut off"))} · ${CAUSES[e.cutOff]}${wake}`;
 	if (read?.ending?.kind === "stopped") return `– dormant · stopped${wake}`;
 	if (read?.ending?.kind === "error") return `${bold(red("errored"))}${wake}`;
 	return null;
@@ -1188,7 +1188,7 @@ export function query(): string {
 	return m.filter.getValue().trim().toLowerCase();
 }
 
-function matches(e: Entry): boolean {
+export function matches(e: Entry): boolean {
 	const q = query();
 	const label = groupOf(e) ?? "";
 	return q === "" || `${displayName(e)} ${projectName(e.project)} ${e.branch ?? ""} ${label}`.toLowerCase().includes(q);

@@ -108,9 +108,12 @@ export default function (pi: ExtensionAPI) {
 
 	const failureText = () => {
 		const mismatch = proc.failure?.match(/db schema is v(\d+), this line writes v(\d+)/);
-		return mismatch ? `update swb + pi; roster: R reload · db v${mismatch[1]}; line expects v${mismatch[2]}` : proc.failure;
+		return mismatch
+			? `update swb + pi; roster: \x1b[1mR\x1b[22m reload · \x1b[2mdb v${mismatch[1]}; line expects v${mismatch[2]}`
+			: proc.failure;
 	};
-	const showFailure = () => ui?.setStatus("swb", `\x1b[1;31mswb: not recording\x1b[22;39m · ${failureText()} · transcript saved`);
+	const showFailure = () =>
+		ui?.setStatus("swb", `\x1b[1;31mswb: not recording\x1b[22;39m · ${failureText()} · \x1b[2mtranscript saved\x1b[22m`);
 
 	const connect = (): Db => {
 		proc.db ??= new Db(proc.launch.db, { create: false });

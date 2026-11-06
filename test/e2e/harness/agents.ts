@@ -182,15 +182,27 @@ export async function cardEndings(s: Scenario, harness: "pi" | "claude" | "codex
 		await until(() => [ending, transcript].every((text) => s.screen().includes(text)), budgets.settle, `${ending}, ${transcript}`);
 		return s.screen();
 	};
-	const cutCard = await card(cut.id, "cut off · ⏎ resume unfinished turn", "$ echo entered", "cut off · killed");
+	const cutCard = await card(cut.id, "! cut off · killed · ⏎ resume unfinished turn", "$ echo entered", "cut off · killed");
 	s.save("cut.txt", cutCard);
-	s.save("quit.txt", await card(quit.id, "cut off · ⏎ resume unfinished turn", "$ echo entered", "cut off · shut down"));
+	s.save("quit.txt", await card(quit.id, "! cut off · shut down · ⏎ resume unfinished turn", "$ echo entered", "cut off · shut down"));
 	const stoppedCard = await card(stopped.id, "stopped · ⏎ wake & focus", "$ echo entered");
 	s.save("stopped.txt", stoppedCard);
 	const failedCard = await card(failed.id, "errored · ⏎ wake & focus", "invalid request: boom");
 	s.save("failed.txt", failedCard);
 	expect(stoppedCard).not.toContain("resume unfinished turn");
 	expect(failedCard).not.toContain("$ echo entered");
+	s.swb("drive", "resize", "80x30");
+	await until(() => s.screen().includes("i ▸ details"), budgets.settle, "narrow details available");
+	s.keys("i");
+	await until(
+		() => s.screen().includes("Error ·") && s.screen().includes("invalid request: boom"),
+		budgets.settle,
+		"the provider error in narrow details",
+	);
+	expect(s.screen()).not.toContain("you fail boom");
+	s.keys("i");
+	s.swb("drive", "resize", "140x40");
+	await waitState(s, "the wide Deck restored", (x) => !x.layout.rosterOnly);
 	s.keys("n");
 	await waitState(s, "the directory picker", (x) => x.mode === "picker");
 	await until(() => !s.screen().includes("⏎ wake & focus"), budgets.settle, "the picker owns Enter, not the card");

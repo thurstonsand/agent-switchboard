@@ -142,7 +142,7 @@ test("? fits every key in a tall Deck, and in a short one scrolls them by wheel 
 	expect(s.screen()).toContain(first);
 	expect(s.screen()).toContain(last);
 	expect(s.screen()).toContain("State marks");
-	expect(s.screen()).toContain("Unseen (finished since Visit)");
+	expect(s.screen()).toContain("Unseen · finished since last viewed");
 	expect(s.screen()).toContain("Alt+a, then key");
 	s.keys("x");
 	await until(() => !s.screen().includes("key or click closes"), budgets.settle, "help closed");

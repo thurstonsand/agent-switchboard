@@ -18,5 +18,5 @@ Sleep 800ms
 Type "j"
 Sleep 300ms
 Type "k"
-Wait+Screen /⎇ feature/
+Wait+Screen /⎇  feature/
 Sleep 4s

@@ -1375,13 +1375,13 @@ export class SettingsPane {
 			];
 		} else {
 			const path = gray(shortPath(configPath()));
-			const title = ` ${bold("Settings")}`;
-			const gap = Math.max(1, Math.floor((width - fw - visibleWidth(path)) / 2) - visibleWidth(title));
-			left = [
+			const title = ` ${bold("Settings")}  `;
+			return this.clickable(0, 0, [
 				[title, null],
-				[" ".repeat(gap), null],
+				...filters,
+				[" ".repeat(Math.max(1, width - visibleWidth(title) - fw - visibleWidth(path))), null],
 				[path, { kind: "open", line: null }],
-			];
+			]);
 		}
 		const used = left.reduce((n, [text]) => n + visibleWidth(text), 0);
 		return this.clickable(0, 0, [...left, [" ".repeat(Math.max(1, width - used - fw)), null], ...filters]);
@@ -1473,7 +1473,7 @@ export class SettingsPane {
 	itemLine(item: Item, i: number, y: number, left: number, width: number, labelWidth: number): string {
 		const selected = i === this.cursor && this.area === "list" && !this.searching;
 		const lit = selected || i === this.hover;
-		const mark = i === this.cursor ? "▌" : " ";
+		const mark = selected ? "▌" : " ";
 		const dropping = this.gesture.kind === "drag" && this.gesture.over === i && this.gesture.item !== i;
 		let line: string;
 		const parts: Part[] = [];

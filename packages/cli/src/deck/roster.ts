@@ -49,6 +49,7 @@ import {
 	levelOf,
 	listedDirs,
 	marked,
+	matches,
 	menuPresets,
 	model,
 	nameChoices,
@@ -113,6 +114,7 @@ import {
 	gray,
 	green,
 	key,
+	keyName,
 	magenta,
 	red,
 	shortPath,
@@ -353,8 +355,8 @@ function pickerParts(width: number, height: number): Part[] {
 }
 
 function promptTitle(title: string, width: number): string {
-	const label = truncateToWidth(` ${title} `, width - 6, "…");
-	return `${gray("╭─")}${label}${gray("─".repeat(Math.max(0, width - visibleWidth(label) - 6)))} ✕ ${gray("╮")}`;
+	const label = truncateToWidth(` ${title} `, width - 7, "…");
+	return `${gray("╭─")}${label}${gray("─".repeat(Math.max(0, width - visibleWidth(label) - 7)))} ✕ ${gray("─╮")}`;
 }
 
 function promptOverlay(width: number, height: number): Overlay[] {
@@ -475,8 +477,26 @@ function filterTag(width: number): string | null {
 	const parts: Part[] = [
 		[" ", null],
 		[`${magenta(`/${model.filter.getValue()}`)} ✕`, { kind: "clearFilter" }],
+		[` · ${filterCount()} · ${bold("Esc")} clears`, { kind: "clearFilter" }],
 	];
 	return truncateToWidth(clickable(0, parts), width, "…");
+}
+
+function filterCount(): string {
+	const entries = [...model.entries.values()];
+	return gray(`${entries.filter(matches).length} of ${entries.length}`);
+}
+
+function matchedText(text: string): string {
+	const q = query();
+	if (!q) return text;
+	let out = "";
+	let from = 0;
+	for (let at = text.toLowerCase().indexOf(q); at !== -1; at = text.toLowerCase().indexOf(q, from)) {
+		out += text.slice(from, at) + underline(text.slice(at, at + q.length));
+		from = at + q.length;
+	}
+	return out + text.slice(from);
 }
 
 function list(rows: Row[], index: number, width: number, full: number, now: number): string[] {
@@ -590,13 +610,15 @@ function detailRows(width: number, top: number, expanded: boolean): string[] {
 	if (!e) return [""];
 	const parts: Part[] = [[" ", null]];
 	if (model.stage.staged === e.id && e.open) {
+		parts.push([gray(`${keyName(model.config.prefix)}:`), null]);
 		for (const view of VIEWS) {
 			// The first view is the session's own TUI, whichever harness that is.
-			const label = ` ${view === "agent" ? e.harness : view} `;
+			const accelerator = view === "split" ? "v " : view === panes.applied.view || viewOf(e) === "split" ? "" : "e ";
+			const label = ` ${accelerator}${view === "agent" ? e.harness : view} `;
 			parts.push([view === panes.applied.view ? cursorLine(label, true) : label, { kind: "view", view }]);
 		}
 		// The shell is a toggle beside the views, not one of them.
-		if (!panes.narrow) parts.push([gray(" · "), null], [panes.applied.shell ? cursorLine(" shell ", true) : " shell ", { kind: "shell" }]);
+		if (!panes.narrow) parts.push([panes.applied.shell ? cursorLine(" s shell", true) : " s shell", { kind: "shell" }]);
 	}
 	if (panes.narrow && cursorEntry())
 		parts.push(
@@ -637,7 +659,10 @@ function hints(y: number, cols: number): string {
 			cols,
 			[],
 		);
-	if (filtering()) return ` ${model.filter.render(Math.max(10, panes.rosterWidth() - 2))[0] ?? ""}`;
+	if (filtering()) {
+		const hint = ` · ${filterCount()} · ${bold("Esc")} clears`;
+		return ` ${model.filter.render(Math.max(10, cols - visibleWidth(hint) - 1))[0] ?? ""}${hint}`;
+	}
 	if (nameMode()) return legend(y, keymap(), cols, []);
 	const drag = dragging();
 	if (drag?.moved) {
@@ -732,7 +757,7 @@ function overlayConfirm(
 function rowLine(row: Row, width: number, now: number): string {
 	if (row.kind === "header") {
 		const count = gray(` (${row.count})`);
-		const name = row.group === null ? projectName(row.project) : row.group;
+		const name = row.group === null ? bold(matchedText(projectName(row.project))) : matchedText(row.group);
 		return `${" ".repeat(1 + row.depth * 2)}${row.collapsed ? "▸" : "▾"} ${name}${count}`;
 	}
 	if (row.kind === "section") {
@@ -769,8 +794,10 @@ function rowLine(row: Row, width: number, now: number): string {
 		: e.provisional || state === "archived"
 			? gray
 			: (s: string) => s;
-	let title = truncateToWidth(paint(displayName(e)), titleWidth, "…");
-	if (model.peek.settled?.source === "pointer" && model.peek.settled.id === e.id) title = underline(title);
+	const hovered = model.peek.settled?.source === "pointer" && model.peek.settled.id === e.id;
+	const name = hovered ? displayName(e) : matchedText(displayName(e));
+	let title = truncateToWidth(matches(e) ? paint(name) : gray(name), titleWidth, "…");
+	if (hovered) title = underline(title);
 	title += " ".repeat(Math.max(0, titleWidth - visibleWidth(title)));
 	return `${lead}${glyph(state, now)} ${title}${hidden}${right}`;
 }
@@ -1072,7 +1099,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 		const changes = diff
 			? `  ${(diff.add ? green : gray)(`+${diff.add}`)} ${(diff.del ? red : gray)(`−${diff.del}`)}${gray(" uncommitted")}`
 			: "";
-		head.push(`${gray("⎇")} ${e.branch}${changes}`);
+		head.push(`${gray("⎇")}  ${matchedText(e.branch)}${changes}`);
 	}
 	const group = groupOf(e);
 	const visible = panes.narrow ? [] : rosterRows().slice(frame.scrollTop, frame.scrollTop + frame.listHeight);
@@ -1081,7 +1108,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	const links: { at: number; command: Command }[] = [];
 	const parent = parentOf(e);
 	if (parent && !(row.nest && visible.some((r) => r.key === parent.id))) {
-		const label = `${gray("started by")} ${originMark(origin(e))} `;
+		const label = `${gray("started by")} ${originMark(origin(e))}${origin(e) === "operator" ? "  " : " "}`;
 		head.push(`${label}${truncateToWidth(displayName(parent), inner - visibleWidth(label), "…")}`);
 		if (parent.project !== e.project && !parent.operator)
 			head.push(gray(`${" ".repeat(visibleWidth(label))}in ${projectName(parent.project)}`));
@@ -1115,6 +1142,8 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	}
 	const turn: string[] = [];
 	if (info?.error) turn.push(rule, ...wrapTextWithAnsi(red(`✗ ${info.error}`), inner).slice(0, 3));
+	else if (panes.narrow && stateOf(e) === "errored" && info?.ending?.kind === "error")
+		turn.push(rule, ...wrapTextWithAnsi(`Error · ${info.ending.message}`, inner).slice(0, 2));
 	else if (
 		info?.last &&
 		(panes.narrow || !(panes.applied.id === e.id && panes.applied.view !== "editor" && panes.applied.shell?.at !== "replace"))

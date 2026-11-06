@@ -9,7 +9,7 @@ let muted: string | null = null;
 export const dim = (s: string): string => (muted ? `\x1b[${muted}m${s}\x1b[39m` : sgr("2", "22")(s));
 
 export function dimColors(background: RgbColor, foreground: RgbColor, light: boolean): void {
-	muted = light ? mix(38, background, foreground, 0.6) : null;
+	muted = light ? mix(38, background, foreground, 0.75) : null;
 }
 
 export const red = sgr("31", "39");
