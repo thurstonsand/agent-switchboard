@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { cursorTo, entry, launched, launchTry, rowIndex, sessionRows, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 import { liveSession } from "./harness/lifecycle.ts";
+import { scheduled, swbIn } from "./harness/schedules.ts";
 
 let s: Scenario;
 afterEach(async () => {
@@ -32,7 +33,7 @@ test("a on a session that started others still open asks first: esc keeps them, 
 	s.keys("a");
 	let st = await waitState(s, "the archive prompt", (x) => x.mode === "archive");
 	// Everything it started, in any Project, and none of it seen yet.
-	expect(st.archive).toEqual({ id: root, counts: "●3", all: 4 });
+	expect(st.archive).toEqual({ id: root, counts: "●3", all: 4, cancels: null });
 	await until(() => s.screen().includes("Archive  a this  A all 4  esc abort"), budgets.settle, "the prompt's choices");
 	s.save("prompt.txt", s.screen());
 	s.save("prompt.ansi", s.swb("drive", "capture", "--ansi"));
@@ -65,6 +66,129 @@ test("a on a session that started others still open asks first: esc keeps them, 
 	await until(() => open().every((o) => !o), budgets.settle, "the whole family archived by a click");
 	await waitState(s, "the prompt gone", (x) => x.mode === "roster");
 	s.save("archived-all.txt", s.screen());
+});
+
+test("archiving cancels every schedule a session set or receives: a names them after the family prompt, and swb archive asks or needs --yes", async () => {
+	s = scenario("phase8", "archive-schedules");
+	const lead = await launched(s, "reply lead", { cwd: s.project, title: "lead" });
+	const peer = await launched(s, "reply peer", { cwd: s.project, title: "peer" });
+	const child = await launched(s, "reply child", { from: lead, title: "child" });
+	await scheduled(s, "reply standup", "--from", lead, "--to", peer, "--cron", "0 9 * * *", "--schedule-label", "standup");
+	const nightly = await swbIn(
+		s,
+		"reply nightly",
+		"launch",
+		"--from",
+		lead,
+		"--title",
+		"nightly",
+		"--cron",
+		"0 2 * * *",
+		"--schedule-label",
+		"nightly build",
+	);
+	expect(nightly).toMatchObject({ code: 0, err: "" });
+	await scheduled(s, "reply check", "--from", peer, "--to", lead, "--at", "PT1H", "--schedule-label", "check on lead");
+	await scheduled(s, "reply own", "--from", child, "--at", "PT1H", "--schedule-label", "child's check-in");
+	await scheduled(s, "reply own", "--from", peer, "--at", "PT1H", "--schedule-label", "peer's own");
+	const pending = () =>
+		s
+			.query<{ label: string }>("SELECT schedule_label AS label FROM schedules WHERE next_at IS NOT NULL AND cancelled_at IS NULL")
+			.map((r) => r.label)
+			.sort();
+	/** The archive prompt's lines, inside its box. */
+	const prompt = () => {
+		const lines = s.screen().split("\n");
+		const top = lines.findIndex((line) => line.includes("┌"));
+		const bottom = lines.findIndex((line, i) => i > top && line.includes("└"));
+		return top === -1 ? [] : lines.slice(top + 1, bottom).map((line) => (line.split("│")[1] ?? "").trim());
+	};
+	s.swb("drive", "start");
+	await waitState(s, "the sessions on the roster", (x) => x.ready && rowIndex(x, child) !== -1);
+
+	// First whether its family goes too, then the schedules that go with what was chosen.
+	await cursorTo(s, lead);
+	s.keys("a");
+	await waitState(s, "the family prompt", (x) => x.mode === "archive" && x.archive?.cancels === null);
+	await until(() => prompt().at(-1) === "Archive  a this  A all 2  esc abort", budgets.settle, "the family prompt's answers");
+	expect(prompt()).toEqual(["●1", "Archive  a this  A all 2  esc abort"]);
+	s.keys("A");
+	await waitState(s, "the schedules prompt", (x) => x.archive?.cancels != null);
+	await until(() => prompt().includes("◷ child's check-in"), budgets.settle, "the schedules all 2 cancel");
+	// Each session's, set or received, soonest first, under its title.
+	const own = prompt().slice(2, 5);
+	expect(own.toSorted()).toEqual(["◷ check on lead", "◷ nightly build", "◷ standup"]);
+	expect(prompt()).toEqual(["Cancels schedules:", "lead", ...own, "child", "◷ child's check-in", "Archive anyway a  esc abort"]);
+	s.save("prompt-family.txt", s.screen());
+	s.keys("Escape");
+	await waitState(s, "the prompt gone", (x) => x.mode === "roster" && x.archive === null);
+	expect([entry(s, lead).open, entry(s, child).open, pending().length]).toEqual([true, true, 5]);
+
+	// The session alone: its own schedules, under no title.
+	s.keys("a");
+	await waitState(s, "the family prompt again", (x) => x.archive?.cancels === null);
+	s.keys("a");
+	await waitState(s, "its own schedules", (x) => x.archive?.cancels?.length === 3);
+	await until(() => prompt()[1] === own[0], budgets.settle, "the schedules it alone cancels");
+	expect(prompt()).toEqual(["Cancels schedules:", ...own, "Archive anyway a  esc abort"]);
+	s.save("prompt.txt", s.screen());
+	s.keys("a");
+	await until(() => !entry(s, lead).open, budgets.settle, "lead archived alone");
+	expect(entry(s, child).open).toBe(true);
+	expect(pending()).toEqual(["child's check-in", "peer's own"]);
+
+	// No family and no worktree: straight to its schedules.
+	await cursorTo(s, peer);
+	s.keys("a");
+	await waitState(s, "the schedules prompt for peer", (x) => x.archive?.cancels != null);
+	await until(() => prompt().includes("◷ peer's own"), budgets.settle, "the schedule it cancels");
+	expect(prompt()).toEqual(["Cancels schedules:", "◷ peer's own", "Archive anyway a  esc abort"]);
+	s.save("prompt-schedules-only.txt", s.screen());
+	s.keys("Escape");
+	await waitState(s, "the prompt gone", (x) => x.mode === "roster");
+	expect(entry(s, peer).open).toBe(true);
+
+	// swb archive from a script refuses, naming them; at a terminal it asks.
+	const refused = s.swbTry("archive", peer);
+	expect({ code: refused.code, err: refused.err.trim() }).toEqual({
+		code: 1,
+		err: `swb: archiving "peer" cancels 1 schedule: "peer's own"; swb archive --yes ${peer} to archive anyway`,
+	});
+	const shell = `swb-shell-${s.instance}`;
+	const terminal = (answer: string) => {
+		s.tmux(
+			shell,
+			"new-session",
+			"-d",
+			"-s",
+			answer,
+			"-x",
+			"100",
+			"-y",
+			"10",
+			"-c",
+			s.project,
+			`swb archive ${peer}; echo "exit $?"; sleep 600`,
+		);
+		return () => s.tmux(shell, "capture-pane", "-p", "-t", `=${answer}:`);
+	};
+	const no = terminal("n");
+	await until(() => no().includes("Archive it? [y/N]"), budgets.settle, "the CLI's question");
+	expect(no()).toMatch(/^Archiving "peer" cancels its schedules:\n {2}◷ peer's own · \w{3} \w{3} \d+, \d\d:\d\d\nArchive it\? \[y\/N\]/);
+	s.tmux(shell, "send-keys", "-t", "=n:", "n", "Enter");
+	await until(() => no().includes("exit 1"), budgets.settle, "no archives nothing");
+	expect(no()).toContain("swb: not archived");
+	expect(entry(s, peer).open).toBe(true);
+	s.save("cli-prompt.txt", no());
+	const yes = terminal("y");
+	await until(() => yes().includes("Archive it? [y/N]"), budgets.settle, "the CLI's question again");
+	s.tmux(shell, "send-keys", "-t", "=y:", "y", "Enter");
+	await until(() => yes().includes("exit 0"), budgets.settle, "yes archives");
+	expect(entry(s, peer).open).toBe(false);
+	expect(pending()).toEqual(["child's check-in"]);
+	// --yes needs no terminal.
+	s.swb("archive", "--yes", child);
+	expect([entry(s, child).open, pending()]).toEqual([false, []]);
 });
 
 test("a prefix key on the archive prompt leaves it unanswered: M-a S opens snooze in its place, and M-a n the picker", async () => {

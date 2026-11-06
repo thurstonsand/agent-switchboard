@@ -5,6 +5,7 @@ import type { DeckState } from "../../../packages/cli/src/deck/protocol.ts";
 import { claudeAutoMode, recalled, subagentDone } from "../harness/agents.ts";
 import { config, cursorTo, launched, launchTry, seed } from "../harness/deck.ts";
 import { git, gitRepo, gitWorktree, type LsEntry, type PiPackage, release, repo, type Scenario, until, which } from "../harness/index.ts";
+import { scheduled, swbIn } from "../harness/schedules.ts";
 
 export type Director = {
 	packages?: PiPackage[];
@@ -584,6 +585,44 @@ export const directors: Record<string, Director> = {
 			await waitDeck(s, "Settings closed, the list still shown", (x) => x.mode === "roster" && !x.layout.rosterHidden);
 			await waitDeck(s, "the keyboard on the Stage", (x) => x.focus === "stage");
 			await waitDeck(s, "the list hidden", (x) => x.layout.rosterHidden);
+		},
+	},
+
+	"archive-schedules": {
+		setup: async (s) => {
+			const lead = await launched(s, "reply on it", { cwd: s.project, title: "Ship the release" });
+			const peer = await launched(s, "reply triaged", { cwd: s.project, title: "Triage issues" });
+			const child = await launched(s, "reply reviewed", { from: lead, title: "Review the changelog" });
+			await scheduled(s, "reply standup", "--from", lead, "--to", peer, "--cron", "0 9 * * 1-5", "--schedule-label", "Daily standup");
+			const nightly = await swbIn(
+				s,
+				"reply built",
+				"launch",
+				"--from",
+				lead,
+				"--title",
+				"Nightly",
+				"--cron",
+				"0 2 * * *",
+				"--schedule-label",
+				"Nightly build",
+			);
+			expect(nightly.code).toBe(0);
+			await scheduled(s, "reply checked", "--from", peer, "--to", lead, "--at", "PT3H", "--schedule-label", "Check on the release");
+			await scheduled(s, "reply rerun", "--from", child, "--at", "PT2H", "--schedule-label", "Re-run the e2e suite");
+			await scheduled(s, "reply weekly", "--from", peer, "--cron", "0 10 * * 1", "--schedule-label", "Weekly triage");
+			writeFileSync(join(s.home, "lead"), lead);
+		},
+		run: async (s) => {
+			const lead = readFileSync(join(s.home, "lead"), "utf8");
+			await waitDeck(s, "the archive prompt", (x) => x.mode === "archive");
+			await waitDeck(s, "the schedules prompt", (x) => x.archive?.cancels != null);
+			await waitLs(s, "lead and its child archived", (ls) => ls.filter((e) => !e.open).length === 2);
+			expect(s.ls().find((e) => e.id === lead)?.open).toBe(false);
+			const pending = s.query<{ label: string }>(
+				"SELECT schedule_label AS label FROM schedules WHERE next_at IS NOT NULL AND cancelled_at IS NULL ORDER BY label",
+			);
+			expect(pending.map((r) => r.label)).toEqual(["Weekly triage"]);
 		},
 	},
 

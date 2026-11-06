@@ -79,7 +79,7 @@ test("a timed snooze holds through a conversation and shows while blocked or cut
 	const today = new Date();
 	const days = Math.round((new Date(monday).setHours(0, 0, 0, 0) - new Date(today).setHours(0, 0, 0, 0)) / 86_400_000);
 	expect(days).toBe(today.getDay() === 1 ? 7 : (8 - today.getDay()) % 7);
-	s.swb("archive", pi.id);
+	s.swb("archive", "--yes", pi.id);
 	s.swb("unarchive", pi.id);
 	expect(
 		s.query<{ cancelled: number }>("select cancelled_at is not null as cancelled from schedules where id = ?", later.details.id),

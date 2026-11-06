@@ -3,7 +3,7 @@ import type { Config } from "../config.ts";
 import type { SessionState } from "../derive.ts";
 import type { TargetTree } from "../dirs.ts";
 import type { Catalog, LaunchTarget } from "../harnesses.ts";
-import type { ScheduleView } from "../schedules.ts";
+import type { Pending, ScheduleView } from "../schedules.ts";
 import type { DeckLayout } from "../store.ts";
 import type { Ending } from "../transcripts/conversation.ts";
 
@@ -17,6 +17,8 @@ export type Entry = SessionState & {
 	worktree: string | null;
 	/** What its Peek lists: schedules aimed at it, or launches it set, pending ones and the last that finished. */
 	schedules: ScheduleView[];
+	/** Every pending schedule it set or that's aimed at it: what archiving it cancels. */
+	pending: Pending[];
 };
 
 export type Snapshot = {
@@ -144,7 +146,8 @@ export type DeckState = {
 	mode: "filter" | "name" | "picker" | "snooze" | "archive" | "roster" | "settings";
 	picker: PickerState | null;
 	/** The archive prompt: whose, its counts line, and how many `all` would archive. */
-	archive: { id: string; counts: string; all: number } | null;
+	/** `cancels`: on the prompt's second step, the labels of the schedules archiving cancels. */
+	archive: { id: string; counts: string; all: number; cancels: string[] | null } | null;
 	settings: SettingsState | null;
 	/** config.toml as it is on disk can't be read; the Deck keeps what it had. */
 	configError: string | null;

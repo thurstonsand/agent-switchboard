@@ -336,7 +336,11 @@ export type Mode =
 	| { kind: "filter" }
 	| NameMode
 	| SnoozeMode
-	| { kind: "archive"; id: string }
+	/**
+	 * `a`'s prompt: first whether its family or worktree goes too, then, once `chosen` holds that answer, the
+	 * schedules archiving cancels. A session with schedules but neither family nor worktree starts at the second.
+	 */
+	| { kind: "archive"; id: string; chosen: { all: boolean; deleteWorktree: boolean } | null }
 	/** The directory picker, `n` and `N`, which takes over the whole roster while it's open. */
 	| { kind: "picker"; picker: Choosing }
 	/** Settings, which takes over the whole Deck while it's open. */

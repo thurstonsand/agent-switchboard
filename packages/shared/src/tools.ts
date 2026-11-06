@@ -110,11 +110,11 @@ export const TOOLS = {
 		],
 		parameters: Type.Object({
 			session: Type.Optional(session),
-			archived: Type.Optional(Type.Boolean({ description: "false unarchives." })),
+			archived: Type.Optional(Type.Boolean({ description: "false unarchives. Archiving cancels every schedule for this session." })),
 			delete_worktree: Type.Optional(
 				Type.Boolean({
 					description:
-						"With archived true, for this session only: delete its linked worktree, keeping the branch and conversations. With family true, archive its descendants too, but delete only this worktree. Only when the user asks. Refuses modified or untracked files, locked worktrees, scheduled launches into it, or open/live sessions using it outside the selected family. Ignored files are deleted. Conversations whose directory is gone resume in the Project root, or fail clearly if that is gone too. Call last, then end your turn.",
+						"With archived true, for this session only: delete its linked worktree, keeping the branch and conversations. With family true, archive its descendants too, but delete only this worktree. Only when the user asks. Refuses modified or untracked files, locked worktrees, scheduled launches into it that sessions outside the selection set, or open/live sessions using it outside the selected family. Ignored files are deleted. Conversations whose directory is gone resume in the Project root, or fail clearly if that is gone too. Call last, then end your turn.",
 				}),
 			),
 			family: Type.Optional(Type.Boolean({ description: "With archived: every open session it started, and theirs, too." })),

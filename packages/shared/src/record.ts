@@ -295,8 +295,8 @@ export function isArchived(db: Db, sessionId: string): boolean {
 }
 
 /**
- * Marks a session archived and cancels what it hasn't received, schedules aimed at it included, its snooze, and a
- * reload waiting for it; false before its first turn, when there is nothing to archive.
+ * Marks a session archived and cancels what it hasn't received, every schedule it set or that's aimed at it, its
+ * snooze, and a reload waiting for it; false before its first turn, when there is nothing to archive.
  */
 export function markArchived(db: Db, sessionId: string): boolean {
 	if (!db.get("SELECT 1 FROM sessions WHERE session_id = ?", sessionId)) return false;
@@ -308,6 +308,6 @@ export function markArchived(db: Db, sessionId: string): boolean {
 		now,
 	);
 	db.run(`UPDATE messages SET cancelled_at = ? WHERE target_id = ? AND ${PENDING_MESSAGE}`, now, sessionId);
-	db.run(`UPDATE schedules SET cancelled_at = ? WHERE target_id = ? AND ${PENDING_SCHEDULE}`, now, sessionId);
+	db.run(`UPDATE schedules SET cancelled_at = ? WHERE (source_id = ? OR target_id = ?) AND ${PENDING_SCHEDULE}`, now, sessionId, sessionId);
 	return true;
 }

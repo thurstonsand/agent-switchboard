@@ -1121,6 +1121,16 @@ export function archiving(): string | null {
 	return m.mode.kind === "archive" ? m.mode.id : null;
 }
 
+/** The schedules archiving cancels, by session, the session first, then with `all` its family: each schedule once. */
+export function archiveCancels(e: Entry, all: boolean): { entry: Entry; schedules: Entry["pending"] }[] {
+	const seen = new Set<string>();
+	return [e, ...(all ? openDescendants(m.entries.values(), e.id) : [])].flatMap((entry) => {
+		const schedules = entry.pending.filter((p) => !seen.has(p.id));
+		for (const p of schedules) seen.add(p.id);
+		return schedules.length > 0 ? [{ entry, schedules }] : [];
+	});
+}
+
 export function pickerMode(): Choosing | null {
 	return m.mode.kind === "picker" ? m.mode.picker : null;
 }
@@ -1853,7 +1863,10 @@ function stopRow(row = selected()): void {
 	else post({ type: "stop", req: nextReq(), id: e.id });
 }
 
-/** a: archives or unarchives the session; one that started others still open asks first whether they go too. */
+/**
+ * a: archives or unarchives the session. One that started others still open asks first whether they go too, and one
+ * in a linked worktree whether that goes too; then, if any going has schedules, it names them and asks again.
+ */
 function toggleArchived(row = selected()): void {
 	if (row?.kind !== "session" || m.pin) return;
 	const e = row.entry;
@@ -1861,10 +1874,11 @@ function toggleArchived(row = selected()): void {
 		toast("nothing to archive before the first prompt", "error");
 		return;
 	}
-	if (e.open && (e.worktree || openDescendants(m.entries.values(), e.id).length > 0)) {
+	const asks = e.worktree !== null || openDescendants(m.entries.values(), e.id).length > 0;
+	if (e.open && (asks || e.pending.length > 0)) {
 		m.selectedKey = e.id;
 		m.hover = null;
-		enter({ kind: "archive", id: e.id });
+		enter({ kind: "archive", id: e.id, chosen: asks ? null : { all: false, deleteWorktree: false } });
 		return;
 	}
 	// Only the cursor's own row moving takes the cursor along; archived, it lingers where it is.
@@ -1880,7 +1894,12 @@ function toggleArchived(row = selected()): void {
 
 /** The archive prompt's answer: the session alone, all it started besides, or (null) neither. */
 function finishArchiving(all: boolean | null, deleteWorktree = false): void {
-	const e = m.mode.kind === "archive" ? m.entries.get(m.mode.id) : undefined;
+	const mode = m.mode;
+	const e = mode.kind === "archive" ? m.entries.get(mode.id) : undefined;
+	if (mode.kind === "archive" && e && all !== null && mode.chosen === null && archiveCancels(e, all).length > 0) {
+		mode.chosen = { all, deleteWorktree };
+		return;
+	}
 	leave();
 	if (!e || all === null) return;
 	const req = nextReq();
@@ -2471,6 +2490,10 @@ export function keymap(): Binding<Command>[] {
 				bind(["escape", "q", "s"], "esc", "cancel", CANCEL),
 			];
 		case "archive": {
+			if (mode.chosen) {
+				const { all, deleteWorktree } = mode.chosen;
+				return [bind(["a"], "a", "", { kind: "archiveAnswer", all, deleteWorktree }), bind(["escape"], "esc", "abort", CANCEL)];
+			}
 			const e = m.entries.get(mode.id);
 			const family = e ? openDescendants(m.entries.values(), e.id).length : 0;
 			const answer = (all: boolean, deleteWorktree: boolean): Command => ({ kind: "archiveAnswer", all, deleteWorktree });

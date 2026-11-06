@@ -25,6 +25,7 @@ import { VERSION } from "../version.ts";
 import { deck, placeholder, rosterPane, sock, stagePane } from "./env.ts";
 import {
 	addTarget,
+	archiveCancels,
 	archivedKey,
 	archiving,
 	boot,
@@ -166,7 +167,8 @@ function cardStream(): Response {
 	return new Response(body, { headers: { "content-type": "application/x-ndjson" } });
 }
 
-const ARCHIVE_PROMPT_LINES = 4;
+/** The schedules the archive prompt names for each session before it counts the rest. */
+const ARCHIVE_SCHEDULES = 3;
 
 class Roster implements Component, Focusable {
 	/**
@@ -417,11 +419,7 @@ function list(rows: Row[], index: number, width: number, full: number, now: numb
 	// The archive prompt opens beneath its row, pushing the rows after it down; its row is the cursor's.
 	const asking = archiving() === null ? -1 : rows.findIndex((r) => r.key === archiving());
 	const archiveEntry = model.mode.kind === "archive" ? model.entries.get(model.mode.id) : undefined;
-	const prompt =
-		asking === -1
-			? 0
-			: ARCHIVE_PROMPT_LINES +
-				(archiveEntry?.worktree ? 1 + (openDescendants(model.entries.values(), archiveEntry.id).length > 0 ? 1 : 0) : 0);
+	const prompt = asking === -1 || !archiveEntry ? 0 : archivePromptHeight(archiveEntry);
 	if (index < frame.scrollTop) frame.scrollTop = index;
 	if (index + prompt >= frame.scrollTop + height) frame.scrollTop = index + prompt - height + 1;
 	frame.scrollTop = Math.max(0, Math.min(frame.scrollTop, Math.max(0, rows.length + prompt - height)));
@@ -449,27 +447,59 @@ function list(rows: Row[], index: number, width: number, full: number, now: numb
 	return [...out, ...picker.map(([line]) => line)];
 }
 
+/** What the prompt says above its answers: what goes with the session, or the schedules archiving cancels. */
+function archiveNotes(e: Entry): string[] {
+	const mode = model.mode;
+	if (mode.kind === "archive" && mode.chosen) {
+		const groups = archiveCancels(e, mode.chosen.all);
+		return [
+			"Cancels schedules:",
+			...groups.flatMap(({ entry, schedules }) => [
+				// One session's schedules need no title; several are told apart by theirs.
+				...(groups.length > 1 ? [` ${displayName(entry)}`] : []),
+				...schedules.slice(0, ARCHIVE_SCHEDULES).map((p) => `  ${gray("◷")} ${p.scheduleLabel}`),
+				...(schedules.length > ARCHIVE_SCHEDULES ? [gray(`  … ${schedules.length - ARCHIVE_SCHEDULES} more`)] : []),
+			]),
+		];
+	}
+	const family = openDescendants(model.entries.values(), e.id);
+	return [family.length > 0 ? familyTally(family) : "Branch kept; clean worktree only"];
+}
+
+/** The prompt's borders, notes, answers, and a line for each way to delete the worktree too. */
+function archivePromptHeight(e: Entry): number {
+	return (
+		3 +
+		archiveNotes(e).length +
+		keymap().filter((b) => b.command?.kind === "archiveAnswer" && b.command.deleteWorktree && b.label !== null).length
+	);
+}
+
 /** Archive alone, with its family, or delete this linked worktree as well: the archive keymap's answers, as buttons. */
 function archivePrompt(e: Entry, width: number, top: number): string[] {
 	const inner = Math.max(1, width - 4);
-	const family = openDescendants(model.entries.values(), e.id);
 	const box = (text: string) => ` │${truncateToWidth(text, inner, "…", true)}│`;
+	const notes = archiveNotes(e);
 	const answers = keymap().filter((b) => b.label !== null);
 	const keep = answers.filter((b) => b.command?.kind !== "archiveAnswer" || !b.command.deleteWorktree);
 	const deleting = answers.filter((b) => b.command?.kind === "archiveAnswer" && b.command.deleteWorktree);
-	const choice = clickable(top + 2, [
-		[" │ Archive  ", null],
-		...keep.flatMap((b, i): Part[] => [...(i > 0 ? ([["  ", null]] as Part[]) : []), [key(b.name, b.label as string), b.command]]),
+	const anyway = model.mode.kind === "archive" && model.mode.chosen !== null;
+	const choice = clickable(top + 1 + notes.length, [
+		[anyway ? " │ Archive anyway " : " │ Archive  ", null],
+		...keep.flatMap((b, i): Part[] => [
+			...(i > 0 ? ([["  ", null]] as Part[]) : []),
+			[b.label ? key(b.name, b.label) : bold(b.name), b.command],
+		]),
 	]);
 	const lines = deleting.map((b, i) =>
-		clickable(top + 3 + i, [
+		clickable(top + 2 + notes.length + i, [
 			[" │ ", null],
 			[key(b.name, b.label as string), b.command],
 		]),
 	);
 	return [
 		` ┌${"─".repeat(inner)}┐`,
-		box(` ${family.length > 0 ? familyTally(family) : "Branch kept; clean worktree only"}`),
+		...notes.map((note) => box(` ${note}`)),
 		...[choice, ...lines].map((line) => `${truncateToWidth(line, inner + 2, "…", true)}│`),
 		` └${"─".repeat(inner)}┘`,
 	];
@@ -1137,7 +1167,9 @@ function viewState(): DeckState {
 			const e = model.mode.kind === "archive" ? model.entries.get(model.mode.id) : undefined;
 			if (!e) return null;
 			const family = openDescendants(model.entries.values(), e.id);
-			return { id: e.id, counts: Bun.stripANSI(familyTally(family)), all: family.length + 1 };
+			const chosen = model.mode.kind === "archive" ? model.mode.chosen : null;
+			const cancels = chosen ? archiveCancels(e, chosen.all).flatMap((g) => g.schedules.map((p) => p.scheduleLabel)) : null;
+			return { id: e.id, counts: Bun.stripANSI(familyTally(family)), all: family.length + 1, cancels };
 		})(),
 		settings: settingsPane()?.state() ?? null,
 		configError: model.configError?.message ?? null,

@@ -40,7 +40,8 @@ const USAGE = `swb: Agent Switchboard
   swb dirs [--json]            list the directories the Deck's picker offers
   swb models [--harness H] [--json] [QUERY]
                                list every model the harnesses offer, with its default effort and note
-  swb archive ID               archive a session
+  swb archive ID [--yes]       archive a session; one with schedules, which archiving cancels, asks first, or needs --yes
+                               without a terminal
   swb unarchive ID             reopen an archived session
   swb snooze ID one_hour|one_day|monday|next_message|off|TIME
                                hide a session in Snoozed until then, or its next message; TIME is ISO 8601, local unless it has an offset

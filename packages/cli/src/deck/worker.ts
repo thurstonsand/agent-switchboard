@@ -6,7 +6,7 @@ import type { Config } from "../config.ts";
 import { deriveSessions, type RuntimeRecord, runtimeLive, runtimeRecords, type SessionRow, sessionRows, type World } from "../derive.ts";
 import { addDir, removeDir, targets } from "../dirs.ts";
 import { type Catalog, discover, launchFlags, readCatalog, resolveLaunch, shortlist, writeGuide } from "../harnesses.ts";
-import { type ScheduleView, schedulesBySession, snooze } from "../schedules.ts";
+import { type Pending, pendingBySession, type ScheduleView, schedulesBySession, snooze } from "../schedules.ts";
 import {
 	archive,
 	archiveWorktree,
@@ -54,6 +54,7 @@ const worktrees = new Map<string, string | null>();
  */
 const asking = new Set<string>();
 let schedules = new Map<string, ScheduleView[]>();
+let pending = new Map<string, Pending[]>();
 /** What each launch left for the first session its process records, by tmux session, until that session takes it. */
 let launches = new Map<string, { parentId: string | null; group: string | null }>();
 let profile: TerminalProfile | null = null;
@@ -168,6 +169,7 @@ function readDb(): void {
 	rows = sessionRows(db);
 	runtimes = runtimeRecords(db);
 	schedules = schedulesBySession(db);
+	pending = pendingBySession(db);
 	launches = new Map(
 		db
 			.all("SELECT tmux_session, parent_id, group_name FROM launches")
@@ -251,6 +253,7 @@ function snapshot(): Polled {
 			provisional: false,
 			worktree: worktreeOf(row),
 			schedules: schedules.get(row.session_id) ?? [],
+			pending: pending.get(row.session_id) ?? [],
 		};
 	});
 	for (const runtime of runtimes) {
@@ -287,6 +290,7 @@ function snapshot(): Polled {
 			provisional: true,
 			worktree: null,
 			schedules: [],
+			pending: [],
 		});
 	}
 	return {

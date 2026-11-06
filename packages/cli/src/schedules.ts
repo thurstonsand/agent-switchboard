@@ -336,6 +336,23 @@ export function schedulesBySession(db: Db): Map<string, ScheduleView[]> {
 	return by;
 }
 
+export type Pending = { id: string; scheduleLabel: string; nextAt: number };
+
+/** Each session's pending schedules, those it set and those aimed at it, soonest first: what archiving it cancels. */
+export function pendingBySession(db: Db): Map<string, Pending[]> {
+	const by = new Map<string, Pending[]>();
+	for (const row of db.all(
+		`SELECT id, source_id, target_id, schedule_label, next_at FROM schedules WHERE ${PENDING_SCHEDULE} ORDER BY next_at`,
+	)) {
+		const pending = { id: row.id as string, scheduleLabel: row.schedule_label as string, nextAt: row.next_at as number };
+		for (const id of new Set([row.source_id, row.target_id])) {
+			if (id === null) continue;
+			by.set(id as string, [...(by.get(id as string) ?? []), pending]);
+		}
+	}
+	return by;
+}
+
 /** When the next schedule is due, if any is. */
 export function nextDue(db: Db): number | null {
 	return (db.get(`SELECT min(next_at) AS at FROM schedules WHERE ${PENDING_SCHEDULE}`)?.at as number | null) ?? null;

@@ -736,7 +736,11 @@ export async function archiveWorktree(
 			if (!selected.has(r.session_id as string) && inside(r.cwd as string) && liveRuntime(db, r.session_id as string, hosts))
 				throw new SwbError(`worktree is still used by session ${r.session_id}; stop it first`);
 		}
-		for (const schedule of db.all(`SELECT id, schedule_label, launch FROM schedules WHERE ${PENDING_SCHEDULE} AND launch IS NOT NULL`)) {
+		for (const schedule of db.all(
+			`SELECT id, source_id, schedule_label, launch FROM schedules WHERE ${PENDING_SCHEDULE} AND launch IS NOT NULL`,
+		)) {
+			// One a selected session set goes with its archive.
+			if (selected.has(schedule.source_id as string)) continue;
 			const launch = JSON.parse(schedule.launch as string) as { cwd: string };
 			if (inside(launch.cwd))
 				throw new SwbError(`worktree is used by schedule "${schedule.schedule_label}" (${schedule.id}); unschedule it first`);

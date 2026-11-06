@@ -188,12 +188,14 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 	const startingId = JSON.parse(started.out).details.id as string;
 	await settled(s, startingId, "starting peer idle");
 	await archive(startingId);
+	// A launch another session set into the worktree holds it; the one the archived session sets goes with it.
+	const planner = await launched(s, "reply planner", { cwd: s.project, title: "Planner" });
 	const scheduling = await swbIn(
 		s,
 		"reply scheduled",
 		"launch",
 		"--from",
-		id,
+		planner,
 		"--title",
 		"Future work",
 		"--cwd",
@@ -205,12 +207,29 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 	);
 	expect(scheduling.code).toBe(0);
 	const schedule = JSON.parse(scheduling.out) as { details: { id: string } };
+	await cursorTo(s, id);
 	await ask();
 	clickDelete();
 	await waitState(s, "schedule refusal", (st) => st.toasts.some((t) => t.text.includes("Check feature")));
 	expect(entry(s, id).open).toBe(true);
 	expect(existsSync(tree)).toBe(true);
-	s.swb("unschedule", schedule.details.id, "--from", id);
+	s.swb("unschedule", schedule.details.id, "--from", planner);
+	const own = await swbIn(
+		s,
+		"reply own",
+		"launch",
+		"--from",
+		id,
+		"--title",
+		"Own",
+		"--cwd",
+		tree,
+		"--at",
+		"PT1H",
+		"--schedule-label",
+		"Own follow-up",
+	);
+	expect(own.code).toBe(0);
 	const child = await launched(s, "reply child", { from: id, cwd: tree, title: "Child" });
 	const awayTree = gitWorktree(s, s.project, "elsewhere");
 	const away = await launched(s, "reply away", { from: id, cwd: awayTree, title: "Elsewhere" });
@@ -222,12 +241,18 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 	const y = lines.findIndex((line) => line.includes("all 3 + delete this worktree"));
 	expect(y).toBeGreaterThan(0);
 	s.swb("drive", "click", String((lines[y] as string).indexOf("all 3") + 1), String(y));
+	// Its own scheduled launch goes with it, once it says so.
+	await waitState(s, "the schedule it cancels", (st) => st.archive?.cancels?.includes("Own follow-up") ?? false);
+	s.keys("a");
 	await until(() => !entry(s, id).open, budgets.settle, "clicked archive and deletion");
 	expect(entry(s, child)).toMatchObject({ open: false, live: false });
 	expect(entry(s, away)).toMatchObject({ open: false, live: false });
 	expect(existsSync(tree)).toBe(false);
 	expect(existsSync(awayTree)).toBe(true);
 	expect(git(s, s.project, "show", "feature:keep.txt")).toBe("valuable work");
+	expect(s.query("SELECT cancelled_at IS NOT NULL AS cancelled FROM schedules WHERE schedule_label = 'Own follow-up'")).toEqual([
+		{ cancelled: 1 },
+	]);
 });
 
 test("family deletion cancels a running child before removal, and missing Project roots never launch in HOME", async () => {
