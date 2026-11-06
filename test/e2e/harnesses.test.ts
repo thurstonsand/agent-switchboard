@@ -82,7 +82,7 @@ test("the Deck's n opens on the default preset, puts its real TUI on the Stage, 
 	expect(opened.picker?.presets[0]).toBe("opus");
 	// The launch card on the Stage says what runs: the harness, then the model.
 	const card = await waitState(s, "the launch card", (x) => (x.launch?.card ?? null) !== null);
-	expect(card.launch?.card?.[1]).toMatch(/claude {2}opus/);
+	expect(card.launch?.card?.[1]).toContain("claude · opus");
 	// The menu keeps the shortlist's numbers; a number picks Codex, and Esc in a reopened menu keeps it.
 	s.keys("Tab");
 	const menu = await waitState(s, "the menu", (x) => x.launch?.menu?.some((l) => l.includes("codex")) ?? false);
@@ -206,7 +206,7 @@ test("the picker keeps the preset I chose when the shortlist is reordered beneat
 	await waitState(s, "the new order in the picker", (x) => x.picker?.presets.slice(0, 3).join() === "sonnet,haiku,opus");
 	const st = state(s);
 	expect(st.picker?.preset).toBe("opus");
-	expect(st.launch?.card?.[1]).toMatch(/claude {2}opus/);
+	expect(st.launch?.card?.[1]).toContain("claude · opus");
 });
 
 test("session_launch with no preset carries the caller's harness and model forward, not the default", async () => {

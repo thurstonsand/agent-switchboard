@@ -2665,7 +2665,7 @@ function rosterKeys(row: Row | undefined): Binding<Command>[] {
 	let enter: string | null = null;
 	if (row?.kind === "header") enter = row.collapsed ? "expand" : "collapse";
 	else if (row?.kind === "section") enter = row.expanded ? "collapse" : "expand";
-	else if (session) enter = !session.open ? "open" : session.live ? "focus" : "wake";
+	else if (session) enter = !session.open ? "open" : session.cutOff ? "resume" : session.live ? "focus" : "wake";
 	if (session && m.peek.settled?.id === session.id) enter = null;
 	if (
 		!panes.narrow &&
@@ -2825,10 +2825,12 @@ export function peekButtons(row: Row): [label: string, key: string, act: RowAct]
 	if (!e.open) items.push(["Unarchive", "a", "archive"]);
 	else {
 		items.push(e.live ? ["Stop", "x", "stop"] : ["Wake in background", "w", "wake"]);
-		if (!e.provisional && !e.snoozed) items.push(e.markedUnseen ? ["Unmark Unseen", "u", "unseen"] : ["Mark Unseen", "u", "unseen"]);
+		if (!e.provisional && !e.snoozed)
+			items.push([e.markedUnseen ? "Unmark Unseen" : isUnseen(e) ? "Keep Unseen" : "Mark Unseen", "u", "unseen"]);
 		if (!e.provisional) items.push(e.snoozed ? ["Unsnooze", "s", "snooze"] : ["Snooze…", "s", "snooze"], ["Archive", "a", "archive"]);
 		if (!e.operator) items.push(["Group…", "m", "group"]);
 	}
+	if (parentOf(e)) items.push(["Parent", "p", "parent"]);
 	return items;
 }
 

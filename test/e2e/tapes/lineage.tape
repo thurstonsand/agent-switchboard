@@ -9,7 +9,7 @@ Screenshot ../artifacts/phase6/videos/lineage-tree.png
 Type "j"
 Sleep 300ms
 Type "k"
-Wait+Screen /started by/
+Wait+Screen /p Parent/
 Sleep 300ms
 Screenshot ../artifacts/phase6/videos/lineage-peek.png
 Type "p"

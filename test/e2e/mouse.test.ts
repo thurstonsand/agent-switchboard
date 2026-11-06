@@ -100,7 +100,7 @@ test("the mouse reaches everything the keys do: a row's Peek, the hidden or narr
 	await waitState(s, "filtering", (x) => x.mode === "filter");
 	s.keys("-l", "a");
 	await waitState(s, "typed into the filter", (x) => x.filter === "a");
-	await peekButton("bravo", b, "u Mark Unseen");
+	await peekButton("bravo", b, "u Keep Unseen");
 	await waitState(s, "the filter closed by the Peek's button", (x) => x.mode === "roster" && x.filter === "a");
 	await until(() => entry(s, b).markedUnseen, budgets.settle, "bravo marked Unseen from its Peek");
 	s.keys("Escape");
@@ -178,6 +178,11 @@ test("a Peek follows the pointer and the cursor keys, leaves with the pointer, a
 	// The state names the Peek before its popup, a process of its own, has drawn it.
 	await onScreen("a Archive", "bravo's Peek drawn");
 	expect(hovered.peek?.lines.some((line) => line.trim() === "bravo")).toBe(false);
+	const footer = () => s.screen().trimEnd().split("\n").at(-1) as string;
+	expect(footer()).toContain("? keys");
+	expect(footer()).not.toContain("archive");
+	expect(hovered.peek?.lines.join("\n")).not.toContain("All keys");
+	expect(s.swb("drive", "capture", "--ansi")).toMatch(/\[[\d;]*4mbravo/);
 	s.save("peek-hover.txt", s.screen());
 
 	s.keys("s");
@@ -200,6 +205,8 @@ test("a Peek follows the pointer and the cursor keys, leaves with the pointer, a
 	s.swb("drive", "move", "100", "35");
 	await waitState(s, "the Peek gone with the pointer", (x) => x.peek === null && x.hover === null);
 	expect(s.screen()).not.toContain("a Archive");
+	expect(footer()).toContain("⏎ wake");
+	expect(s.swb("drive", "capture", "--ansi")).not.toMatch(/\[[\d;]*4mbravo/);
 
 	// A control lights only while the pointer is on it: leaving the roster for pi puts it out.
 	const [tabX, tabY] = find(" editor ");
@@ -309,6 +316,16 @@ test("narrow details expand by key and click, scroll, follow the selection, and 
 	expect(s.screen()).toContain("started by ↳ parent");
 	expect(s.screen()).toContain("created");
 	expect(s.screen()).toContain("a Archive");
+	expect(
+		s
+			.screen()
+			.split("\n")
+			.find((line) => line.includes("created")),
+	).toMatch(/^│.{83}│/);
+	await click("p Parent", 85);
+	await waitState(s, "the details Parent action returns to the parent", (x) => x.cursor === parent);
+	await cursorTo(s, child);
+	await onScreen("got descendant", "the child's details restored");
 	await click("i ▾ details", 85);
 	await onScreen("i ▸ details", "collapsed by click");
 	expect(s.screen()).not.toContain("got descendant");

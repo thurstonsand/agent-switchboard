@@ -13,7 +13,6 @@ import {
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { VIEWS } from "@swb/shared";
-import { harnessName } from "@swb/shared/mailbox";
 import { mark } from "@swb/shared/trace";
 import { displayName, openDescendants, projectName } from "../derive.ts";
 import { targetName } from "../dirs.ts";
@@ -97,6 +96,7 @@ import {
 	type PeekSpot,
 	type PickRow,
 	type Row,
+	type RowAct,
 	type SessionRow,
 } from "./model.ts";
 import { type Overlay, type OverlayButton, Overlays, type OverlayView } from "./overlay.ts";
@@ -117,6 +117,7 @@ import {
 	red,
 	shortPath,
 	spinnerFrame,
+	underline,
 	wakeAt,
 } from "./style.ts";
 
@@ -404,7 +405,7 @@ function renderPicker(width: number, height: number): string[] {
 		? `${prompt}${model.path.render(Math.max(10, width - 2 - visibleWidth(prompt)))[0] ?? ""}`
 		: (model.search.render(Math.max(10, width - 2))[0] ?? "");
 	// The launch card goes on the Stage; with no room there, as on a narrow Deck, the roster draws it under its title.
-	const card = launchOnStage(width) ? null : launchCard(choosing, Math.min(LAUNCH_COLS, width), "right");
+	const card = launchOnStage(width) ? null : launchCard(choosing, Math.min(LAUNCH_COLS, width));
 	for (const b of card?.buttons ?? []) frame.targets.push({ y: 1 + b.y, from: b.from, to: b.to, command: b.command });
 	frame.card = card ? card.lines.map((line) => Bun.stripANSI(line)) : null;
 	// While the menu is open, the rest of the picker waits behind it.
@@ -416,7 +417,7 @@ function renderPicker(width: number, height: number): string[] {
 		gray("─".repeat(width)),
 	];
 	frame.pickerListY = lines.length;
-	// The picker's detail is its path and two blank lines.
+	// Leave room below the list for its path, a blank line, and the footer.
 	const bodyHeight = Math.max(1, height - lines.length - 6);
 	let body: Part[];
 	let detail: string;
@@ -456,9 +457,13 @@ function renderPicker(width: number, height: number): string[] {
 		frame.targets.push({ y, from: 0, to: width, command });
 	});
 	const out = shown.map(([line]) => line);
-	while (out.length < bodyHeight) out.push("");
-	if (choosing.confirm) overlayConfirm(out, width, choosing.confirm, frame.pickerListY, keymap(), frame.targets);
-	lines.push(...out.map(muted), gray("─".repeat(width)), muted(detail), "", "", messageLine(Date.now()));
+	if (choosing.confirm) {
+		while (out.length < bodyHeight) out.push("");
+		overlayConfirm(out, width, choosing.confirm, frame.pickerListY, keymap(), frame.targets);
+	}
+	lines.push(...out.map(muted), "", muted(detail));
+	while (lines.length < height - 2) lines.push("");
+	lines.push(messageLine(Date.now()));
 	// The remove prompt carries its own keys.
 	lines.push(choosing.confirm ? "" : legend(lines.length, keymap(), width, []));
 	return lines.map((line) => truncateToWidth(line, width, "…", true));
@@ -644,7 +649,16 @@ function hints(y: number, cols: number): string {
 		if (historyStep(-1) !== -1) arrows.push([`${bold("[")} ${dim("back")} `, { kind: "history", step: -1 }]);
 		if (historyStep(1) !== -1) arrows.push([`${bold("]")} ${dim("forward")}`, { kind: "history", step: 1 }]);
 	}
-	return legend(y, model.focus === "stage" ? stageKeys() : keymap(), cols, arrows);
+	let bindings = model.focus === "stage" ? stageKeys() : keymap();
+	if (model.focus === "roster" && (model.peek.settled || frame.details)) {
+		const row = rosterRows().find((r) => r.key === (model.peek.settled?.id ?? cursorEntry()?.id));
+		const actions = row ? peekButtons(row).map(([, , act]) => act) : [];
+		bindings = bindings.filter((b) => {
+			const c = b.command;
+			return !(c?.kind === "activate" && c.enter) && !(c?.kind === "row" && actions.includes(c.act));
+		});
+	}
+	return legend(y, bindings, cols, arrows);
 }
 
 /**
@@ -751,7 +765,9 @@ function rowLine(row: Row, width: number, now: number): string {
 		: e.provisional || state === "archived"
 			? gray
 			: (s: string) => s;
-	const title = truncateToWidth(paint(displayName(e)), titleWidth, "…", true);
+	let title = truncateToWidth(paint(displayName(e)), titleWidth, "…");
+	if (model.peek.settled?.source === "pointer" && model.peek.settled.id === e.id) title = underline(title);
+	title += " ".repeat(Math.max(0, titleWidth - visibleWidth(title)));
 	return `${lead}${glyph(state, now)} ${title}${hidden}${state === "dormant" || state === "archived" ? dim(right) : right}`;
 }
 
@@ -873,7 +889,7 @@ function launchOverlays(choosing: Choosing, width: number, height: number): Over
 			x: width + 1,
 			y: 0,
 			width: w,
-			view: launchCard(choosing, w, "left"),
+			view: launchCard(choosing, w),
 			leaves: false,
 			hovers: null,
 		});
@@ -898,19 +914,14 @@ function ago(at: number, now: number): string {
 	return a === "now" ? "just now" : `${a} ago`;
 }
 
-/** Floating boxes have closed sides; expanded narrow details stay open at the terminal's edge. */
-function peekFrame(open: "left" | "right", inner: number): (content: string) => string {
-	return (content) =>
-		open === "left"
-			? `${gray("│")} ${truncateToWidth(content, inner, "…", true)} ${gray("│")}`
-			: `${gray("│")} ${truncateToWidth(content, inner, "…", true)} `;
+function peekFrame(inner: number): (content: string) => string {
+	return (content) => `${gray("│")} ${truncateToWidth(content, inner, "…", true)} ${gray("│")}`;
 }
 
 /** What a session from the picker starts on, as the launch card's field says it. */
 function presetField(c: Choice): string {
 	const p = c.preset;
-	const name = model.config.presets === null && p.harness === "claude" && !p.agent ? c.note.split(" · ")[0] : (p.agent ?? p.model);
-	return `${harnessName(p.harness)} · ${bold(name ?? "")}${p.agent ? " · agent" : ""}`;
+	return `${p.harness} · ${bold(p.agent ?? p.model ?? "")}${p.agent ? " · agent" : ""}`;
 }
 
 function presetNote(note: string, width: number): string[] {
@@ -920,9 +931,9 @@ function presetNote(note: string, width: number): string[] {
 
 /**
  * The launch card: what a session from the picker starts on, its harness first, and the preset's note; its field opens
- * the menu. On the Stage it opens to the left, onto the roster's border; in a narrow Deck's roster, to the right.
+ * the menu. It sits beside the roster, or above the directory list in a narrow Deck.
  */
-function launchCard(choosing: Choosing, width: number, open: "left" | "right"): OverlayView {
+function launchCard(choosing: Choosing, width: number): OverlayView {
 	const inner = width - 4;
 	const presets = pickerPresets();
 	const chosen = presets[chosenPreset(choosing)];
@@ -941,22 +952,14 @@ function launchCard(choosing: Choosing, width: number, open: "left" | "right"): 
 	}
 	const arrow = presets.length === 0 ? " " : menu ? "▴" : "▾";
 	const field = `${truncateToWidth(value, inner - 2, "…", true)} ${gray(arrow)}`;
-	const frame =
-		open === "left"
-			? peekFrame(open, inner)
-			: (content: string) => `${gray("│")} ${truncateToWidth(content, inner, "…", true)} ${gray("│")}`;
+	const frame = peekFrame(inner);
 	const lines = [
 		promptTitle("starts", width),
 		frame(field),
 		...(menu
 			? []
 			: [
-					...presetNote(
-						chosen && model.config.presets === null && chosen.preset.harness === "claude" && !chosen.preset.agent
-							? chosen.note.split(" · ").slice(1).join(" · ")
-							: (chosen?.note ?? ""),
-						inner,
-					).map(frame),
+					...presetNote(chosen?.note ?? "", inner).map(frame),
 					...(chosen
 						? [frame(gray(`${chosen.preset.effort ?? "default"} effort${chosen.preset.provider ? ` · ${chosen.preset.provider}` : ""}`))]
 						: []),
@@ -1014,14 +1017,13 @@ function launchMenu(choosing: Choosing, width: number, maxHeight: number): Overl
 }
 
 /**
- * What a Peek shows, framed on three sides. Beside the roster it opens to the left, onto the roster's border; drawn by
- * the roster itself, at the terminal's right edge, it opens to the right. A Peek too short for everything loses the last
- * turn first.
+ * A session's particulars and actions, beside its row or in expanded narrow details. A floating Peek too short for
+ * everything loses the last turn first; narrow details scroll the complete view.
  */
 function peekView(row: SessionRow, width: number, maxHeight: number, open: "left" | "right"): OverlayView {
 	const e = row.entry;
 	const now = Date.now();
-	const inner = width - (open === "left" ? 4 : 3);
+	const inner = width - 4;
 	const rule = gray("─".repeat(inner));
 	const head: string[] = [];
 	const title = wrapTextWithAnsi(displayName(e), inner);
@@ -1032,7 +1034,8 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	head.push(
 		`${gray("created")} ${ago(e.createdAt, now)} · ${e.open ? `${gray("active")} ${e.activity !== "idle" ? "now" : ago(e.activityAt, now)}` : `${gray("archived")} ${ago(archivedKey(e), now)}`}`,
 	);
-	head.push(rule, tailOf(`${e.harness} · ${shortPath(e.cwd)}`, inner));
+	const harness = `${e.harness} · `;
+	head.push(rule, `${harness}${tailOf(shortPath(e.cwd), inner - visibleWidth(harness))}`);
 	const info = model.peek.info.get(e.id)?.info;
 	if (e.branch) {
 		const diff = info?.diff;
@@ -1040,14 +1043,14 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 		head.push(`${gray("⎇")} ${e.branch}${changes}`);
 	}
 	const group = groupOf(e);
-	if (group !== null) head.push(`${gray("Group")} ${group}`);
-	// Lines that are buttons: who started it, and on a fold, each session it hides.
+	const visible = panes.narrow ? [] : rosterRows().slice(frame.scrollTop, frame.scrollTop + frame.listHeight);
+	if (group !== null && !visible.some((r) => r.key === row.header)) head.push(`${gray("Group")} ${group}`);
+	// On a fold, each hidden session is a button that reveals it.
 	const links: { at: number; command: Command }[] = [];
 	const parent = parentOf(e);
-	if (parent) {
+	if (parent && !(row.nest && visible.some((r) => r.key === parent.id))) {
 		const label = `${gray("started by")} ${originMark(origin(e))} `;
-		links.push({ at: head.length, command: { kind: "row", act: "parent", row: e.id } });
-		head.push(`${label}${truncateToWidth(displayName(parent), inner - visibleWidth(label) - 3, "…", true)}  ${bold("p")}`);
+		head.push(`${label}${truncateToWidth(displayName(parent), inner - visibleWidth(label), "…")}`);
 		if (parent.project !== e.project && !parent.operator)
 			head.push(gray(`${" ".repeat(visibleWidth(label))}in ${projectName(parent.project)}`));
 	}
@@ -1093,42 +1096,39 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	const buttons: { y: number; from: number; to: number; command: Command; text: string }[] = [];
 	const buttonLines: string[] = [];
 	const actions = peekButtons(row);
-	const session = actions.filter(([, , act]) => ["focus", "stop", "wake", "reload", "new"].includes(act));
+	const session = actions.filter(([, , act]) => ["focus", "stop", "wake", "reload", "new", "parent"].includes(act));
 	const organize = actions.filter(([, , act]) => ["snooze", "archive", "group", "unseen"].includes(act));
-	const col = Math.floor(inner / 2);
-	buttonLines.push(`${" Session".padEnd(col)} Organize`);
-	for (let i = 0; i < Math.max(session.length, organize.length); i++) {
-		let line = "";
-		for (const [column, action] of [session[i], organize[i]].entries()) {
-			if (!action) {
-				line += " ".repeat(col);
-				continue;
-			}
-			const [label, k, act] = action;
-			const text = truncateToWidth(` ${bold(k)} ${label}`, col, "…", true);
-			buttons.push({
-				y: buttonLines.length,
-				from: column * col,
-				to: (column + 1) * col,
-				command: { kind: "row", act, row: row.key },
-				text,
-			});
-			line += text;
+	const col = Math.max(Math.floor(inner / 2), ...session.map(([label, k]) => visibleWidth(` ${k} ${label}`) + 3));
+	const stacked = col + Math.max(...organize.map(([label, k]) => visibleWidth(` ${k} ${label}`))) > inner;
+	const button = (action: [string, string, RowAct] | undefined, from: number, width: number): string => {
+		if (!action) return " ".repeat(width);
+		const [label, k, act] = action;
+		const text = truncateToWidth(act === "focus" ? bold(` ${k} ${label}`) : ` ${bold(k)} ${label}`, width, "…", true);
+		buttons.push({ y: buttonLines.length, from, to: from + width, command: { kind: "row", act, row: row.key }, text });
+		return text;
+	};
+	if (stacked) {
+		for (const [heading, group] of [
+			["Session", session],
+			["Organize", organize],
+		] as const) {
+			buttonLines.push(` ${heading}`);
+			for (const action of group) buttonLines.push(button(action, 0, inner));
 		}
-		buttonLines.push(line);
+	} else {
+		buttonLines.push(`${" Session".padEnd(col)} Organize`);
+		for (let i = 0; i < Math.max(session.length, organize.length); i++)
+			buttonLines.push(`${button(session[i], 0, col - 3)}   ${button(organize[i], col, inner - col)}`);
 	}
-	const allKeys = ` ${bold("?")} All keys`;
-	buttons.push({ y: buttonLines.length, from: 0, to: inner, command: { kind: "help" }, text: allKeys });
-	buttonLines.push(allKeys);
 	const body = [...head, ...(head.length + turn.length + 1 + buttonLines.length + 2 <= maxHeight ? turn : []), rule];
 	const buttonsAt = body.length;
 	body.push(...buttonLines);
-	const frame = peekFrame(open, inner);
-	const edge = "─".repeat(width - 1);
+	const box = peekFrame(inner);
+	const edge = "─".repeat(width - 2);
 	const lines = [
-		open === "left" ? promptTitle("Peek", width) : gray(`╭${edge}`),
-		...body.slice(0, maxHeight - 2).map(frame),
-		gray(open === "left" ? `╰${"─".repeat(width - 2)}╯` : `╰${edge}`),
+		open === "left" ? promptTitle("Peek", width) : gray(`╭${edge}╮`),
+		...body.slice(0, maxHeight - 2).map(box),
+		gray(`╰${edge}╯`),
 	];
 	const margin = 2;
 	return {
@@ -1144,7 +1144,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 					from: margin,
 					to: margin + inner,
 					command: link.command,
-					hot: frame(cursorLine(truncateToWidth(body[link.at] as string, inner, "…", true), true)),
+					hot: box(cursorLine(truncateToWidth(body[link.at] as string, inner, "…", true), true)),
 				})),
 			...buttons
 				.filter((b) => 1 + buttonsAt + b.y < lines.length - 1)
@@ -1152,7 +1152,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 					const y = 1 + buttonsAt + b.y;
 					// The line again with this one button lit, for the pointer resting on it.
 					const lit = (buttonLines[b.y] as string).replace(b.text, cursorLine(b.text, true));
-					return { y, from: margin + b.from, to: margin + b.to, command: b.command, hot: frame(lit) };
+					return { y, from: margin + b.from, to: margin + b.to, command: b.command, hot: box(lit) };
 				}),
 		],
 	};

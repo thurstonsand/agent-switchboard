@@ -390,6 +390,7 @@ export class SettingsPane {
 		const out: Item[] = [];
 		for (const s of SETTINGS.filter(keep)) {
 			if (s.control.kind === "harnesses") {
+				out.push({ kind: "heading", text: "Enabled harnesses" });
 				out.push(...(["claude", "codex", "pi"] as const).map((harness): Item => ({ kind: "harness", harness })));
 				continue;
 			}
@@ -1325,6 +1326,7 @@ export class SettingsPane {
 		this.targets = [];
 		this.itemRows.clear();
 		this.narrow = width < NARROW_BELOW;
+		const terminalWidth = width;
 		width = Math.min(width, RAIL + 101);
 		const now = Date.now();
 		const lines: string[] = [this.header(width)];
@@ -1347,10 +1349,12 @@ export class SettingsPane {
 		}
 		lines.push(...body);
 		const rule =
-			this.narrow || error || this.adding ? "─".repeat(width) : `${"─".repeat(RAIL)}┴${"─".repeat(Math.max(0, width - RAIL - 1))}`;
+			this.narrow || error || this.adding
+				? "─".repeat(terminalWidth)
+				: `${"─".repeat(RAIL)}┴${"─".repeat(Math.max(0, terminalWidth - RAIL - 1))}`;
 		if (!prose) lines.push(gray(rule), ...(this.adding ? this.footer(width, error) : ["", ""]));
 		lines.push(this.messageLine(now), this.clickable(height - 1, 0, legendParts(this.keymap(), width)));
-		return lines.map((line) => truncateToWidth(line, width, "…", true));
+		return lines.map((line) => truncateToWidth(line, terminalWidth, "…", true));
 	}
 
 	header(width: number): string {
@@ -1462,7 +1466,7 @@ export class SettingsPane {
 		const active = r === this.section && this.query() === "" && !this.changedOnly;
 		const text = truncateToWidth(` ${section}`, RAIL, "…", true);
 		this.targets.push({ y, from: 0, to: RAIL, command: { kind: "section", to: r, area: "rail" } });
-		if (active) return this.host.paint.cursor(text, this.area === "rail");
+		if (active) return this.area === "rail" ? this.host.paint.cursor(text, true) : bold(text);
 		return this.pointer?.y === y && this.pointer.x < RAIL ? this.host.paint.hover(text) : text;
 	}
 
@@ -1518,7 +1522,7 @@ export class SettingsPane {
 		line = truncateToWidth(`${mark}${line}`, width, "…", true);
 		if (dropping) return this.host.paint.cursor(line, true);
 		if (selected) return this.host.paint.cursor(line, true);
-		if (i === this.cursor) return this.host.paint.cursor(line, false);
+		if (i === this.cursor) return bold(line);
 		return i === this.hover ? this.host.paint.hover(line) : line;
 	}
 
@@ -1597,7 +1601,7 @@ export class SettingsPane {
 			[star, { kind: "star", at: i }],
 			[` ${cells.harness}`, null],
 			[bold(cells.model), null],
-			[bold(cells.effort), { kind: "adjust", by: 1, at: i, wrap: true }],
+			[cells.effort, { kind: "adjust", by: 1, at: i, wrap: true }],
 			[cells.provider, null],
 			[editing ? `  ${this.inputCell(Math.max(1, width - 45 - visibleWidth(cells.provider)))}` : "", null],
 		];
@@ -1730,7 +1734,7 @@ export class SettingsPane {
 			const choice = this.choices()[item.index];
 			text = choice?.reason ?? choice?.note ?? "";
 		}
-		return wrapTextWithAnsi(text, width - 2).map((line) => `  ${gray(line)}`);
+		return wrapTextWithAnsi(text, width - 2).map((line) => `  ${line}`);
 	}
 
 	/** The config error has the whole list's place while it stands, so the message line doesn't repeat it. */

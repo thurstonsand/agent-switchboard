@@ -4,6 +4,7 @@ import type { RgbColor } from "@earendil-works/pi-tui";
 const sgr = (open: string, close: string) => (s: string) => `\x1b[${open}m${s}\x1b[${close}m`;
 
 export const bold = sgr("1", "22");
+export const underline = sgr("4", "24");
 let muted: string | null = null;
 export const dim = (s: string): string => (muted ? `\x1b[${muted}m${s}\x1b[39m` : sgr("2", "22")(s));
 
