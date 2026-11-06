@@ -43,6 +43,15 @@ Escape
 Wait+Screen /schema.sql/
 Sleep 3s
 Screenshot ../artifacts/phase6/videos/gallery-04-cut-off-card.png
+
+# Hiding the roster takes the keyboard to the Stage, which would wake a dormant session, so on a live one.
+Alt+a
+Type "/Plan the Q1"
+Sleep 1.5s
+Enter
+Escape
+Wait+Screen /three themes/
+Sleep 2s
 Alt+a
 Type "z"
 Wait+Screen /show list/
