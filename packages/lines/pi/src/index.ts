@@ -107,9 +107,9 @@ export default function (pi: ExtensionAPI) {
 
 	const failureText = () => {
 		const mismatch = proc.failure?.match(/db schema is v(\d+), this line writes v(\d+)/);
-		return mismatch ? `db v${mismatch[1]}, pi expects v${mismatch[2]} · update swb + pi; R reload` : proc.failure;
+		return mismatch ? `db v${mismatch[1]}, needs v${mismatch[2]} · update swb + pi; roster: R reload` : proc.failure;
 	};
-	const showFailure = () => ui?.setStatus("swb", `\x1b[1;91mswb: not recording\x1b[22;39m · ${failureText()}`);
+	const showFailure = () => ui?.setStatus("swb", `\x1b[1;31mswb: not recording\x1b[22;39m · ${failureText()} · transcript saved`);
 
 	const connect = (): Db => {
 		proc.db ??= new Db(proc.launch.db, { create: false });
@@ -119,7 +119,6 @@ export default function (pi: ExtensionAPI) {
 	const fail = (error: unknown) => {
 		proc.failure = error instanceof Error ? error.message : String(error);
 		showFailure();
-		ui?.notify(`swb: not recording · ${failureText()}. Pi's transcript is still saved.`, "error");
 	};
 
 	// A busy db holds pi's writes for a later try, and says so; any other failure stops the line recording.

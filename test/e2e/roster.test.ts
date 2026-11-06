@@ -178,7 +178,7 @@ test("m names a session's Group, n joins it; dragging moves it between Groups, a
 		s
 			.tmux(s.servers.ui, "capture-pane", "-p", "-e", "-t", `=${state(s).deck}:.0`)
 			.split("\n")
-			.find((line) => line.includes("> review"));
+			.find((line) => line.includes("/ review"));
 	await until(() => nameLine() !== undefined, budgets.settle, "the name typed");
 	expect(nameLine()).not.toContain("\x1b[7m");
 	expect(s.tmux(s.servers.drive, "display", "-p", "#{cursor_flag}")).toBe("1");

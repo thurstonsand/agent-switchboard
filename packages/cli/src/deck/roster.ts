@@ -99,6 +99,7 @@ import {
 	type SessionRow,
 } from "./model.ts";
 import { type Overlay, type OverlayButton, Overlays, type OverlayView } from "./overlay.ts";
+import { PRESET_HEADER, presetColumns } from "./preset-table.ts";
 import type { DeckState, Entry, PickerState, State } from "./protocol.ts";
 import {
 	age,
@@ -132,12 +133,13 @@ function glyph(state: State, now: number, selected = false): string {
 		case "idle":
 			return "○";
 		case "dormant":
-			return "·";
+			return "◌";
 		case "cut-off":
+			return bold(red("!"));
 		case "errored":
-			return red("⚠");
+			return bold(red("×"));
 		case "archived":
-			return gray("✓");
+			return "✓";
 	}
 }
 
@@ -289,37 +291,50 @@ function drawOver(lines: string[], o: Overlay, width: number): void {
 /** The picker's rows, which the list gives up its bottom to; each choice is a button. */
 function pickerParts(width: number, height: number): Part[] {
 	if (snoozeMode()) return snoozeMenu(width);
+	if (model.mode.kind === "archive") {
+		const e = model.entries.get(model.mode.id);
+		if (!e) return [];
+		return [
+			[promptTitle(`Archive ${displayName(e)}`, width), null],
+			...archiveNotes(e).map((note): Part => [` ${note}`, null]),
+			...keymap()
+				.filter((b) => b.label !== null && b.command?.kind !== "cancel")
+				.map(
+					(b): Part => [
+						` ${bold(b.name.padEnd(3))} ${b.label?.replace("delete clean worktree", bold(red("delete clean worktree")))}`,
+						b.command,
+					],
+				),
+		];
+	}
 	const naming = nameMode();
 	if (!naming) return [];
 	const choices = nameChoices();
-	const shown = Math.max(1, Math.min(choices.length, height - 6));
+	const shown = Math.max(1, Math.min(choices.length, height - 3));
 	const from = Math.max(0, Math.min(naming.choice - shown + 1, choices.length - shown));
-	const title = ` ${naming.renaming ? "rename" : "Group for"} ${naming.title} `;
-	const out: Part[] = [
-		[`${gray(`─${truncateToWidth(title, width - 5, "…")}${"─".repeat(Math.max(0, width - 4 - visibleWidth(title)))}`)} ✕ `, null],
-	];
+	const title = `${naming.renaming ? "Rename Group" : "Group for"} ${naming.title}`;
+	const out: Part[] = [[promptTitle(title, width), null]];
 	for (let i = from; i < from + shown; i++) {
 		const choice = choices[i] as { label: string; name: string | null };
 		const label = choice.name === null ? dim(choice.label) : choice.label.startsWith("+ ") ? green(choice.label) : choice.label;
 		const line = truncateToWidth(`   ${label}`, width, "…", true);
 		out.push([i === naming.choice ? cursorLine(line, true) : line, { kind: "choose", index: i }]);
 	}
-	out.push(
-		[` ${dim(naming.renaming ? "Rename Group:" : "Filter or new Group:")}`, null],
-		[` ${naming.input.render(Math.max(10, width - 2))[0] ?? ""}`, null],
-		[` ${key("⏎", naming.renaming ? "rename" : "assign")}  ${key("esc", "cancel")}`, null],
-	);
+	const input = naming.input.render(Math.max(10, width - 2))[0] ?? "";
+	out.push([` ${input}`, null]);
 	return out;
+}
+
+function promptTitle(title: string, width: number): string {
+	const label = truncateToWidth(` ${title} `, width - 4, "…");
+	return `${gray("─")}${bold(label)}${gray("─".repeat(Math.max(0, width - visibleWidth(label) - 4)))} ✕ `;
 }
 
 function snoozeMenu(width: number): Part[] {
 	const snoozing = snoozeMode();
 	if (!snoozing) return [];
 	const now = Date.now();
-	const title = ` Snooze ${snoozing.title} `;
-	const out: Part[] = [
-		[`${gray(`─${truncateToWidth(title, width - 5, "…")}${"─".repeat(Math.max(0, width - 4 - visibleWidth(title)))}`)} ✕ `, null],
-	];
+	const out: Part[] = [[promptTitle(`Snooze ${snoozing.title}`, width), null]];
 	SNOOZE_CHOICES.forEach((choice, i) => {
 		const until = presetUntil(choice.snooze, now);
 		const at = until === null ? "↘" : wakeAt(until, now);
@@ -420,13 +435,9 @@ function list(rows: Row[], index: number, width: number, full: number, now: numb
 	});
 	// The ✕ closing the Group picker, at its title's right end.
 	if (picker.length > 0) frame.targets.push({ y: frame.listTop + height, from: width - 3, to: width, command: { kind: "cancel" } });
-	// The archive prompt opens beneath its row, pushing the rows after it down; its row is the cursor's.
-	const asking = archiving() === null ? -1 : rows.findIndex((r) => r.key === archiving());
-	const archiveEntry = model.mode.kind === "archive" ? model.entries.get(model.mode.id) : undefined;
-	const prompt = asking === -1 || !archiveEntry ? 0 : archivePromptHeight(archiveEntry);
 	if (index < frame.scrollTop) frame.scrollTop = index;
-	if (index + prompt >= frame.scrollTop + height) frame.scrollTop = index + prompt - height + 1;
-	frame.scrollTop = Math.max(0, Math.min(frame.scrollTop, Math.max(0, rows.length + prompt - height)));
+	if (index >= frame.scrollTop + height) frame.scrollTop = index - height + 1;
+	frame.scrollTop = Math.max(0, Math.min(frame.scrollTop, Math.max(0, rows.length - height)));
 	frame.listHeight = height;
 	const out: string[] = [];
 	for (let i = frame.scrollTop; out.length < height; i++) {
@@ -444,7 +455,6 @@ function list(rows: Row[], index: number, width: number, full: number, now: numb
 			const at = foldColumn(row);
 			frame.targets.push({ y, from: at - 1, to: at + 1, command: { kind: "fold", id: row.key } });
 		}
-		if (i === asking) out.push(...archivePrompt((row as SessionRow).entry, width, frame.listTop + out.length));
 	}
 	out.length = height;
 	if (rows.length === 0) out[0] = dim(model.snapshot ? (query() ? "   no matches" : "   no sessions yet · n new") : "   loading…");
@@ -460,7 +470,7 @@ function archiveNotes(e: Entry): string[] {
 			[...model.entries.values()].flatMap((entry) => entry.schedules.filter((s) => s.cron !== null).map((s) => s.id)),
 		);
 		return [
-			"Cancels schedules:",
+			bold("Cancels schedules:"),
 			...groups.flatMap(({ entry, schedules }) => [
 				// One session's schedules need no title; several are told apart by theirs.
 				...(groups.length > 1 ? [` ${displayName(entry)}`] : []),
@@ -471,33 +481,6 @@ function archiveNotes(e: Entry): string[] {
 	}
 	const family = openDescendants(model.entries.values(), e.id);
 	return [family.length > 0 ? `${family.length} child session${family.length === 1 ? "" : "s"}` : "Branch kept with either choice"];
-}
-
-/** The prompt's borders, notes, answers, and a line for each way to delete the worktree too. */
-function archivePromptHeight(e: Entry): number {
-	return 2 + archiveNotes(e).length + keymap().filter((b) => b.label !== null).length;
-}
-
-/** Archive alone, with its family, or delete this linked worktree as well: the archive keymap's answers, as buttons. */
-function archivePrompt(e: Entry, width: number, top: number): string[] {
-	const inner = Math.max(1, width - 4);
-	const box = (text: string) => ` │${truncateToWidth(text, inner, "…", true)}│`;
-	const notes = archiveNotes(e);
-	const answers = keymap().filter((b) => b.label !== null);
-	const lines = answers.map((b, i) =>
-		clickable(top + 1 + notes.length + i, [
-			[" │ ", null],
-			[`${bold(b.name.padEnd(3))} ${b.label}`, b.command],
-		]),
-	);
-	const title = truncateToWidth(` Archive ${displayName(e)} `, inner - 3, "…");
-	frame.targets.push({ y: top, from: width - 5, to: width - 2, command: { kind: "cancel" } });
-	return [
-		` ┌${bold(title)}${"─".repeat(Math.max(0, inner - visibleWidth(title) - 3))} ✕ ┐`,
-		...notes.map((note, i) => box(` ${i === 0 ? dim(note) : note}`)),
-		...lines.map((line) => `${truncateToWidth(line, inner + 2, "…", true)}│`),
-		` └${"─".repeat(inner)}┘`,
-	];
 }
 
 /** Joins the parts into row y's line, recording where each clickable one lands. */
@@ -559,10 +542,15 @@ function messageLine(now: number, y: number | null = null, withConfigError = tru
 
 /** The legend line: a field being typed into, where a drag would land, or the keys the mode takes. */
 function hints(y: number, cols: number): string {
-	// The archive prompt carries its own keys.
-	if (archiving() !== null) return "";
+	if (archiving() !== null)
+		return legend(
+			y,
+			keymap().filter((b) => b.command?.kind === "cancel"),
+			cols,
+			[],
+		);
 	if (filtering()) return ` ${model.filter.render(Math.max(10, panes.rosterWidth() - 2))[0] ?? ""}`;
-	if (nameMode()) return "";
+	if (nameMode()) return legend(y, keymap(), cols, []);
 	const drag = dragging();
 	if (drag?.moved) {
 		if (!drag.drop) return ` ${red("✗ not here")}`;
@@ -637,8 +625,8 @@ function rowLine(row: Row, width: number, now: number, selected: boolean): strin
 		return `${" ".repeat(1 + row.depth * 2)}${row.collapsed ? "▸" : "▾"} ${name}${count}`;
 	}
 	if (row.kind === "section") {
-		const label = ` ${row.expanded ? "▾" : "▸"} ${row.label} (${row.count}) `;
-		return gray(`${label}${"─".repeat(Math.max(0, width - visibleWidth(label) - 1))}`);
+		const label = ` ${row.expanded ? "▾" : "▸"} ${row.label} ${gray(`(${row.count})`)} `;
+		return `${label}${gray("─".repeat(Math.max(0, width - visibleWidth(label) - 1)))}`;
 	}
 	const e = row.entry;
 	// Mid-drag, the session being carried is a hollow outline of itself.
@@ -659,7 +647,7 @@ function rowLine(row: Row, width: number, now: number, selected: boolean): strin
 			: e.activity === "working"
 				? ""
 				: age(e.activityAt, now);
-	const worktree = e.cwd !== e.project ? magenta("⎇") : " ";
+	const worktree = e.cwd !== e.project ? gray("⎇") : " ";
 	const right = ` ${worktree} ${e.open && e.activity === "blocked" ? attention(when.padStart(3)) : when.padStart(3)} `;
 	const hidden = row.folded ? ` ${foldedTally(row.family.map((p) => p.entry))}` : "";
 	const titleWidth = width - visibleWidth(lead) - 2 - visibleWidth(hidden) - visibleWidth(right);
@@ -698,10 +686,11 @@ function familyTally(family: Entry[]): string {
 	const tally: [State[], string][] = [
 		[["working", "loading"], "◐"],
 		[["blocked"], "◆"],
-		[["cut-off", "errored"], "⚠"],
+		[["cut-off"], "!"],
+		[["errored"], "×"],
 		[["unseen"], "●"],
 		[["idle"], "○"],
-		[["dormant"], "·"],
+		[["dormant"], "◌"],
 	];
 	return tally
 		.flatMap(([which, mark]) => {
@@ -886,18 +875,15 @@ function launchMenu(choosing: Choosing, width: number, maxHeight: number): Overl
 	const menu = choosing.menu as Menu;
 	const inner = width - 4;
 	const presets = pickerPresets();
-	const chosen = chosenPreset(choosing);
 	const shown = menuPresets(menu.query);
 	const items: string[] = [];
 	const itemAt: number[] = [];
 	shown.forEach((index, n) => {
 		const p = (presets[index] as Choice).preset;
-		const name = p.agent ?? p.model ?? "";
-		const pad = " ".repeat(Math.max(1, 21 - visibleWidth(name)));
-		const effort = (p.agent ? "agent" : (p.effort ?? "default")).padEnd(8);
+		const cells = presetColumns(p.harness, p.agent ?? p.model ?? "", p.agent ? "agent" : (p.effort ?? "default"), p.provider ?? "");
 		itemAt.push(items.length);
 		items.push(
-			`${menu.query === "" && n < 9 ? bold(String(index + 1)) : " "} ${p.default ? "★" : " "} ${p.harness.padEnd(7)} ${index === chosen ? cyan(name) : name}${pad}${effort}${p.provider ?? ""}`,
+			`${menu.query === "" && n < 9 ? bold(String(index + 1)) : " "} ${p.default ? "★" : " "} ${cells.harness}${cells.model}${cells.effort}${cells.provider}`,
 		);
 	});
 	if (shown.length === 0) items.push(gray("nothing matches"));
@@ -906,10 +892,7 @@ function launchMenu(choosing: Choosing, width: number, maxHeight: number): Overl
 	const from = Math.min(Math.max(0, (itemAt[menu.cursor] ?? 0) - room + 1), Math.max(0, items.length - room));
 	const to = Math.min(items.length, from + room);
 	const row = (content: string) => `${gray("│")} ${truncateToWidth(content, inner, "…", true)} ${gray("│")}`;
-	const lines = [
-		gray(`├${"─".repeat(width - 2)}┤`),
-		row(gray(`    ${"Harness".padEnd(8)}${"Model".padEnd(21)}${"Effort".padEnd(8)}Provider`)),
-	];
+	const lines = [gray(`├${"─".repeat(width - 2)}┤`), row(PRESET_HEADER)];
 	const buttons: OverlayButton[] = [];
 	items.slice(from, to).forEach((line, i) => {
 		const n = itemAt.indexOf(from + i);
@@ -947,7 +930,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	if (e.branch) {
 		const diff = info?.diff;
 		const changes = diff ? `  ${green(`+${diff.add}`)} ${red(`−${diff.del}`)}${gray(" uncommitted")}` : "";
-		head.push(`${magenta(`⎇ ${e.branch}`)}${changes}`);
+		head.push(`${gray("⎇")} ${e.branch}${changes}`);
 	}
 	const group = groupOf(e);
 	if (group !== null) head.push(`${gray("Group")} ${group}`);
@@ -957,7 +940,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	if (parent) {
 		const label = `${gray("started by")} ${originMark(origin(e))} `;
 		links.push({ at: head.length, command: { kind: "row", act: "parent", row: e.id } });
-		head.push(`${label}${truncateToWidth(displayName(parent), inner - visibleWidth(label) - 2, "…", true)} ${bold("p")}`);
+		head.push(`${label}${truncateToWidth(displayName(parent), inner - visibleWidth(label) - 3, "…", true)}  ${bold("p")}`);
 		if (parent.project !== e.project && !parent.operator)
 			head.push(gray(`${" ".repeat(visibleWidth(label))}in ${projectName(parent.project)}`));
 	}
@@ -975,7 +958,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 		}
 	}
 	if (e.schedules.length > 0) {
-		head.push(rule, gray("Schedules"));
+		head.push(rule, "Schedules");
 		// The soonest few, and always the last that ran, so it shows one ran however many are pending.
 		const shown = [...e.schedules.filter((v) => v.nextAt !== null).slice(0, 3), ...e.schedules.filter((v) => v.nextAt === null)];
 		for (const v of shown) {
@@ -1000,11 +983,11 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	const buttons: { y: number; from: number; to: number; command: Command; text: string }[] = [];
 	const buttonLines: string[] = [];
 	const actions = peekButtons(row);
-	const session = actions.filter(([, , act]) => ["stop", "wake", "reload", "new"].includes(act));
+	const session = actions.filter(([, , act]) => ["focus", "stop", "wake", "reload", "new"].includes(act));
 	const organize = actions.filter(([, , act]) => ["snooze", "archive", "group", "unseen"].includes(act));
 	const copy = actions.filter(([, , act]) => ["copyOpen", "copyMention"].includes(act));
 	const col = Math.floor(inner / 2);
-	buttonLines.push(`${gray(" Session".padEnd(col))}${gray(" Organize")}`);
+	buttonLines.push(`${" Session".padEnd(col)} Organize`);
 	for (let i = 0; i < Math.max(session.length, organize.length); i++) {
 		let line = "";
 		for (const [column, action] of [session[i], organize[i]].entries()) {
@@ -1025,7 +1008,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 		}
 		buttonLines.push(line);
 	}
-	buttonLines.push(gray(" Copy"));
+	buttonLines.push(" Copy");
 	for (const [label, k, act] of copy) {
 		const text = ` ${bold(k)} ${label.replace(/^Copy /, "")}`;
 		buttons.push({ y: buttonLines.length, from: 0, to: inner, command: { kind: "row", act, row: row.key }, text });

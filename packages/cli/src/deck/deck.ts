@@ -9,6 +9,7 @@ import { ensureServer, ensureSessionsServer, hook, notify, onlyControl, randomHe
 import { openStore } from "../store.ts";
 import { CLIENT_CWD, cleanEnv, listSessions, quote, SESSIONS, tmux, tmuxClient, tmuxTry, UI } from "../tmux.ts";
 import type { DeckState } from "./protocol.ts";
+import { keyName } from "./style.ts";
 
 export const HELP_POPUP = ["-T", " swb keys ", `${SWB} __help`];
 
@@ -154,7 +155,7 @@ function uiConf(config: Config): string {
 		"set -g status off",
 		"set -g status-position top",
 		"set -g status-style default",
-		`set -g status-format[0] "#[range=user|roster] #[bold]◂ ${prefix} z#[nobold] #[dim]show list#[nodim] #[norange]"`,
+		`set -g status-format[0] "#[range=user|roster] #[bold]◂ ${keyName(prefix)} z#[nobold] show list #[norange]"`,
 		`bind -n MouseDown1Status if -F '#{==:#{mouse_status_range},roster}' { if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { ${roster("focus")} } }`,
 		"set -g mouse on",
 		`bind -n Any if -F '#{mouse_pane}' { if -F '${POINTER_AWAY}' { ${LEAVE} } ; send-keys -M } { if -F '${KEY_AWAY}' { ${LEAVE} } ; send-keys }`,

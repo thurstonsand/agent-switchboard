@@ -174,7 +174,7 @@ export async function cardEndings(s: Scenario, harness: "pi" | "claude" | "codex
 	s.swb("drive", "start");
 	const glyphs = await waitState(s, "every row", (x) => x.rows.filter((r) => r.kind === "session").length === 4);
 	const glyphOf = (id: string) => glyphs.rows.flatMap((r) => (r.kind === "session" && r.id === id ? [r.glyph] : []))[0];
-	expect([cut, quit, stopped, failed].map(({ id }) => glyphOf(id))).toEqual(["⚠", "⚠", "●", "⚠"]);
+	expect([cut, quit, stopped, failed].map(({ id }) => glyphOf(id))).toEqual(["!", "!", "●", "×"]);
 	const card = async (id: string, ending: string, transcript: string, peek?: string) => {
 		await cursorTo(s, id);
 		if (peek) await until(() => s.screen().includes(peek), budgets.settle, peek);

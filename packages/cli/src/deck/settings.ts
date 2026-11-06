@@ -29,8 +29,9 @@ import {
 import { type Catalog, type Choice, effortLevels, effortMark, type Model, presetLabel, searchMatch, shortlist } from "../harnesses.ts";
 import { setOrReset, withValue } from "../write-config.ts";
 import { type Binding, bindingFor, legendParts } from "./model.ts";
+import { PRESET_HEADER, presetColumns } from "./preset-table.ts";
 import type { SettingsState } from "./protocol.ts";
-import { bold, cyan, dim, gray, green, red, shortPath, yellow } from "./style.ts";
+import { bold, cyan, gray, green, red, shortPath, yellow } from "./style.ts";
 
 // Settings: every key of config.toml as a list to read and change, drawn by the roster across the whole Deck.
 // Setting a value back to the default takes the key out of the file.
@@ -319,6 +320,7 @@ export class SettingsPane {
 	gesture: Gesture = { kind: "none" };
 	listTop = 2;
 	listHeight = 0;
+	itemRows = new Map<number, number>();
 	listLeft = 0;
 	narrow = false;
 	/** The items as last drawn. */
@@ -396,7 +398,7 @@ export class SettingsPane {
 				const count = this.presets().length;
 				out.push(
 					{ kind: "shortlist" },
-					{ kind: "heading", text: "Key  Harness   Model                     Effort   Provider" },
+					{ kind: "heading", text: PRESET_HEADER },
 					...Array.from({ length: count }, (_, index): Item => ({ kind: "preset", index })),
 					{
 						kind: "addPreset",
@@ -978,9 +980,9 @@ export class SettingsPane {
 			to: this.area === "rail" ? "list" : "rail",
 		});
 		const tail = [
+			bind(["escape"], "esc", this.query() !== "" || this.changedOnly ? "clear" : "sessions", CANCEL),
 			bind(["/"], "/", "search", { kind: "search" }),
 			bind(["O"], "O", "file", { kind: "open", line: s ? lineOf(this.host.loaded().text, s.key) : null }),
-			bind(["escape"], "esc", null, CANCEL),
 			bind(["c"], "c", null, { kind: "filter", changed: !this.changedOnly }),
 			bind(["?"], "?", null, { kind: "help" }),
 		];
@@ -1218,8 +1220,8 @@ export class SettingsPane {
 	/** The list item under a screen row, if any. */
 	itemAt(y: number): number | null {
 		if (this.adding || y < this.listTop || y >= this.listTop + this.listHeight) return null;
-		const i = this.scroll + (y - this.listTop);
-		return selectable(this.shown[i]) ? i : null;
+		const i = this.itemRows.get(y);
+		return i !== undefined && selectable(this.shown[i]) ? i : null;
 	}
 
 	handleMouse(event: TuiMouseEvent): { handled: boolean; render?: boolean; capture?: boolean } {
@@ -1321,6 +1323,7 @@ export class SettingsPane {
 
 	render(width: number, height: number): string[] {
 		this.targets = [];
+		this.itemRows.clear();
 		this.narrow = width < NARROW_BELOW;
 		const now = Date.now();
 		const lines: string[] = [this.header(width)];
@@ -1350,7 +1353,6 @@ export class SettingsPane {
 	}
 
 	header(width: number): string {
-		const close: Part = [`${bold("esc")} ${dim("sessions")} `, CLOSE];
 		if (this.narrow) {
 			const name = SECTIONS[this.section] as string;
 			const left: Part[] = [
@@ -1359,27 +1361,23 @@ export class SettingsPane {
 				[` ${name} `, null],
 				["›", { kind: "section", to: this.section + 1, area: null }],
 			];
-			const used = left.reduce((n, [t]) => n + visibleWidth(t), 0);
-			return this.clickable(0, 0, [...left, [" ".repeat(Math.max(1, width - used - visibleWidth(close[0]))), null], close]);
+			return this.clickable(0, 0, left);
 		}
 		const path = gray(shortPath(configPath()));
 		const title = ` ${bold("Settings")}`;
 		const gap = Math.max(1, Math.floor((width - visibleWidth(path)) / 2) - visibleWidth(title));
-		const used = visibleWidth(title) + gap + visibleWidth(path);
 		return this.clickable(0, 0, [
 			[title, null],
 			[" ".repeat(gap), null],
 			[path, { kind: "open", line: null }],
-			[" ".repeat(Math.max(1, width - used - visibleWidth(close[0]))), null],
-			close,
 		]);
 	}
 
 	searchLine(width: number): string {
 		const filters: Part[] = [
-			[this.changedOnly ? gray("all") : bold("all"), { kind: "filter", changed: false }],
-			["   ", null],
-			[this.changedOnly ? bold("changed") : gray("changed"), { kind: "filter", changed: true }],
+			[this.changedOnly ? " all " : this.host.paint.cursor(" all ", true), { kind: "filter", changed: false }],
+			[" · ", null],
+			[this.changedOnly ? this.host.paint.cursor(" changed ", true) : " changed ", { kind: "filter", changed: true }],
 			[" ", null],
 		];
 		const fw = filters.reduce((n, [t]) => n + visibleWidth(t), 0);
@@ -1424,8 +1422,11 @@ export class SettingsPane {
 			Math.max(12, ...items.map((i) => (i.kind === "setting" && i.s.control.kind !== "paths" ? visibleWidth(i.s.label) : 0))),
 		);
 		const rows: string[] = [];
+		const harnessHelp = this.current()?.kind === "harness";
 		for (let i = this.scroll; rows.length < listHeight && i < items.length; i++) {
+			if (harnessHelp && items[i]?.kind === "shortlist") rows.push(...this.footer(Math.min(80, listWidth), null), "");
 			const y = this.listTop + rows.length;
+			this.itemRows.set(y, i);
 			rows.push(this.itemLine(items[i] as Item, i, y, left, listWidth, labelWidth));
 			if (this.editing?.kind === "choices" && i === this.cursor && this.editing.s.control.kind === "enum") {
 				const editing = this.editing;
@@ -1439,7 +1440,7 @@ export class SettingsPane {
 					});
 			}
 		}
-		rows.push("", ...this.footer(Math.min(80, listWidth), null));
+		if (!harnessHelp) rows.push("", ...this.footer(Math.min(80, listWidth), null));
 		while (rows.length < height) rows.push("");
 		if (items.length === 0) rows[0] = gray(this.changedOnly && this.query() === "" ? "   nothing changed yet" : "   no settings match");
 		return this.railed(rows.slice(0, height));
@@ -1470,7 +1471,7 @@ export class SettingsPane {
 		const parts: Part[] = [];
 		switch (item.kind) {
 			case "heading":
-				return truncateToWidth(` ${bold(item.text)}`, width, "…", true);
+				return truncateToWidth(` ${item.text === PRESET_HEADER ? ` ${item.text}` : bold(item.text)}`, width, "…", true);
 			case "blank":
 				return "";
 			case "warning":
@@ -1543,8 +1544,9 @@ export class SettingsPane {
 		const value = show(s, this.valueOf(s));
 		const parts: Part[] = [
 			[label, null],
-			[value, s.control.kind === "paths" ? null : { kind: "activate", at: i }],
+			[set ? bold(value) : value, s.control.kind === "paths" ? null : { kind: "activate", at: i }],
 		];
+		if (!set && s.control.kind !== "prose") parts.push([`  ${gray(`(${s.fallback().from ?? "default"})`)}`, null]);
 		if (lit && s.control.kind !== "prose") {
 			const fallback = s.fallback();
 			if (set)
@@ -1554,7 +1556,6 @@ export class SettingsPane {
 					["  ", null],
 					[gray("↺ reset"), { kind: "reset", at: i }],
 				);
-			else parts.push(["   ", null], [gray(fallback.from ?? "default"), null]);
 		}
 		return parts;
 	}
@@ -1586,24 +1587,23 @@ export class SettingsPane {
 		if (!choice) return [];
 		const p = choice.preset;
 		const star = p.default ? (choice.reason ? red("★") : "★") : choice.reason ? red("✗") : " ";
-		const model = p.agent ?? p.model ?? "";
+		const cells = presetColumns(p.harness, p.agent ?? p.model ?? "", p.agent ? "agent" : (p.effort ?? "default"), p.provider ?? "");
 		const editing = this.editing?.kind === "text" && this.editing.target.kind === "note" && i === this.cursor;
 		return [
 			[`${String(index + 1).padStart(2)} `, null],
 			[star, { kind: "star", at: i }],
-			[` ${p.harness.padEnd(9)} `, null],
-			[truncateToWidth(model, 25, "…", true), null],
-			[` ${(p.agent ? "agent" : (p.effort ?? "default")).padEnd(8)}`, { kind: "adjust", by: 1, at: i, wrap: true }],
-			[` ${p.provider ?? ""}`, null],
-			[editing ? this.inputCell(Math.max(1, width - 53)) : "", null],
+			[` ${cells.harness}`, null],
+			[cells.model, null],
+			[cells.effort, { kind: "adjust", by: 1, at: i, wrap: true }],
+			[cells.provider, null],
+			[editing ? `  ${this.inputCell(Math.max(1, width - 45 - visibleWidth(cells.provider)))}` : "", null],
 		];
 	}
 
 	errorBody(error: ConfigError, width: number, height: number): string[] {
 		const rows = [
 			"",
-			`  ${red(`✗ ${shortPath(error.file)}${error.line === null ? "" : `:${error.line}`}`)}`,
-			...wrapTextWithAnsi(`  ${error.problem}`, width - 2),
+			...wrapTextWithAnsi(`  ${red(`✗ ${error.line === null ? "" : `line ${error.line}: `}${error.problem}`)}`, width - 2),
 			"",
 			...wrapTextWithAnsi("  This Deck keeps the settings it had until the file is fixed; new swb commands stop on it.", width - 2),
 			"",
@@ -1730,8 +1730,8 @@ export class SettingsPane {
 			const choice = this.choices()[item.index];
 			text = choice?.reason ?? choice?.note ?? "";
 		}
-		return wrapTextWithAnsi(text, width - 3)
-			.map((line) => `   ${line}`)
+		return wrapTextWithAnsi(text, width - 2)
+			.map((line) => `  ${line}`)
 			.concat("", "")
 			.slice(0, 2);
 	}

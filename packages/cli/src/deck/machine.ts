@@ -60,7 +60,7 @@ import {
 import type { Card, Entry, FromWorker, PeekInfo, ShellAt, Snapshot, State, StatSummary, ToWorker, Transcript } from "./protocol.ts";
 import { SettingsPane } from "./settings.ts";
 import { type Applied, StagePanes } from "./stage.ts";
-import { attention, bold, cyan, gray, green, hex, lerp, mix, red, sgrBg, shortPath, wakeAt, yellow } from "./style.ts";
+import { attention, bold, cyan, gray, green, hex, keyName, lerp, mix, red, sgrBg, shortPath, wakeAt, yellow } from "./style.ts";
 
 const VISIT_MS = 1000;
 
@@ -392,6 +392,7 @@ function ending(e: Entry, read: Transcript | null): string | null {
 }
 
 function card(e: Entry, lines: string[] = []): Card {
+	if (pickerMode()) return { head: [], lines: [], turns: [], tail: [], ending: null, agent: "" };
 	const transcript = m.transcripts.get(e.id);
 	const extra = transcript?.error ? [red(transcript.error)] : [];
 	const read = transcript?.transcript ?? null;
@@ -599,6 +600,7 @@ function apply(): void {
 
 /** What the Stage's agent pane is labelled: its session's harness, or what it waits on without one. */
 function stageLabel(a: Applied): string {
+	if (pickerMode() && a.card) return "new session";
 	if (a.id === null) return newLaunch() ? "new" : "empty";
 	const e = m.entries.get(a.id);
 	if (!e) throw new Error(`the Stage applied ${a.id}, which has no entry`);
@@ -1473,6 +1475,12 @@ function run(c: Command): void {
 /** A row's own command, from its key on the cursor's row, its Peek's buttons, or a prefix key. */
 function act(act: RowAct, row: Row | undefined): void {
 	switch (act) {
+		case "focus":
+			if (row?.kind === "session") {
+				reveal(row.entry.id);
+				focusEntry(row.entry);
+			}
+			break;
 		case "wake":
 			wakeRow(row);
 			break;
@@ -2021,7 +2029,7 @@ function newAt(row = selected()): void {
  * merges into an existing Group or renames to a new one.
  */
 function startNaming(row = selected()): void {
-	const input = new Input({ prompt: "> " });
+	const input = new Input({ prompt: "/ ", placeholder: "filter or new Group", placeholderStyle: gray });
 	input.focused = m.filter.focused;
 	if (row?.kind === "session" && row.entry.operator) toast("Operators don't take Groups", "info");
 	else if (row?.kind === "session") {
@@ -2480,8 +2488,9 @@ export function keymap(): Binding<Command>[] {
 			return [];
 		// Their legend line is the field being typed into.
 		case "filter":
-		case "name":
 			return [...ARROWS, bind(["enter"], "⏎", null, CHOOSE), bind(["escape"], "esc", null, CANCEL)];
+		case "name":
+			return [...ARROWS, bind(["enter"], "⏎", mode.renaming ? "rename" : "assign", CHOOSE), bind(["escape"], "esc", "cancel", CANCEL)];
 		case "snooze":
 			return [
 				bind(["up", "k"], "↑", null, step(-1)),
@@ -2538,9 +2547,9 @@ function pickerKeys(choosing: Choosing): Binding<Command>[] {
 	return [
 		bind(["enter"], "⏎", "start", CHOOSE),
 		...(pickerPresets().length > 0 ? [bind(["tab", "shift+tab"], "⇥", "preset", { kind: "menu" })] : []),
-		// The prefix key, which reaches the roster through the UI server.
-		bind([], `${m.config.prefix} d`, "remove", { kind: "remove" }),
 		bind(["escape"], "esc", "cancel", CANCEL),
+		// The prefix key, which reaches the roster through the UI server.
+		bind([], `${keyName(m.config.prefix)} d`, "remove", { kind: "remove" }),
 		...ARROWS,
 	];
 }
@@ -2553,6 +2562,7 @@ function rosterKeys(row: Row | undefined): Binding<Command>[] {
 	if (row?.kind === "header") enter = row.collapsed ? "expand" : "collapse";
 	else if (row?.kind === "section") enter = row.expanded ? "collapse" : "expand";
 	else if (session) enter = !session.open ? "open" : session.live ? "focus" : "wake";
+	if (session?.activity === "blocked" && m.peek.settled?.id === session.id) enter = null;
 	if (
 		!panes.narrow &&
 		session?.open &&
@@ -2601,12 +2611,13 @@ function rosterKeys(row: Row | undefined): Binding<Command>[] {
  * binds; a click runs what they do.
  */
 export function stageKeys(): Binding<Command>[] {
-	const help = bind([], `${m.config.prefix} ?`, "keys", { kind: "help" });
+	const prefix = keyName(m.config.prefix);
+	const help = bind([], `${prefix} ?`, "keys", { kind: "help" });
 	if (panes.applied.target === placeholder || harnessStarting(panes.applied))
 		return [bind([], "esc", "list", { kind: "roster", to: "focus" }), help];
 	return [
-		bind([], `${m.config.prefix} h`, "list", { kind: "roster", to: "focus" }),
-		bind([], `${m.config.prefix} z`, "hide list", { kind: "roster", to: "hide" }),
+		bind([], `${prefix} h`, "list", { kind: "roster", to: "focus" }),
+		bind([], `${prefix} z`, "hide list", { kind: "roster", to: "hide" }),
 		help,
 	];
 }
@@ -2683,6 +2694,7 @@ export function peekButtons(row: Row): [label: string, key: string, act: RowAct]
 	const items: [string, string, RowAct][] = [];
 	if (!e.open) items.push(["Unarchive", "a", "archive"]);
 	else {
+		if (e.activity === "blocked") items.push(["Focus to respond", "⏎", "focus"]);
 		items.push(e.live ? ["Stop", "x", "stop"] : ["Wake", "w", "wake"]);
 		if (!e.provisional) items.push(["Reload", "R", "reload"]);
 		if (!e.provisional && !e.snoozed) items.push(e.markedUnseen ? ["Unmark Unseen", "u", "unseen"] : ["Mark Unseen", "u", "unseen"]);

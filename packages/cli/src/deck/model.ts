@@ -43,7 +43,19 @@ type Whole =
 	| TerminalProfile;
 
 /** What a row can be asked to do: by its key on the cursor's row, by its Peek's buttons, or by a prefix key from anywhere. */
-export type RowAct = "wake" | "stop" | "reload" | "archive" | "snooze" | "unseen" | "parent" | "copyOpen" | "copyMention" | "new" | "group";
+export type RowAct =
+	| "focus"
+	| "wake"
+	| "stop"
+	| "reload"
+	| "archive"
+	| "snooze"
+	| "unseen"
+	| "parent"
+	| "copyOpen"
+	| "copyMention"
+	| "new"
+	| "group";
 
 /**
  * What a key, a click, a prefix key, or a button asks the roster to do. Keys find theirs in the mode's keymap, and every

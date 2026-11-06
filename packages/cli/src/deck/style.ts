@@ -12,8 +12,12 @@ export const magenta = sgr("35", "39");
 export const blue = sgr("34", "39");
 export const cyan = sgr("36", "39");
 export const gray = dim;
-export const attention = magenta;
-export const blockedMark = sgr("1;7;35", "22;27;39");
+export const attention = yellow;
+export const blockedMark = sgr("1;33", "22;39");
+
+export function keyName(name: string): string {
+	return name.replaceAll("M-", "Alt+").replaceAll("C-", "Ctrl+").replaceAll("S-", "Shift+");
+}
 
 const SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
 

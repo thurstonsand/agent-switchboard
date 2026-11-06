@@ -1,12 +1,13 @@
 import { decodeKittyPrintable, matchesKey, StdinBuffer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { loadConfig } from "../config.ts";
-import { blockedMark, blue, bold, cyan, dim, green, magenta, red } from "./style.ts";
+import { blockedMark, blue, bold, cyan, dim, green, keyName, red } from "./style.ts";
 
 const CLOSES = "any key or click closes";
 
 /** The popup's lines, the hint under them aside: a blank line, then a key and what it does on each. */
 function lines(prefix: string, columns = Infinity): string[] {
-	const row = (k: string, label: string) => `  ${bold(k.padEnd(14))} ${label}`;
+	prefix = keyName(prefix);
+	const row = (k: string, label: string) => `  ${bold(k.padEnd(17))} ${label}`;
 	const left = [
 		bold("  Move"),
 		row("j k ↑ ↓", "Move"),
@@ -42,10 +43,11 @@ function lines(prefix: string, columns = Infinity): string[] {
 	];
 	const right = [
 		bold("  State marks"),
-		"  ○ idle                 · dormant (not running)",
+		"  ○ idle                 ◌ dormant (not running)",
 		`  ${cyan("◐")} working              ${green("●")} Unseen (finished since Visit)`,
-		`  ${blockedMark("◆")} blocked              ${red("⚠")} cut off or errored`,
-		`  ${dim("✓")} archived             ${magenta("⎇")} worktree`,
+		`  ${blockedMark("◆")} blocked              ${bold(red("!"))} cut off · resume unfinished turn`,
+		`  ✓ archived             ${bold(red("×"))} errored · inspect and retry`,
+		`  ${dim("⎇")} worktree`,
 		`  ${blue("⌁")} started by Operator  ↳ started by session`,
 		"  +N folded family       ◷ once / ↻ recurring schedule",
 		"",
@@ -55,12 +57,14 @@ function lines(prefix: string, columns = Infinity): string[] {
 		row(`${prefix} s`, "Shell beside / below / instead; ctrl-d closes"),
 		row(`${prefix} z`, "Hide / show roster; click ◂ to show"),
 		"",
-		bold("  From any pane"),
-		`  ${prefix.replaceAll("M-", "Alt+").replaceAll("C-", "Ctrl+")} = ${prefix} · hold to reveal pane keys`,
-		row("C-h j k l", "Move through panes and nvim windows"),
+		bold("  From any pane · navigate"),
+		`  ${prefix}, then key · hold to reveal pane keys`,
+		row("Ctrl+h j k l", "Move through panes and nvim windows"),
 		row(`${prefix} h j k l`, "Focus the pane bearing that key"),
 		row(`${prefix} J K`, "Next / previous session; j k in roster"),
 		row(`${prefix} Tab`, "Roster / pane you left"),
+		"",
+		bold("  From any pane · session actions"),
 		row(`${prefix} S`, "Snooze / unsnooze"),
 		row(`${prefix} <key>`, "n N w x R a p u [ ] y Y / m , as in roster"),
 		row(`${prefix} d`, "Remove highlighted directory in picker"),

@@ -136,14 +136,14 @@ test("? fits every key in a tall Deck, and in a short one scrolls them by wheel 
 	s.swb("drive", "start", "--size", "140x50");
 	await waitState(s, "the Deck", (x) => x.ready);
 	const first = "j k ↑ ↓";
-	const last = "Send literal M-a";
+	const last = "Send literal Alt+a";
 	s.keys("?");
 	await until(() => s.screen().includes("key or click closes"), budgets.settle, "the key help");
 	expect(s.screen()).toContain(first);
 	expect(s.screen()).toContain(last);
 	expect(s.screen()).toContain("State marks");
 	expect(s.screen()).toContain("Unseen (finished since Visit)");
-	expect(s.screen()).toContain("Alt+a = M-a");
+	expect(s.screen()).toContain("Alt+a, then key");
 	s.keys("x");
 	await until(() => !s.screen().includes("key or click closes"), budgets.settle, "help closed");
 
@@ -250,6 +250,29 @@ test("[ and ] step back and forward through the sessions I visited, from the ros
 	await waitState(s, "nothing after b now", (x) => noLater(x) && x.staged.id === b);
 	s.keys("M-a", "[");
 	await waitState(s, "M-a [ back to a", (x) => x.staged.id === a && x.focus === "stage", budgets.piReady);
+});
+
+test("the new-session picker hides a dormant transcript, restores it on cancel, and leaves a live harness untouched", async () => {
+	s = scenario("phase6", "picker-underlay");
+	const [id] = (await seed(s, { turns: ["the old conversation is still here"], title: "Previous session" })) as [string];
+	s.swb("drive", "start");
+	await waitState(s, "the dormant session", (x) => x.ready && x.staged.id === id && x.staged.kind === "dormant");
+	await until(() => s.screen().includes("the old conversation is still here"), budgets.settle, "the transcript");
+	s.keys("n");
+	await waitState(s, "the picker", (x) => x.mode === "picker");
+	await until(() => !s.screen().includes("the old conversation is still here"), budgets.settle, "the old card hidden");
+	expect(s.screen()).toContain("new session");
+	s.keys("Escape");
+	await waitState(s, "the roster", (x) => x.mode === "roster");
+	await until(() => s.screen().includes("the old conversation is still here"), budgets.settle, "the card restored");
+	expect(entry(s, id).live).toBe(false);
+	s.keys("Enter");
+	await waitState(s, "the live session", (x) => x.focus === "stage" && x.staged.kind === "live", budgets.piReady);
+	await reply(s, "the live harness stays visible");
+	s.keys("M-a", "n");
+	await waitState(s, "the picker over pi", (x) => x.mode === "picker");
+	expect(s.screen()).toContain("the live harness stays visible");
+	expect(entry(s, id).live).toBe(true);
 });
 
 test("n and M-a n open the picker on the highlighted session's directory, before its first prompt too, and Enter starts there", async () => {

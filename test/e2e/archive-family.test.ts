@@ -100,12 +100,15 @@ test("archiving cancels every schedule a session set or receives: a names them a
 			.query<{ label: string }>("SELECT schedule_label AS label FROM schedules WHERE next_at IS NOT NULL AND cancelled_at IS NULL")
 			.map((r) => r.label)
 			.sort();
-	/** The archive prompt's lines, inside its box. */
+	/** The docked archive prompt, with its Cancel action in the footer. */
 	const prompt = () => {
-		const lines = s.screen().split("\n");
-		const top = lines.findIndex((line) => line.includes("┌"));
-		const bottom = lines.findIndex((line, i) => i > top && line.includes("└"));
-		return top === -1 ? [] : lines.slice(top + 1, bottom).map((line) => (line.split("│")[1] ?? "").trim());
+		const lines = s
+			.screen()
+			.split("\n")
+			.map((line) => line.slice(0, 42).trim());
+		const top = lines.findIndex((line) => line.startsWith("─ Archive"));
+		const bottom = lines.findIndex((line, i) => i > top && line.startsWith("──"));
+		return top === -1 ? [] : [...lines.slice(top + 1, bottom), ...lines.filter((line) => line === "esc Cancel")];
 	};
 	s.swb("drive", "start");
 	await waitState(s, "the sessions on the roster", (x) => x.ready && rowIndex(x, child) !== -1);

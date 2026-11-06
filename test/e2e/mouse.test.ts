@@ -139,6 +139,27 @@ test("the mouse reaches everything the keys do: a row's Peek, the hidden or narr
 	expect(state(s).cursor).toBe(a);
 });
 
+test("a blocked Peek focuses its own session to respond, even while another row is selected", async () => {
+	s = scenario("phase6", "peek-respond");
+	const [a, b] = (await seed(s, { turns: ["alpha"], title: "alpha" }, { turns: ["bravo"], title: "bravo" })) as [string, string];
+	s.swb("drive", "start");
+	await waitState(s, "the Deck", (x) => x.ready);
+	await cursorTo(s, a);
+	s.keys("Enter");
+	await waitState(s, "alpha focused", (x) => x.staged.id === a && x.focus === "stage" && x.staged.kind === "live", budgets.piReady);
+	s.keys("-l", "confirm deploy", "Enter");
+	await onScreen("Confirm deploy?", "the dialog");
+	s.keys("M-a", "h");
+	await waitState(s, "the roster", (x) => x.focus === "roster");
+	await cursorTo(s, b);
+	await peekButton("alpha", a, "⏎ Focus to respond");
+	await waitState(s, "alpha, not bravo, focused", (x) => x.staged.id === a && x.focus === "stage");
+	await onScreen("Confirm deploy?", "the dialog ready for an answer");
+	s.keys("Enter");
+	await until(() => entry(s, a).activity === "idle", budgets.settle, "alpha answered");
+	expect(s.screen()).toContain("tool done deploy");
+});
+
 test("a Peek follows the pointer and the cursor keys, leaves with the pointer, and never takes pi's keys", async () => {
 	s = scenario("phase6", "peek");
 	const [a, b] = (await seed(s, { turns: ["alpha"], title: "alpha" }, { turns: ["bravo"], title: "bravo" })) as [string, string];
