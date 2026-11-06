@@ -141,7 +141,7 @@ test("a Codex session rewound again and again, across a wake and an archive, rea
 	await agrees(["SWB-rewind-alpha", "SWB-rewind-echo"]);
 
 	// Dormant, then awake again: the woken Codex goes on in the rollout the reverts left it in.
-	s.tmux(s.servers.sessions, "kill-session", "-t", `=${host(s, codex.id)}`);
+	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(host(s, codex.id)));
 	await until(() => !entry(s, codex.id).live, budgets.settle, "dormant");
 	expect(active()).toEqual(["reply SWB-rewind-alpha", "reply SWB-rewind-echo"]);
 	s.swb("drive", "start");

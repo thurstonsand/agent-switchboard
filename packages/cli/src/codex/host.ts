@@ -23,7 +23,7 @@ import { codexServerOverrides, declareCodexServer } from "../lines.ts";
 import { codexOperatorConfig } from "../operator.ts";
 import { SWB } from "../sessions.ts";
 import { openStore } from "../store.ts";
-import { SESSIONS, tmuxTry } from "../tmux.ts";
+import { listHosts } from "../tmux.ts";
 import { archivedInCodex, codexProvider } from "../transcripts/codex.ts";
 import { CodexClient, type Notification } from "./client.ts";
 
@@ -425,8 +425,8 @@ class CodexLine {
 
 	/** The pane title starts with the shown thread's id, cut to 29 characters; it's resolved on this server. */
 	async bind(): Promise<void> {
-		const title = tmuxTry(SESSIONS, "display", "-p", "-t", `=${this.host}:`, "#{pane_title}");
-		const prefix = title.ok ? /^([0-9a-f-]{8,})/.exec(title.out)?.[1] : undefined;
+		const title = listHosts("#{pane_title}").find(([name]) => name === this.host)?.[1];
+		const prefix = title === undefined ? undefined : /^([0-9a-f-]{8,})/.exec(title)?.[1];
 		if (!prefix || this.bound?.id.startsWith(prefix)) return;
 		const { data } = await this.client.request<{ data: string[] }>("thread/loaded/list", {});
 		const matches = data.filter((id) => id.startsWith(prefix));

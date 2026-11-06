@@ -45,7 +45,7 @@ test("session_launch starts a managed pi Session that records its parent, and me
 	await until(() => entry(s, child.id).activity === "idle", budgets.settle, "the child idle again");
 
 	const host = s.query<{ tmux_session: string }>("select tmux_session from runtimes where session_id = ?", child.id)[0]?.tmux_session;
-	s.tmux(s.servers.sessions, "kill-session", "-t", `=${host}`);
+	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(host as string));
 	await until(() => !entry(s, child.id).live, budgets.settle, "the child dormant");
 	s.keys("-l", `message ${child.id} w1`, "Enter");
 	await until(() => s.signal("replied.w1") !== "", budgets.piReady, "the woken child's reply");
@@ -58,8 +58,8 @@ test("session_launch starts a managed pi Session that records its parent, and me
 	// A clean quit closes the pane of a child no Deck started, as it does one a Deck did.
 	const woken = s.query<{ tmux_session: string }>("select tmux_session from runtimes where session_id = ?", child.id)[0]
 		?.tmux_session as string;
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${woken}:`, "-l", "archive a1");
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${woken}:`, "Enter");
+	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(woken), "-l", "archive a1");
+	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(woken), "Enter");
 	await until(() => !entry(s, child.id).open && !entry(s, child.id).live, budgets.settle, "the child archived and quit");
 	await until(
 		() => !s.tmux(s.servers.sessions, "list-sessions", "-F", "#{session_name}").split("\n").includes(woken),
@@ -95,7 +95,7 @@ test("a pi that dies before it's ready says failed to start, and w retries once 
 	writeFileSync(pi, script);
 	s.keys("w");
 	const retried = await waitState(s, "a live after the retry", (x) => x.staged.id === a && x.staged.kind === "live", budgets.piReady);
-	const remain = () => s.tmux(s.servers.sessions, "show", "-p", "-v", "-t", `=${retried.staged.host}:`, "remain-on-exit");
+	const remain = () => s.tmux(s.servers.sessions, "show", "-p", "-v", "-t", s.pane(retried.staged.host as string), "remain-on-exit");
 	await until(() => remain() === "", budgets.settle, "remain-on-exit cleared once pi registered");
 	s.save("retried.txt", s.screen());
 });
@@ -113,14 +113,14 @@ test("a newer swb takes over: idle pis stop, a working one keeps its turn, and e
 		s.query<{ tmux_session: string }>("SELECT tmux_session FROM runtimes WHERE session_id = ?", id)[0]?.tmux_session;
 	const [hostA, hostB] = [hostOf(a), hostOf(b)] as [string, string];
 	const draft = join(s.env.XDG_STATE_HOME as string, "agent-switchboard", "drafts", a);
-	s.tmux(sessions, "send-keys", "-t", `=${hostA}:`, "-l", "half a thought");
+	s.tmux(sessions, "send-keys", "-t", s.pane(hostA), "-l", "half a thought");
 	await until(
-		() => s.tmux(sessions, "capture-pane", "-p", "-t", `=${hostA}:`).includes("half a thought"),
+		() => s.tmux(sessions, "capture-pane", "-p", "-t", s.pane(hostA)).includes("half a thought"),
 		budgets.settle,
 		"a's draft typed",
 	);
-	s.tmux(sessions, "send-keys", "-t", `=${hostB}:`, "-l", "hold u1");
-	s.tmux(sessions, "send-keys", "-t", `=${hostB}:`, "Enter");
+	s.tmux(sessions, "send-keys", "-t", s.pane(hostB), "-l", "hold u1");
+	s.tmux(sessions, "send-keys", "-t", s.pane(hostB), "Enter");
 	await until(() => s.signal("u1.entered") !== "", budgets.piReady, "b mid-turn");
 	const names = (server: string) => s.tmux(server, "list-sessions", "-F", "#{session_name}").split("\n");
 	const pid = (server: string) => s.tmux(server, "display", "-p", "#{pid}");
@@ -146,11 +146,11 @@ test("a newer swb takes over: idle pis stop, a working one keeps its turn, and e
 	s.swb("wake", a);
 	expect(s.tmux(sessions, "show", "-gv", "@swb_version")).toBe("99.0.0");
 	await until(
-		() => entry(s, a).live && s.tmux(sessions, "capture-pane", "-p", "-t", `=${hostOf(a)}:`).includes("half a thought"),
+		() => entry(s, a).live && s.tmux(sessions, "capture-pane", "-p", "-t", s.pane(hostOf(a) as string)).includes("half a thought"),
 		budgets.piReady,
 		"a's draft back",
 	);
-	s.save("draft-restored.txt", s.tmux(sessions, "capture-pane", "-p", "-t", `=${hostOf(a)}:`));
+	s.save("draft-restored.txt", s.tmux(sessions, "capture-pane", "-p", "-t", s.pane(hostOf(a) as string)));
 	expect(existsSync(draft)).toBe(false);
 
 	s.swb("drive", "stop");

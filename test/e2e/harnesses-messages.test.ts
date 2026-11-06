@@ -13,7 +13,7 @@ afterEach(async () => {
 		for (const { session_id, tmux_session } of s.query<{ session_id: string; tmux_session: string }>(
 			"select session_id, tmux_session from runtimes",
 		))
-			s.save(`pane-${session_id}.txt`, s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-S", "-200", "-t", `=${tmux_session}:`));
+			s.save(`pane-${session_id}.txt`, s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-S", "-200", "-t", s.pane(tmux_session)));
 		s.save("ls.json", JSON.stringify(s.ls(), null, 2));
 		for (const harness of ["claude", "codex"] as const) s.save(`${harness}-requests.json`, JSON.stringify(s.requests(harness), null, 1));
 	} catch {}
@@ -272,9 +272,9 @@ test("agents use swb's tools across harnesses: list, message, launch, and cancel
 		budgets.settle,
 		"pi's listing row",
 	);
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, pi.id)}:`, "C-o");
+	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host(s, pi.id)), "C-o");
 	await until(() => /Sessions\s*\n\s*Open sessions \(/.test(pane(s, pi.id)), budgets.settle, "pi's expanded row, the model's text");
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, pi.id)}:`, "C-o");
+	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host(s, pi.id)), "C-o");
 
 	// A launch from Claude starts a Codex session whose parent is Claude.
 	type(
@@ -296,9 +296,9 @@ test("agents use swb's tools across harnesses: list, message, launch, and cancel
 	expect(calls).toContain("  Launch · codex · launched by claude");
 	expect(calls).toContain("  ⎿  Launched a Codex session");
 	// ctrl+o keeps Claude Code's own rows, in full.
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, claude.id)}:`, "C-o");
+	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host(s, claude.id)), "C-o");
 	await until(() => pane(s, claude.id).includes("session_launch (MCP)"), budgets.settle, "Claude Code's rows under ctrl+o");
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, claude.id)}:`, "C-o");
+	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host(s, claude.id)), "C-o");
 
 	// Cancel from pi stops Codex's held turn.
 	await settled(s, codex.id, "Codex done messaging pi");
@@ -346,7 +346,7 @@ test("a message to a dormant Claude Code or Codex session wakes it on its own co
 	]);
 	for (const target of [claude, codex]) {
 		const harness = target.harness as "claude" | "codex";
-		s.tmux(s.servers.sessions, "kill-session", "-t", `=${host(s, target.id)}`);
+		s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(host(s, target.id)));
 		await until(() => !entry(s, target.id).live, budgets.settle, `${harness} dormant`);
 		// Whether its process runs is swb's business: an agent sees it idle, and its message delivered, nothing about waking.
 		const listed = JSON.parse(s.swb("list", "--from", pi.id)) as { text: string };
@@ -369,7 +369,7 @@ test("a message to a dormant Claude Code or Codex session wakes it on its own co
 test("a Codex session woken after config.toml changes provider resumes on the provider its conversation was saved with", async () => {
 	s = scenario("harnesses", "codex-provider", { packages: [], recorder: true, harnesses: ["codex"] });
 	const [pi, codex] = await Promise.all([launched(s, "pi", "reply pi-up"), launched(s, "codex", "reply SWB-first-codex")]);
-	s.tmux(s.servers.sessions, "kill-session", "-t", `=${host(s, codex.id)}`);
+	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(host(s, codex.id)));
 	await until(() => !entry(s, codex.id).live, budgets.settle, "codex dormant");
 	// Codex 0.166 refuses a conversation on any provider but its own; the same fake under another name is enough.
 	const config = join(s.home, ".codex/config.toml");

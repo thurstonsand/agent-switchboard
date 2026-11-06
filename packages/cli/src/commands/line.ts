@@ -5,9 +5,9 @@ import { parseArgs } from "node:util";
 import { pidAlive } from "@swb/shared";
 import { frame, listen, markDelivered, pendingFor, sender, unmarkDelivered } from "@swb/shared/mailbox";
 import { endHosting, pendingTitle, recordTx, sawRequest, setPhase, settle, startHosting, startTurn, turnErrored } from "@swb/shared/record";
-import { UsageError } from "../errors.ts";
+import { SwbError, UsageError } from "../errors.ts";
 import { openStore } from "../store.ts";
-import { SESSIONS, tmux, tmuxTry } from "../tmux.ts";
+import { listHosts, SESSIONS, tmuxTry } from "../tmux.ts";
 import { claudePermissionMode, claudeTitle } from "../transcripts/claude.ts";
 
 // The Claude line's half in swb. A mod can't open a database, so its hooks run these.
@@ -30,7 +30,9 @@ function claudeTranscript(id: string, cwd: string): string {
 
 /** The process in a host's pane: the harness itself, since its login shell execs it. */
 function panePid(host: string): number {
-	return Number(tmux(SESSIONS, "display", "-p", "-t", `=${host}:`, "#{pane_pid}"));
+	const pid = listHosts("#{pane_pid}").find(([name]) => name === host)?.[1];
+	if (!pid) throw new SwbError(`no pane hosts ${host}`);
+	return Number(pid);
 }
 
 export function record(args: string[]): void {

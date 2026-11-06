@@ -112,9 +112,9 @@ function hostOf(s: Scenario, id: string): string {
 
 /** Types into a session's own TUI, as the agent's user would, while the tape's human is elsewhere. */
 function typeInto(s: Scenario, id: string, text: string): void {
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${hostOf(s, id)}:`, "-l", text);
+	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(hostOf(s, id)), "-l", text);
 	Bun.sleepSync(300);
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${hostOf(s, id)}:`, "Enter");
+	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(hostOf(s, id)), "Enter");
 }
 
 export const directors: Record<string, Director> = {
@@ -446,7 +446,7 @@ export const directors: Record<string, Director> = {
 			await launched(s, "reply pinned", { cwd: infra, title: "Pin the base image" });
 			await launched(s, "reply on it", { cwd: operator, title: "Morning triage" });
 			const host = s.query<{ tmux_session: string }>("select tmux_session from runtimes where session_id = ?", certs)[0]?.tmux_session;
-			s.tmux(s.servers.sessions, "kill-session", "-t", `=${host}`);
+			s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(host as string));
 			await waitLs(s, "the certs session dormant", (ls) => ls.find((e) => e.id === certs)?.live === false);
 		},
 		run: async (s) => {
@@ -477,7 +477,7 @@ export const directors: Record<string, Director> = {
 			const operator = s.ls().find((e) => e.title === "Morning triage")?.id as string;
 			const host = s.query<{ tmux_session: string }>("select tmux_session from runtimes where session_id = ?", operator)[0]?.tmux_session;
 			await until(
-				() => s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-t", `=${host}:`).includes("Nothing changed"),
+				() => s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-t", s.pane(host as string)).includes("Nothing changed"),
 				TAPE,
 				"the refusal in the Operator",
 			);
@@ -522,7 +522,7 @@ export const directors: Record<string, Director> = {
 				ls.some((e) => e.parentId === claude && e.harness === "codex" && e.activity === "idle"),
 			).then((ls) => ls.find((e) => e.parentId === claude) as LsEntry);
 			await Bun.sleep(1500);
-			s.tmux(s.servers.sessions, "kill-session", "-t", `=${hostOf(s, child.id)}`);
+			s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(hostOf(s, child.id)));
 			await waitLs(s, "the Codex session dormant", (ls) => ls.find((e) => e.id === child.id)?.live === false);
 			await waitLs(s, "the Codex session woken", (ls) => ls.find((e) => e.id === child.id)?.live === true);
 			await waitLs(s, "the Codex session archived", (ls) => ls.find((e) => e.id === child.id)?.open === false);
@@ -543,11 +543,7 @@ export const directors: Record<string, Director> = {
 	links: {
 		run: async (s) => {
 			await until(() => s.signal("replied.see [the docs](mailto:ops@example.com) for the deploy steps") !== "", TAPE, "the reply");
-			const pi = s
-				.tmux(s.servers.sessions, "list-panes", "-a", "-F", "#{@swb_kind} #{pane_id}")
-				.split("\n")
-				.find((line) => line.startsWith("pi "))
-				?.split(" ")[1] as string;
+			const pi = s.tmux(s.servers.sessions, "list-panes", "-a", "-f", "#{@swb_host}", "-F", "#{pane_id}").split("\n")[0] as string;
 			await until(
 				() => s.tmux(s.servers.sessions, "capture-pane", "-p", "-e", "-t", pi).includes("\x1b]8;;mailto:ops@example.com\x1b\\the docs"),
 				TAPE,
@@ -854,12 +850,7 @@ export const directors: Record<string, Director> = {
 		run: async (s) => {
 			const signals = join(s.home, "e2e-signals");
 			const id = (title: string) => s.ls().find((e) => e.title === title)?.id as string;
-			const pis = () =>
-				s
-					.tmux(s.servers.sessions, "list-sessions", "-F", "#{session_name} #{@swb_kind}")
-					.split("\n")
-					.filter((line) => line.endsWith(" pi"))
-					.map((line) => line.split(" ")[0] as string);
+			const pis = () => s.tmux(s.servers.sessions, "list-panes", "-a", "-F", "#{@swb_host}").split("\n").filter(Boolean);
 			const bisect = id("Bisect the flaky test");
 			const draft = id("Draft the changelog");
 			// Every shutdown holds until released, so the wait shows.
@@ -1127,11 +1118,11 @@ export const directors: Record<string, Director> = {
 			await Bun.sleep(5000);
 			const [{ pid }] = s.query<{ pid: number }>("select pid from runtimes where session_id = ?", pi) as [{ pid: number }];
 			process.kill(pid, "SIGKILL");
-			s.tmux(s.servers.sessions, "send-keys", "-t", `=${hostOf(s, claude)}:`, "Escape");
+			s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(hostOf(s, claude)), "Escape");
 			await waitLs(s, "pi killed, Claude Code stopped, Codex errored", (ls) =>
 				ls.every((e) => (e.id === pi ? !e.live : e.activity === "idle")),
 			);
-			for (const id of [claude, codex]) s.tmux(s.servers.sessions, "kill-session", "-t", `=${hostOf(s, id)}`);
+			for (const id of [claude, codex]) s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(hostOf(s, id)));
 			await waitLs(s, "all three dormant", (ls) => ls.every((e) => !e.live));
 			release(s, "test");
 			release(s, "lint");
@@ -1187,7 +1178,7 @@ export const directors: Record<string, Director> = {
 			await waitLs(s, "the child idle", (ls) => ls.find((e) => e.id === child.id)?.activity === "idle");
 			await Bun.sleep(2000);
 			const host = s.query<{ tmux_session: string }>("select tmux_session from runtimes where session_id = ?", child.id)[0]?.tmux_session;
-			s.tmux(s.servers.sessions, "kill-session", "-t", `=${host}`);
+			s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(host as string));
 			await waitLs(s, "the child dormant", (ls) => ls.find((e) => e.id === child.id)?.live === false);
 			await until(() => s.signal("replied.w1") !== "", TAPE, "the woken child's reply");
 			expect(s.ls().find((e) => e.id === child.id)).toMatchObject({ open: true, live: true });
@@ -1303,7 +1294,7 @@ export const directors: Record<string, Director> = {
 				await until(() => s.signal(`replied.${title}`) !== "", TAPE, title);
 				s.keys("-l", `/name ${title}`, "Enter");
 				await waitLs(s, `${title} titled`, (ls) => ls.some((e) => e.title === title && e.activity === "idle"));
-				s.tmux(s.servers.sessions, "kill-session", "-t", `=${st.staged.host}`);
+				s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(st.staged.host));
 				await waitLs(s, `${title} dormant`, (ls) => ls.some((e) => e.title === title && !e.live));
 				s.swb("drive", "stop");
 			}

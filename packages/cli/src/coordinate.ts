@@ -23,7 +23,7 @@ import {
 	wake,
 } from "./sessions.ts";
 import { rename, setGroup, setReload } from "./store.ts";
-import { SESSIONS, tmuxTry } from "./tmux.ts";
+import { listHosts } from "./tmux.ts";
 import { inUse } from "./transcripts/read.ts";
 
 // The coordination every line's tools run. Each returns the text the model reads, so all three harnesses say the same
@@ -222,7 +222,7 @@ async function registered(db: Db, host: string, timeoutMs: number): Promise<stri
 		const row = db.get("SELECT session_id FROM runtimes WHERE tmux_session = ?", host);
 		if (row) return row.session_id as string;
 		// A harness that dies first, as a Codex without swb's tools does, says why in what it left in its pane.
-		if (tmuxTry(SESSIONS, "display", "-p", "-t", `=${host}:`, "#{pane_dead}").out.trim() === "1")
+		if (listHosts("#{pane_dead}").some(([name, dead]) => name === host && dead === "1"))
 			throw new SwbError(`the new session (${host}) ended before it started:\n${lastWords(host).join("\n")}`);
 		if (Date.now() > deadline) throw new SwbError(`the new session (${host}) didn't start within ${timeoutMs / 1000} s`);
 		await Bun.sleep(100);

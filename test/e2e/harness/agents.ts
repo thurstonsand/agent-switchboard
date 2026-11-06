@@ -66,7 +66,7 @@ export async function settled(s: Scenario, id: string, what: string): Promise<vo
 		await until(
 			() =>
 				s
-					.tmux(s.servers.sessions, "display", "-p", "-t", `=${host(s, id)}:`, "#{pane_title}")
+					.tmux(s.servers.sessions, "display", "-p", "-t", s.pane(host(s, id)), "#{pane_title}")
 					.trim()
 					.endsWith("Ready"),
 			ready,
@@ -103,7 +103,7 @@ export function commands(): string[] {
 }
 
 export function pane(s: Scenario, id: string): string {
-	return s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-S", "-500", "-t", `=${host(s, id)}:`);
+	return s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-S", "-500", "-t", s.pane(host(s, id)));
 }
 
 /**
@@ -116,7 +116,7 @@ export function type(s: Scenario, id: string, text: string): void {
 		id,
 	);
 	if (!runtime) throw new Error(`no runtime for ${id}`);
-	const target = `=${runtime.tmux_session}:`;
+	const target = s.pane(runtime.tmux_session);
 	s.tmux(s.servers.sessions, "set-buffer", "-b", "e2e-type", "--", text);
 	s.tmux(s.servers.sessions, "paste-buffer", "-p", "-d", "-b", "e2e-type", "-t", target);
 	if (runtime.harness === "codex") Bun.sleepSync(300);
@@ -154,7 +154,7 @@ export async function cardEndings(s: Scenario, harness: "pi" | "claude" | "codex
 		);
 	// What swb quit --force sends.
 	process.kill(pid(quit.id), "SIGTERM");
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, stopped.id)}:`, "Escape");
+	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host(s, stopped.id)), "Escape");
 	await until(
 		() =>
 			!entry(s, cut.id).live &&
@@ -167,7 +167,7 @@ export async function cardEndings(s: Scenario, harness: "pi" | "claude" | "codex
 	expect([entry(s, cut.id).cutOff, entry(s, quit.id).cutOff]).toEqual(["killed", "shutdown"]);
 	// Errored, live or not, marks its row as a cut-off one does; stopped doesn't.
 	expect([cut, quit, stopped, failed].map(({ id }) => entry(s, id).errored)).toEqual([false, false, false, true]);
-	for (const { id } of [stopped, failed]) s.tmux(s.servers.sessions, "kill-session", "-t", `=${host(s, id)}`);
+	for (const { id } of [stopped, failed]) s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(host(s, id)));
 	await until(() => !entry(s, stopped.id).live && !entry(s, failed.id).live, budgets.settle, "both dormant");
 	expect([entry(s, stopped.id).cutOff, entry(s, failed.id).cutOff]).toEqual([null, null]);
 

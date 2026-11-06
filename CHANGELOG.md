@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-Schema v12: update swb and the pi line together.
+Schema v12: update swb and the pi line together, and run `swb quit` with the swb you have before installing this one: this swb finds the sessions it runs by a mark an older one didn't leave, so it can't see, stop, or quit those.
 
 ### Added
 

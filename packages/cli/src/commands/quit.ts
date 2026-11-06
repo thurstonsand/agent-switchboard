@@ -5,7 +5,7 @@ import { displayName, type RuntimeRow, runtimeLive, states } from "../derive.ts"
 import { SwbError } from "../errors.ts";
 import { stopPis } from "../sessions.ts";
 import { openStore } from "../store.ts";
-import { killServer, listSessions, SESSIONS, tmuxTry, UI } from "../tmux.ts";
+import { killServer, listHosts, SESSIONS, tmuxTry, UI } from "../tmux.ts";
 
 /**
  * Stops everything swb runs: every harness, saving drafts as an upgrade does, then the Deck, the Editors, and the
@@ -20,7 +20,7 @@ export function quit(args: string[]): void {
 		throw new SwbError(
 			`turn running in ${working.map((s) => `"${displayName(s)}"`).join(", ")}: wait for it to complete, or swb quit --force`,
 		);
-	const hosts = new Set(listSessions(SESSIONS).map(([name]) => name as string));
+	const hosts = new Set(listHosts().map(([host]) => host as string));
 	const live = (db.all("SELECT tmux_session, boot_id, pid FROM runtimes") as RuntimeRow[]).filter((r) => runtimeLive(r, bootId(), hosts));
 	// A reload left waiting would have the next clock start its session, which quitting everything says not to.
 	recordTx(db, () => db.run("UPDATE marks SET reload = NULL WHERE reload IS NOT NULL"));

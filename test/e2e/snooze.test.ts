@@ -11,7 +11,7 @@ afterEach(async () => {
 		for (const { session_id, tmux_session } of s.query<{ session_id: string; tmux_session: string }>(
 			"select session_id, tmux_session from runtimes",
 		))
-			s.save(`pane-${session_id}.txt`, s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-S", "-200", "-t", `=${tmux_session}:`));
+			s.save(`pane-${session_id}.txt`, s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-S", "-200", "-t", s.pane(tmux_session)));
 		s.save("clock.txt", s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-S", "-200", "-t", "=swb-ctl:"));
 		s.save("schedules.json", JSON.stringify(s.query("select * from schedules"), null, 2));
 		s.save("ls.json", JSON.stringify(s.ls(), null, 2));
@@ -66,7 +66,7 @@ test("a timed snooze holds through a conversation and shows while blocked or cut
 	s.swb("snooze", other.id, "one_hour");
 	type(s, other.id, "hold i1");
 	await until(() => s.signal("i1.entered") !== "", budgets.settle, "the held turn");
-	s.tmux(s.servers.sessions, "kill-session", "-t", `=${host(s, other.id)}`);
+	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(host(s, other.id)));
 	await until(() => !entry(s, other.id).live, budgets.settle, "dormant");
 	expect(snoozeOf(s, other.id).cutOff).not.toBeNull();
 	expect(snoozeOf(s, other.id).snoozed).toBe(false);

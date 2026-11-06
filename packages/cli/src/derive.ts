@@ -3,7 +3,7 @@ import { bootId, type Db, type Harness, operatorDir, type Phase, pidAlive, type 
 import { OPEN } from "@swb/shared/states";
 import { loadConfig } from "./config.ts";
 import { SwbError } from "./errors.ts";
-import { listSessions, SESSIONS } from "./tmux.ts";
+import { listHosts } from "./tmux.ts";
 
 /** One Session with every derived state, as `swb ls --json` prints it. */
 export type SessionState = {
@@ -48,7 +48,7 @@ export type SessionState = {
 export type World = { now: number; bootId: string; hosts: Set<string>; inactiveAfterMs: number };
 
 export function world(inactiveAfterMs: number): World {
-	return { now: Date.now(), bootId: bootId(), hosts: new Set(listSessions(SESSIONS).map(([name]) => name as string)), inactiveAfterMs };
+	return { now: Date.now(), bootId: bootId(), hosts: new Set(listHosts().map(([host]) => host as string)), inactiveAfterMs };
 }
 
 export type CutOff = "shutdown" | "killed" | "restart";

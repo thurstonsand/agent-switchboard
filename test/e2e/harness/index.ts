@@ -91,6 +91,8 @@ export type Scenario = {
 	/** A plain directory to run sessions in. */
 	project: string;
 	tmux: (server: string, ...args: string[]) => string;
+	/** The pane a host's harness runs in, wherever the Deck has put it; throws once it's gone. */
+	pane: (host: string) => string;
 	/** The real swb binary under this scenario's environment, run in the project dir; throws on a non-zero exit. */
 	swb: (...args: string[]) => string;
 	swbTry: (...args: string[]) => { code: number; out: string; err: string };
@@ -241,6 +243,13 @@ export function scenario(
 		env,
 		project,
 		tmux,
+		pane: (host) => {
+			const line = tmux(named.sessions, "list-panes", "-a", "-F", "#{@swb_host}\t#{pane_id}")
+				.split("\n")
+				.find((l) => l.startsWith(`${host}\t`));
+			if (!line) throw new Error(`no pane hosts ${host}`);
+			return line.split("\t")[1] as string;
+		},
 		swb,
 		swbTry,
 		ls: () => JSON.parse(swb("ls", "--json")) as LsEntry[],

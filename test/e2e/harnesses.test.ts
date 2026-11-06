@@ -13,7 +13,7 @@ afterEach(async () => {
 		for (const { session_id, tmux_session } of s.query<{ session_id: string; tmux_session: string }>(
 			"select session_id, tmux_session from runtimes",
 		))
-			s.save(`pane-${session_id}.txt`, s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-S", "-200", "-t", `=${tmux_session}:`));
+			s.save(`pane-${session_id}.txt`, s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-S", "-200", "-t", s.pane(tmux_session)));
 		s.save("ls.json", JSON.stringify(s.ls(), null, 2));
 		for (const harness of ["claude", "codex"] as const) s.save(`${harness}-requests.json`, JSON.stringify(s.requests(harness), null, 1));
 	} catch {}
@@ -25,14 +25,14 @@ test("Codex's /new moves its host to the new thread: that one is recorded, and t
 	const first = await launched(s, "codex", "reply first thread");
 	const hostName = host(s, first.id);
 	expect(first).toMatchObject({ harness: "codex", open: true, live: true, cwd: s.project, activity: "idle" });
-	expect(s.tmux(s.servers.sessions, "display", "-p", "-t", `=${hostName}:`, "#{pane_title}")).toStartWith(first.id.slice(0, 29));
+	expect(s.tmux(s.servers.sessions, "display", "-p", "-t", s.pane(hostName), "#{pane_title}")).toStartWith(first.id.slice(0, 29));
 	await until(() => pane(s, first.id).includes("first thread"), budgets.settle, "the reply on screen");
 	await until(() => entry(s, first.id).title === "First thread", budgets.settle, "titled by Codex's own title generator");
 	type(s, first.id, "/new");
 	await Bun.sleep(1000);
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${hostName}:`, "-l", "reply second thread");
+	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(hostName), "-l", "reply second thread");
 	await Bun.sleep(300);
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${hostName}:`, "Enter");
+	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(hostName), "Enter");
 	const second = await until(
 		() => s.ls().find((e) => e.harness === "codex" && e.id !== first.id && e.activity === "idle" && e.title !== null),
 		ready,
@@ -40,11 +40,11 @@ test("Codex's /new moves its host to the new thread: that one is recorded, and t
 	);
 	expect(second).toMatchObject({ live: true, open: true, title: "Second thread" });
 	expect(entry(s, first.id)).toMatchObject({ live: false, open: true });
-	expect(s.tmux(s.servers.sessions, "display", "-p", "-t", `=${hostName}:`, "#{pane_title}")).toStartWith(second.id.slice(0, 29));
+	expect(s.tmux(s.servers.sessions, "display", "-p", "-t", s.pane(hostName), "#{pane_title}")).toStartWith(second.id.slice(0, 29));
 	// Messages follow the thread the pane shows now.
 	expect((await send(s, first.id, second.id, "SWB-after-new please ack")).details.delivered).toBe(true);
 	await until(
-		() => s.tmux(s.servers.sessions, "capture-pane", "-p", "-t", `=${hostName}:`).includes("got SWB-after-new"),
+		() => s.tmux(s.servers.sessions, "capture-pane", "-p", "-t", s.pane(hostName)).includes("got SWB-after-new"),
 		ready,
 		"the new thread answering",
 	);
@@ -115,7 +115,7 @@ test("the Deck's n opens on the default preset, puts its real TUI on the Stage, 
 	await until(() => s.screen().includes("SWB-from-the-deck"), budgets.settle, "the reply in the Stage");
 	s.save("claude-stage.txt", s.screen());
 
-	s.tmux(s.servers.sessions, "kill-session", "-t", `=${host(s, id)}`);
+	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(host(s, id)));
 	await until(() => !entry(s, id).live, budgets.settle, "Claude dormant");
 	s.keys("M-a", "h");
 	await waitState(s, "the roster focused", (x) => x.focus === "roster");
@@ -263,7 +263,7 @@ test("session_launch and a scheduled launch, from pi, Claude Code, or Codex, sta
 			);
 			expect(child.group).toBe(expected);
 			await until(() => entry(s, parent.id).activity === "idle", ready, `${parent.harness} done launching ${name}`);
-			s.tmux(s.servers.sessions, "kill-session", "-t", `=${host(s, child.id)}`);
+			s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(host(s, child.id)));
 		}
 	for (const parent of parents) {
 		const title = `${parent.harness} scheduled`;

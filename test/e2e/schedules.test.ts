@@ -13,7 +13,7 @@ afterEach(async () => {
 		for (const { session_id, tmux_session } of s.query<{ session_id: string; tmux_session: string }>(
 			"select session_id, tmux_session from runtimes",
 		))
-			s.save(`pane-${session_id}.txt`, s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-S", "-200", "-t", `=${tmux_session}:`));
+			s.save(`pane-${session_id}.txt`, s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-S", "-200", "-t", s.pane(tmux_session)));
 		s.save("clock.txt", s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-S", "-200", "-t", "=swb-ctl:"));
 		s.save("schedules.json", JSON.stringify(s.query("select * from schedules"), null, 2));
 		s.save("ls.json", JSON.stringify(s.ls(), null, 2));
@@ -38,7 +38,7 @@ test("a session schedules itself a message and snoozes until then; the clock wak
 	expect(pane(s, pi.id)).toContain("This session is snoozed until then.");
 
 	// Dormant, with no Deck open: only the clock is left to deliver it.
-	s.tmux(s.servers.sessions, "kill-session", "-t", `=${host(s, pi.id)}`);
+	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(host(s, pi.id)));
 	await until(() => !entry(s, pi.id).live, budgets.settle, "dormant");
 	expect(snoozeOf(s, pi.id).snoozed).toBe(true);
 
@@ -52,7 +52,7 @@ test("a session schedules itself a message and snoozes until then; the clock wak
 	type(s, pi.id, "call session_list_schedules {}");
 	// Collapsed, the row names the schedule; expanded, it reads as the model's listing.
 	await until(() => pane(s, pi.id).includes("Schedules in 8 seconds ("), budgets.settle, "the listing's row");
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, pi.id)}:`, "C-o");
+	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host(s, pi.id)), "C-o");
 	await until(() => pane(s, pi.id).includes("ran "), budgets.settle, "the listing");
 	expect(pane(s, pi.id)).toContain('· "in 8 seconds" · ran ');
 });
@@ -187,7 +187,7 @@ test("a schedule launches a new session, refuses what can't work, unschedules, a
 test("an invalid config.toml doesn't stop the clock: it says why, and wakes the session with mail once the file is fixed", async () => {
 	s = scenario("schedules", "bad-config");
 	const pi = await launched(s, "pi", "reply up");
-	s.tmux(s.servers.sessions, "kill-session", "-t", `=${host(s, pi.id)}`);
+	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(host(s, pi.id)));
 	await until(() => !entry(s, pi.id).live, budgets.settle, "dormant");
 	const { details } = await scheduled(s, "reply mail", "--from", pi.id, "--at", "PT3S", "--schedule-label", "in 3 seconds");
 	config(s, "bogus = 1\n");

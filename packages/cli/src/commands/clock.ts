@@ -5,7 +5,7 @@ import { states } from "../derive.ts";
 import { type Fired, fire, newSessionName, nextDue } from "../schedules.ts";
 import { SWB, wake } from "../sessions.ts";
 import { openStore, setReload } from "../store.ts";
-import { SESSIONS, tmuxTry } from "../tmux.ts";
+import { hostPane, SESSIONS, tmuxTry } from "../tmux.ts";
 
 // `swb __clock`: the sessions server's control pane, which lives as long as the server does. It fires schedules on
 // time, starts any dormant session with mail waiting, and keeps the search index warm. It reads the wall clock every
@@ -41,7 +41,8 @@ export async function clock(): Promise<void> {
 		for (const host of hosts) {
 			if (registered.has(host)) continue;
 			registered.add(host);
-			tmuxTry(SESSIONS, "set", "-p", "-u", "-t", `=${host}:`, "remain-on-exit");
+			const pane = hostPane(host);
+			if (pane) tmuxTry(SESSIONS, "set", "-p", "-u", "-t", pane, "remain-on-exit");
 		}
 	};
 

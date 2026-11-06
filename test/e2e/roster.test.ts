@@ -36,7 +36,7 @@ test("the roster holds roster_width, or a dragged width, through resizes; clicki
 	s.save("dragged-200-cols.txt", s.screen());
 
 	await prefixKeys(s, "M-a", "h", "the roster focused", (x) => x.focus === "roster");
-	s.tmux(s.servers.sessions, "kill-session", "-t", `=${live.staged.host}`);
+	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(live.staged.host as string));
 	await waitState(s, "pi exited", (x) => x.staged.kind === "exited");
 	s.save("exited.txt", s.screen());
 	s.swb("drive", "click", "120", "20");
@@ -45,7 +45,7 @@ test("the roster holds roster_width, or a dragged width, through resizes; clicki
 
 	await prefixKeys(s, "M-a", "h", "the roster focused", (x) => x.focus === "roster");
 	const again = state(s);
-	s.tmux(s.servers.sessions, "kill-session", "-t", `=${again.staged.host}`);
+	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(again.staged.host as string));
 	await waitState(s, "exited again", (x) => x.staged.kind === "exited" && x.staged.id === id);
 	s.keys("M-a", "v");
 	await waitState(s, "split and woken", (x) => x.staged.kind === "live" && x.layout.split, budgets.piReady);

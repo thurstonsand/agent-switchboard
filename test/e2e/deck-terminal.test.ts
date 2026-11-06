@@ -20,8 +20,8 @@ async function piColor(host: string, osc: "11" | "4;9"): Promise<string> {
 	let asked = 0;
 	const ask = () => {
 		writeFileSync(log, "");
-		s.tmux(s.servers.sessions, "send-keys", "-t", `=${host}:`, "-l", "/e2e-bg");
-		s.tmux(s.servers.sessions, "send-keys", "-t", `=${host}:`, "Enter");
+		s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host), "-l", "/e2e-bg");
+		s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host), "Enter");
 		asked = Date.now();
 	};
 	ask();
@@ -53,7 +53,7 @@ const DARK_RED = "\x1b]4;9;rgb:fbfb/4949/3434\x1b\\";
 
 /** The background pi paints its last user message on, read from its pane rather than asked of the terminal. */
 function userMessageBg(host: string): string {
-	const ansi = s.tmux(s.servers.sessions, "capture-pane", "-p", "-e", "-t", `=${host}:`);
+	const ansi = s.tmux(s.servers.sessions, "capture-pane", "-p", "-e", "-t", s.pane(host));
 	return [...ansi.slice(0, ansi.lastIndexOf("reply ")).matchAll(/48;2;(\d+;\d+;\d+)/g)].at(-1)?.[1] ?? "none";
 }
 
@@ -93,12 +93,12 @@ test("a pi follows theme changes even in copy mode, and dims only on the Deck wh
 	s.save("dark.ansi", s.swb("drive", "capture", "--ansi"));
 
 	// tmux 3.7c tells pi only once copy mode ends; swb, on 3.8, while it's still up.
-	s.tmux(s.servers.sessions, "copy-mode", "-t", `=${host}:`);
+	s.tmux(s.servers.sessions, "copy-mode", "-t", s.pane(host));
 	s.swb("drive", "theme", "light");
 	await waitState(s, "the roster's light background", (x) => x.colors.background === "#f9f5d7");
 	await Bun.sleep(500);
-	expect(s.tmux(s.servers.sessions, "display", "-p", "-t", `=${host}:`, "#{pane_in_mode}")).toBe("1");
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host}:`, "-X", "cancel");
+	expect(s.tmux(s.servers.sessions, "display", "-p", "-t", s.pane(host), "#{pane_in_mode}")).toBe("1");
+	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host), "-X", "cancel");
 	await until(() => userMessageBg(host) === "219;229;229", budgets.settle, "pi's light user message, after copy mode");
 	await until(() => renderedMessageBg() === "186;194;194", budgets.settle, "the live theme flip restores 15% dimming");
 	s.save("light.ansi", s.swb("drive", "capture", "--ansi"));

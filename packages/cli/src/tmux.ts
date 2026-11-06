@@ -117,6 +117,25 @@ export function listPanes(server: string, ...fields: string[]): string[][] {
 		.map((line) => line.split("\t"));
 }
 
+/**
+ * Every harness pane on the sessions server, by its host: the name of the tmux session it was launched in, which its
+ * pane carries as @swb_host, so it's found wherever the Deck has put it. With the given format fields.
+ */
+export function listHosts(...fields: string[]): string[][] {
+	return listPanes(SESSIONS, "#{@swb_host}", ...fields).filter(([host]) => host !== "");
+}
+
+/** The pane a host's harness runs in, or null once it's gone. */
+export function hostPane(host: string): string | null {
+	return listHosts("#{pane_id}").find(([name]) => name === host)?.[1] ?? null;
+}
+
+/** Ends a host's harness, closing its pane wherever it is; a session left with no pane goes with it. */
+export function killHost(host: string): void {
+	const pane = hostPane(host);
+	if (pane) tmuxTry(SESSIONS, "kill-pane", "-t", pane);
+}
+
 /** Quotes one argument for a tmux command string. */
 export function quote(arg: string): string {
 	return `'${arg.replaceAll("'", `'\\''`)}'`;

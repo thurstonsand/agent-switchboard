@@ -23,7 +23,7 @@ import {
 	wake,
 } from "../sessions.ts";
 import { loadLayout, markUnseen, markVisited, openStore, saveLayout, setGroup, setView } from "../store.ts";
-import { listSessions, SESSIONS, tmux, tmuxTry, UI } from "../tmux.ts";
+import { hostPane, killHost, listPanes, SESSIONS, tmux, tmuxTry, UI } from "../tmux.ts";
 import { locateTranscript } from "../transcripts/read.ts";
 import { DECK, ensurePlaceholder, ensureUiServer, PLACEHOLDER } from "./deck.ts";
 import type { Diff, Entry, FromWorker, NewSession, Snapshot, TerminalProfile, ToWorker, Transcript, Turn } from "./protocol.ts";
@@ -208,33 +208,37 @@ type Polled = { snapshot: Snapshot; attached: Map<string, boolean>; reaped: Map<
 
 function snapshot(): Polled {
 	readDb();
-	const listed = listSessions(
+	// One listing for the whole server: every session has a pane, and harnesses are found by theirs.
+	const panes = listPanes(
 		SESSIONS,
+		"#{session_name}",
 		"#{@swb_kind}",
-		"#{?session_attached,1,0}",
-		"#{pid}",
 		"#{@swb_dir}",
+		"#{pid}",
+		"#{@swb_version}",
+		"#{@swb_host}",
+		"#{?session_attached,1,0}",
 		"#{pane_dead}",
 		"#{pane_dead_time}",
-		"#{@swb_version}",
 		"#{@swb_reaped}",
 		"#{@swb_stopping}",
 	);
+	const listed = [...new Map(panes.map((row) => [row[0] as string, row])).values()];
+	const harnesses = panes.filter((row) => row[5] !== "");
 	const died: Record<string, string[]> = {};
-	for (const [name, kind, , , , dead, deadAt] of listed) {
-		if (kind !== "pi" || dead !== "1") continue;
-		const host = name as string;
-		if (launched.has(host)) {
-			launched.delete(host);
-			died[host] = lastWords(host);
+	for (const [, , , , , host, , dead, deadAt] of harnesses) {
+		if (dead !== "1") continue;
+		if (launched.has(host as string)) {
+			launched.delete(host as string);
+			died[host as string] = lastWords(host as string);
 		} else if (Date.now() / 1000 - Number(deadAt) < ORPHAN_DEAD_S) continue;
-		tmuxTry(SESSIONS, "kill-session", "-t", `=${host}`);
+		killHost(host as string);
 	}
-	const alive = listed.filter(([, kind, , , , dead]) => kind === "pi" && dead !== "1");
-	const attached = new Map(alive.map(([name, , count]) => [name as string, count === "1"]));
-	const reaped = new Map(alive.filter((row) => row[8]).map((row) => [row[0] as string, Number(row[8])]));
+	const alive = harnesses.filter((row) => row[7] !== "1");
+	const attached = new Map(alive.map((row) => [row[5] as string, row[6] === "1"]));
+	const reaped = new Map(alive.filter((row) => row[9]).map((row) => [row[5] as string, Number(row[9])]));
 	// A harness some swb is stopping reads as gone already: its session shows dormant, and its wake waits for it.
-	const quitting = new Set(alive.filter((row) => row[9]).map((row) => row[0] as string));
+	const quitting = new Set(alive.filter((row) => row[10]).map((row) => row[5] as string));
 	const w: World = {
 		now: Date.now(),
 		bootId: boot,
@@ -296,11 +300,11 @@ function snapshot(): Polled {
 		snapshot: {
 			entries,
 			hosts: [...attached.keys()],
-			editors: Object.fromEntries(listed.filter(([, kind]) => kind === "editor").map(([name, , , , dir]) => [dir, name])),
-			shells: Object.fromEntries(listed.filter(([, kind]) => kind === "shell").map(([name, , , , dir]) => [dir, name])),
+			editors: Object.fromEntries(listed.filter(([, kind]) => kind === "editor").map(([name, , dir]) => [dir, name])),
+			shells: Object.fromEntries(listed.filter(([, kind]) => kind === "shell").map(([name, , dir]) => [dir, name])),
 			died,
 			serverUp: listed.length > 0,
-			swbVersion: listed[0]?.[7] ?? "",
+			swbVersion: listed[0]?.[4] ?? "",
 		},
 		attached,
 		reaped,
@@ -319,8 +323,8 @@ function quietKill(signal: "TERM" | "KILL", pid: number): string {
  * background wake isn't reaped on the spot. The attached check runs inside tmux, so a viewer that attached since
  * this poll keeps it.
  *
- * A process gets one SIGTERM, from whichever roster's worker gets there first, as one replaces another: tmux marks its session @swb_reaped as it sends
- * it. pi shuts down once and ignores every later SIGTERM, and the SIGHUP of a closed pane too, so a shutdown hook
+ * A process gets one SIGTERM, from whichever roster's worker gets there first, as one replaces another: tmux marks its
+ * pane @swb_reaped as it sends it. pi shuts down once and ignores every later SIGTERM, and the SIGHUP of a closed pane too, so a shutdown hook
  * that hangs would keep it forever; one still there REAP_GRACE_MS after its SIGTERM gets SIGKILL.
  */
 function reap(snap: Snapshot, attached: Map<string, boolean>, reaped: Map<string, number>): void {
@@ -343,15 +347,17 @@ function reap(snap: Snapshot, attached: Map<string, boolean>, reaped: Map<string
 		const row = byId.get(entry.id);
 		const lastTouched = Math.max(row?.last_settled_at ?? 0, row?.visited_at ?? 0, runtime.started_at);
 		if (now - lastTouched < config.reapAfterMs) continue;
+		const pane = hostPane(entry.host);
+		if (!pane) continue;
 		// SIGTERM rather than closing the pane, so pi's and Claude's lines save any draft; Codex's is lost. See stopPis.
 		tmuxTry(
 			SESSIONS,
 			"if-shell",
 			"-F",
 			"-t",
-			`=${entry.host}:`,
+			pane,
 			"#{?session_attached,0,1}",
-			`set -t =${entry.host}: @swb_reaped ${now} ; run-shell -b '${quietKill("TERM", runtime.pid)}'`,
+			`set -p -t ${pane} @swb_reaped ${now} ; run-shell -b '${quietKill("TERM", runtime.pid)}'`,
 		);
 	}
 }

@@ -22,7 +22,7 @@ test("an idle, unviewed pi is reaped after reap_after with one SIGTERM, then SIG
 	await cursorTo(s, a);
 	s.keys("w");
 	await waitState(s, "a live", (x) => x.staged.id === a && x.staged.kind === "live", budgets.piReady);
-	const pid = Number(s.tmux(s.servers.sessions, "display", "-p", "-t", `=${piSessions(s)[0]}:`, "#{pane_pid}"));
+	const pid = Number(s.tmux(s.servers.sessions, "display", "-p", "-t", s.pane(piSessions(s)[0] as string), "#{pane_pid}"));
 	writeFileSync(join(s.home, "e2e-signals", "shutdown.hold"), "");
 	await cursorTo(s, b);
 	s.keys("w");
@@ -34,7 +34,7 @@ test("an idle, unviewed pi is reaped after reap_after with one SIGTERM, then SIG
 	await until(() => !entry(s, a).live, budgets.settle, "a reaped");
 	expect(s.signal("sigterm")).toBe(`${pid}\n`);
 	expect(entry(s, b).live).toBe(true);
-	expect(s.tmux(s.servers.sessions, "display", "-p", "-t", `=${piSessions(s)[0]}:`, "#{pane_in_mode}")).toBe("0");
+	expect(s.tmux(s.servers.sessions, "display", "-p", "-t", s.pane(piSessions(s)[0] as string), "#{pane_in_mode}")).toBe("0");
 	release(s, "shutdown");
 	s.save("reaped.txt", `${s.screen()}\n${JSON.stringify(s.ls(), null, 2)}`);
 });

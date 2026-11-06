@@ -140,7 +140,7 @@ test("split shows pi below 160 columns and returns on widening, survives reopeni
 	await waitState(s, "split at 200", (x) => x.layout.split && x.staged.view === "split");
 
 	closeDeck(s);
-	s.tmux(s.servers.sessions, "kill-session", "-t", `=${live.staged.host}`);
+	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(live.staged.host as string));
 	await until(() => !entry(s, id).live, budgets.settle, "dormant");
 	expect(savedView(s, id)).toBe("split");
 

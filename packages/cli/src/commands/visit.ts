@@ -9,8 +9,8 @@ export function visit(args: string[]): void {
 	const client = values.client;
 	if (!client) throw new UsageError("visit: --client is required");
 	if (listPanes(UI, "#{pane_tty}").some(([tty]) => tty === client)) return;
-	const host = tmuxTry(SESSIONS, "display", "-p", "-c", client, "#{client_session}");
-	if (!host.ok) return;
+	const host = tmuxTry(SESSIONS, "display", "-p", "-c", client, "#{@swb_host}");
+	if (!host.ok || host.out === "") return;
 	const db = openStore();
 	db.tx(() => {
 		const runtime = db.get("SELECT session_id FROM runtimes r JOIN sessions s USING (session_id) WHERE r.tmux_session = ?", host.out);

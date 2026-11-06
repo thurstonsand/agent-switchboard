@@ -125,7 +125,7 @@ test("n picks a directory, ranked as typed; M-a d removes a repository with its 
 	st = await waitState(s, "pi up in plain", (x) => x.mode === "roster" && x.staged.kind === "live", budgets.piReady);
 	expect(dirs(s).map((d) => d.path)).toContain(join(code, "plain"));
 	// Quit before a prompt: no Session, so only the add remembers plain, and a deleted directory is forgotten.
-	s.tmux(s.servers.sessions, "kill-session", "-t", `=${st.staged.host}`);
+	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(st.staged.host as string));
 	rmSync(join(code, "plain"), { recursive: true });
 	expect(dirs(s).map((d) => d.path)).not.toContain(join(code, "plain"));
 	mkdirSync(join(code, "plain"));

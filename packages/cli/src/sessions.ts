@@ -10,7 +10,20 @@ import { SwbError } from "./errors.ts";
 import { writeClaudeLine } from "./lines.ts";
 import { claudeOperatorSettings } from "./operator.ts";
 import { openStore, setReload } from "./store.ts";
-import { CLIENT_CWD, cleanEnv, killServer, listSessions, quote, SESSIONS, tmux, tmuxClient, tmuxTry } from "./tmux.ts";
+import {
+	CLIENT_CWD,
+	cleanEnv,
+	hostPane,
+	killHost,
+	killServer,
+	listHosts,
+	listSessions,
+	quote,
+	SESSIONS,
+	tmux,
+	tmuxClient,
+	tmuxTry,
+} from "./tmux.ts";
 import { archivedInCodex } from "./transcripts/codex.ts";
 import { relocatePi } from "./transcripts/pi.ts";
 import { VERSION } from "./version.ts";
@@ -128,7 +141,7 @@ function current(server: string, version: string): boolean {
 
 /** An upgrade ends every idle session, so the next wake runs the new swb. Their shutdown writes the db, so this runs outside its lock. */
 function stopIdlePis(): void {
-	const hosts = new Set(listSessions(SESSIONS).map(([name]) => name as string));
+	const hosts = new Set(listHosts().map(([host]) => host as string));
 	const db = openStore();
 	let idle: RuntimeRow[];
 	try {
@@ -148,14 +161,14 @@ export function stopPis(stopping: RuntimeRow[]): void {
 	for (const runtime of stopping) term(runtime, deadline);
 	const hosts = stopping.map((runtime) => runtime.tmux_session);
 	while (stillRunning(hosts).length > 0 && Date.now() < deadline) Bun.sleepSync(20);
-	for (const host of hosts) tmuxTry(SESSIONS, "kill-session", "-t", `=${host}`);
+	for (const host of hosts) killHost(host);
 }
 
 /** Claude Code's own shutdown failsafe fires at 5 s at the earliest, so this leaves its shutdown room to finish. */
 const STOP_GRACE_MS = 10_000;
 
 /**
- * SIGTERMs a harness, and marks its tmux session with when its stopper closes it, so every swb, whichever stops it,
+ * SIGTERMs a harness, and marks its pane with when its stopper closes it, so every swb, whichever stops it,
  * reads it as gone already and starts its session again only once it is. False when it was gone before the signal.
  */
 function term(runtime: RuntimeRow, deadline: number): boolean {
@@ -165,7 +178,8 @@ function term(runtime: RuntimeRow, deadline: number): boolean {
 		if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
 		throw error;
 	}
-	tmuxTry(SESSIONS, "set", "-t", `=${runtime.tmux_session}:`, "@swb_stopping", String(deadline));
+	const pane = hostPane(runtime.tmux_session);
+	if (pane) tmuxTry(SESSIONS, "set", "-p", "-t", pane, "@swb_stopping", String(deadline));
 	return true;
 }
 
@@ -175,9 +189,9 @@ function term(runtime: RuntimeRow, deadline: number): boolean {
  */
 export function stillRunning(hosts: string[]): string[] {
 	const running = new Set(
-		listSessions(SESSIONS, "#{pane_dead}")
+		listHosts("#{pane_dead}")
 			.filter(([, dead]) => dead !== "1")
-			.map(([name]) => name as string),
+			.map(([host]) => host as string),
 	);
 	return hosts.filter((host) => running.has(host));
 }
@@ -192,7 +206,7 @@ async function stopInBackground(runtime: RuntimeRow): Promise<boolean> {
 	if (!term(runtime, deadline)) return false;
 	while (stillRunning([host]).length > 0 && Date.now() < deadline) await Bun.sleep(20);
 	const late = stillRunning([host]).length > 0;
-	tmuxTry(SESSIONS, "kill-session", "-t", `=${host}`);
+	killHost(host);
 	return late;
 }
 
@@ -200,8 +214,8 @@ async function stopInBackground(runtime: RuntimeRow): Promise<boolean> {
 export function beingStopped(db: Db, id: string): { host: string; deadline: number } | null {
 	const host = db.get("SELECT tmux_session FROM runtimes WHERE session_id = ?", id)?.tmux_session as string | undefined;
 	if (!host) return null;
-	const marked = tmuxTry(SESSIONS, "show", "-qv", "-t", `=${host}:`, "@swb_stopping");
-	return marked.ok && marked.out !== "" ? { host, deadline: Number(marked.out) } : null;
+	const marked = listHosts("#{@swb_stopping}").find(([name]) => name === host)?.[1];
+	return marked ? { host, deadline: Number(marked) } : null;
 }
 
 /** Waits out a harness some swb is stopping, closing it at its stopper's deadline, as the stopper would. */
@@ -209,7 +223,7 @@ function awaitStop(db: Db, id: string): void {
 	const stop = beingStopped(db, id);
 	if (!stop) return;
 	while (stillRunning([stop.host]).length > 0 && Date.now() < stop.deadline) Bun.sleepSync(20);
-	tmuxTry(SESSIONS, "kill-session", "-t", `=${stop.host}`);
+	killHost(stop.host);
 }
 
 /** Hosts nothing a restart would lose: swb's clock, and the Deck's placeholder, which both come back with it. */
@@ -467,10 +481,11 @@ export function launch(db: Db, spec: LaunchSpec): string {
 		`exec env -u TMUX -u TMUX_PANE SHELL=${shell} ${shell} -lic ${quote(command)}`,
 		";",
 		"set",
+		"-p",
 		"-t",
+		`=${name}:`,
+		"@swb_host",
 		name,
-		"@swb_kind",
-		"pi",
 		// Kept until pi registers, so a pi that dies on startup leaves its last words for the Deck to show.
 		";",
 		"set",
@@ -617,8 +632,9 @@ export type Wake = "idle" | "resume" | "continue";
 
 /** The last lines a harness left in its pane, kept by remain-on-exit when it dies before it registers. */
 export function lastWords(host: string): string[] {
-	const tail = tmuxTry(SESSIONS, "capture-pane", "-p", "-t", `=${host}:`);
-	return tail.ok
+	const pane = hostPane(host);
+	const tail = pane ? tmuxTry(SESSIONS, "capture-pane", "-p", "-t", pane) : null;
+	return tail?.ok
 		? tail.out
 				.split("\n")
 				.filter((line) => line.trim() !== "")
@@ -632,17 +648,17 @@ export function wake(db: Db, id: string, then: Wake): string {
 	// Outside the tx: the harness's shutdown writes the db.
 	awaitStop(db, id);
 	return db.tx(() => {
-		const listed = listSessions(SESSIONS, "#{@swb_kind}", "#{pane_dead}");
+		const listed = listHosts("#{pane_dead}");
 		const resuming = new Set(db.all("SELECT tmux_session FROM launches WHERE resume_id = ?", id).map((row) => row.tmux_session as string));
 		// A pi that died before it registered leaves a dead pane behind its launch.
-		for (const [name, kind, dead] of listed) {
-			if (kind === "pi" && resuming.has(name as string) && dead === "1") tmuxTry(SESSIONS, "kill-session", "-t", `=${name}`);
+		for (const [name, dead] of listed) {
+			if (resuming.has(name as string) && dead === "1") killHost(name as string);
 		}
-		const hosts = listed.filter(([, , dead]) => dead !== "1");
+		const hosts = listed.filter(([, dead]) => dead !== "1");
 		const host = liveHost(db, id, new Set(hosts.map(([name]) => name as string)));
 		if (host) return host;
 		const recorded = new Set(db.all("SELECT tmux_session FROM runtimes").map((row) => row.tmux_session as string));
-		const inFlight = hosts.find(([name, kind]) => kind === "pi" && resuming.has(name as string) && !recorded.has(name as string));
+		const inFlight = hosts.find(([name]) => resuming.has(name as string) && !recorded.has(name as string));
 		if (inFlight) return inFlight[0] as string;
 		const session = db.get("SELECT cwd, project_root, harness, transcript, phase, effort FROM sessions WHERE session_id = ?", id);
 		if (!session) throw new SwbError(`no session ${id}`);
@@ -684,7 +700,7 @@ export function restart(db: Db, id: string, then: Wake): string {
 	if (isArchived(db, id)) throw new SwbError("archived: unarchive it first");
 	// Taken now, so the clock doesn't start it on the old reload's terms once it stops.
 	recordTx(db, () => setReload(db, id, null));
-	const runtime = liveRuntime(db, id, new Set(listSessions(SESSIONS).map(([name]) => name as string)));
+	const runtime = liveRuntime(db, id, new Set(listHosts().map(([host]) => host as string)));
 	if (runtime) stopPis([runtime]);
 	return wake(db, id, then);
 }
@@ -725,7 +741,7 @@ export async function archiveWorktree(
 			if (!selected.has(s.id) && (s.open || s.live) && inside(s.cwd))
 				throw new SwbError(`worktree is still used by "${displayName(s)}"; archive that session first`);
 		}
-		const listedHosts = listSessions(SESSIONS, "#{pane_start_path}", "#{pane_dead}");
+		const listedHosts = listHosts("#{pane_start_path}", "#{pane_dead}");
 		const hosts = new Set(listedHosts.map(([name]) => name as string));
 		const starting = new Set(
 			db
@@ -815,7 +831,7 @@ export async function archiveWorktree(
  * the others weren't. `stopped` settles once the harnesses are gone, rejecting with any that had to be closed.
  */
 export function archive(db: Db, ids: string[]): { refused: SwbError | null; stopped: Promise<void> } {
-	const hosts = new Set(listSessions(SESSIONS).map(([name]) => name as string));
+	const hosts = new Set(listHosts().map(([host]) => host as string));
 	const quitting: { runtime: RuntimeRow; name: string }[] = [];
 	const refused: string[] = [];
 	for (const id of ids) {
@@ -848,7 +864,7 @@ export function archive(db: Db, ids: string[]): { refused: SwbError | null; stop
 
 /** Stops a live idle pi, keeping its session open to wake later; refuses mid-turn, as archive does. */
 export function stop(db: Db, id: string): void {
-	const hosts = new Set(listSessions(SESSIONS).map(([name]) => name as string));
+	const hosts = new Set(listHosts().map(([host]) => host as string));
 	const session = db.get("SELECT phase FROM sessions WHERE session_id = ?", id);
 	if (!session) throw new SwbError(`no session ${id}`);
 	const runtime = liveRuntime(db, id, hosts);
@@ -877,18 +893,16 @@ export function markUnarchived(db: Db, id: string): void {
 	db.run("INSERT INTO marks (session_id, archived_at) VALUES (?, NULL) ON CONFLICT (session_id) DO UPDATE SET archived_at = NULL", id);
 }
 
-/** Drops the launch rows of tmux sessions that are gone, and kills each Editor and shell no open session uses any more. */
+/** Drops the launch rows of hosts that are gone, and kills each Editor and shell no open session uses any more. */
 export function gc(db: Db): void {
-	const listed = db.tx(() => {
-		const listed = listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_dir}");
-		const names = new Set(listed.map(([name]) => name as string));
+	const hosts = db.tx(() => {
+		const hosts = new Set(listHosts().map(([host]) => host as string));
 		for (const row of db.all("SELECT tmux_session FROM launches"))
-			if (!names.has(row.tmux_session as string)) db.run("DELETE FROM launches WHERE tmux_session = ?", row.tmux_session as string);
-		return listed;
+			if (!hosts.has(row.tmux_session as string)) db.run("DELETE FROM launches WHERE tmux_session = ?", row.tmux_session as string);
+		return hosts;
 	});
-	const owned = listed.filter(([, kind]) => kind === "editor" || kind === "shell");
+	const owned = listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_dir}").filter(([, kind]) => kind === "editor" || kind === "shell");
 	if (owned.length === 0) return;
-	const hosts = new Set(listed.map(([name]) => name as string));
 	const open = db.all(`SELECT s.cwd FROM sessions s LEFT JOIN marks m USING (session_id) WHERE ${OPEN}`);
 	const provisional = db
 		.all("SELECT cwd, tmux_session FROM runtimes WHERE session_id NOT IN (SELECT session_id FROM sessions)")

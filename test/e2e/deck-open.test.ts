@@ -22,7 +22,7 @@ test("swb open selects an Inactive session, opening its section", async () => {
 	s.keys("Enter");
 	const up = await waitState(s, "a live", (x) => x.staged.id === a && x.staged.kind === "live", budgets.piReady);
 	await until(() => entry(s, a).unseen === false, budgets.settle, "a visited");
-	s.tmux(s.servers.sessions, "kill-session", "-t", `=${up.staged.host}`);
+	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(up.staged.host as string));
 	await until(() => !entry(s, a).live, budgets.settle, "a dormant");
 	s.swb("drive", "stop");
 	await until(() => entry(s, a).inactive, budgets.settle, "a inactive");

@@ -112,7 +112,7 @@ test("Esc aborts pi's in-process reader and leaves a stopped caller with no new 
 	await until(() => s.signal("reader.entered") !== "", ready, "nested faux provider holding");
 	expect(entry(s, caller.id).activity).toBe("working");
 	expect(snapshot()).toEqual(before);
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, caller.id)}:`, "Escape");
+	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host(s, caller.id)), "Escape");
 	await until(() => s.signal("reader.aborted") !== "" && s.signal("reader.exited") !== "", ready, "reader's abort signal and exit");
 	await until(() => entry(s, caller.id).activity === "idle", budgets.settle, "caller stopped");
 	expect(entry(s, caller.id)).toMatchObject({ live: true, cutOff: null, errored: false });

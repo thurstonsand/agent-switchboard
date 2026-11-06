@@ -114,7 +114,7 @@ test("Codex asks live Codex, pi, and archived sessions without a rollout, roster
 				.sort(),
 		).toEqual([target.id, pi.id, caller.id].sort());
 		expect(s.query("select * from runtimes where session_id = ?", caller.id)).toEqual(runtime);
-		const title = s.tmux(s.servers.sessions, "display", "-p", "-t", `=${host(s, caller.id)}:`, "#{pane_title}");
+		const title = s.tmux(s.servers.sessions, "display", "-p", "-t", s.pane(host(s, caller.id)), "#{pane_title}");
 		expect(title.startsWith(caller.id.slice(0, 25))).toBe(true);
 		expect(pane(s, caller.id)).not.toContain("Question about session");
 		s.save("rollouts.json", JSON.stringify(before, null, 2));
@@ -216,7 +216,7 @@ test("Esc in the caller stops its reader at once: no more model requests, no ter
 		await Bun.sleep(3000);
 		expect(readerIdle(notes, readerId, 0)).toBeUndefined();
 		const escaped = Date.now();
-		s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, caller.id)}:`, "Escape");
+		s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host(s, caller.id)), "Escape");
 		const idle = await until(() => readerIdle(notes, readerId, escaped), 5000, "the reader interrupted");
 		expect(idle - escaped).toBeLessThan(1500);
 		const requests = readerRequests().length;
@@ -267,7 +267,7 @@ test("A reader whose swb mcp dies is stopped by the host once the caller's turn 
 			.split("\n")
 			.map((line) => /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line))
 			.filter((m): m is RegExpExecArray => m !== null);
-		const tree = new Set([s.tmux(s.servers.sessions, "display", "-p", "-t", `=${host(s, caller.id)}:`, "#{pane_pid}").trim()]);
+		const tree = new Set([s.tmux(s.servers.sessions, "display", "-p", "-t", s.pane(host(s, caller.id)), "#{pane_pid}").trim()]);
 		for (let size = 0; size !== tree.size; ) {
 			size = tree.size;
 			for (const [, pid, ppid] of procs) if (tree.has(ppid as string)) tree.add(pid as string);

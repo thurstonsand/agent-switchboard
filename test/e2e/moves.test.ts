@@ -45,7 +45,7 @@ async function moved(command: string): Promise<{ id: string; from: string; cwd: 
 /** Quits the moved session's pi, then wakes it from the roster: it must come back where it went, with its conversation. */
 async function wakesWhereItWent(id: string, cwd: string): Promise<void> {
 	const host = state(s).staged.host as string;
-	s.tmux(s.servers.sessions, "kill-session", "-t", `=${host}`);
+	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(host));
 	await waitState(s, "the exited card", (x) => x.staged.id === id && x.staged.kind === "exited");
 	await until(() => s.screen().includes("before the move"), budgets.settle, "the conversation on the exited card");
 	s.save("exited.txt", s.screen());
@@ -84,7 +84,7 @@ test("a session whose directory is gone wakes into its own transcript from its p
 	const id = st.staged.id as string;
 	await reply(s, "before the move");
 	await until(() => entry(s, id)?.activity === "idle", budgets.settle, "idle");
-	s.tmux(s.servers.sessions, "kill-session", "-t", `=${st.staged.host as string}`);
+	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(st.staged.host as string));
 	await waitState(s, "the exited card", (x) => x.staged.id === id && x.staged.kind === "exited");
 	git(s, s.project, "worktree", "remove", "--force", worktree);
 	s.keys("Enter");

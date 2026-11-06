@@ -32,7 +32,7 @@ async function tools(label: string): Promise<string[]> {
 }
 
 function history(): string {
-	return s.tmux(s.servers.sessions, "capture-pane", "-p", "-S", "-", "-t", `=${state(s).staged.host}:`);
+	return s.tmux(s.servers.sessions, "capture-pane", "-p", "-S", "-", "-t", s.pane(state(s).staged.host as string));
 }
 
 test("managed pi yields recall to swb, keeps subagents, and stays yielded after /reload; its unmanaged child retains recall", async () => {

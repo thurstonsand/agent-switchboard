@@ -12,7 +12,7 @@ afterEach(async () => {
 		for (const { session_id, tmux_session } of s.query<{ session_id: string; tmux_session: string }>(
 			"select session_id, tmux_session from runtimes",
 		))
-			s.save(`pane-${session_id}.txt`, s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-S", "-200", "-t", `=${tmux_session}:`));
+			s.save(`pane-${session_id}.txt`, s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-S", "-200", "-t", s.pane(tmux_session)));
 		s.save("ls.json", JSON.stringify(s.ls(), null, 2));
 		for (const harness of ["claude", "codex"] as const) s.save(`${harness}-requests.json`, JSON.stringify(s.requests(harness), null, 1));
 	} catch {}
@@ -30,11 +30,11 @@ test("Claude Code waiting on a permission prompt reads as blocked, and an upgrad
 	Bun.sleepSync(1000);
 	s.save("blocked.txt", pane(s, claude.id));
 	// The first choice allows it.
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, claude.id)}:`, "Enter");
+	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host(s, claude.id)), "Enter");
 	await until(() => entry(s, claude.id).activity === "idle", budgets.settle, "Claude's turn done");
 	expect(existsSync(note)).toBe(true);
 
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, claude.id)}:`, "-l", "half a thought");
+	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host(s, claude.id)), "-l", "half a thought");
 	await until(() => pane(s, claude.id).includes("half a thought"), budgets.settle, "the draft typed");
 	// A newer swb stops idle sessions, as an upgrade does.
 	s.tmux(s.servers.sessions, "set", "-gu", "@swb_version");
@@ -45,11 +45,11 @@ test("Claude Code waiting on a permission prompt reads as blocked, and an upgrad
 	s.save("draft-restored.txt", pane(s, claude.id));
 
 	// A prompt cleared, or sent, is no draft for the next stop to keep.
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, claude.id)}:`, "-l", ", finished");
+	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host(s, claude.id)), "-l", ", finished");
 	await until(() => pane(s, claude.id).includes("half a thought, finished"), budgets.settle, "the draft edited");
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, claude.id)}:`, "Escape");
+	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host(s, claude.id)), "Escape");
 	Bun.sleepSync(300);
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, claude.id)}:`, "Escape");
+	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host(s, claude.id)), "Escape");
 	await until(() => !pane(s, claude.id).includes("half a thought"), budgets.settle, "the draft cleared");
 	s.tmux(s.servers.sessions, "set", "-gu", "@swb_version");
 	s.swb("drive", "start");
@@ -119,7 +119,7 @@ test("Codex's own /archive archives in swb, and a Claude session archiving itsel
 	type(s, codex.id, "/archive");
 	await until(() => pane(s, codex.id).includes("Archive this session"), budgets.settle, "Codex asking to confirm");
 	// The digit picks "Yes, archive" at once.
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, codex.id)}:`, "2");
+	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host(s, codex.id)), "2");
 	await until(() => !entry(s, codex.id).open && !entry(s, codex.id).live, budgets.settle, "Codex archived in swb and stopped");
 	// Codex moved its rollout to archived_sessions/; the card still reads it.
 	s.swb("drive", "start", "--size", "160x40");

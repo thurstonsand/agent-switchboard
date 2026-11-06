@@ -271,9 +271,9 @@ Every tmux name below takes a suffix of `-<SWB_INSTANCE>` when that variable is 
     - managed pi gets `PI_IMAGE_PROTOCOL=none`, which makes pi's existing text fallback for images explicit.
   - Hooks call the absolute path of the running `swb` executable.
   - It holds three kinds of tmux session, tagged with user options:
-    - **pi sessions**: `@swb_kind=pi`, plus `@swb_launch_id=<id>` on a resume launch. Named `<project>-<4 hex>`, never renamed. Which session one hosts comes from `runtimes`, never from tmux.
+    - **Harness sessions**, one per harness process, named `<project>-<4 hex>` (its host), never renamed. The harness's pane carries `@swb_host=<host>`, and every command for the harness finds it by that, so it can move to another session's window. Which session one hosts comes from `runtimes`, never from tmux.
     - **Editor sessions**: `@swb_kind=editor`, `@swb_dir=<dir>`. Named `<dirname>-edit-<4 hex>`.
-    - **Placeholder sessions**, one per Deck: `@swb_kind=placeholder`, `@swb_deck=<deck>`. They render the Stage's cards.
+    - **The placeholder session**, `placeholder` (`@swb_kind=placeholder`). It renders the Stage's cards.
     - **The control session**, `swb-ctl` (`@swb_kind=control`). Each Deck's control-mode client attaches here. A `tmux -C` client is an attached client like any other, so attached to a pi session it would make that session look viewed and never reapable.
 - **UI server**, `tmux -L swb-ui`.
   - Owned entirely by `swb` through an embedded config: `default-terminal tmux-256color`, `extended-keys always` with `csi-u`, `terminal-features` with `extkeys`, RGB and hyperlinks, `allow-passthrough all`, `focus-events on`, `escape-time 0`, `status off` (on per Deck while the Stage fills it), `mouse on`, `set -s set-clipboard on` (its default, `external`, drops the inner server's OSC 52), no color styles, and the prefix table. `destroy-unattached` is set **per Deck session** from a `client-attached` hook, because setting it globally kills a new Deck before its client attaches.
@@ -503,7 +503,7 @@ gc()
 
 ```text
 client-detached hook → swb detached --session <name>
-  @swb_kind = pi, its runtime is provisional (no turn yet), and no clients left → kill-session
+  its pane has @swb_host, its runtime is provisional (no turn yet), and no clients left → kill its pane
 ```
 
 ### Views: editor swap and split

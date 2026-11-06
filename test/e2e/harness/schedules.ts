@@ -46,13 +46,13 @@ export function host(s: Scenario, id: string): string {
 
 /** The harness's screen, with its own wrapping undone: whitespace runs read as one space. */
 export function pane(s: Scenario, id: string): string {
-	return s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-S", "-500", "-t", `=${host(s, id)}:`).replace(/\s+/g, " ");
+	return s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-S", "-500", "-t", s.pane(host(s, id))).replace(/\s+/g, " ");
 }
 
 export function type(s: Scenario, id: string, text: string): void {
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, id)}:`, "-l", text);
+	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host(s, id)), "-l", text);
 	Bun.sleepSync(300);
-	s.tmux(s.servers.sessions, "send-keys", "-t", `=${host(s, id)}:`, "Enter");
+	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host(s, id)), "Enter");
 }
 
 type Snoozed = LsEntry & { snoozed: boolean; snoozedUntil: number | null };

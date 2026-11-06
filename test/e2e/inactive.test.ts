@@ -57,7 +57,7 @@ test("Inactive after inactive_after, never while blocked or unseen or working", 
 
 	// Waking a session isn't activity: it stays in Inactive while it loads, and after.
 	const sectionOf = (x: DeckState) => x.rows.slice(0, rowIndex(x, unseen)).findLast((r) => r.kind === "section")?.label;
-	s.tmux(s.servers.sessions, "kill-session", "-t", `=${st.staged.host}`);
+	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(st.staged.host as string));
 	await until(() => !entry(s, unseen).live, budgets.settle, "dormant");
 	s.keys("M-a", "h");
 	await waitState(s, "roster focus", (x) => x.focus === "roster");

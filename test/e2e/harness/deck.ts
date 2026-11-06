@@ -24,12 +24,9 @@ export function entry(s: Scenario, id: string): LsEntry {
 	return s.ls().find((e) => e.id === id) as LsEntry;
 }
 
+/** The host of every harness on the sessions server. */
 export function piSessions(s: Scenario): string[] {
-	return s
-		.tmux(s.servers.sessions, "list-sessions", "-F", "#{session_name} #{@swb_kind}")
-		.split("\n")
-		.filter((line) => line.endsWith(" pi"))
-		.map((line) => line.split(" ")[0] as string);
+	return s.tmux(s.servers.sessions, "list-panes", "-a", "-F", "#{@swb_host}").split("\n").filter(Boolean);
 }
 
 export function config(s: Scenario, toml: string): void {
@@ -90,8 +87,8 @@ export async function seed(s: Scenario, ...conversations: { turns: string[]; tit
 	let id = await launched(s, `reply ${first.turns[0]}`, { cwd: s.project });
 	const { tmux_session: host } = s.query("SELECT tmux_session FROM runtimes WHERE session_id = ?", id)[0] as { tmux_session: string };
 	const prompt = (text: string) => {
-		s.tmux(s.servers.sessions, "send-keys", "-t", `=${host}:`, "-l", text);
-		s.tmux(s.servers.sessions, "send-keys", "-t", `=${host}:`, "Enter");
+		s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host), "-l", text);
+		s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host), "Enter");
 	};
 	for (const { turns, title } of conversations) {
 		if (ids.length > 0) {
@@ -116,7 +113,7 @@ export async function seed(s: Scenario, ...conversations: { turns: string[]; tit
 		await until(() => s.ls().some((row) => row.id === id && row.activity === "idle" && row.unseen), budgets.settle, "idle and Unseen");
 		ids.push(id);
 	}
-	s.tmux(s.servers.sessions, "kill-session", "-t", `=${host}`);
+	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(host));
 	await until(() => s.ls().every((row) => !ids.includes(row.id) || !row.live), budgets.settle, "seeded conversations dormant");
 	// The scenario's first Deck starts where a fresh one would, on the newest session.
 	s.query("DELETE FROM deck_layout");

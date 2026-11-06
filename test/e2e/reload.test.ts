@@ -13,7 +13,7 @@ afterEach(async () => {
 		for (const { session_id, tmux_session } of s.query<{ session_id: string; tmux_session: string }>(
 			"select session_id, tmux_session from runtimes",
 		))
-			s.save(`pane-${session_id}.txt`, s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-S", "-200", "-t", `=${tmux_session}:`));
+			s.save(`pane-${session_id}.txt`, s.tmux(s.servers.sessions, "capture-pane", "-p", "-J", "-S", "-200", "-t", s.pane(tmux_session)));
 		s.save("ls.json", JSON.stringify(s.ls(), null, 2));
 		for (const harness of ["claude", "codex"] as const) s.save(`${harness}-requests.json`, JSON.stringify(s.requests(harness), null, 1));
 	} catch {}
@@ -58,7 +58,7 @@ test("pi reloading itself restarts when its turn ends and carries on with the AG
 	await waitState(s, "the Stage back on the restarted pi", (x) => x.staged.id === pi.id && x.staged.kind === "live");
 
 	// Dormant, idle has nothing to restart; continue starts it to carry on. Archived, it's refused.
-	s.tmux(s.servers.sessions, "kill-session", "-t", `=${host(s, pi.id)}`);
+	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(host(s, pi.id)));
 	await until(() => !entry(s, pi.id).live, budgets.settle, "pi dormant");
 	expect(s.swb("reload", pi.id, "--idle")).toContain("reads its configuration afresh when its next turn starts");
 	rmSync(join(s.home, "e2e-signals", "reloaded.system"));
