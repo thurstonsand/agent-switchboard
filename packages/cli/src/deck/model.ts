@@ -197,7 +197,7 @@ export type Model = {
 	history: { ids: string[]; at: number };
 	/** The keyboard is coming back to the roster from a launch that failed; landing on the Stage meanwhile wakes nothing. */
 	returning: boolean;
-	/** The cursor the last Deck in this Project left, until the first snapshot places it. */
+	/** The cursor the last Deck left, until the first snapshot places it. */
 	restoredKey: string | null;
 	started: boolean;
 	/** The Project `here` is in, which the worker finds before its first snapshot. */

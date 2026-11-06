@@ -24,7 +24,7 @@ Sessions run headless in a dedicated tmux server. `swb` opens a Deck: a roster o
 ## Use
 
 ```text
-swb                          open a Deck where the last one in this Project left off
+swb                          open a Deck where the last one left off
 swb -c, --continue           open a Deck on this Project's most recent session, or a new one
 swb new [--cwd DIR] [--harness pi|claude|codex]   open a Deck on a new session
 swb open ID                  open a Deck on a session

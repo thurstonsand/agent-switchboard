@@ -119,7 +119,7 @@ export async function seed(s: Scenario, ...conversations: { turns: string[]; tit
 	s.tmux(s.servers.sessions, "kill-session", "-t", `=${host}`);
 	await until(() => s.ls().every((row) => !ids.includes(row.id) || !row.live), budgets.settle, "seeded conversations dormant");
 	// The scenario's first Deck starts where a fresh one would, on the newest session.
-	s.query("DELETE FROM deck_layouts");
+	s.query("DELETE FROM deck_layout");
 	return ids;
 }
 

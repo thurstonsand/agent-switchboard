@@ -134,6 +134,14 @@ const MIGRATIONS: string[] = [
 	ALTER TABLE schedules RENAME COLUMN label TO schedule_label;`,
 	// Lines mark a message delivered before handing it over, so being offered is no state of its own.
 	"ALTER TABLE messages DROP COLUMN offered_at",
+	// Every Deck starts from where the last one left off, wherever it was opened.
+	`CREATE TABLE deck_layout (
+		id       INTEGER PRIMARY KEY CHECK (id = 1),
+		state    TEXT NOT NULL,
+		saved_at INTEGER NOT NULL
+	);
+	INSERT INTO deck_layout (id, state, saved_at) SELECT 1, state, saved_at FROM deck_layouts ORDER BY saved_at DESC LIMIT 1;
+	DROP TABLE deck_layouts;`,
 ];
 
 if (MIGRATIONS.length !== SCHEMA_VERSION) throw new Error(`${MIGRATIONS.length} migrations for schema v${SCHEMA_VERSION}`);
@@ -181,18 +189,17 @@ export function setGroup(db: Db, ids: string[], name: string | null): void {
 	});
 }
 
-/** A Deck's layout as last left in a Project, which the next Deck opened there starts from. */
+/** The Deck's layout as last left, which the next Deck starts from. */
 export type DeckLayout = { selectedKey: string; rosterCols: number | null; collapsed: string[]; expanded: string[] };
 
-export function loadLayout(db: Db, projectRoot: string): DeckLayout | null {
-	const row = db.get("SELECT state FROM deck_layouts WHERE project_root = ?", projectRoot);
+export function loadLayout(db: Db): DeckLayout | null {
+	const row = db.get("SELECT state FROM deck_layout");
 	return row ? (JSON.parse(row.state as string) as DeckLayout) : null;
 }
 
-export function saveLayout(db: Db, projectRoot: string, layout: DeckLayout): void {
+export function saveLayout(db: Db, layout: DeckLayout): void {
 	db.run(
-		"INSERT INTO deck_layouts (project_root, state, saved_at) VALUES (?, ?, ?) ON CONFLICT (project_root) DO UPDATE SET state = excluded.state, saved_at = excluded.saved_at",
-		projectRoot,
+		"INSERT INTO deck_layout (id, state, saved_at) VALUES (1, ?, ?) ON CONFLICT (id) DO UPDATE SET state = excluded.state, saved_at = excluded.saved_at",
 		JSON.stringify(layout),
 		Date.now(),
 	);

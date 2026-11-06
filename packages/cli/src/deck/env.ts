@@ -21,7 +21,7 @@ if (!args.deck || !args.here) throw new UsageError("__roster: --deck and --here 
 
 export const deck = args.deck;
 
-/** Where swb was run: `-c` and `swb new` start there, and this Project keeps the Deck's layout. */
+/** Where swb was run: `-c` and `swb new` start there. */
 export const here = args.here;
 
 if (!process.env.TMUX_PANE) throw new UsageError("__roster: runs only inside a Deck pane");

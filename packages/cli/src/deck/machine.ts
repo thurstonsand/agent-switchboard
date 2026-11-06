@@ -821,8 +821,8 @@ function followHost(): void {
 }
 
 /**
- * Where the first snapshot puts the cursor: `swb open`'s session, `-c`'s most recent session here, where the last Deck in
- * this Project left it, else the session I last visited. Only `-c` takes the keyboard.
+ * Where the first snapshot puts the cursor: `swb open`'s session, `-c`'s most recent session here, where the last Deck
+ * left it, else the session I last visited. Only `-c` takes the keyboard.
  */
 function startCursor(): void {
 	m.started = true;
@@ -867,7 +867,7 @@ let draftLayout = "";
 
 let draftSince = 0;
 
-/** Keeps this Project's layout for the next Deck opened in it, once it has held still for a moment. */
+/** Keeps the layout for the next Deck, once it has held still for a moment. */
 function keepLayout(now: number): void {
 	if (!m.started) return;
 	const kept: DeckLayout = {

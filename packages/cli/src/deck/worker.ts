@@ -38,8 +38,6 @@ const TICK_MS = 250;
 
 let deck = "";
 let config: Config;
-/** The Project of the directory swb was run in, whose saved layout this Deck starts from and keeps. */
-let layoutRoot = "";
 const db = openStore();
 const boot = bootId();
 let lastJson = "";
@@ -482,8 +480,7 @@ async function handle(message: ToWorker): Promise<void> {
 			// Only now: the placeholder follows the roster's card stream, and the roster posts init once its socket listens.
 			ensurePlaceholder(deck);
 			config = message.config;
-			layoutRoot = projectRoot(message.here);
-			post({ type: "restore", root: layoutRoot, layout: loadLayout(db, layoutRoot) });
+			post({ type: "restore", root: projectRoot(message.here), layout: loadLayout(db) });
 			setInterval(poll, TICK_MS);
 			if (catalog) post({ type: "catalog", catalog });
 			// The roster shows "loading…" until its first snapshot, which shouldn't wait on refresh spawning every harness.
@@ -501,7 +498,7 @@ async function handle(message: ToWorker): Promise<void> {
 			refresh(message.models);
 			return;
 		case "layout":
-			saveLayout(db, layoutRoot, message.layout);
+			saveLayout(db, message.layout);
 			return;
 		case "wake":
 			if (afterStop(message)) return;

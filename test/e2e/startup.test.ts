@@ -81,7 +81,7 @@ test("n then Enter on Operators starts a trusted pi that reads only swb's curren
 	s.save("operator.txt", s.screen());
 });
 
-test("a new Deck restores the last one's cursor and folds in this Project; -c puts pi on its most recent session", async () => {
+test("a new Deck restores the last one's cursor and folds; -c puts pi on this Project's most recent session", async () => {
 	s = scenario("phase6", "restore");
 	const [older, newer] = (await seed(s, { turns: ["older"] }, { turns: ["newer"] })) as [string, string];
 

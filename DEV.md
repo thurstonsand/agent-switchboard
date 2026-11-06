@@ -60,7 +60,7 @@ Some scenarios install pi-sessions and pi-wt from `node_modules`, at the version
 - Search index: `${XDG_STATE_HOME:-~/.local/state}/agent-switchboard/recall.db`, every Session's transcripts and its subagents' in FTS5, rebuilt from them whenever its own version moves, so it never migrates. Each search catches up on what changed, and the clock keeps it warm
 - Catalog: `${XDG_STATE_HOME:-~/.local/state}/agent-switchboard/catalog.json`, what each harness can start and the models it offers; `locks/catalog.db` lets one swb at a time read the model lists
 - Operator folder: `${XDG_CONFIG_HOME:-~/.config}/agent-switchboard/operator`. Every Deck rewrites its `AGENTS.md`, `CLAUDE.md`, `.pi/extensions/operator.js`, and `.pi/settings.json` from the copies swb ships, with `operator.instructions` after the shipped AGENTS.md, and again whenever that setting changes; Claude Code and Codex Operators get the rest of their limits as launch flags
-- Deck layout: the `deck_layouts` table, one row per Project root: the cursor, folds, and roster width the next Deck there starts from
+- Deck layout: the `deck_layout` table, one row: the cursor, folds, and roster width the next Deck starts from
 - Drafts: `${XDG_STATE_HOME:-~/.local/state}/agent-switchboard/drafts/<session_id>`, an unsent prompt saved when an upgrade stops its pi
 - Deck sockets: `${XDG_STATE_HOME:-~/.local/state}/agent-switchboard/decks/<deck>.sock`
 - tmux servers: `tmux -L swb` (sessions) and `tmux -L swb-ui` (Decks), each suffixed `-<SWB_INSTANCE>` when that is set. Tests always set it. The sessions server's `swb-ctl` pane runs the clock, `swb __clock`, which any swb respawns if it's dead or another build

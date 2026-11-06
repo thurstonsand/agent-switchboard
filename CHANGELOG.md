@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-Schema v11: update swb and the pi line together.
+Schema v12: update swb and the pi line together.
 
 ### Added
 
@@ -10,6 +10,7 @@ Schema v11: update swb and the pi line together.
 
 ### Changed
 
+- A new Deck starts where the last one left off, wherever it's opened. It used to keep a cursor, folds, and roster width for each Project, and started a Project it hadn't seen on the session last visited.
 - Archiving a session cancels every schedule it set, the messages to other sessions and the launches included, as well as those aimed at it. A cron launch no longer keeps starting children of an archived session. The Deck's `a` names them first and asks again, after asking whether its family goes too; `swb archive` asks at a terminal, and refuses without one unless given `--yes`. Deleting a worktree with its archive no longer refuses a scheduled launch into it that an archived session set.
 
 ### Fixed
