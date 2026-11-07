@@ -13,7 +13,10 @@ Alt+a
 Type "h"
 Type "j"
 Wait+Screen /child scout done/
-Wait+Screen /not running/
+Sleep 3s
+Type "k"
+Type "j"
+Wait+Screen /dormant/
 Sleep 2.5s
 Type "k"
 Sleep 1s

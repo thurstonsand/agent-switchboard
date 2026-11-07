@@ -50,7 +50,7 @@ Type "opus everyday"
 Wait+Screen /everyday/
 Sleep 800ms
 Enter
-Wait+Screen /Claude Code's own/
+Wait+Screen /claude's own/
 Sleep 1.5s
 Screenshot ../artifacts/phase6/videos/settings-add-effort.png
 Escape

@@ -80,7 +80,7 @@ function deckHook(name: string, command: string): string {
  */
 export function deckWindow(target: string): string[] {
 	const options: [string, string][] = [
-		["window-style", `dim=#{?#{||:#{==:#{@swb_label},swb},${OVER_OVERLAY}},0,#{?#{==:#{@swb_scheme},light},15,35}}`],
+		["window-style", `dim=#{?#{||:#{||:#{==:#{@swb_label},swb},${OVER_OVERLAY}},#{@swb_card}},0,#{?#{==:#{@swb_scheme},light},15,35}}`],
 		["window-active-style", "dim=0"],
 		["pane-border-status", "top"],
 		["remain-on-exit", "on"],
@@ -97,11 +97,11 @@ export function deckConf(): string[] {
 		// The roster turns the Deck's status line on while it's off-screen: the line is the mouse's way back to it.
 		"set -g status-position top",
 		"set -g status-style default",
-		`set -g status-format[0] "#[range=user|roster] #[bold]◂ #{prefix} z#[nobold] #[dim]show list#[nodim] #[norange]"`,
+		`set -g status-format[0] "#[range=user|roster] #[bold]◂ #{s/C-/Ctrl+/:#{s/M-/Alt+/:prefix}} z#[nobold] show list #[norange]"`,
 		`bind -n MouseDown1Status if -F '#{==:#{mouse_status_range},roster}' { if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { ${roster("focus")} } }`,
 		`bind -n Any if -F '#{mouse_pane}' { if -F '${POINTER_AWAY}' { ${LEAVE} } ; send-keys -M } { if -F '${KEY_AWAY}' { ${LEAVE} } ; send-keys }`,
 		// A card's own process hears Esc, but a harness starting on the Stage would take it as typeahead; its pane is tagged until it registers.
-		`bind -n Escape { if -F '${KEY_AWAY}' { ${LEAVE} } ; if -F '#{@swb_starting}' { ${deckCmd("esc")} } { send-keys } }`,
+		`bind -n Escape { if -F '${KEY_AWAY}' { ${LEAVE} } ; if -F '#{@swb_starting}' { ${deckCmd("esc")} } { send-keys Escape } }`,
 		// tmux's own defaults, but for overlays; a right click on a pane that takes no mouse no longer opens tmux's menu.
 		overlayAware("MouseDown1Pane", "select-pane -t= ; send-keys -M"),
 		overlayAware(

@@ -62,7 +62,7 @@ test("Enter on a dormant row puts the keyboard on its pi as it comes up; Enter t
 	await until(() => s.signal("start.entered"), budgets.piReady, "b's pi held mid-start");
 	// Past its card, the Stage shows b's pi itself, which isn't up to hear Esc.
 	await waitState(s, "keyboard on b's starting pi", (x) => x.staged.id === b && x.staged.kind === "loading" && x.focus === "stage");
-	await until(() => s.screen().includes("esc list"), budgets.settle, "esc list while b's pi starts");
+	await until(() => s.screen().includes("esc roster"), budgets.settle, "esc roster while b's pi starts");
 	s.keys("Escape");
 	const back = await waitState(s, "back in the roster", (x) => x.focus === "roster");
 	expect(back.waking.every((w) => !w.keyboardWaiting)).toBe(true);

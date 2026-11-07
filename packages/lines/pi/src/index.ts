@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
 import type { FSWatcher } from "node:fs";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import { Text, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { Db, describeTool, launchGuide, linkedWorktree, operatorDir } from "@swb/shared";
 import { frame, listen, markDelivered, pendingFor, sender, unmarkDelivered } from "@swb/shared/mailbox";
 import {
@@ -105,7 +106,14 @@ export default function (pi: ExtensionAPI) {
 		(request as { register(host: unknown): void }).register({ name: "swb", peers: true, recall: true }),
 	);
 
-	const showFailure = () => ui?.setStatus("swb", ui.theme.fg("error", `swb: not recording: ${proc.failure}`));
+	const failureText = () => {
+		const mismatch = proc.failure?.match(/db schema is v(\d+), this line writes v(\d+)/);
+		return mismatch
+			? `update swb + pi; roster: \x1b[1mR\x1b[22m reload · \x1b[2mdb v${mismatch[1]}; line expects v${mismatch[2]}`
+			: proc.failure;
+	};
+	const showFailure = () =>
+		ui?.setStatus("swb", `\x1b[1;31mswb: not recording\x1b[22;39m · ${failureText()} · \x1b[2mtranscript saved\x1b[22m`);
 
 	const connect = (): Db => {
 		proc.db ??= new Db(proc.launch.db, { create: false });
@@ -115,7 +123,6 @@ export default function (pi: ExtensionAPI) {
 	const fail = (error: unknown) => {
 		proc.failure = error instanceof Error ? error.message : String(error);
 		showFailure();
-		ui?.notify(`swb: not recording: ${proc.failure}`, "error");
 	};
 
 	// A busy db holds pi's writes for a later try, and says so; any other failure stops the line recording.
@@ -208,7 +215,15 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerMessageRenderer(MESSAGE, (message, _options, theme) => {
 		const details = message.details as IncomingDetails;
-		return new Text(`${theme.fg("accent", `↘ ${details.title}`)}\n${details.body}`, 0, 0);
+		return {
+			invalidate() {},
+			render(width: number) {
+				return [
+					...wrapTextWithAnsi(`↘ from ${theme.bold(details.title)}`, Math.max(1, width - 1)).map((line) => ` ${line}`),
+					...wrapTextWithAnsi(details.body, Math.max(1, width - 3)).map((line) => `   ${line}`),
+				];
+			},
+		};
 	});
 
 	pi.on("session_start", (event, ctx) => {
@@ -331,14 +346,45 @@ export default function (pi: ExtensionAPI) {
 				description: describeTool(name, TOOLS[name].description, guide),
 				promptGuidelines: TOOLS[name].guidelines,
 				parameters: toolParameters(name, name === "swb_update_session" && linkedWorktree(cwd) !== null),
-				renderCall(args, theme) {
+				renderCall(args, theme, context) {
 					const what = target(args as Record<string, unknown>);
-					return new Text(`${theme.fg("toolTitle", theme.bold(TOOLS[name].label))}${what ? ` · ${theme.fg("accent", what)}` : ""}`, 0, 0);
+					const call = new Text(
+						`${theme.fg("toolTitle", theme.bold(TOOLS[name].label))}${what ? ` · ${theme.fg("accent", what)}` : ""}`,
+						0,
+						0,
+					);
+					return name === "session_send_message" || name === "session_list"
+						? { invalidate() {}, render: (width: number) => (context.state.receipt ? [] : call.render(width)) }
+						: call;
 				},
 				// Collapsed, a call reads as swb's summary, or the text's first line; expanded, as the text the model read.
 				renderResult(result, options, theme, context) {
 					const output = (result.content.find((item) => item.type === "text")?.text ?? "").trim();
 					if (context.isError) return new Text(theme.fg("error", output), 0, 0);
+					if (name === "session_send_message") {
+						context.state.receipt = true;
+						const details = result.details as { delivered: boolean; target: { id: string; title: string | null } };
+						const label = details.target.title ?? details.target.id;
+						const heading = `${theme.bold("Message")} → ${label} · ${details.delivered ? "delivered" : "queued"}`;
+						return new Text(options.expanded ? `${heading}\n${output}` : heading, 0, 0);
+					}
+					if (name === "session_list") {
+						const { sessions } = result.details as {
+							sessions: { id: string; title: string | null; harness: string; state: string; cwd: string; group: string | null }[];
+						};
+						context.state.receipt = true;
+						const heading = `${theme.bold("Sessions")} · ${sessions.length} found`;
+						const entries = sessions.map((s) => {
+							const home = homedir();
+							const cwd = s.cwd === home || s.cwd.startsWith(`${home}/`) ? `~${s.cwd.slice(home.length)}` : s.cwd;
+							return `${theme.bold(s.title ?? s.id.slice(0, 8))}\n  ${s.harness} · ${s.state} · ${theme.fg("dim", s.id)}\n  ${cwd}${s.group ? ` · Group ${s.group}` : ""}`;
+						});
+						return new Text(
+							options.expanded ? [heading, ...entries].join("\n") : `${heading} · ${context.keyHint("app.tools.expand", "details")}`,
+							0,
+							0,
+						);
+					}
 					if (options.expanded) return new Text(theme.fg("dim", output), 0, 0);
 					const lines = output.split("\n");
 					const { summary } = result.details as { summary?: string };

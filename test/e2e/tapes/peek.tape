@@ -6,18 +6,18 @@ Type "# hover a row for its Peek; its buttons act on that row; j and k bring the
 Hide
 Type "swb drive start && tmux -L swb-drive-$SWB_INSTANCE attach" Enter
 Show
-Wait+Screen /survives nested blocks/
+Wait+Screen /error recovery/
 Sleep 1s
 Screenshot ../artifacts/phase6/videos/peek-hover.png
 Sleep 2s
 Screenshot ../artifacts/phase6/videos/peek-button.png
-Wait+Screen /Stop x/
+Wait+Screen /x Stop/
 Sleep 1s
 Screenshot ../artifacts/phase6/videos/peek-woken.png
 Sleep 5.5s
 Screenshot ../artifacts/phase6/videos/peek-tab-hover.png
-Wait+Screen /pi  notes drafted/
-Sleep 1s
+Wait+Screen /notes drafted/
+Sleep 300ms
 Screenshot ../artifacts/phase6/videos/peek-cursor.png
 Wait+Screen /(?s)── editor.*stable now/
 Sleep 1.5s

@@ -44,7 +44,7 @@ export type Transcript = { turns: Turn[]; tail: string[]; ending: Ending | null 
 export type Diff = { files: number; add: number; del: number };
 
 /** What a Peek shows that the snapshot doesn't carry: the last turn, or why it won't read, and its directory's uncommitted changes. */
-export type PeekInfo = { last: Turn | null; diff: Diff | null; error: string | null };
+export type PeekInfo = { last: Turn | null; ending: Ending | null; diff: Diff | null; error: string | null };
 
 /** What the Stage shows when it shows no live session; the placeholder renders it. */
 export type Card = {

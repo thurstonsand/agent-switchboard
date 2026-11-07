@@ -109,7 +109,7 @@ test("a session live in one managed pi cannot be opened in another", async () =>
 
 	const third = launchBeside("third", `--session-id ${first.session_id}`);
 	const red = await until(
-		() => third().includes(`swb: not recording: session ${first.session_id} is already open`) && third(),
+		() => third().includes(`swb: not recording · session ${first.session_id} is already open`) && third(),
 		budgets.piReady,
 		"the red footer",
 	);

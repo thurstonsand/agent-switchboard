@@ -179,11 +179,9 @@ test("the shortlist is automatic until its first edit writes it out; ↺ brings 
 	s.save("automatic.txt", s.screen());
 
 	// The first edit, a note, writes the list out with it. faux-1 doesn't reason, so its only effort is off.
-	for (let x = st; x.settings?.items[x.settings.cursor]?.kind !== "preset"; ) {
-		const before = x.settings?.cursor;
-		s.keys("j");
-		x = await waitState(s, "the cursor moving down", (y) => y.settings?.cursor !== before);
-	}
+	// The selected harness's explanation above the shortlist isn't a list item or a mouse target.
+	await click("faux-1");
+	await waitState(s, "the preset selected below the harness explanation", (x) => x.settings?.items[x.settings.cursor]?.kind === "preset");
 	s.keys("Enter", "-l", "Scripted turns", "Enter");
 	await waitState(s, "written", (x) => x.settings?.items.find((i) => i.kind === "preset")?.set === true);
 	expect(read()).toBe(

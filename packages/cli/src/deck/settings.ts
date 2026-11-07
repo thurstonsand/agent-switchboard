@@ -11,7 +11,6 @@ import {
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { HARNESSES, type Harness } from "@swb/shared";
-import { harnessName } from "@swb/shared/mailbox";
 import {
 	type ConfigError,
 	configPath,
@@ -30,11 +29,12 @@ import {
 import { type Catalog, type Choice, effortLevels, effortMark, type Model, presetLabel, searchMatch, shortlist } from "../harnesses.ts";
 import { setOrReset, withValue } from "../write-config.ts";
 import { type Binding, bindingFor, legendParts } from "./model.ts";
+import { PRESET_HEADER, presetColumns } from "./preset-table.ts";
 import type { SettingsState } from "./protocol.ts";
-import { bold, cyan, dim, gray, green, key, red, shortPath, yellow } from "./style.ts";
+import { bold, cyan, gray, green, red, shortPath, yellow } from "./style.ts";
 
-// Settings: every key of config.toml as a list to read and change, drawn by the roster across the whole Deck. A value is
-// dim while it's the default and bright once it's set; setting it back to the default takes the key out of the file.
+// Settings: every key of config.toml as a list to read and change, drawn by the roster across the whole Deck.
+// Setting a value back to the default takes the key out of the file.
 
 /** What Settings needs from the roster that draws it. */
 export type SettingsHost = {
@@ -320,6 +320,7 @@ export class SettingsPane {
 	gesture: Gesture = { kind: "none" };
 	listTop = 2;
 	listHeight = 0;
+	itemRows = new Map<number, number>();
 	listLeft = 0;
 	narrow = false;
 	/** The items as last drawn. */
@@ -389,15 +390,21 @@ export class SettingsPane {
 		const out: Item[] = [];
 		for (const s of SETTINGS.filter(keep)) {
 			if (s.control.kind === "harnesses") {
+				out.push({ kind: "heading", text: "Enabled harnesses" });
 				out.push(...(["claude", "codex", "pi"] as const).map((harness): Item => ({ kind: "harness", harness })));
 				continue;
 			}
 			if (s.control.kind === "presets") {
 				if (out.length > 0) out.push({ kind: "blank" });
 				const count = this.presets().length;
-				out.push({ kind: "shortlist" }, ...Array.from({ length: count }, (_, index): Item => ({ kind: "preset", index })), {
-					kind: "addPreset",
-				});
+				out.push(
+					{ kind: "shortlist" },
+					{ kind: "heading", text: PRESET_HEADER },
+					...Array.from({ length: count }, (_, index): Item => ({ kind: "preset", index })),
+					{
+						kind: "addPreset",
+					},
+				);
 				continue;
 			}
 			if (s.key.join(".") === "warn_long_shortlist") {
@@ -919,7 +926,10 @@ export class SettingsPane {
 	keymap(): Binding<SettingsCommand>[] {
 		const error = this.host.error();
 		if (error)
-			return [bind(["O", "enter"], "O", "open it", { kind: "open", line: error.line }), bind(["escape"], "esc", "sessions", CLOSE)];
+			return [
+				bind(["O", "enter"], "O", "open config.toml at that line", { kind: "open", line: error.line }),
+				bind(["escape"], "esc", "sessions", CLOSE),
+			];
 		const adding = this.adding;
 		if (adding?.step === "search") {
 			const page = Math.max(1, this.listHeight - 2);
@@ -971,9 +981,9 @@ export class SettingsPane {
 			to: this.area === "rail" ? "list" : "rail",
 		});
 		const tail = [
-			bind(["/"], "/", "search", { kind: "search" }),
+			bind(["escape"], "esc", this.query() !== "" || this.changedOnly ? "clear" : "sessions", CANCEL),
+			bind(["/"], "/", null, { kind: "search" }),
 			bind(["O"], "O", "file", { kind: "open", line: s ? lineOf(this.host.loaded().text, s.key) : null }),
-			bind(["escape"], "esc", null, CANCEL),
 			bind(["c"], "c", null, { kind: "filter", changed: !this.changedOnly }),
 			bind(["?"], "?", null, { kind: "help" }),
 		];
@@ -1211,8 +1221,8 @@ export class SettingsPane {
 	/** The list item under a screen row, if any. */
 	itemAt(y: number): number | null {
 		if (this.adding || y < this.listTop || y >= this.listTop + this.listHeight) return null;
-		const i = this.scroll + (y - this.listTop);
-		return selectable(this.shown[i]) ? i : null;
+		const i = this.itemRows.get(y);
+		return i !== undefined && selectable(this.shown[i]) ? i : null;
 	}
 
 	handleMouse(event: TuiMouseEvent): { handled: boolean; render?: boolean; capture?: boolean } {
@@ -1314,15 +1324,18 @@ export class SettingsPane {
 
 	render(width: number, height: number): string[] {
 		this.targets = [];
+		this.itemRows.clear();
 		this.narrow = width < NARROW_BELOW;
+		const terminalWidth = width;
+		width = Math.min(width, RAIL + 101);
 		const now = Date.now();
 		const lines: string[] = [this.header(width)];
-		const bodyHeight = Math.max(3, height - 7);
+		const bodyHeight = Math.max(3, height - (this.adding ? 7 : 5));
 		const error = this.host.error();
 		// An editor takes the rule and the footer's rows too: its own bottom rule stands in for the one under the list.
 		const prose = !error && !this.adding && this.proseShown() !== null;
 		this.listTop = 2;
-		this.listHeight = prose ? bodyHeight + 3 : bodyHeight;
+		this.listHeight = prose ? Math.max(3, height - 4) : bodyHeight;
 		let body: string[];
 		if (error) {
 			lines.push(gray("─".repeat(width)));
@@ -1336,54 +1349,55 @@ export class SettingsPane {
 		}
 		lines.push(...body);
 		const rule =
-			this.narrow || error || this.adding ? "─".repeat(width) : `${"─".repeat(RAIL)}┴${"─".repeat(Math.max(0, width - RAIL - 1))}`;
-		if (!prose) lines.push(gray(rule), ...this.footer(width, error));
+			this.narrow || error || this.adding
+				? "─".repeat(terminalWidth)
+				: `${"─".repeat(RAIL)}┴${"─".repeat(Math.max(0, terminalWidth - RAIL - 1))}`;
+		if (!prose) lines.push(gray(rule), ...(this.adding ? this.footer(width, error) : []));
 		lines.push(this.messageLine(now), this.clickable(height - 1, 0, legendParts(this.keymap(), width)));
-		return lines.map((line) => truncateToWidth(line, width, "…", true));
+		return lines.map((line) => truncateToWidth(line, terminalWidth, "…", true));
 	}
 
 	header(width: number): string {
-		const close: Part = [`${bold("esc")} ${dim("sessions")} `, CLOSE];
+		const filters: Part[] = [
+			[this.changedOnly ? " all " : this.host.paint.cursor(" all ", true), { kind: "filter", changed: false }],
+			[" · ", null],
+			[this.changedOnly ? this.host.paint.cursor(" changed ", true) : " changed ", { kind: "filter", changed: true }],
+		];
+		const fw = filters.reduce((n, [text]) => n + visibleWidth(text), 0);
+		let left: Part[];
 		if (this.narrow) {
 			const name = SECTIONS[this.section] as string;
-			const left: Part[] = [
+			left = [
 				[` ${bold("Settings")}  `, null],
 				["‹", { kind: "section", to: this.section - 1, area: null }],
 				[` ${name} `, null],
 				["›", { kind: "section", to: this.section + 1, area: null }],
 			];
-			const used = left.reduce((n, [t]) => n + visibleWidth(t), 0);
-			return this.clickable(0, 0, [...left, [" ".repeat(Math.max(1, width - used - visibleWidth(close[0]))), null], close]);
+		} else {
+			const path = gray(shortPath(configPath()));
+			const title = ` ${bold("Settings")}  `;
+			return this.clickable(0, 0, [
+				[title, null],
+				...filters,
+				[" ".repeat(Math.max(1, width - visibleWidth(title) - fw - visibleWidth(path))), null],
+				[path, { kind: "open", line: null }],
+			]);
 		}
-		const path = gray(shortPath(configPath()));
-		const title = ` ${bold("Settings")}`;
-		const gap = Math.max(1, Math.floor((width - visibleWidth(path)) / 2) - visibleWidth(title));
-		const used = visibleWidth(title) + gap + visibleWidth(path);
-		return this.clickable(0, 0, [
-			[title, null],
-			[" ".repeat(gap), null],
-			[path, { kind: "open", line: null }],
-			[" ".repeat(Math.max(1, width - used - visibleWidth(close[0]))), null],
-			close,
-		]);
+		const used = left.reduce((n, [text]) => n + visibleWidth(text), 0);
+		return this.clickable(0, 0, [...left, [" ".repeat(Math.max(1, width - used - fw)), null], ...filters]);
 	}
 
 	searchLine(width: number): string {
-		const filters: Part[] = [
-			[this.changedOnly ? gray("all") : bold("all"), { kind: "filter", changed: false }],
-			["   ", null],
-			[this.changedOnly ? bold("changed") : gray("changed"), { kind: "filter", changed: true }],
-			[" ", null],
-		];
-		const fw = filters.reduce((n, [t]) => n + visibleWidth(t), 0);
-		const fieldWidth = Math.max(10, width - fw - 4);
+		const fieldWidth = Math.max(10, width - 4);
 		const field = this.searching
 			? `${cyan("/")} ${this.search.render(fieldWidth)[0] ?? ""}`
 			: this.query() !== ""
 				? `${cyan("/")} ${this.search.getValue()}`
 				: gray("/ search");
-		const pad = Math.max(1, width - 1 - visibleWidth(field) - fw);
-		return this.clickable(1, 0, [[" ", null], [field, { kind: "search" }], [" ".repeat(pad), null], ...filters]);
+		return this.clickable(1, 0, [
+			[" ", null],
+			[field, { kind: "search" }],
+		]);
 	}
 
 	body(width: number, height: number): string[] {
@@ -1402,7 +1416,9 @@ export class SettingsPane {
 		// The rows an open choice list adds, below its setting.
 		const extra =
 			this.editing?.kind === "choices" ? (this.editing.s.control.kind === "enum" ? this.editing.s.control.choices.length : 0) : 0;
-		const room = Math.max(1, height - extra);
+		const description = this.footer(Math.min(80, listWidth), null);
+		const listHeight = Math.max(1, height - description.length - 1);
+		const room = Math.max(1, listHeight - extra);
 		if (!this.scrolledAway) {
 			if (this.cursor < this.scroll) this.scroll = this.cursor;
 			if (this.cursor >= this.scroll + room) this.scroll = this.cursor - room + 1;
@@ -1416,14 +1432,15 @@ export class SettingsPane {
 			Math.max(12, ...items.map((i) => (i.kind === "setting" && i.s.control.kind !== "paths" ? visibleWidth(i.s.label) : 0))),
 		);
 		const rows: string[] = [];
-		for (let i = this.scroll; rows.length < height && i < items.length; i++) {
+		for (let i = this.scroll; rows.length < listHeight && i < items.length; i++) {
 			const y = this.listTop + rows.length;
+			this.itemRows.set(y, i);
 			rows.push(this.itemLine(items[i] as Item, i, y, left, listWidth, labelWidth));
 			if (this.editing?.kind === "choices" && i === this.cursor && this.editing.s.control.kind === "enum") {
 				const editing = this.editing;
 				editing.s.control.kind === "enum" &&
 					editing.s.control.choices.forEach((c, ci) => {
-						if (rows.length >= height) return;
+						if (rows.length >= listHeight) return;
 						const line = truncateToWidth(`      ${ci === editing.choice ? "●" : "○"} ${c.value}  ${gray(c.about)}`, listWidth, "…", true);
 						const cy = this.listTop + rows.length;
 						this.targets.push({ y: cy, from: left, to: width, command: { kind: "choose", index: ci } });
@@ -1431,9 +1448,10 @@ export class SettingsPane {
 					});
 			}
 		}
+		rows.push("", ...description);
 		while (rows.length < height) rows.push("");
 		if (items.length === 0) rows[0] = gray(this.changedOnly && this.query() === "" ? "   nothing changed yet" : "   no settings match");
-		return this.railed(rows);
+		return this.railed(rows.slice(0, height));
 	}
 
 	/** The list's rows with the section rail beside them, when there's room for it. */
@@ -1448,20 +1466,20 @@ export class SettingsPane {
 		const active = r === this.section && this.query() === "" && !this.changedOnly;
 		const text = truncateToWidth(` ${section}`, RAIL, "…", true);
 		this.targets.push({ y, from: 0, to: RAIL, command: { kind: "section", to: r, area: "rail" } });
-		if (active) return this.host.paint.cursor(text, this.area === "rail");
+		if (active) return this.area === "rail" ? this.host.paint.cursor(text, true) : bold(text);
 		return this.pointer?.y === y && this.pointer.x < RAIL ? this.host.paint.hover(text) : text;
 	}
 
 	itemLine(item: Item, i: number, y: number, left: number, width: number, labelWidth: number): string {
 		const selected = i === this.cursor && this.area === "list" && !this.searching;
 		const lit = selected || i === this.hover;
-		const mark = i === this.cursor ? "▸" : " ";
+		const mark = selected ? "▌" : " ";
 		const dropping = this.gesture.kind === "drag" && this.gesture.over === i && this.gesture.item !== i;
 		let line: string;
 		const parts: Part[] = [];
 		switch (item.kind) {
 			case "heading":
-				return truncateToWidth(` ${bold(item.text)}`, width, "…", true);
+				return truncateToWidth(` ${item.text === PRESET_HEADER ? ` ${item.text}` : bold(item.text)}`, width, "…", true);
 			case "blank":
 				return "";
 			case "warning":
@@ -1477,7 +1495,7 @@ export class SettingsPane {
 			case "entry": {
 				const value = (this.valueOf(item.s) as string[])[item.index] ?? "";
 				const editing = this.editing?.kind === "text" && this.editing.target.kind === "entry" && i === this.cursor;
-				parts.push([`    ${editing ? this.inputCell(width - 6) : this.isSet(item.s) ? value : dim(value)}`, null]);
+				parts.push([`    ${editing ? this.inputCell(width - 6) : value}`, null]);
 				if (lit && !editing) parts.push(["   ", null], [gray("x remove · J K move"), null]);
 				break;
 			}
@@ -1491,20 +1509,20 @@ export class SettingsPane {
 				parts.push(...this.harnessParts(item.harness, i));
 				break;
 			case "shortlist":
-				parts.push(...this.shortlistParts(i, width));
+				parts.push(...this.shortlistParts(i));
 				break;
 			case "preset":
 				parts.push(...this.presetParts(item.index, i, width));
 				break;
 			case "addPreset":
-				parts.push(["  ", null], [green("+ add a preset"), { kind: "activate", at: i }]);
+				parts.push([" ", null], [green("+ add a preset"), { kind: "activate", at: i }]);
 				break;
 		}
 		line = this.clickable(y, left + 1, parts);
 		line = truncateToWidth(`${mark}${line}`, width, "…", true);
 		if (dropping) return this.host.paint.cursor(line, true);
 		if (selected) return this.host.paint.cursor(line, true);
-		if (i === this.cursor) return this.host.paint.cursor(line, false);
+		if (i === this.cursor) return bold(line);
 		return i === this.hover ? this.host.paint.hover(line) : line;
 	}
 
@@ -1532,11 +1550,11 @@ export class SettingsPane {
 			];
 		}
 		const value = show(s, this.valueOf(s));
-		const shown = set ? value : dim(value);
 		const parts: Part[] = [
 			[label, null],
-			[shown, s.control.kind === "paths" ? null : { kind: "activate", at: i }],
+			[bold(value), s.control.kind === "paths" ? null : { kind: "activate", at: i }],
 		];
+		if (!set && s.fallback().from && s.control.kind !== "prose") parts.push([`  ${gray(`(${s.fallback().from})`)}`, null]);
 		if (lit && s.control.kind !== "prose") {
 			const fallback = s.fallback();
 			if (set)
@@ -1546,73 +1564,57 @@ export class SettingsPane {
 					["  ", null],
 					[gray("↺ reset"), { kind: "reset", at: i }],
 				);
-			else parts.push(["   ", null], [gray(fallback.from ?? "default"), null]);
 		}
 		return parts;
 	}
 
 	harnessParts(harness: Harness, i: number): Part[] {
 		const on = this.host.loaded().config.harnesses.includes(harness);
-		const set = this.isSet(setting("harnesses"));
 		const status = this.host.catalog()?.status[harness];
 		const box = `[${on ? "x" : " "}]`;
 		const note = status === undefined ? gray("finding…") : status.problem ? red(status.problem) : "";
 		return [
 			[" ", null],
-			[set ? box : dim(box), { kind: "activate", at: i }],
-			[` ${(set ? (s: string) => s : dim)(harness.padEnd(8))} `, null],
+			[box, { kind: "activate", at: i }],
+			[` ${harness.padEnd(8)} `, null],
 			[note, null],
 		];
 	}
 
-	shortlistParts(i: number, width: number): Part[] {
+	shortlistParts(i: number): Part[] {
 		const custom = this.host.loaded().config.presets !== null;
-		const title = ` ${bold("Shortlist")}`;
-		const right: Part = custom ? [gray("↺"), { kind: "reset", at: i }] : [gray("automatic"), null];
-		const pad = Math.max(1, width - 3 - visibleWidth(title) - visibleWidth(right[0]));
+		const title = bold("Shortlist");
+		const right: Part = custom ? [gray("↺"), { kind: "reset", at: i }] : ["", null];
 		const listed = this.host.catalog() === null && !custom ? [gray("   finding harnesses…"), null] : null;
-		return [[title, null], ...(listed ? [listed as [string, null]] : []), [" ".repeat(pad), null], right];
+		return [[title, null], ...(listed ? [listed as [string, null]] : []), [" ", null], right];
 	}
 
 	presetParts(index: number, i: number, width: number): Part[] {
 		const choice = this.choices()[index];
 		if (!choice) return [];
 		const p = choice.preset;
-		const custom = this.host.loaded().config.presets !== null;
-		const paint = custom ? (s: string) => s : dim;
 		const star = p.default ? (choice.reason ? red("★") : "★") : choice.reason ? red("✗") : " ";
-		const where = p.provider ? `${p.harness} · ${p.provider}` : p.harness;
-		// The picker draws a harness's own effort as it draws medium; here, where it's set, it says so.
-		const model = p.agent ?? (p.effort === null ? `${p.model} ${gray("default")}` : `${p.model}${effortMark(p.effort)}`);
-		const noteWidth = Math.max(0, width - 48);
-		const note = choice.reason && i === this.cursor ? red(choice.reason) : gray(truncateToWidth(choice.note, noteWidth, "…"));
+		const cells = presetColumns(p.harness, p.agent ?? p.model ?? "", p.agent ? "agent" : (p.effort ?? "default"), p.provider ?? "");
 		const editing = this.editing?.kind === "text" && this.editing.target.kind === "note" && i === this.cursor;
 		return [
 			[`${String(index + 1).padStart(2)} `, null],
 			[star, { kind: "star", at: i }],
-			[` ${paint(where.padEnd(16).slice(0, 16))} `, null],
-			[paint(`${model}${" ".repeat(Math.max(0, 22 - visibleWidth(model)))}`), { kind: "adjust", by: 1, at: i, wrap: true }],
-			[" ", null],
-			[editing ? this.inputCell(noteWidth) : note, null],
+			[` ${cells.harness}`, null],
+			[bold(cells.model), null],
+			[cells.effort, { kind: "adjust", by: 1, at: i, wrap: true }],
+			[cells.provider, null],
+			[editing ? `  ${this.inputCell(Math.max(1, width - 45 - visibleWidth(cells.provider)))}` : "", null],
 		];
 	}
 
 	errorBody(error: ConfigError, width: number, height: number): string[] {
 		const rows = [
 			"",
-			`  ${red(`✗ ${shortPath(error.file)}${error.line === null ? "" : `:${error.line}`}`)}`,
-			...wrapTextWithAnsi(`  ${error.problem}`, width - 2),
+			...wrapTextWithAnsi(`  ${red(`✗ ${error.line === null ? "" : `line ${error.line}: `}${error.problem}`)}`, width - 2),
 			"",
-			`  ${gray("This Deck keeps the settings it had until the file is fixed; new swb commands stop on it.")}`,
+			...wrapTextWithAnsi("  This Deck keeps the settings it had until the file is fixed; new swb commands stop on it.", width - 2),
 			"",
 		];
-		const y = this.listTop + rows.length;
-		rows.push(
-			this.clickable(y, 0, [
-				["  ", null],
-				[key("O", "open config.toml at that line"), { kind: "open", line: error.line }],
-			]),
-		);
 		while (rows.length < height) rows.push("");
 		return rows.slice(0, height);
 	}
@@ -1621,7 +1623,7 @@ export class SettingsPane {
 		const adding = this.adding as Adding;
 		if (adding.step !== "search") {
 			const m = adding.picked as Model;
-			return ` ${gray("adding")} ${bold(presetLabel({ ...m, effort: effortLevels(m)[adding.effort] ?? null, use: "", default: false }))} ${gray(`· ${harnessName(m.harness)}`)}`;
+			return ` ${gray("adding")} ${bold(presetLabel({ ...m, effort: effortLevels(m)[adding.effort] ?? null, use: "", default: false }))} ${gray(`· ${m.harness}`)}`;
 		}
 		const catalog = this.host.catalog();
 		const count = this.addRows().filter((r) => r.kind !== "group").length;
@@ -1644,7 +1646,7 @@ export class SettingsPane {
 				const y = this.listTop + rows.length;
 				const line = truncateToWidth(
 					e === null
-						? `   ${"default".padEnd(8)}   ${gray(`${harnessName(m.harness)}'s own`)}`
+						? `   ${"default".padEnd(8)}   ${gray(`${m.harness}'s own`)}`
 						: `   ${e.padEnd(8)} ${effortMark(e) || " "}${e === m.effort ? gray("   its default") : ""}`,
 					width,
 					"…",
@@ -1710,9 +1712,13 @@ export class SettingsPane {
 					: step === "effort"
 						? "The effort it starts at. Change it later from the shortlist with ← →."
 						: "Agents read this note to choose among your presets.";
-			return wrapTextWithAnsi(`   ${about}`, width).concat("", "").slice(0, 2);
+			return wrapTextWithAnsi(about, width - 3)
+				.map((line) => `   ${line}`)
+				.concat("", "")
+				.slice(0, 2);
 		}
 		const item = this.current();
+		if (item?.kind === "harness") return [];
 		const s = this.settingOf(item);
 		let text = s?.description ?? (this.searching ? "" : SECTION_ABOUT[SECTIONS[this.section] as Section]);
 		const editing = this.editing;
@@ -1724,16 +1730,11 @@ export class SettingsPane {
 					: `   ${gray("Press the new prefix. The current one and C-h j k l reach tmux first, so they can't be pressed here.")}`,
 				"",
 			];
-		if (item?.kind === "harness") {
-			const status = this.host.catalog()?.status[item.harness];
-			text = `${harnessName(item.harness)}${status?.version ? ` ${status.version}` : ""}. ${s?.description ?? ""}`;
-		}
 		if (item?.kind === "preset") {
 			const choice = this.choices()[item.index];
-			// The row says the note, or why it can't start; the footer, what the shortlist is.
-			if (choice?.reason) text = s?.description ?? "";
+			text = choice?.reason ?? choice?.note ?? "";
 		}
-		return wrapTextWithAnsi(`   ${text}`, width).concat("", "").slice(0, 2);
+		return wrapTextWithAnsi(text, width - 2).map((line) => `  ${line}`);
 	}
 
 	/** The config error has the whole list's place while it stands, so the message line doesn't repeat it. */

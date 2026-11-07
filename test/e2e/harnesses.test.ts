@@ -82,25 +82,43 @@ test("the Deck's n opens on the default preset, puts its real TUI on the Stage, 
 	expect(opened.picker?.presets[0]).toBe("opus");
 	// The launch card on the Stage says what runs: the harness, then the model.
 	const card = await waitState(s, "the launch card", (x) => (x.launch?.card ?? null) !== null);
-	expect(card.launch?.card?.[1]).toMatch(/Claude Code {2}opus/);
-	// Tab drops the menu, a harness at a time; a number moves the card to Codex, and Esc in a reopened menu keeps it.
+	expect(card.launch?.card?.[1]).toContain("claude · opus");
+	// The menu keeps the shortlist's numbers; a number picks Codex, and Esc in a reopened menu keeps it.
 	s.keys("Tab");
-	const menu = await waitState(s, "the menu", (x) => x.launch?.menu?.some((l) => l.includes("Codex")) ?? false);
-	// The automatic shortlist takes turns, Claude Code's then Codex's; the menu gathers each harness's together.
+	const menu = await waitState(s, "the menu", (x) => x.launch?.menu?.some((l) => l.includes("codex")) ?? false);
+	expect(menu.launch?.menu?.some((l) => l.includes("choose") && l.includes("keep"))).toBe(true);
+	s.swb("drive", "resize", "65x24");
+	await until(() => s.screen().includes("Presets · project"), budgets.settle, "the narrow chooser retains its destination");
+	expect(s.screen().trimEnd().split("\n").at(-1)).not.toContain("choose");
+	s.swb("drive", "resize", "160x40");
+	// The automatic shortlist interleaves harnesses, and every digit keeps that association.
 	const shown = menu.picker?.menu?.shown ?? [];
 	const gpts = shown.filter((label) => label.startsWith("gpt"));
 	const codex = shown.indexOf(gpts[0] as string);
 	expect(codex).toBeGreaterThan(0);
-	expect(shown.slice(codex, codex + gpts.length)).toEqual(gpts);
+	expect(shown).toEqual(opened.picker?.presets ?? []);
 	s.keys(String(codex + 1));
 	await waitState(s, "Codex chosen", (x) => x.picker?.harness === "codex" && x.picker.menu === null);
 	s.keys("Tab");
 	await waitState(s, "the menu again", (x) => x.picker?.menu !== null);
-	s.keys("Escape");
-	const kept = await waitState(s, "the menu closed", (x) => x.picker?.menu === null && x.launch?.card?.[1]?.includes("Codex") === true);
+	const keep = await until(
+		() => {
+			const lines = s.screen().split("\n");
+			const y = lines.findIndex((line) => line.includes("esc keep"));
+			return y >= 0 && { y, x: (lines[y] as string).indexOf("esc keep") };
+		},
+		budgets.settle,
+		"the preset card's keep action",
+	);
+	s.swb("drive", "click", String(keep.x), String(keep.y));
+	const kept = await waitState(s, "the menu closed", (x) => x.picker?.menu === null && x.launch?.card?.[1]?.includes("codex") === true);
 	expect(kept.picker?.harness).toBe("codex");
 	s.keys("Tab");
 	await waitState(s, "the menu once more", (x) => x.picker?.menu !== null);
+	s.keys("Escape");
+	await waitState(s, "Escape also keeps Codex", (x) => x.picker?.harness === "codex" && x.picker.menu === null);
+	s.keys("Tab");
+	await waitState(s, "the menu to choose the default", (x) => x.picker?.menu !== null);
 	s.keys("1");
 	await waitState(s, "back on the default", (x) => x.picker?.harness === "claude" && x.picker.menu === null);
 	s.save("picker.txt", s.screen());
@@ -124,7 +142,7 @@ test("the Deck's n opens on the default preset, puts its real TUI on the Stage, 
 	await cursorTo(s, id);
 	await waitState(s, "the dormant card", (x) => x.staged.kind === "dormant" && x.staged.id === id);
 	await until(() => /claude\s+SWB-from-the-deck/.test(s.screen()), budgets.settle, "Claude's reply on the card, labelled claude");
-	expect(s.screen()).toMatch(/ claude +editor +split/);
+	expect(s.screen()).toMatch(/ claude +e editor +v split/);
 	expect(state(s).rows.some((r) => r.kind === "session" && r.id === id)).toBe(true);
 	s.save("claude-card.txt", s.screen());
 });
@@ -206,7 +224,7 @@ test("the picker keeps the preset I chose when the shortlist is reordered beneat
 	await waitState(s, "the new order in the picker", (x) => x.picker?.presets.slice(0, 3).join() === "sonnet,haiku,opus");
 	const st = state(s);
 	expect(st.picker?.preset).toBe("opus");
-	expect(st.launch?.card?.[1]).toMatch(/Claude Code {2}opus/);
+	expect(st.launch?.card?.[1]).toContain("claude · opus");
 });
 
 test("session_launch with no preset carries the caller's harness and model forward, not the default", async () => {

@@ -24,6 +24,7 @@ import {
 } from "../sessions.ts";
 import { loadLayout, markUnseen, markVisited, openStore, saveLayout, setGroup, setView } from "../store.ts";
 import { hostPane, killHome, listPanes, SESSIONS, tmux, tmuxTry } from "../tmux.ts";
+import type { Ending } from "../transcripts/conversation.ts";
 import { locateTranscript } from "../transcripts/read.ts";
 import { applyPrefix, DECK, PLACEHOLDER } from "./conf.ts";
 import { ensurePlaceholder } from "./deck.ts";
@@ -516,13 +517,18 @@ function diffOf(cwd: string): Promise<Diff | null> {
 /** A Peek's extras. A transcript that won't read says so in place of the last turn, and the rest still shows. */
 async function peek(id: string, cwd: string, path: string | null, harness: Harness): Promise<void> {
 	let last: Turn | null = null;
+	let ending: Ending | null = null;
 	let error: string | null = null;
 	try {
-		if (path) last = transcriptOf(path, harness).turns.at(-1) ?? null;
+		if (path) {
+			const transcript = transcriptOf(path, harness);
+			last = transcript.turns.at(-1) ?? null;
+			ending = transcript.ending;
+		}
 	} catch (e) {
 		error = (e as Error).message;
 	}
-	post({ type: "peek", id, info: { last, diff: await diffOf(cwd), error } });
+	post({ type: "peek", id, info: { last, ending, diff: await diffOf(cwd), error } });
 }
 
 async function handle(message: ToWorker): Promise<void> {

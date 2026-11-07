@@ -85,6 +85,13 @@ export function ensurePlaceholder(fresh: boolean): void {
 		`=${PLACEHOLDER}:`,
 		"@swb_home",
 		PLACEHOLDER,
+		";",
+		"set",
+		"-p",
+		"-t",
+		`=${PLACEHOLDER}:`,
+		"@swb_card",
+		"1",
 	);
 }
 

@@ -1,5 +1,5 @@
-# A working session's glyph breathes in the theme's own cyan, and follows the terminal from dark to light and back.
-# Its own settings, smaller than common.tape's: at 1800×900 VHS can't keep real time, and the breathing would race.
+# A working session's glyph stays bold in the theme's own cyan, following the terminal from dark to light and back.
+# A small recording keeps the terminal's theme transitions in real time.
 Set Shell bash
 Set FontFamily "BerkeleyMono Nerd Font Mono, DejaVu Sans Mono"
 Set FontSize 18

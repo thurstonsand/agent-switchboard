@@ -175,19 +175,34 @@ export async function launchSession(db: Db, l: Launch): Promise<ToolResult> {
 		: l.briefing;
 	ensureSessionsServer();
 	if (harness === "claude") await trustClaudeFolder(dir);
-	const host = db.tx(() =>
-		launch(db, {
+	const host = db.tx(() => {
+		// pi's first agent-to-agent turn uses the same durable delivery and renderer as every later Message.
+		const mailbox = harness === "pi" && l.from !== null;
+		if (mailbox)
+			db.run(
+				`INSERT INTO messages (id, kind, source_id, target_id, body, report_back, created_at, schedule_id, scheduled_for)
+				 VALUES (?, 'message', ?, ?, ?, ?, ?, ?, ?)`,
+				crypto.randomUUID(),
+				l.from,
+				sessionId as string,
+				l.briefing,
+				l.reportBack ? 1 : 0,
+				Date.now(),
+				l.scheduled?.id ?? null,
+				l.scheduled?.at ?? null,
+			);
+		return launch(db, {
 			...launchFlags(target),
 			cwd: dir,
 			resume: null,
 			trust: true,
 			...(sessionId ? { sessionId } : {}),
-			prompt,
+			...(mailbox ? {} : { prompt }),
 			...(l.title && harness === "claude" ? { title: l.title } : {}),
 			...(l.from ? { parentId: l.from } : {}),
 			group,
-		}),
-	);
+		});
+	});
 	const id = await registered(db, host, 60_000);
 	if (l.title && harness === "codex") await nameThread(host, id, l.title);
 	else if (l.title && harness === "pi") await titled(db, id, l.title);

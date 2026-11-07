@@ -169,7 +169,8 @@ test("the Deck's Snoozed section: s snoozes from the roster, the row says when i
 	await cursorTo(s, id);
 	const peeked = await waitState(s, "its Peek", (x) => x.peek?.id === id && x.peek.lines.some((l) => l.includes("SWB check later")));
 	s.save("peek.txt", s.screen());
-	expect(peeked.peek?.lines.some((l) => l.includes("snoozed until a message"))).toBe(true);
+	expect(peeked.peek?.lines.some((l) => l.includes("s Unsnooze"))).toBe(true);
+	expect(peeked.peek?.lines.some((l) => l.includes("snoozed until"))).toBe(false);
 	expect(s.screen()).toContain("↘");
 
 	// Enter focuses it without unsnoozing it.

@@ -1,4 +1,4 @@
-import { decodeKittyPrintable, type Input, type KeyId, matchesKey, type RgbColor, visibleWidth } from "@earendil-works/pi-tui";
+import { decodeKittyPrintable, type Input, type KeyId, matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 import type { View } from "@swb/shared";
 import type { Config, ConfigError, Loaded } from "../config.ts";
 import type { Target, TargetTree } from "../dirs.ts";
@@ -44,7 +44,19 @@ type Whole =
 	| TerminalProfile;
 
 /** What a row can be asked to do: by its key on the cursor's row, by its Peek's buttons, or by a prefix key from anywhere. */
-export type RowAct = "wake" | "stop" | "reload" | "archive" | "snooze" | "unseen" | "parent" | "copyOpen" | "copyMention" | "new" | "group";
+export type RowAct =
+	| "focus"
+	| "wake"
+	| "stop"
+	| "reload"
+	| "archive"
+	| "snooze"
+	| "unseen"
+	| "parent"
+	| "copyOpen"
+	| "copyMention"
+	| "new"
+	| "group";
 
 /**
  * What a key, a click, a prefix key, or a button asks the roster to do. Keys find theirs in the mode's keymap, and every
@@ -88,6 +100,9 @@ export type Command =
 	| { kind: "remove" }
 	| { kind: "view"; view: View }
 	| { kind: "shell" }
+	| { kind: "details" }
+	| { kind: "detailScroll"; by: number }
+	| { kind: "dismissPeek" }
 	/** The roster back on screen with the keyboard, back on screen without it, or off it. */
 	| { kind: "roster"; to: "focus" | "show" | "hide" }
 	| { kind: "settings" }
@@ -119,10 +134,10 @@ export function bindingFor<C>(bindings: Binding<C>[], data: string): Binding<C> 
 /** A keymap's labelled bindings as legend buttons, in its order. What doesn't fit in `room` goes whole, from the end. */
 export function legendParts<C>(bindings: Binding<C>[], room: number): [text: string, command: C | null][] {
 	const shown = bindings.filter((b) => b.label !== null);
-	const width = () => shown.reduce((n, b) => n + 1 + visibleWidth(key(b.name, b.label as string)), 0);
+	const width = () => shown.reduce((n, b) => n + 2 + visibleWidth(key(b.name, b.label as string)), -1);
 	while (shown.length > 1 && width() > room) shown.pop();
-	return shown.flatMap((b): [string, C | null][] => [
-		[" ", null],
+	return shown.flatMap((b, i): [string, C | null][] => [
+		[i === 0 ? " " : "  ", null],
 		[key(b.name, b.label as string), b.command],
 	]);
 }
@@ -150,6 +165,7 @@ type PeekState = {
 	/** Where the Peek is, once the pointer rested there and what it shows came in or stopped being waited for. */
 	settled: PeekSpot | null;
 	pending: PendingPeek | null;
+	expires: Timer | null;
 	/** Where the last render wanted the Peek. */
 	spot: PeekSpot | null;
 	/** The Peek put away when the keyboard went to the Stage; it stays away until its row changes. */
@@ -209,14 +225,11 @@ export type Model = {
 	// does. Until the terminal reports its colors, reverse video stands in. The row under the pointer gets a fainter mix
 	// than the cursor's, focused or not; the cursor also has the ▌ bar while its session is on the Stage.
 	cursorBg: { focused: string; unfocused: string; hover: string } | null;
-	// The working glyph breathes either side of the theme's cyan: faint toward the background, strong toward the
-	// foreground. Fading all the way to the background would sink it below the cursor row's highlight on a dark theme.
-	// Until the palette arrives it holds still.
-	breath: { faint: RgbColor; strong: RgbColor } | null;
 	colors: { background: string | null; scheme: string | null };
 	/** The picker's list as the worker last found it; null until its first scan lands. */
 	dirTrees: TargetTree[] | null;
 	peek: PeekState;
+	details: { expanded: boolean; top: number; id: string | null };
 	/** How many times the keyboard moved panes; a move asked for before the latest one is abandoned. */
 	focusMoves: number;
 	// Like pi: query the colors, and again on every light/dark report (997). The roster starts before the Deck's
@@ -320,6 +333,7 @@ export type Part = [text: string, command: Command | null];
 /** `m`'s picker: the sessions it moves, the Group it renames when it started on one's header, and the highlighted choice. */
 export type NameMode = {
 	kind: "name";
+	at: { x: number; y: number; row: string };
 	ids: string[];
 	renaming: { projectKey: string } | null;
 	project: string;
@@ -329,7 +343,7 @@ export type NameMode = {
 };
 
 /** `s`'s menu for a session: how long to snooze it. */
-export type SnoozeMode = { kind: "snooze"; id: string; title: string; choice: number };
+export type SnoozeMode = { kind: "snooze"; at: { x: number; y: number; row: string }; id: string; title: string; choice: number };
 
 /** Named as `deck state` reports them. */
 export type Mode =
@@ -341,7 +355,7 @@ export type Mode =
 	 * `a`'s prompt: first whether its family or worktree goes too, then, once `chosen` holds that answer, the
 	 * schedules archiving cancels. A session with schedules but neither family nor worktree starts at the second.
 	 */
-	| { kind: "archive"; id: string; chosen: { all: boolean; deleteWorktree: boolean } | null }
+	| { kind: "archive"; at: { x: number; y: number; row: string }; id: string; chosen: { all: boolean; deleteWorktree: boolean } | null }
 	/** The directory picker, `n` and `N`, which takes over the whole roster while it's open. */
 	| { kind: "picker"; picker: Choosing }
 	/** Settings, which takes over the whole Deck while it's open. */
@@ -365,6 +379,8 @@ export type Frame = {
 	frameQueued: boolean;
 	listTop: number;
 	listHeight: number;
+	promptGap: { at: number; rows: number } | null;
+	details: { y: number; height: number; total: number } | null;
 	/** What a click does, by row and column range, as of the last render. */
 	targets: ClickTarget[];
 	/** When the key the next frame answers came in, for the key-to-frame time; 0 with none waiting. */

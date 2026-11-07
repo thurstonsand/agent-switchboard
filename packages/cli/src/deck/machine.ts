@@ -61,7 +61,7 @@ import {
 import type { Card, Entry, FromWorker, PeekInfo, ShellAt, Snapshot, State, StatSummary, ToWorker, Transcript } from "./protocol.ts";
 import { SettingsPane } from "./settings.ts";
 import { type Applied, StagePanes } from "./stage.ts";
-import { attention, bold, cyan, gray, green, hex, lerp, mix, red, sgrBg, shortPath, wakeAt, yellow } from "./style.ts";
+import { attention, bold, cyan, dimColors, gray, green, hex, keyName, mix, red, sgrBg, shortPath } from "./style.ts";
 
 const VISIT_MS = 1000;
 
@@ -114,10 +114,20 @@ const m: Model = {
 	intent: startIntent?.kind === "new" ? null : startIntent,
 	continueTo: null,
 	cursorBg: null,
-	breath: null,
 	colors: { background: null, scheme: null },
 	dirTrees: null,
-	peek: { settled: null, pending: null, spot: null, dismissed: null, byKeys: false, watching: false, info: new Map(), asked: new Set() },
+	peek: {
+		settled: null,
+		pending: null,
+		expires: null,
+		spot: null,
+		dismissed: null,
+		byKeys: false,
+		watching: false,
+		info: new Map(),
+		asked: new Set(),
+	},
+	details: { expanded: false, top: 0, id: null },
 	focusMoves: 0,
 	profile: null,
 	selectedKey: "",
@@ -256,9 +266,7 @@ export function stateOf(e: Entry): State {
 
 /** The one place a session's state is named; the row's glyph is where it's scanned, and its section says snoozed. */
 export function status(e: Entry): string {
-	const base = `${phaseStatus(e)}${e.reload && e.live ? gray(" · reloads when this turn ends") : ""}`;
-	if (!e.snoozed) return base;
-	return `${base}${gray(` · snoozed until ${e.snoozedUntil === null ? "a message" : wakeAt(e.snoozedUntil, Date.now())}`)}`;
+	return `${phaseStatus(e)}${e.reload && e.live ? gray(" · reloads when this turn ends") : ""}`;
 }
 
 function phaseStatus(e: Entry): string {
@@ -272,15 +280,15 @@ function phaseStatus(e: Entry): string {
 		case "working":
 			return cyan("working");
 		case "unseen":
-			return e.live ? green("unseen") : `${green("unseen")}${gray(" · not running")}`;
+			return e.live ? green("unseen") : `${green("unseen")}${gray(" · dormant")}`;
 		case "idle":
 			return e.provisional ? `idle${gray(" · no prompt yet")}` : "idle";
 		case "dormant":
-			return "not running";
+			return m.transcripts.get(e.id)?.transcript?.ending?.kind === "stopped" ? "dormant · stopped" : "dormant";
 		case "cut-off":
-			return `${red("cut off")}${gray(` · ${CAUSES[e.cutOff as CutOff]} · waking continues it`)}`;
+			return `${red("cut off")}${gray(` · ${CAUSES[e.cutOff as CutOff]}`)}`;
 		case "errored":
-			return e.live ? red("errored") : `${red("errored")}${gray(" · not running")}`;
+			return e.live ? red("errored") : `${red("errored")}${gray(" · dormant")}`;
 		case "archived":
 			return gray("archived");
 	}
@@ -379,15 +387,17 @@ function syncTitle(): void {
 	);
 }
 
-/** Where a conversation stopped short of a reply. Why it was cut off is its status's to say, not this. */
+/** Where a conversation stopped short of a reply, when no Peek already explains it. */
 function ending(e: Entry, read: Transcript | null): string | null {
-	if (e.cutOff) return red("cut off");
-	if (read?.ending?.kind === "stopped") return yellow("stopped");
-	if (read?.ending?.kind === "error") return red("errored");
+	const wake = e.open && m.mode.kind === "roster" ? ` · ${bold("⏎")} ${e.cutOff ? "resume unfinished turn" : "wake & focus"}` : "";
+	if (e.cutOff) return `${bold(red("! cut off"))} · ${CAUSES[e.cutOff]}${wake}`;
+	if (read?.ending?.kind === "stopped") return `– dormant · stopped${wake}`;
+	if (read?.ending?.kind === "error") return `${bold(red("errored"))}${wake}`;
 	return null;
 }
 
 function card(e: Entry, lines: string[] = []): Card {
+	if (pickerMode()) return { head: [], lines: [], turns: [], tail: [], ending: null, agent: "" };
 	const transcript = m.transcripts.get(e.id);
 	const extra = transcript?.error ? [red(transcript.error)] : [];
 	const read = transcript?.transcript ?? null;
@@ -399,7 +409,7 @@ function card(e: Entry, lines: string[] = []): Card {
 		turns: transcript ? (read?.turns.slice(-process.stdout.rows) ?? []) : null,
 		// An error's own words hang beneath the turn it ended, like the calls before it.
 		tail: end ? [...(read?.tail ?? []), ...(read?.ending?.kind === "error" ? [read.ending.message] : [])].slice(-process.stdout.rows) : [],
-		ending: end,
+		ending: m.peek.settled?.id === e.id ? null : end,
 		agent: e.harness,
 	};
 }
@@ -558,6 +568,12 @@ function afterCommit(effect: () => void): void {
 export function commit(): void {
 	if (dispatching) throw new Error("a Deck commit inside a change");
 	normalize();
+	const detailId = cursorEntry()?.id ?? null;
+	if (detailId !== m.details.id) {
+		m.details.id = detailId;
+		m.details.top = 0;
+	}
+	if (panes.narrow && m.details.expanded && detailId) askPeekInfo(detailId);
 	apply();
 	// A key's time goes only to the switch its own commit makes.
 	panes.keyAt = 0;
@@ -595,6 +611,7 @@ function apply(): void {
 
 /** What the Stage's agent pane is labelled: its session's harness, or what it waits on without one. */
 function stageLabel(a: Applied): string {
+	if (pickerMode() && a.card) return "new session";
 	if (a.id === null) return newLaunch() ? "new" : "empty";
 	const e = m.entries.get(a.id);
 	if (!e) throw new Error(`the Stage applied ${a.id}, which has no entry`);
@@ -1100,12 +1117,13 @@ function groupKey(group: string): string {
 }
 
 export function cursorLine(line: string, focused: boolean): string {
+	line = line.replaceAll("\x1b[2m", "");
 	if (!m.cursorBg) return focused ? sgrBg("7", line) : sgrBg("4", line);
 	return sgrBg(focused ? m.cursorBg.focused : m.cursorBg.unfocused, line);
 }
 
 export function hoverLine(line: string): string {
-	return m.cursorBg ? sgrBg(m.cursorBg.hover, line) : line;
+	return m.cursorBg ? sgrBg(m.cursorBg.hover, line.replaceAll("\x1b[2m", "")) : line;
 }
 
 export const frame: Frame = {
@@ -1118,6 +1136,8 @@ export const frame: Frame = {
 	frameQueued: false,
 	listTop: 0,
 	listHeight: 0,
+	promptGap: null,
+	details: null,
 	targets: [],
 	keyAt: 0,
 };
@@ -1186,7 +1206,7 @@ export function query(): string {
 	return m.filter.getValue().trim().toLowerCase();
 }
 
-function matches(e: Entry): boolean {
+export function matches(e: Entry): boolean {
 	const q = query();
 	const label = groupOf(e) ?? "";
 	return q === "" || `${displayName(e)} ${projectName(e.project)} ${e.branch ?? ""} ${label}`.toLowerCase().includes(q);
@@ -1195,6 +1215,22 @@ function matches(e: Entry): boolean {
 export function rosterRows(): Row[] {
 	const rows: Row[] = [];
 	const all = [...m.entries.values()].filter((e) => matches(e));
+	// Keep a match's ancestors as context, so filtering doesn't turn a child into a new root.
+	const included = new Set(all.map((e) => e.id));
+	for (const e of all) {
+		const parent = parentOf(e);
+		if (
+			parent &&
+			!included.has(parent.id) &&
+			!parent.operator &&
+			parent.project === e.project &&
+			groupOf(parent) === groupOf(e) &&
+			sectionOf(parent) === sectionOf(e)
+		) {
+			included.add(parent.id);
+			all.push(parent);
+		}
+	}
 	const lingers = (e: Entry) => !e.open && e.id === m.lingering && e.id === m.selectedKey;
 	const open = all.filter((e) => e.open || lingers(e));
 	const sectionHere = (e: Entry) => (lingers(e) ? (e.operator ? "operators" : "open") : sectionOf(e));
@@ -1249,7 +1285,7 @@ export function rosterRows(): Row[] {
 	const pushGroups = (list: Entry[], depth: number, parent: string) => {
 		for (const [project, members] of groupByProject(list)) {
 			const key = `${parent}:${project}`;
-			const collapsed = m.collapsed.has(key);
+			const collapsed = query() === "" && m.collapsed.has(key);
 			rows.push({ kind: "header", key, projectKey: key, project, group: null, cwd: project, count: members.length, depth, collapsed });
 			if (collapsed) continue;
 			// Groups sit beneath the Project, ahead of its sessions in none.
@@ -1263,7 +1299,7 @@ export function rosterRows(): Row[] {
 			const sorted = [...buckets.entries()].sort(([a], [b]) => a.localeCompare(b));
 			for (const [group, inside] of sorted) {
 				const subKey = `${key}:${groupKey(group)}`;
-				const subCollapsed = m.collapsed.has(subKey);
+				const subCollapsed = query() === "" && m.collapsed.has(subKey);
 				const cwd = (inside[0] as Entry).cwd;
 				rows.push({
 					kind: "header",
@@ -1283,6 +1319,7 @@ export function rosterRows(): Row[] {
 	};
 	// A filter opens every section it has matches in, so a match is never hidden behind a caret.
 	const section = (key: SectionKey, label: string, count: number) => {
+		if (query() !== "" && count === 0) return false;
 		const expanded = m.expanded.has(key) || (query() !== "" && count > 0);
 		rows.push({ kind: "section", key, label, count, expanded });
 		return expanded;
@@ -1337,7 +1374,7 @@ export function cursorIndex(rows: Row[]): number {
 /** Settles the cursor on a row of rows, once there are sessions to settle on, and returns its index. */
 function resolveCursor(rows: Row[]): number {
 	const index = cursorIndex(rows);
-	if (!rows.some((r) => r.kind === "session") && m.selectedKey === "") return index;
+	if (index < 0 || (!rows.some((r) => r.kind === "session") && m.selectedKey === "")) return index;
 	m.selectedKey = (rows[index] as Row).key;
 	m.lastIndex = index;
 	// Left by any means, a lingering row is in Archived for good, even when the cursor comes back to it there.
@@ -1373,8 +1410,15 @@ function input(data: string): void {
 	if (isKeyRelease(data)) return;
 	// A key reaches the roster only while its pane has the keyboard, ahead of the focus hook saying so.
 	focusOn(rosterPane);
+	const peek = m.mode.kind === "roster" ? m.peek.settled : null;
+	const binding = bindingFor(keymap(), data);
+	let command = binding?.command;
+	if (peek && command?.kind === "row") command = { ...command, row: peek.id };
+	if (peek && command?.kind === "activate" && command.enter) command = { kind: "row", act: "focus", row: peek.id };
 	m.hover = null;
 	m.pointer = null;
+	m.peek.byKeys = false;
+	syncPeek(null);
 	panes.keyAt = performance.now();
 	frame.keyAt = panes.keyAt;
 	// A key puts the toasts away, all but a stopped worker's: the Deck can't go on without it.
@@ -1384,8 +1428,7 @@ function input(data: string): void {
 		settings.handleInput(data);
 		return;
 	}
-	const binding = bindingFor(keymap(), data);
-	if (binding?.command) run(binding.command);
+	if (command) run(command);
 	else if (!binding && typing()) run({ kind: "type", data });
 }
 
@@ -1444,6 +1487,7 @@ function run(c: Command): void {
 			enter({ kind: "filter" });
 			break;
 		case "clearFilter":
+			if (filtering()) leave();
 			m.filter.setValue("");
 			break;
 		case "addDir":
@@ -1465,6 +1509,18 @@ function run(c: Command): void {
 		}
 		case "shell":
 			toggleShell();
+			break;
+		case "details":
+			m.details.expanded = !m.details.expanded;
+			m.details.top = 0;
+			break;
+		case "detailScroll":
+			if (frame.details) m.details.top = Math.max(0, Math.min(frame.details.total - frame.details.height, m.details.top + c.by));
+			break;
+		case "dismissPeek":
+			m.peek.dismissed = m.peek.settled?.id ?? null;
+			m.peek.byKeys = false;
+			syncPeek(null);
 			break;
 		case "roster":
 			if (c.to === "hide") {
@@ -1489,6 +1545,12 @@ function run(c: Command): void {
 /** A row's own command, from its key on the cursor's row, its Peek's buttons, or a prefix key. */
 function act(act: RowAct, row: Row | undefined): void {
 	switch (act) {
+		case "focus":
+			if (row?.kind === "session") {
+				reveal(row.entry.id);
+				focusEntry(row.entry);
+			}
+			break;
 		case "wake":
 			wakeRow(row);
 			break;
@@ -1593,8 +1655,8 @@ function typeInto(data: string): void {
 	if (filtering()) {
 		m.filter.handleInput(data);
 		const rows = rosterRows();
-		const first = rows.find((r) => r.kind === "session");
-		if (first && !rows.some((r) => r.kind === "session" && r.key === m.selectedKey)) m.selectedKey = first.key;
+		const first = rows.find((r) => r.kind === "session" && matches(r.entry));
+		if (first && !rows.some((r) => r.kind === "session" && r.key === m.selectedKey && matches(r.entry))) m.selectedKey = first.key;
 	} else if (naming) {
 		const before = naming.input.getValue();
 		naming.input.handleInput(data);
@@ -1670,12 +1732,15 @@ function mouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
 		screen.pointerAway();
 		const before = targetAt(m.pointer);
 		m.pointer = { x: event.x, y: event.y };
+		m.peek.dismissed = null;
+		if (m.peek.settled) expirePeek();
 		relit = targetAt(m.pointer) !== before;
 	}
-	// The archive prompt answers to its own buttons and nothing else.
-	if (archiving() !== null) {
+	// A prompt answers to its own buttons, never the rows underneath it.
+	if (archiving() !== null || nameMode() || snoozeMode()) {
 		if (event.type === "move") return { handled: true, render: relit };
-		if (event.button === "left" && event.type === "press") press(event);
+		if (event.type === "wheel" && archiving() === null) run({ kind: "step", by: Math.sign(event.wheelDelta ?? 0) });
+		else if (event.button === "left" && event.type === "press") press(event);
 		else if (event.button === "left" && event.type === "click") {
 			const target = clicked();
 			if (target?.command) run(target.command);
@@ -1719,7 +1784,7 @@ function mouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
 		return { handled: true, render: true };
 	}
 	if (event.type === "wheel") {
-		run({ kind: "step", by: Math.sign(event.wheelDelta ?? 0) });
+		run({ kind: frame.details && event.y >= frame.details.y ? "detailScroll" : "step", by: Math.sign(event.wheelDelta ?? 0) });
 		return { handled: true };
 	}
 	if (event.button !== "left") return undefined;
@@ -1751,7 +1816,7 @@ function mouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
 	}
 	const row = rowAt(event.y);
 	if (!row) return undefined;
-	run({ kind: "select", key: row.key, index: frame.scrollTop + (event.y - frame.listTop) });
+	run({ kind: "select", key: row.key, index: rosterRows().findIndex((r) => r.key === row.key) });
 	return { handled: true };
 }
 
@@ -1762,7 +1827,7 @@ function mouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
 export function peekSpot(rows: Row[], index: number): PeekSpot | null {
 	if (
 		panes.rosterHidden ||
-		(panes.narrow && m.focus !== "roster") ||
+		panes.narrow ||
 		pickerMode() ||
 		nameMode() ||
 		snoozeMode() ||
@@ -1774,6 +1839,7 @@ export function peekSpot(rows: Row[], index: number): PeekSpot | null {
 	const spot = (i: number, source: "pointer" | "cursor"): PeekSpot | null => {
 		const row = rows[i];
 		if (row?.kind !== "session" || i < frame.scrollTop || i >= frame.scrollTop + frame.listHeight) return null;
+		if (source === "cursor" && row.entry.activity === "blocked") return null;
 		return { id: row.key, source, y: frame.listTop + i - frame.scrollTop };
 	};
 	if (m.hover !== null)
@@ -1785,6 +1851,10 @@ export function peekSpot(rows: Row[], index: number): PeekSpot | null {
 }
 
 function rowAt(y: number): Row | undefined {
+	if (frame.promptGap && y >= frame.promptGap.at) {
+		if (y < frame.promptGap.at + frame.promptGap.rows) return undefined;
+		y -= frame.promptGap.rows;
+	}
 	if (y < frame.listTop || y >= frame.listTop + frame.listHeight) return undefined;
 	return rosterRows()[frame.scrollTop + (y - frame.listTop)];
 }
@@ -1877,8 +1947,15 @@ function reloadRow(row = selected()): void {
 function stopRow(row = selected()): void {
 	const e = row?.kind === "session" ? row.entry : null;
 	if (!e) return;
-	if (!e.live) toast("not running", "info");
+	if (!e.live) toast("dormant", "info");
 	else post({ type: "stop", req: nextReq(), id: e.id });
+}
+
+function promptAnchor(row: Row): { x: number; y: number; row: string } {
+	return {
+		...(m.pointer ?? { x: 0, y: frame.listTop + rosterRows().findIndex((r) => r.key === row.key) - frame.scrollTop + 1 }),
+		row: row.key,
+	};
 }
 
 /**
@@ -1896,7 +1973,7 @@ function toggleArchived(row = selected()): void {
 	if (e.open && (asks || e.pending.length > 0)) {
 		m.selectedKey = e.id;
 		m.hover = null;
-		enter({ kind: "archive", id: e.id, chosen: asks ? null : { all: false, deleteWorktree: false } });
+		enter({ kind: "archive", at: promptAnchor(row), id: e.id, chosen: asks ? null : { all: false, deleteWorktree: false } });
 		return;
 	}
 	// Only the cursor's own row moving takes the cursor along; archived, it lingers where it is.
@@ -1976,7 +2053,7 @@ function toggleSnooze(row = selected()): void {
 		const req = nextReq();
 		if (row.key === selected()?.key) m.pin = { index: resolveCursor(rosterRows()), req, answered: false };
 		post({ type: "snooze", req, id: e.id, snooze: "off" });
-	} else enter({ kind: "snooze", id: e.id, title: displayName(e), choice: 0 });
+	} else enter({ kind: "snooze", at: promptAnchor(row), id: e.id, title: displayName(e), choice: 0 });
 }
 
 function finishSnooze(snooze: SnoozePreset): void {
@@ -2037,13 +2114,22 @@ function newAt(row = selected()): void {
  * merges into an existing Group or renames to a new one.
  */
 function startNaming(row = selected()): void {
-	const input = new Input({ prompt: "> " });
+	const input = new Input({ prompt: "/ ", placeholder: "filter or new Group", placeholderStyle: gray });
 	input.focused = m.filter.focused;
 	if (row?.kind === "session" && row.entry.operator) toast("Operators don't take Groups", "info");
 	else if (row?.kind === "session") {
 		const group = groupOf(row.entry);
 		const project = row.entry.project;
-		enter({ kind: "name", ids: [row.entry.id], renaming: null, project, title: displayName(row.entry), choice: 0, input });
+		enter({
+			kind: "name",
+			at: promptAnchor(row),
+			ids: [row.entry.id],
+			renaming: null,
+			project,
+			title: displayName(row.entry),
+			choice: 0,
+			input,
+		});
 		const naming = nameMode() as NameMode;
 		naming.choice = Math.max(
 			0,
@@ -2052,7 +2138,16 @@ function startNaming(row = selected()): void {
 	} else if (row?.kind === "header" && row.group !== null) {
 		const name = row.group;
 		const ids = [...m.entries.values()].filter((e) => e.project === row.project && groupOf(e) === name).map((e) => e.id);
-		enter({ kind: "name", ids, renaming: { projectKey: row.projectKey }, project: row.project, title: name, choice: 0, input });
+		enter({
+			kind: "name",
+			at: promptAnchor(row),
+			ids,
+			renaming: { projectKey: row.projectKey },
+			project: row.project,
+			title: name,
+			choice: 0,
+			input,
+		});
 		const naming = nameMode() as NameMode;
 		naming.choice = Math.max(
 			0,
@@ -2320,7 +2415,7 @@ export function chosenPreset(choosing: Choosing): number {
 	return Math.max(0, presetLabels(pickerPresets().map((c) => c.preset)).indexOf(choosing.preset));
 }
 
-/** What the menu shows, as indexes into pickerPresets: a harness at a time, in the order they first appear, narrowed by `query`. */
+/** What the menu shows, in shortlist order, narrowed by `query`. */
 export function menuPresets(query: string): number[] {
 	const presets = pickerPresets();
 	const words = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -2329,9 +2424,7 @@ export function menuPresets(query: string): number[] {
 		const text = `${p.harness} ${harnessName(p.harness)} ${p.provider ?? ""} ${p.model ?? ""} ${p.effort ?? ""} ${p.agent ?? ""} ${c.note}`;
 		return words.every((w) => text.toLowerCase().includes(w));
 	};
-	return [...new Set(presets.map((c) => c.preset.harness))].flatMap((h) =>
-		presets.flatMap((c, i) => (c.preset.harness === h && matches(c) ? [i] : [])),
-	);
+	return presets.flatMap((c, i) => (matches(c) ? [i] : []));
 }
 
 /**
@@ -2404,6 +2497,10 @@ function wantPeek(want: PeekSpot | null): PeekSpot | null {
 
 /** Settles the Peek on `spot`: at once to close, after the pointer rests, and what it shows comes in, to open or move. */
 function syncPeek(spot: PeekSpot | null): void {
+	if (m.peek.expires && spot === null) {
+		clearTimeout(m.peek.expires);
+		m.peek.expires = null;
+	}
 	if (spotKey(m.peek.settled) === spotKey(spot)) {
 		m.peek.settled = spot;
 		cancelPendingPeek();
@@ -2415,6 +2512,9 @@ function syncPeek(spot: PeekSpot | null): void {
 		m.peek.settled = null;
 		return;
 	}
+	// A visible Peek owns its session's keys, so once the cursor leaves that session its Peek goes at once; only the
+	// pointer, which crosses rows on its way somewhere, gets the smoother switch.
+	if (spot.source === "cursor" && m.peek.settled && m.peek.settled.id !== spot.id) m.peek.settled = null;
 	m.peek.pending = { spot, waiting: false, timer: setTimeout(() => dispatch(peekRested), m.peek.settled ? PEEK_SWITCH_MS : PEEK_OPEN_MS) };
 }
 
@@ -2433,6 +2533,20 @@ function settlePeek(): void {
 	clearTimeout(pending.timer);
 	m.peek.pending = null;
 	m.peek.settled = pending.spot;
+	expirePeek();
+}
+
+function expirePeek(): void {
+	if (m.peek.expires) clearTimeout(m.peek.expires);
+	m.peek.expires = setTimeout(
+		() =>
+			dispatch(() => {
+				m.peek.dismissed = m.peek.settled?.id ?? null;
+				m.peek.byKeys = false;
+				syncPeek(null);
+			}),
+		30_000,
+	);
 }
 
 /** Whether tmux reports the pointer leaving: while something under it is lit, or something leaves with it. */
@@ -2448,6 +2562,7 @@ function askPeekInfo(id: string): void {
 	const e = m.entries.get(id);
 	const have = m.peek.info.get(id);
 	if (!e || m.peek.asked.has(id) || (have && Date.now() - have.at < PEEK_INFO_MS)) return;
+	readTranscript(e, false);
 	m.peek.asked.add(id);
 	post({ type: "peek", id, cwd: e.cwd, transcript: e.transcript, harness: e.harness });
 }
@@ -2498,8 +2613,9 @@ export function keymap(): Binding<Command>[] {
 			return [];
 		// Their legend line is the field being typed into.
 		case "filter":
-		case "name":
 			return [...ARROWS, bind(["enter"], "⏎", null, CHOOSE), bind(["escape"], "esc", null, CANCEL)];
+		case "name":
+			return [...ARROWS, bind(["enter"], "⏎", mode.renaming ? "rename" : "assign", CHOOSE), bind(["escape"], "esc", "cancel", CANCEL)];
 		case "snooze":
 			return [
 				bind(["up", "k"], "↑", null, step(-1)),
@@ -2508,24 +2624,27 @@ export function keymap(): Binding<Command>[] {
 				bind(["escape", "q", "s"], "esc", "cancel", CANCEL),
 			];
 		case "archive": {
-			if (mode.chosen) {
-				const { all, deleteWorktree } = mode.chosen;
-				return [bind(["a"], "a", "", { kind: "archiveAnswer", all, deleteWorktree }), bind(["escape"], "esc", "abort", CANCEL)];
-			}
 			const e = m.entries.get(mode.id);
 			const family = e ? openDescendants(m.entries.values(), e.id).length : 0;
+			if (mode.chosen) {
+				const { all, deleteWorktree } = mode.chosen;
+				return [
+					bind(["a"], "a", `Archive ${all ? family + 1 : 1}; cancel schedules`, { kind: "archiveAnswer", all, deleteWorktree }),
+					bind(["escape"], "esc", "Cancel", CANCEL),
+				];
+			}
 			const answer = (all: boolean, deleteWorktree: boolean): Command => ({ kind: "archiveAnswer", all, deleteWorktree });
-			const out = [bind(["a"], "a", "this", answer(false, false))];
-			if (family > 0) out.push(bind(["A"], "A", `all ${family + 1}`, answer(true, false)));
-			out.push(bind(["escape"], "esc", "abort", CANCEL));
-			if (e?.worktree) out.push(bind(["d"], "d", "archive + delete worktree", answer(false, true)));
-			if (e?.worktree && family > 0) out.push(bind(["D"], "D", `all ${family + 1} + delete this worktree`, answer(true, true)));
+			const out = [bind(["a"], "a", e?.worktree ? "Archive; keep worktree" : "Archive this session", answer(false, false))];
+			if (family > 0) out.push(bind(["A"], "A", `Archive family (${family + 1})`, answer(true, false)));
+			if (e?.worktree) out.push(bind(["d"], "d", "Archive; delete clean worktree", answer(false, true)));
+			if (e?.worktree && family > 0) out.push(bind(["D"], "D", `Family (${family + 1}); delete clean worktree`, answer(true, true)));
+			out.push(bind(["escape"], "esc", "Cancel", CANCEL));
 			return out;
 		}
 		case "picker":
 			return pickerKeys(mode.picker);
 		case "roster":
-			return rosterKeys(selected());
+			return rosterKeys(m.peek.settled ? rosterRows().find((row) => row.key === m.peek.settled?.id) : selected());
 	}
 }
 
@@ -2552,10 +2671,10 @@ function pickerKeys(choosing: Choosing): Binding<Command>[] {
 		];
 	return [
 		bind(["enter"], "⏎", "start", CHOOSE),
-		...(pickerPresets().length > 0 ? [bind(["tab", "shift+tab"], "⇥", "preset", { kind: "menu" })] : []),
-		// The prefix key, which reaches the roster through tmux.
-		bind([], `${m.config.prefix} d`, "remove", { kind: "remove" }),
+		...(pickerPresets().length > 0 ? [bind(["tab", "shift+tab"], "⇥", null, { kind: "menu" })] : []),
 		bind(["escape"], "esc", "cancel", CANCEL),
+		// The prefix key, which reaches the roster through tmux.
+		bind([], `${keyName(m.config.prefix)} d`, "remove", { kind: "remove" }),
 		...ARROWS,
 	];
 }
@@ -2563,11 +2682,20 @@ function pickerKeys(choosing: Choosing): Binding<Command>[] {
 /** The roster's own keys, on its cursor's row; the legend shows what that row's are. */
 function rosterKeys(row: Row | undefined): Binding<Command>[] {
 	const session = row?.kind === "session" ? row.entry : null;
-	const onRow = (act: RowAct): Command => ({ kind: "row", act, row: null });
+	const onRow = (act: RowAct): Command => ({ kind: "row", act, row: row?.key ?? null });
 	let enter: string | null = null;
 	if (row?.kind === "header") enter = row.collapsed ? "expand" : "collapse";
 	else if (row?.kind === "section") enter = row.expanded ? "collapse" : "expand";
-	else if (session) enter = !session.open ? "open" : session.live ? "focus" : "wake";
+	else if (session) enter = !session.open ? "open" : session.cutOff ? "resume" : session.live ? "focus" : "wake";
+	if (session && m.peek.settled?.id === session.id) enter = null;
+	if (
+		!panes.narrow &&
+		session?.open &&
+		panes.applied.target === PLACEHOLDER &&
+		panes.applied.id === session.id &&
+		panes.applied.card?.ending
+	)
+		enter = null;
 	let newLabel: string | null = null;
 	if (!row || row.kind === "header" || (session?.open && !session.snoozed)) newLabel = "new";
 	else if (row.kind === "section" && row.key === "operators") newLabel = "new operator";
@@ -2579,6 +2707,17 @@ function rosterKeys(row: Row | undefined): Binding<Command>[] {
 		bind(["n"], "n", newLabel, onRow("new")),
 		bind(["?"], "?", "keys", { kind: "help" }),
 		bind([","], ",", "settings", { kind: "settings" }),
+		...(panes.narrow && session
+			? [
+					bind(["i"], "i", null, { kind: "details" }),
+					...(m.details.expanded
+						? [
+								bind(["pageDown"], "PgDn", null, { kind: "detailScroll", by: frame.details?.height ?? 1 }),
+								bind(["pageUp"], "PgUp", null, { kind: "detailScroll", by: -(frame.details?.height ?? 1) }),
+							]
+						: []),
+				]
+			: []),
 		bind(["down", "j"], "j", null, step(1)),
 		bind(["up", "k"], "k", null, step(-1)),
 		bind(["g"], "g", null, step(Number.NEGATIVE_INFINITY)),
@@ -2608,12 +2747,13 @@ function rosterKeys(row: Row | undefined): Binding<Command>[] {
  * binds; a click runs what they do.
  */
 export function stageKeys(): Binding<Command>[] {
-	const help = bind([], `${m.config.prefix} ?`, "keys", { kind: "help" });
+	const prefix = keyName(m.config.prefix);
+	const help = bind([], `${prefix} ?`, "keys", { kind: "help" });
 	if (panes.applied.target === PLACEHOLDER || harnessStarting(panes.applied))
-		return [bind([], "esc", "list", { kind: "roster", to: "focus" }), help];
+		return [bind([], "esc", "roster", { kind: "roster", to: "focus" }), help];
 	return [
-		bind([], `${m.config.prefix} h`, "list", { kind: "roster", to: "focus" }),
-		bind([], `${m.config.prefix} z`, "hide list", { kind: "roster", to: "hide" }),
+		bind([], `${prefix} h`, "roster", { kind: "roster", to: "focus" }),
+		bind([], `${prefix} z`, "hide", { kind: "roster", to: "hide" }),
 		help,
 	];
 }
@@ -2653,9 +2793,13 @@ function prefixKeymap(row: string | null): Binding<Command>[] {
  */
 function prefixKey(k: string, row: string | undefined): void {
 	if (row !== undefined && !rosterRows().some((r) => r.key === row)) throw new Error(`no session ${row} in the roster`);
-	const command = bindingFor(prefixKeymap(row ?? null), k)?.command;
+	const command = bindingFor(prefixKeymap(row ?? m.peek.settled?.id ?? null), k)?.command;
 	if (!command) throw new Error(`unknown deck key ${k}`);
 	if (settingsPane()) return;
+	m.hover = null;
+	m.pointer = null;
+	m.peek.byKeys = false;
+	syncPeek(null);
 	if (command.kind !== "remove") leave();
 	run(command);
 }
@@ -2691,7 +2835,7 @@ async function showHelp(): Promise<void> {
 	const [client, cols, rows] = found;
 	const size = helpSize(m.config.prefix);
 	const fit = ["-w", String(Math.min(size.width, Number(cols))), "-h", String(Math.min(size.height, Number(rows)))];
-	await tmuxAsync(SESSIONS, "display-popup", "-c", client, "-E", ...fit, ...HELP_POPUP);
+	await tmuxAsync(SESSIONS, "display-popup", "-c", client, "-E", "-B", ...fit, ...HELP_POPUP);
 }
 
 /** A Peek's buttons: each one's label, the roster key that does the same, and what it does. */
@@ -2703,17 +2847,27 @@ export function peekButtons(row: Row): [label: string, key: string, act: RowAct]
 		return items;
 	}
 	const e = row.entry;
-	const items: [string, string, RowAct][] = [];
+	const primary = !e.open
+		? "Open"
+		: e.cutOff
+			? "Resume unfinished turn"
+			: !e.live
+				? "Wake & focus"
+				: e.errored
+					? "Inspect and retry"
+					: e.activity === "blocked"
+						? "Focus to respond"
+						: "Focus";
+	const items: [string, string, RowAct][] = [[primary, "⏎", "focus"]];
 	if (!e.open) items.push(["Unarchive", "a", "archive"]);
 	else {
-		items.push(e.live ? ["Stop", "x", "stop"] : ["Wake", "w", "wake"]);
-		if (!e.provisional) items.push(["Reload", "R", "reload"]);
-		if (!e.provisional && !e.snoozed) items.push(e.markedUnseen ? ["Unmark Unseen", "u", "unseen"] : ["Mark Unseen", "u", "unseen"]);
+		items.push(e.live ? ["Stop", "x", "stop"] : ["Wake in background", "w", "wake"]);
+		if (!e.provisional && !e.snoozed)
+			items.push([e.markedUnseen ? "Unmark Unseen" : isUnseen(e) ? "Keep Unseen" : "Mark Unseen", "u", "unseen"]);
 		if (!e.provisional) items.push(e.snoozed ? ["Unsnooze", "s", "snooze"] : ["Snooze…", "s", "snooze"], ["Archive", "a", "archive"]);
 		if (!e.operator) items.push(["Group…", "m", "group"]);
-		items.push([e.operator ? "New Operator" : "New session here", "n", "new"]);
 	}
-	items.push(["Copy swb open <id>", "y", "copyOpen"], ["Copy @session:<id>", "Y", "copyMention"]);
+	if (parentOf(e)) items.push(["Parent", "p", "parent"]);
 	return items;
 }
 
@@ -3082,17 +3236,17 @@ function closeSettings(): void {
 // ── main ────────────────────────────────────────────────────────────────
 
 function takeColors({ foreground, background, palette }: TerminalColors, scheme: "light" | "dark" | null): void {
+	const light =
+		(scheme ?? m.profile?.scheme ?? (background && background.r + background.g + background.b > 382 ? "light" : "dark")) === "light";
+	if (background && foreground) dimColors(background, foreground, light);
 	m.cursorBg =
 		background && foreground
 			? {
 					focused: mix(48, background, foreground, 0.2),
 					unfocused: mix(48, background, foreground, 0.12),
-					hover: mix(48, background, foreground, 0.06),
+					hover: mix(48, background, foreground, light ? 0.12 : 0.06),
 				}
 			: null;
-	const themeCyan = palette?.[6];
-	m.breath =
-		background && foreground && themeCyan ? { faint: lerp(background, themeCyan, 0.6), strong: lerp(themeCyan, foreground, 0.3) } : null;
 	m.colors = { background: background ? hex(background as RgbColor) : null, scheme: scheme ?? m.colors.scheme };
 	if (background && foreground) {
 		// Before the terminal's first report, its scheme is guessed from the background, as tmux does.
@@ -3176,6 +3330,7 @@ export function onFrame(spot: PeekSpot | null, leaves: boolean): boolean {
 		const settled = spotKey(m.peek.settled);
 		syncPeek(wantPeek(spot));
 		syncWatch(m.pointer !== null || m.peek.spot !== null || leaves);
+		if (spotKey(m.peek.settled) !== settled) setStageCard(desired());
 		return spotKey(m.peek.settled) !== settled;
 	});
 }
@@ -3186,8 +3341,9 @@ export function onPointerOut(): void {
 }
 
 /** A button on an overlay. A Peek's are its row's prefix keys, and leave a mode left open as those do. */
-export function onOverlayPress(command: Command): void {
+export function onOverlayPress(command: Command, at: { x: number; y: number }): void {
 	dispatch(() => {
+		m.pointer = at;
 		if (command.kind === "row") leave();
 		run(command);
 	});
@@ -3195,6 +3351,7 @@ export function onOverlayPress(command: Command): void {
 
 /** The pointer on an overlay that belongs to a row, as a Peek does: the row stays hovered. */
 export function onOverlayHover(row: string): void {
+	if (m.peek.settled) expirePeek();
 	if (m.hover === row && !m.peek.pending) return;
 	dispatch(() => {
 		cancelPendingPeek();

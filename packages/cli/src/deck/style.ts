@@ -4,16 +4,27 @@ import type { RgbColor } from "@earendil-works/pi-tui";
 const sgr = (open: string, close: string) => (s: string) => `\x1b[${open}m${s}\x1b[${close}m`;
 
 export const bold = sgr("1", "22");
-export const dim = sgr("2", "22");
+export const underline = sgr("4", "24");
+let muted: string | null = null;
+export const dim = (s: string): string => (muted ? `\x1b[${muted}m${s}\x1b[39m` : sgr("2", "22")(s));
+
+export function dimColors(background: RgbColor, foreground: RgbColor, light: boolean): void {
+	muted = light ? mix(38, background, foreground, 0.75) : null;
+}
+
 export const red = sgr("31", "39");
 export const green = sgr("32", "39");
 export const yellow = sgr("33", "39");
 export const magenta = sgr("35", "39");
 export const blue = sgr("34", "39");
 export const cyan = sgr("36", "39");
-export const gray = sgr("90", "39");
-/** The glimpse companion's attention purple, #c084fc. */
-export const attention = sgr("38;2;192;132;252", "39");
+export const gray = dim;
+export const attention = yellow;
+export const blockedMark = sgr("1;33", "22;39");
+
+export function keyName(name: string): string {
+	return name.replaceAll("M-", "Alt+").replaceAll("C-", "Ctrl+").replaceAll("S-", "Shift+");
+}
 
 const SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
 
@@ -21,13 +32,8 @@ export function spinnerFrame(now: number): string {
 	return SPINNER[Math.floor(now / 80) % SPINNER.length] as string;
 }
 
-/** The blocked glyph flashes at about 1 Hz. */
-export function flashOn(now: number): boolean {
-	return Math.floor(now / 500) % 2 === 0;
-}
-
 export function key(name: string, label: string): string {
-	return `${bold(name)} ${dim(label)}`;
+	return `${bold(name)} ${label}`;
 }
 
 const MINUTE = 60_000;
@@ -42,14 +48,15 @@ export function age(at: number, now: number): string {
 	return `${Math.floor(d / DAY)}d`;
 }
 
-/** When a snooze ends, as short as a roster row takes it: "14:30" today, "Sun 9a" within the week, "Oct 25" after. */
+/** When a snooze ends: "2:30p" today, "Sun 9a" within the week, "Oct 25" after. */
 export function wakeAt(at: number, now: number): string {
 	const d = new Date(at);
 	const [h, m] = [d.getHours(), d.getMinutes()];
-	if (d.toDateString() === new Date(now).toDateString()) return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+	const time = `${h % 12 || 12}${m ? `:${String(m).padStart(2, "0")}` : ""}${h < 12 ? "a" : "p"}`;
+	if (d.toDateString() === new Date(now).toDateString()) return time;
 	if (at - now < 6 * DAY) {
 		const day = d.toLocaleDateString("en-US", { weekday: "short" });
-		return `${day} ${h % 12 || 12}${m ? `:${String(m).padStart(2, "0")}` : ""}${h < 12 ? "a" : "p"}`;
+		return `${day} ${time}`;
 	}
 	return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
@@ -68,12 +75,6 @@ export function lerp(a: RgbColor, b: RgbColor, t: number): RgbColor {
 export function mix(layer: 38 | 48, a: RgbColor, b: RgbColor, t: number): string {
 	const c = lerp(a, b, t);
 	return `${layer};2;${c.r};${c.g};${c.b}`;
-}
-
-/** The working glyph breathes from faint to strong and back, every 2.8 s. */
-export function breathe(faint: RgbColor, strong: RgbColor, now: number, s: string): string {
-	const t = (1 - Math.cos((2 * Math.PI * now) / 2800)) / 2;
-	return `\x1b[${mix(38, faint, strong, t)}m${s}\x1b[39m`;
 }
 
 export function hex(color: RgbColor): string {

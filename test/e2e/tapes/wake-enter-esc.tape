@@ -23,7 +23,7 @@ Type "G"
 Type "k"
 Sleep 1.5s
 Enter
-Wait+Screen /esc list/
+Wait+Screen /esc roster/
 Sleep 100ms
 Escape
 Sleep 4s

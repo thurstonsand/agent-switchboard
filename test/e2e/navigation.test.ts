@@ -112,9 +112,9 @@ test("roster navigation: h l space and a header click fold projects; g G jump; M
 	s.keys("M-a", "l");
 	await waitState(s, "pi again", (x) => x.focus === "stage");
 	const lines = s.screen().split("\n");
-	const hint = lines.findIndex((line) => line.includes("hide list"));
+	const hint = lines.findIndex((line) => line.includes("hide"));
 	expect(hint).toBeGreaterThan(-1);
-	s.swb("drive", "click", String((lines[hint] as string).indexOf("hide list")), String(hint));
+	s.swb("drive", "click", String((lines[hint] as string).indexOf("hide")), String(hint));
 	await waitState(s, "the legend's hide list clicked", (x) => x.layout.rosterHidden);
 	s.keys("M-a", "z");
 	await waitState(s, "the roster back", (x) => !x.layout.rosterHidden);
@@ -136,12 +136,15 @@ test("? fits every key in a tall Deck, and in a short one scrolls them by wheel 
 	await seed(s, { turns: ["here"] });
 	s.swb("drive", "start", "--size", "140x50");
 	await waitState(s, "the Deck", (x) => x.ready);
-	const first = "j k ↑ ↓      move";
-	const last = "a literal M-a";
+	const first = "j k ↑ ↓";
+	const last = "Send literal Alt+a";
 	s.keys("?");
 	await until(() => s.screen().includes("key or click closes"), budgets.settle, "the key help");
 	expect(s.screen()).toContain(first);
 	expect(s.screen()).toContain(last);
+	expect(s.screen()).toContain("State marks");
+	expect(s.screen()).toContain("Unseen · finished since last viewed");
+	expect(s.screen()).toContain("Alt+a, then key");
 	s.keys("x");
 	await until(() => !s.screen().includes("key or click closes"), budgets.settle, "help closed");
 
@@ -149,23 +152,28 @@ test("? fits every key in a tall Deck, and in a short one scrolls them by wheel 
 	await Bun.sleep(500);
 	const cursor = state(s).cursor;
 	s.keys("M-a", "?");
-	await until(() => s.screen().includes("↓ 19 · j k, wheel scroll"), budgets.settle, "the short help, its end below");
+	await until(() => /↓ \d+ more lines · j\/k ↑\/↓ scroll/.test(s.screen()), budgets.settle, "the short help, its end below");
 	expect(s.screen()).toContain(first);
 	expect(s.screen()).not.toContain(last);
+	expect(s.screen()).toContain("PgUp/PgDn page · Esc closes");
+	s.keys("PageDown");
+	await until(() => s.screen().includes(last), budgets.settle, "PageDown reaches the last keys");
+	s.keys("PageUp");
+	await until(() => s.screen().includes(first), budgets.settle, "PageUp returns to Move");
 	for (let i = 0; i < 3; i++) s.swb("drive", "wheel", "down", "70", "12");
-	await until(() => s.screen().includes("↑ 3 ↓ 16"), budgets.settle, "three wheel turns down");
+	await until(() => s.screen().includes("↑ 3 ↓"), budgets.settle, "three wheel turns down");
 	expect(s.screen()).not.toContain(first);
 	s.swb("drive", "wheel", "up", "70", "12");
-	await until(() => s.screen().includes("↑ 2 ↓ 17"), budgets.settle, "one back up");
+	await until(() => s.screen().includes("↑ 2 ↓"), budgets.settle, "one back up");
 	s.keys(" ", " ");
-	await until(() => s.screen().includes(last) && s.screen().includes("↑ 19 ·"), budgets.settle, "space pages to the end");
+	await until(() => s.screen().includes(last) && /↑ \d+ ·/.test(s.screen()), budgets.settle, "space pages to the end");
 	s.keys("k", "k", "Up");
-	await until(() => s.screen().includes("↑ 16 ↓ 3"), budgets.settle, "k and ↑ back up");
+	await until(() => s.screen().includes("↓ 3 more lines ·"), budgets.settle, "k and ↑ back up");
 	s.keys("j");
-	await until(() => s.screen().includes("↑ 17 ↓ 2"), budgets.settle, "j down");
+	await until(() => s.screen().includes("↓ 2 more lines ·"), budgets.settle, "j down");
 	expect(state(s).cursor).toBe(cursor);
 	s.keys("q");
-	await until(() => !s.screen().includes("wheel scroll"), budgets.settle, "q closes it");
+	await until(() => !s.screen().includes("PgUp/PgDn page"), budgets.settle, "q closes it");
 	expect(state(s).ready).toBe(true);
 });
 
@@ -224,9 +232,9 @@ test("[ and ] step back and forward through the sessions I visited, from the ros
 	);
 	expect(state(s).cursor).toBe(b);
 	const screen = s.screen().split("\n");
-	const legendY = screen.findLastIndex((line) => line.includes("‹ ›"));
+	const legendY = screen.findLastIndex((line) => line.includes("] forward"));
 	s.save("history-legend.txt", screen[legendY] as string);
-	s.swb("drive", "click", String((screen[legendY] as string).indexOf("›")), String(legendY));
+	s.swb("drive", "click", String((screen[legendY] as string).indexOf("]")), String(legendY));
 	await waitState(s, "the legend's › forward to c", (x) => x.staged.id === c && x.cursor === c);
 
 	// A snoozed session is still somewhere I've been.
@@ -248,6 +256,29 @@ test("[ and ] step back and forward through the sessions I visited, from the ros
 	await waitState(s, "nothing after b now", (x) => noLater(x) && x.staged.id === b);
 	s.keys("M-a", "[");
 	await waitState(s, "M-a [ back to a", (x) => x.staged.id === a && x.focus === "stage", budgets.piReady);
+});
+
+test("the new-session picker hides a dormant transcript, restores it on cancel, and leaves a live harness untouched", async () => {
+	s = scenario("phase6", "picker-underlay");
+	const [id] = (await seed(s, { turns: ["the old conversation is still here"], title: "Previous session" })) as [string];
+	s.swb("drive", "start");
+	await waitState(s, "the dormant session", (x) => x.ready && x.staged.id === id && x.staged.kind === "dormant");
+	await until(() => s.screen().includes("the old conversation is still here"), budgets.settle, "the transcript");
+	s.keys("n");
+	await waitState(s, "the picker", (x) => x.mode === "picker");
+	await until(() => !s.screen().includes("the old conversation is still here"), budgets.settle, "the old card hidden");
+	expect(s.screen()).toContain("new session");
+	s.keys("Escape");
+	await waitState(s, "the roster", (x) => x.mode === "roster");
+	await until(() => s.screen().includes("the old conversation is still here"), budgets.settle, "the card restored");
+	expect(entry(s, id).live).toBe(false);
+	s.keys("Enter");
+	await waitState(s, "the live session", (x) => x.focus === "stage" && x.staged.kind === "live", budgets.piReady);
+	await reply(s, "the live harness stays visible");
+	s.keys("M-a", "n");
+	await waitState(s, "the picker over pi", (x) => x.mode === "picker");
+	expect(s.screen()).toContain("the live harness stays visible");
+	expect(entry(s, id).live).toBe(true);
 });
 
 test("n and M-a n open the picker on the highlighted session's directory, before its first prompt too, and Enter starts there", async () => {

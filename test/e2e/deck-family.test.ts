@@ -67,7 +67,7 @@ function rosterLine(text: string): string | undefined {
 		.find((line) => line.includes(text));
 }
 
-test("a session an agent started nests under it; its Peek's started-by line and p go to the parent; h folds a family; a child starts in its parent's Group, or the one its launch names, then keeps its own; an Operator can't start another", async () => {
+test("a session an agent started nests under it; its Peek's Parent action and p go to the parent; h folds a family; a child starts in its parent's Group, or the one its launch names, then keeps its own; an Operator can't start another", async () => {
 	s = scenario("phase8", "lineage");
 	const other = join(s.root, "other");
 	const operatorDir = join(s.env.XDG_CONFIG_HOME as string, "agent-switchboard/operator");
@@ -90,25 +90,40 @@ test("a session an agent started nests under it; its Peek's started-by line and 
 	// Families go by their newest member; within one, so do siblings. Another Project, or an Operator, marks the row instead.
 	let st = await waitState(s, "the families on the roster", (x) => x.ready && sessionRows(x).length === 7);
 	expect(lineage(st)).toEqual(["op", "↳ port", "⌁ bump", "root", "  c2", "  c1", "    g1"]);
-	expect(rosterLine(" root")).toContain("▾● root");
+	expect(rosterLine(" root")).toContain(" ● root");
 	expect(rosterLine(" c2")).toContain("  ├─ ● c2");
-	expect(rosterLine(" c1")).toContain("  └▾ ● c1");
+	expect(rosterLine(" c1")).toContain("  └─ ● c1");
 	expect(rosterLine(" g1")).toContain("     └─ ● g1");
-	expect(rosterLine(" port")).toContain("↳ ● port");
-	expect(rosterLine(" bump")).toContain("⌁ ● bump");
+	expect(rosterLine(" port")).toMatch(/● port\s+↳/);
+	expect(rosterLine(" bump")).toMatch(/● bump\s+⌁/);
 	s.save("families.txt", s.screen());
 	s.save("families.ansi", s.swb("drive", "capture", "--ansi"));
+
+	s.keys("/", "-l", "g1", "Enter");
+	await waitState(s, "the matching child with its ancestors", (x) => x.filter === "g1" && sessionRows(x).length === 3);
+	expect(lineage(state(s))).toEqual(["root", "  c1", "    g1"]);
+	expect(rosterLine(" g1")).toContain("     └─ ● g1");
+	expect(s.screen()).toContain("1 of 7 · Esc clears");
+	expect(s.screen()).not.toContain("Operators (0)");
+	expect(s.screen()).not.toContain("Archived (0)");
+	s.keys("Escape");
+	await waitState(s, "all families again", (x) => x.filter === "" && sessionRows(x).length === 7);
+	expect(s.screen()).not.toContain("Esc clears");
+	s.keys("g");
 
 	const peekOf = async (id: string) => {
 		await cursorTo(s, id);
 		return (await waitState(s, `${id}'s Peek`, (x) => x.peek?.id === id && x.peek.lines.some((l) => l.includes("pi ·")))).peek
 			?.lines as string[];
 	};
-	expect((await peekOf(g1)).some((l) => /started by ↳ c1\s+p/.test(l))).toBe(true);
+	const nestedPeek = await peekOf(g1);
+	expect(nestedPeek.some((l) => l.includes("started by"))).toBe(false);
+	expect(nestedPeek.some((l) => l.includes("p Parent"))).toBe(true);
 	const portPeek = await peekOf(port);
-	expect(portPeek.some((l) => /started by ↳ c1\s+p/.test(l))).toBe(true);
+	expect(portPeek.some((l) => l.includes("started by ↳ c1"))).toBe(true);
+	expect(portPeek.some((l) => l.includes("p Parent"))).toBe(true);
 	expect(portPeek.some((l) => l.includes("in project"))).toBe(true);
-	expect((await peekOf(bump)).some((l) => /started by ⌁ op\s+p/.test(l))).toBe(true);
+	expect((await peekOf(bump)).some((l) => l.includes("started by ⌁  op"))).toBe(true);
 	s.save("peek-bump.txt", s.screen());
 
 	await cursorTo(s, port);
@@ -123,11 +138,11 @@ test("a session an agent started nests under it; its Peek's started-by line and 
 	st = await waitState(s, "root folded", (x) => sessionRows(x).find((r) => r.id === root)?.folded === true);
 	expect(lineage(st)).toEqual(["op", "↳ port", "⌁ bump", "root +3"]);
 	// The fold counts what it hides, and of those, what needs me: all three are Unseen.
-	expect(rosterLine(" root")).toMatch(/▸● root\s+\+3 ●3/);
+	expect(rosterLine(" root")).toMatch(/ ● root\s+\+3 ●3/);
 	s.keys("j", "k");
 	const folded = (await waitState(s, "the folded Peek", (x) => x.peek?.id === root && x.peek.lines.some((l) => l.includes("folded")))).peek
 		?.lines as string[];
-	expect(folded.filter((l) => /[├└]─ ● /.test(l)).map((l) => l.replace(/│\s*$/, "").trim())).toEqual(["├─ ● c2", "└─ ● c1", "└─ ● g1"]);
+	expect(folded.filter((l) => /[├└]─ ● /.test(l)).map((l) => l.replace(/^│|│\s*$/g, "").trim())).toEqual(["├─ ● c2", "└─ ● c1", "└─ ● g1"]);
 	s.save("folded.txt", s.screen());
 
 	// p from a row elsewhere opens the fold hiding its parent.

@@ -61,7 +61,7 @@ test("M-a e swaps the Stage to nvim in the session's directory, and back", async
 
 	const tab = (label: string): [string, string] => {
 		const lines = s.screen().split("\n");
-		const y = lines.findIndex((line) => line.includes(" pi  editor  split "));
+		const y = lines.findIndex((line) => /: .* v split /.test(line));
 		expect(y).toBeGreaterThan(-1);
 		return [String((lines[y] as string).indexOf(` ${label} `) + 1), String(y)];
 	};
