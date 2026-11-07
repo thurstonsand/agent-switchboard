@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { type as prompt } from "./harness/agents.ts";
 import { cursorTo, entry, launched, rowIndex, seed, state, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 import { snoozeOf } from "./harness/schedules.ts";
@@ -51,6 +52,35 @@ function filled(y: number, text: string): boolean {
 async function onScreen(text: string, what: string): Promise<void> {
 	await until(() => s.screen().includes(text), budgets.settle, what);
 }
+
+test("cut-off Peek actions stay whole at wide and minimum detail widths", async () => {
+	s = scenario("phase6", "peek-action-width");
+	const id = await launched(s, "reply ready", { cwd: s.project, title: "Cut off" });
+	prompt(s, id, "hold peek-width");
+	await until(() => s.signal("peek-width.entered") !== "", budgets.settle, "the turn held");
+	const runtime = s.query<{ pid: number }>("SELECT pid FROM runtimes WHERE session_id = ?", id)[0];
+	process.kill((runtime as { pid: number }).pid, "SIGKILL");
+	await until(() => entry(s, id).cutOff !== null, budgets.settle, "the turn cut off");
+	s.swb("drive", "start", "--size", "175x48");
+	await waitState(s, "the Deck", (x) => x.ready);
+	for (const size of ["175x48", "60x48", "28x48"]) {
+		s.swb("drive", "resize", size);
+		await waitState(s, "the requested width", (x) => x.layout.width === Number(size.split("x")[0]));
+		if (state(s).layout.rosterOnly) s.keys("i");
+		else s.swb("drive", "move", ...find(entry(s, id).title ?? "hold peek-width"));
+		await onScreen("Organize", "the action groups");
+		const actions = s
+			.screen()
+			.split("\n")
+			.filter((line) => line.includes("│"))
+			.join(" ")
+			.replaceAll("│", " ")
+			.replace(/\s+/g, " ");
+		expect(actions).toContain("⏎ Resume unfinished turn");
+		expect(actions).toContain("w Wake in background");
+		if (state(s).layout.rosterOnly) s.keys("i");
+	}
+});
 
 test("the mouse reaches everything the keys do: a row's Peek, the hidden or narrow roster, the shell, the Group picker, the filter, and help", async () => {
 	s = scenario("phase6", "mouse");

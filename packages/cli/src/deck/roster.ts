@@ -1226,10 +1226,10 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	] as const) {
 		let line = `${heading}  `;
 		for (const [label, k, act] of group) {
-			const text = truncateToWidth(act === "focus" ? bold(`${k} ${label}`) : key(k, label), inner - 2, "…");
-			if (visibleWidth(line) + visibleWidth(text) > inner) {
+			const text = act === "focus" ? bold(`${k} ${label}`) : key(k, label);
+			if (visibleWidth(line) + visibleWidth(text) > inner - 2) {
 				buttonLines.push(line.trimEnd());
-				line = "  ";
+				line = visibleWidth(text) <= inner - 2 ? "  " : "";
 			}
 			const from = visibleWidth(line);
 			buttons.push({ y: buttonLines.length, from, to: from + visibleWidth(text), command: { kind: "row", act, row: row.key }, text });
