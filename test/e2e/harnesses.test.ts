@@ -95,7 +95,7 @@ test("the Deck's n opens on the default preset, puts its real TUI on the Stage, 
 	// The menu keeps the shortlist's numbers; a number picks Codex, and Esc in a reopened menu keeps it.
 	s.keys("Tab");
 	const menu = await waitState(s, "the menu", (x) => x.launch?.menu?.some((l) => l.includes("codex")) ?? false);
-	expect(menu.launch?.menu?.some((l) => l.includes("choose") && l.includes("keep"))).toBe(true);
+	expect(menu.launch?.menu?.some((l) => l.includes("choose") && l.includes("cancel"))).toBe(true);
 	s.swb("drive", "resize", "65x24");
 	await until(() => s.screen().includes("Presets · project"), budgets.settle, "the narrow chooser retains its destination");
 	expect(s.screen().trimEnd().split("\n").at(-1)).not.toContain("choose");
@@ -113,11 +113,11 @@ test("the Deck's n opens on the default preset, puts its real TUI on the Stage, 
 	const keep = await until(
 		() => {
 			const lines = s.screen().split("\n");
-			const y = lines.findIndex((line) => line.includes("esc keep"));
-			return y >= 0 && { y, x: (lines[y] as string).indexOf("esc keep") };
+			const y = lines.findIndex((line) => line.includes("esc cancel"));
+			return y >= 0 && { y, x: (lines[y] as string).indexOf("esc cancel") };
 		},
 		budgets.settle,
-		"the preset card's keep action",
+		"the preset card's cancel action",
 	);
 	s.swb("drive", "click", String(keep.x), String(keep.y));
 	const kept = await waitState(s, "the menu closed", (x) => x.picker?.menu === null && x.launch?.card?.[1]?.includes("codex") === true);

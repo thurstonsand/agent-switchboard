@@ -1362,17 +1362,19 @@ export class SettingsPane {
 			[this.changedOnly ? " all " : this.host.paint.cursor(" all ", true), { kind: "filter", changed: false }],
 			[" · ", null],
 			[this.changedOnly ? this.host.paint.cursor(" changed ", true) : " changed ", { kind: "filter", changed: true }],
+			[` ${bold("c")} `, { kind: "filter", changed: !this.changedOnly }],
 		];
 		const fw = filters.reduce((n, [text]) => n + visibleWidth(text), 0);
 		let left: Part[];
 		if (this.narrow) {
 			const name = SECTIONS[this.section] as string;
-			left = [
-				[` ${bold("Settings")}  `, null],
-				["‹", { kind: "section", to: this.section - 1, area: null }],
-				[` ${name} `, null],
-				["›", { kind: "section", to: this.section + 1, area: null }],
-			];
+			left = [[` ${bold("Settings")}  `, null]];
+			if (this.query() === "" && !this.changedOnly)
+				left.push(
+					["‹", { kind: "section", to: this.section - 1, area: null }],
+					[` ${name} `, null],
+					["›", { kind: "section", to: this.section + 1, area: null }],
+				);
 		} else {
 			const path = gray(shortPath(configPath()));
 			const title = ` ${bold("Settings")}  `;
@@ -1568,7 +1570,7 @@ export class SettingsPane {
 	harnessParts(harness: Harness, i: number): Part[] {
 		const on = this.host.loaded().config.harnesses.includes(harness);
 		const status = this.host.catalog()?.status[harness];
-		const box = `[${on ? "x" : " "}]`;
+		const box = on ? "✓" : "○";
 		const note = status === undefined ? gray("finding…") : status.problem ? red(status.problem) : "";
 		return [
 			[" ", null],

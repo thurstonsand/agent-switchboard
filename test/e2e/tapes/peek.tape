@@ -11,7 +11,7 @@ Sleep 1s
 Screenshot ../artifacts/phase6/videos/peek-hover.png
 Sleep 2s
 Screenshot ../artifacts/phase6/videos/peek-button.png
-Wait+Screen /x Stop/
+Wait+Screen /x Shut down/
 Sleep 1s
 Screenshot ../artifacts/phase6/videos/peek-woken.png
 Sleep 5.5s

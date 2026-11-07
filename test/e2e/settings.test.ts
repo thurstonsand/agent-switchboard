@@ -88,6 +88,17 @@ test("Settings edits config.toml by keyboard and mouse, keeps its comments, and 
 	expect(st.settings?.items.filter((i) => i.kind === "setting").map((i) => i.key)).toEqual(["roster_width"]);
 	s.keys("Escape");
 	await waitState(s, "search cleared", (x) => x.settings?.search === null);
+	s.swb("drive", "resize", "80x28");
+	await until(() => s.screen().includes("‹ Directories ›"), budgets.settle, "narrow Settings section");
+	expect(s.screen()).toMatch(/all +· +changed +c/);
+	s.keys("c");
+	await waitState(s, "changed settings across sections", (x) => x.settings?.changedOnly === true);
+	await until(() => !s.screen().includes("‹ Directories ›"), budgets.settle, "filtered header has no section scope");
+	expect(s.screen()).toContain("General");
+	expect(s.screen()).toContain("Directories");
+	s.keys("Escape");
+	await until(() => s.screen().includes("‹ Directories ›"), budgets.settle, "section scope restored");
+	s.swb("drive", "resize", "160x40");
 
 	// esc goes back to sessions, and the roster has its width back.
 	s.keys("Escape");

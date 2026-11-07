@@ -238,7 +238,7 @@ class Roster implements Component, Focusable {
 			lines.splice(prompt.y, 0, ...Array<string>(reserved).fill(""));
 		}
 		const detailTop = height - detailLines - 2;
-		const tabs = detailRows(width, detailTop, detail !== null);
+		const tabs = detailRows(width, detailTop);
 		if (detail) {
 			const y = detailTop + 1;
 			frame.details = { y, height: detail.lines.length, total: detail.total };
@@ -325,7 +325,7 @@ function pickerParts(width: number, height: number): Part[] {
 		if (!e) return [];
 		return [
 			[`Archive ${displayName(e)}`, null],
-			...archiveNotes(e).map((note): Part => [` ${note}`, null]),
+			...archiveNotes(e).map((note): Part => [` ${gray(note)}`, null]),
 			...keymap()
 				.filter((b) => b.label !== null && b.command?.kind !== "cancel")
 				.map(
@@ -339,7 +339,7 @@ function pickerParts(width: number, height: number): Part[] {
 	const naming = nameMode();
 	if (!naming) return [];
 	const choices = nameChoices();
-	const shown = Math.max(1, Math.min(choices.length, height - 3));
+	const shown = Math.max(1, Math.min(choices.length, height - 4));
 	const from = Math.max(0, Math.min(naming.choice - shown + 1, choices.length - shown));
 	const title = `${naming.renaming ? "Rename Group" : "Group for"} ${naming.title}`;
 	const out: Part[] = [[title, null]];
@@ -373,6 +373,26 @@ function promptOverlay(width: number, height: number): Overlay[] {
 	const buttons: OverlayButton[] = parts.flatMap(([line, command], y) =>
 		command ? [{ y, from: 1, to: width - 1, command, hot: row(cursorLine(truncateToWidth(line, width - 2, "…", true), true)) }] : [],
 	);
+	const footer = legendParts(
+		keymap().filter((b) => b.command?.kind === "choose" || b.command?.kind === "cancel"),
+		width - 2,
+	);
+	const footerText = footer.map(([text]) => text).join("");
+	const footerY = lines.length - 1;
+	lines.splice(footerY, 0, row(footerText));
+	let column = 1;
+	for (const [i, [text, command]] of footer.entries()) {
+		const from = column;
+		column += visibleWidth(text);
+		if (command)
+			buttons.push({
+				y: footerY,
+				from,
+				to: column,
+				command,
+				hot: row(footer.map(([part], j) => (i === j ? cursorLine(part, true) : part)).join("")),
+			});
+	}
 	buttons.push({ y: 0, from: width - 4, to: width - 1, command: { kind: "cancel" }, hot: lines[0] as string });
 	const x = insert ? 0 : Math.max(rosterWidth + 1, Math.min(mode.at.x, panes.width - width));
 	const y = insert
@@ -389,7 +409,7 @@ function snoozeMenu(width: number): Part[] {
 	SNOOZE_CHOICES.forEach((choice, i) => {
 		const until = presetUntil(choice.snooze, now);
 		const at = until === null ? "↘" : wakeAt(until, now);
-		const label = `   ${choice.label}`;
+		const label = ` ${bold(String(i + 1))} ${choice.label}`;
 		const line = `${label}${" ".repeat(Math.max(1, width - visibleWidth(label) - visibleWidth(at) - 1))}${at} `;
 		out.push([i === snoozing.choice ? cursorLine(line, true) : line, { kind: "choose", index: i }]);
 	});
@@ -601,10 +621,11 @@ function detailView(row: Row | undefined, width: number, height: number): (Overl
 }
 
 /** The Stage's views and, without a Stage beside it, a disclosure for the selected session. */
-function detailRows(width: number, top: number, expanded: boolean): string[] {
+function detailRows(width: number, top: number): string[] {
 	const e = cursorEntry() ?? (model.stage.staged === null ? null : (model.entries.get(model.stage.staged) ?? null));
 	if (!e) return [""];
 	const parts: Part[] = [[" ", null]];
+	if (panes.narrow && model.details.expanded) parts.push([gray("PgUp/PgDn scroll  ·  "), null]);
 	if (model.stage.staged === e.id && e.open) {
 		parts.push([gray(`${keyName(model.config.prefix)} → `), null]);
 		const editor = panes.applied.view === "editor";
@@ -617,12 +638,6 @@ function detailRows(width: number, top: number, expanded: boolean): string[] {
 		const shell = `  ${bold("s")} shell`;
 		if (!panes.narrow) parts.push([panes.applied.shell ? cursorLine(shell, true) : shell, { kind: "shell" }]);
 	}
-	if (panes.narrow && cursorEntry())
-		parts.push(
-			["  ", null],
-			[`${bold("i")} ${expanded ? "▾" : "▸"} details`, { kind: "details" }],
-			...(expanded ? ([[gray(" · PgUp/PgDn scroll"), null]] as Part[]) : []),
-		);
 	return [truncateToWidth(clickable(top, parts), Math.max(0, width - 1), "…")];
 }
 
@@ -649,13 +664,7 @@ function messageLine(now: number, y: number | null = null, withConfigError = tru
 
 /** The legend line: a field being typed into, where a drag would land, or the keys the mode takes. */
 function hints(y: number, cols: number): string {
-	if (archiving() !== null)
-		return legend(
-			y,
-			keymap().filter((b) => b.command?.kind === "cancel"),
-			cols,
-			[],
-		);
+	if (archiving() !== null || nameMode() || snoozeMode()) return "";
 	if (filtering()) {
 		const hint = ` · ${filterCount()} · ${bold("Esc")} clears`;
 		return clickable(y, [
@@ -663,7 +672,6 @@ function hints(y: number, cols: number): string {
 			[hint, { kind: "clearFilter" }],
 		]);
 	}
-	if (nameMode()) return legend(y, keymap(), cols, []);
 	const drag = dragging();
 	if (drag?.moved) {
 		if (!drag.drop) return ` ${red("✗ not here")}`;
@@ -780,7 +788,7 @@ function rowLine(row: Row, width: number, now: number): string {
 		: e.snoozed
 			? e.snoozedUntil === null
 				? "↘"
-				: `◷ ${wakeAt(e.snoozedUntil, now)}`
+				: wakeAt(e.snoozedUntil, now)
 			: e.activity === "working"
 				? ""
 				: age(e.activityAt, now);
@@ -960,7 +968,7 @@ function peekFrame(inner: number): (content: string) => string {
 /** What a session from the picker starts on, as the launch card's field says it. */
 function presetField(c: Choice): string {
 	const p = c.preset;
-	return `${p.harness} · ${bold(p.agent ?? p.model ?? "")}${p.agent ? " · agent" : ""}`;
+	return bold(`${p.harness} · ${p.agent ?? p.model ?? ""}${p.agent ? " · agent" : ""}`);
 }
 
 function presetNote(note: string, width: number): string[] {
@@ -1001,7 +1009,7 @@ function launchCard(choosing: Choosing, width: number): OverlayView {
 		: presets.length === 0
 			? "Harness"
 			: choosing.mode === "pick"
-				? "Preset · Tab change"
+				? `Preset · ${bold("Tab")} change preset`
 				: "Preset";
 	const lines = [
 		promptTitle(heading, width),
@@ -1062,7 +1070,7 @@ function launchMenu(choosing: Choosing, width: number, maxHeight: number): Overl
 			buttons.push({ y: lines.length, from: 2, to: 2 + inner, command: { kind: "choose", index: n }, hot: row(hoverLine(content)) });
 		lines.push(row(n === menu.cursor ? cursorLine(content, true) : content));
 	});
-	lines.push(gray(`├${"─".repeat(width - 2)}┤`), ...note.map(row), row(""));
+	lines.push(gray(`├${"─".repeat(width - 2)}┤`), ...note.map((line) => row(gray(line))), row(""));
 	const hints = legendParts(keymap(), inner);
 	let x = 2;
 	for (const [text, command] of hints) {

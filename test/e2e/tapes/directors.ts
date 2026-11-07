@@ -1996,7 +1996,7 @@ export const directors: Record<string, Director> = {
 			await Bun.sleep(2500);
 			const [x, y] = await onScreen(s, "w Wake", 1000, 43);
 			s.swb("drive", "click", String(x), String(y));
-			await waitDrive(s, "Refactor woken from its Peek", (st) => st.peek?.lines.some((line) => line.includes("x Stop")) === true);
+			await waitDrive(s, "Refactor woken from its Peek", (st) => st.peek?.lines.some((line) => line.includes("x Shut down")) === true);
 			await Bun.sleep(2500);
 			s.swb("drive", "move", "100", "30");
 			await waitDrive(s, "the Peek gone with the pointer", (st) => st.peek === null && st.hover === null);

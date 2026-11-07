@@ -148,7 +148,7 @@ test("a migration under a running recorder turns its footer red at the next writ
 	await prompt(s, "reply two");
 	await until(() => s.screen().includes(`db v99; line expects v${SCHEMA_VERSION}`), budgets.settle, "the red footer");
 	expect(s.screen()).toContain("update swb + pi");
-	expect(s.screen()).toContain("Ctrl+b h roster");
+	expect(s.screen()).toContain("Ctrl+b → h roster");
 	expect(s.screen()).toContain("transcript saved");
 	expect(s.screen().match(/swb: not recording/g)).toHaveLength(1);
 	const conn2 = s.db();

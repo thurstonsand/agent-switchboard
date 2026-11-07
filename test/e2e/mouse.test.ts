@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { cursorTo, entry, launched, rowIndex, seed, state, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
+import { snoozeOf } from "./harness/schedules.ts";
 
 let s: Scenario;
 afterEach(async () => {
@@ -63,7 +64,7 @@ test("the mouse reaches everything the keys do: a row's Peek, the hidden or narr
 	await until(() => entry(s, b).live, budgets.piReady, "bravo woken from its Peek");
 	expect(state(s)).toMatchObject({ cursor: a, focus: "roster" });
 	s.save("peek-woke.txt", s.screen());
-	await peekButton("bravo", b, "x Stop");
+	await peekButton("bravo", b, "x Shut down");
 	await until(() => !entry(s, b).live, budgets.settle, "bravo stopped from its Peek");
 	expect(state(s).cursor).toBe(a);
 
@@ -300,6 +301,15 @@ test("Archive stays at its clicked action, Snooze stays at its row, and the Stag
 		s.keys("Escape");
 		await waitState(s, "form canceled", (st) => st.mode === "roster");
 	}
+	s.keys("s");
+	await onScreen("2 1 day", "numbered Snooze choices");
+	await onScreen("⏎ choose  esc cancel", "menu-local controls");
+	s.keys("2");
+	await waitState(s, "number chooses Snooze", (st) => st.mode === "roster");
+	await until(() => snoozeOf(s, parent).snoozed, budgets.settle, "parent snoozed by number");
+	const remaining = (snoozeOf(s, parent).snoozedUntil as number) - Date.now();
+	expect(remaining).toBeGreaterThan(23 * 60 * 60 * 1000);
+	expect(remaining).toBeLessThan(25 * 60 * 60 * 1000);
 });
 
 test("narrow details expand by key and click, scroll, follow the selection, and keep their actions", async () => {

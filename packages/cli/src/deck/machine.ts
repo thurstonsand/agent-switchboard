@@ -2615,12 +2615,13 @@ export function keymap(): Binding<Command>[] {
 		case "filter":
 			return [...ARROWS, bind(["enter"], "⏎", null, CHOOSE), bind(["escape"], "esc", null, CANCEL)];
 		case "name":
-			return [...ARROWS, bind(["enter"], "⏎", mode.renaming ? "rename" : "assign", CHOOSE), bind(["escape"], "esc", "cancel", CANCEL)];
+			return [...ARROWS, bind(["enter"], "⏎", "choose", CHOOSE), bind(["escape"], "esc", "cancel", CANCEL)];
 		case "snooze":
 			return [
 				bind(["up", "k"], "↑", null, step(-1)),
 				bind(["down", "j"], "↓", null, step(1)),
-				bind(["enter"], "⏎", "snooze", CHOOSE),
+				...SNOOZE_CHOICES.map((_, i) => bind([String(i + 1)], String(i + 1), null, { kind: "choose", index: i })),
+				bind(["enter"], "⏎", "choose", CHOOSE),
 				bind(["escape", "q", "s"], "esc", "cancel", CANCEL),
 			];
 		case "archive": {
@@ -2630,7 +2631,7 @@ export function keymap(): Binding<Command>[] {
 				const { all, deleteWorktree } = mode.chosen;
 				return [
 					bind(["a"], "a", `Archive ${all ? family + 1 : 1}; cancel schedules`, { kind: "archiveAnswer", all, deleteWorktree }),
-					bind(["escape"], "esc", "Cancel", CANCEL),
+					bind(["escape"], "esc", "cancel", CANCEL),
 				];
 			}
 			const answer = (all: boolean, deleteWorktree: boolean): Command => ({ kind: "archiveAnswer", all, deleteWorktree });
@@ -2638,7 +2639,7 @@ export function keymap(): Binding<Command>[] {
 			if (family > 0) out.push(bind(["A"], "A", `Archive family (${family + 1})`, answer(true, false)));
 			if (e?.worktree) out.push(bind(["d"], "d", "Archive; delete clean worktree", answer(false, true)));
 			if (e?.worktree && family > 0) out.push(bind(["D"], "D", `Family (${family + 1}); delete clean worktree`, answer(true, true)));
-			out.push(bind(["escape"], "esc", "Cancel", CANCEL));
+			out.push(bind(["escape"], "esc", "cancel", CANCEL));
 			return out;
 		}
 		case "picker":
@@ -2660,7 +2661,7 @@ function pickerKeys(choosing: Choosing): Binding<Command>[] {
 						...shown.slice(0, 9).map((_, i) => bind([String(i + 1)], String(i + 1), null, { kind: "choose", index: i })),
 					]
 				: [];
-		return [...numbers, bind(["enter"], "⏎", "choose", CHOOSE), bind(["escape", "tab", "shift+tab"], "esc", "keep", CANCEL), ...ARROWS];
+		return [...numbers, bind(["enter"], "⏎", "choose", CHOOSE), bind(["escape", "tab", "shift+tab"], "esc", "cancel", CANCEL), ...ARROWS];
 	}
 	if (choosing.mode === "add")
 		return [
@@ -2686,7 +2687,18 @@ function rosterKeys(row: Row | undefined): Binding<Command>[] {
 	let enter: string | null = null;
 	if (row?.kind === "header") enter = row.collapsed ? "expand" : "collapse";
 	else if (row?.kind === "section") enter = row.expanded ? "collapse" : "expand";
-	else if (session) enter = !session.open ? "open" : session.cutOff ? "resume" : session.live ? "focus" : "wake";
+	else if (session)
+		enter = !session.open
+			? "open"
+			: session.cutOff
+				? "resume"
+				: !session.live
+					? "wake"
+					: session.errored
+						? "inspect error"
+						: session.activity === "blocked"
+							? "respond"
+							: "focus";
 	if (session && m.peek.settled?.id === session.id) enter = null;
 	if (
 		!panes.narrow &&
@@ -2696,20 +2708,17 @@ function rosterKeys(row: Row | undefined): Binding<Command>[] {
 		panes.applied.card?.ending
 	)
 		enter = null;
-	let newLabel: string | null = null;
-	if (!row || row.kind === "header" || (session?.open && !session.snoozed)) newLabel = "new";
-	else if (row.kind === "section" && row.key === "operators") newLabel = "new operator";
 	return [
 		bind(["enter"], "⏎", enter, { kind: "activate", enter: true }),
-		bind(["m"], "m", row?.kind === "header" && row.group !== null ? "rename" : null, onRow("group")),
-		bind(["s"], "s", session?.snoozed ? "unsnooze" : null, onRow("snooze")),
-		bind(["a"], "a", session ? (session.open ? "archive" : "unarchive") : null, onRow("archive")),
-		bind(["n"], "n", newLabel, onRow("new")),
+		bind(["m"], "m", null, onRow("group")),
+		bind(["s"], "s", null, onRow("snooze")),
+		bind(["a"], "a", null, onRow("archive")),
+		bind(["n"], "n", "new", onRow("new")),
 		bind(["?"], "?", "keys", { kind: "help" }),
 		bind([","], ",", "settings", { kind: "settings" }),
 		...(panes.narrow && session
 			? [
-					bind(["i"], "i", null, { kind: "details" }),
+					bind(["i"], "i", m.details.expanded ? "▾ details" : "▸ details", { kind: "details" }),
 					...(m.details.expanded
 						? [
 								bind(["pageDown"], "PgDn", null, { kind: "detailScroll", by: frame.details?.height ?? 1 }),
@@ -2752,9 +2761,9 @@ export function stageKeys(): Binding<Command>[] {
 	if (panes.applied.target === PLACEHOLDER || harnessStarting(panes.applied))
 		return [bind([], "esc", "roster", { kind: "roster", to: "focus" }), help];
 	return [
-		bind([], `${prefix} h`, "roster", { kind: "roster", to: "focus" }),
-		bind([], `${prefix} z`, "hide", { kind: "roster", to: "hide" }),
-		help,
+		bind([], `${prefix} → h`, "roster", { kind: "roster", to: "focus" }),
+		bind([], "z", "hide", { kind: "roster", to: "hide" }),
+		bind([], "?", "keys", { kind: "help" }),
 	];
 }
 
@@ -2861,7 +2870,7 @@ export function peekButtons(row: Row): [label: string, key: string, act: RowAct]
 	const items: [string, string, RowAct][] = [[primary, "⏎", "focus"]];
 	if (!e.open) items.push(["Unarchive", "a", "archive"]);
 	else {
-		items.push(e.live ? ["Stop", "x", "stop"] : ["Wake in background", "w", "wake"]);
+		items.push(e.live ? ["Shut down", "x", "stop"] : ["Wake in background", "w", "wake"]);
 		if (!e.provisional && !e.snoozed)
 			items.push([e.markedUnseen ? "Unmark Unseen" : isUnseen(e) ? "Keep Unseen" : "Mark Unseen", "u", "unseen"]);
 		if (!e.provisional) items.push(e.snoozed ? ["Unsnooze", "s", "snooze"] : ["Snooze…", "s", "snooze"], ["Archive", "a", "archive"]);

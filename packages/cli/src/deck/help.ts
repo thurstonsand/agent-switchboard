@@ -29,7 +29,7 @@ function lines(prefix: string, columns = Infinity): string[] {
 	];
 	const lifecycle = [
 		bold("  Session lifecycle"),
-		row("w / x", "Wake in background / stop"),
+		row("w / x", "Wake in background / shut down"),
 		row("R", "Reload agent on fresh config"),
 		row("n / N", "New in known / added directory"),
 		row("Tab", "Choose preset in directory picker"),
@@ -50,7 +50,8 @@ function lines(prefix: string, columns = Infinity): string[] {
 		`  ${blockedMark("◆")} blocked · waiting for you`,
 		`  ${bold(red("!"))} cut off · resume unfinished turn`,
 		`  ✓ archived             ${bold(red("×"))} errored · inspect and retry`,
-		dim("  stopped: turn ended early on purpose; nothing to resume"),
+		"  stopped: turn ended early on purpose; nothing to resume",
+		"  Snoozed · hidden until its time or next message",
 		"",
 		bold("  Relationships & schedules"),
 		`  ${dim("⎇")}  worktree`,
