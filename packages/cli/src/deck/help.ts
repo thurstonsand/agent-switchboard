@@ -1,4 +1,4 @@
-import { decodeKittyPrintable, matchesKey, StdinBuffer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { decodeKittyPrintable, matchesKey, StdinBuffer, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { loadConfig } from "../config.ts";
 import { blockedMark, blue, bold, cyan, dim, gray, green, keyName, red } from "./style.ts";
 
@@ -7,7 +7,13 @@ const CLOSES = "any key or click closes";
 /** The popup's lines, the hint under them aside: a blank line, then a key and what it does on each. */
 function lines(prefix: string, columns = Infinity): string[] {
 	prefix = keyName(prefix);
-	const row = (k: string, label: string) => `  ${bold(k.padEnd(17))} ${label}`;
+	const row = (k: string, label: string) => {
+		const lead = `  ${bold(k.padEnd(17))} `;
+		const indent = visibleWidth(lead);
+		return wrapTextWithAnsi(label, Math.max(1, columns - indent))
+			.map((line, i) => `${i === 0 ? lead : " ".repeat(indent)}${line}`)
+			.join("\n");
+	};
 	const start = [
 		bold("  Start here · in the roster"),
 		row("j k ↑ ↓", "Move"),
@@ -43,7 +49,7 @@ function lines(prefix: string, columns = Infinity): string[] {
 	];
 	const organize = [bold("  Organize"), row("s", "Snooze / unsnooze"), row("u", "Mark / unmark Unseen"), row("m", "Pick or rename Group")];
 	const settings = [bold("  Copy & settings"), row("y / Y", "Copy swb open <id> / @session:<id>"), row(",", "Settings")];
-	const left = [...start, "", ...move, "", ...relationships, "", ...lifecycle, "", ...organize, "", ...settings];
+	const left = [...start, "", ...move, "", ...relationships, "", ...lifecycle, "", ...organize, "", ...settings].flatMap((s) => s.split("\n"));
 	const states = [
 		bold("  State marks"),
 		`  ${blockedMark("◆")} blocked · waiting for you`,
@@ -82,9 +88,10 @@ function lines(prefix: string, columns = Infinity): string[] {
 		row(`${prefix} ${prefix}`, `Send literal ${prefix}`),
 		"",
 		...states,
-	];
+	].flatMap((s) => s.split("\n"));
 	const width = Math.max(...left.map(visibleWidth)) + 4;
-	if (width + Math.max(...right.map(visibleWidth)) > columns) return ["", ...left, "", ...right];
+	if (width + Math.max(...right.map(visibleWidth)) > columns)
+		return ["", ...left, "", ...right].flatMap((line) => wrapTextWithAnsi(line, columns));
 	return [
 		"",
 		...Array.from(
@@ -113,7 +120,12 @@ export async function help(): Promise<void> {
 		top = Math.max(0, Math.min(overflow(), top));
 		const below = all.length - top - room();
 		const more = [top > 0 ? `↑ ${top}` : "", below > 0 ? `↓ ${below} more lines` : ""].filter(Boolean).join(" ");
-		const hint = overflow() === 0 ? CLOSES : `${more} · j/k ↑/↓ scroll · PgUp/PgDn page · Esc closes`;
+		const hint =
+			overflow() === 0
+				? CLOSES
+				: width < 80
+					? `${more.replace(" lines", "")} · j/k scroll · PgDn page · Esc close`
+					: `${more} · j/k ↑/↓ scroll · PgUp/PgDn page · Esc closes`;
 		const shown = [...all.slice(top, top + room()), "", `  ${hint}`];
 		const framed = [
 			`${gray("╭─")} Keys ${gray("─".repeat(Math.max(0, width - 12)))} ✕ ${gray("╮")}`,

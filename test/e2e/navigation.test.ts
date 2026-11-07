@@ -177,6 +177,16 @@ test("? fits every key in a tall Deck, and in a short one scrolls them by wheel 
 	s.keys("q");
 	await until(() => !s.screen().includes("PgUp/PgDn page"), budgets.settle, "q closes it");
 	expect(state(s).ready).toBe(true);
+	s.swb("drive", "resize", "60x24");
+	await Bun.sleep(500);
+	s.keys("?");
+	await until(() => s.screen().includes("Close help"), budgets.settle, "compact help");
+	expect(s.screen()).toContain("goes back");
+	expect(s.screen()).toMatch(/│ {20}swb +│/);
+	expect(s.screen()).toContain("Esc close");
+	s.keys("Space", "Space", "Space", "Space", "Space");
+	await until(() => s.screen().includes("recurring schedule"), budgets.settle, "wrapped help reaches its end");
+	s.keys("Escape");
 });
 
 test("[ and ] step back and forward through the sessions I visited, from the roster, the Stage, and the legend's arrows", async () => {

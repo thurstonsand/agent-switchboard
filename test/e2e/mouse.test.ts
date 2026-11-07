@@ -434,8 +434,12 @@ test("narrow details expand by key and click, scroll, follow the selection, and 
 	await onScreen("got descendant", "expanded by click");
 	s.swb("drive", "resize", "60x18");
 	await until(() => !s.screen().includes("a Archive") && s.screen().includes("PgUp/PgDn"), budgets.settle, "short details");
+	expect(s.screen()).toMatch(/╭[^\n]*╮/);
+	expect(s.screen()).toMatch(/╰[^\n]*↓ \d+ more[^\n]*╯/);
 	s.keys("NPage");
 	await onScreen("a Archive", "actions after scrolling details");
+	expect(s.screen()).toMatch(/╭[^\n]*↑ \d+[^\n]*╮/);
+	expect(s.screen()).toMatch(/╰[^\n]*╯/);
 	await click("m Group…", 60);
 	await onScreen("Group for child", "the details action targets its session");
 	s.keys("Escape", "PPage");

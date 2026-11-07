@@ -630,10 +630,19 @@ function detailView(row: Row | undefined, width: number, height: number): (Overl
 		return null;
 	const view = peekView(row, width, Infinity, "right");
 	const top = Math.min(model.details.top, Math.max(0, view.lines.length - height));
+	const room = Math.max(1, height - 2);
+	const interior = view.lines.slice(1, -1);
+	const below = Math.max(0, interior.length - top - room);
+	const border = (left: string, right: string, label: string) =>
+		gray(`${left}${label}${"─".repeat(Math.max(0, width - 2 - visibleWidth(label)))}${right}`);
 	return {
 		total: view.lines.length,
-		lines: view.lines.slice(top, top + height),
-		buttons: view.buttons.filter((b) => b.y >= top && b.y < top + height).map((b) => ({ ...b, y: b.y - top })),
+		lines: [
+			border("╭", "╮", top > 0 ? ` ↑ ${top} · PgUp ` : ""),
+			...interior.slice(top, top + room),
+			border("╰", "╯", below > 0 ? ` ↓ ${below} more · PgDn ` : ""),
+		],
+		buttons: view.buttons.filter((b) => b.y > top && b.y <= top + room).map((b) => ({ ...b, y: b.y - top })),
 	};
 }
 
@@ -642,7 +651,7 @@ function detailRows(width: number, top: number): string[] {
 	const e = cursorEntry() ?? (model.stage.staged === null ? null : (model.entries.get(model.stage.staged) ?? null));
 	if (!e) return [""];
 	const parts: Part[] = [[" ", null]];
-	if (panes.narrow && model.details.expanded) parts.push([gray("PgUp/PgDn scroll  ·  "), null]);
+	if (panes.narrow && model.details.expanded) parts.push([gray("PgUp/PgDn details  ·  "), null]);
 	if (model.stage.staged === e.id && e.open) {
 		parts.push([gray(`${keyName(model.config.prefix)} → `), null]);
 		const editor = panes.applied.view === "editor";
