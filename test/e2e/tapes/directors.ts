@@ -1468,6 +1468,7 @@ export const directors: Record<string, Director> = {
 				["Simulated: idle when killed", false],
 				["Simulated: mid-turn when killed", true],
 			]);
+			await waitDeck(s, "the reopened Deck shows the cut-off session", (x) => x.ready && x.staged.kind === "dormant");
 		},
 	},
 
@@ -1905,8 +1906,8 @@ export const directors: Record<string, Director> = {
 			await click(" shell ");
 			await waitDrive(s, "the shell closed", (x) => x.layout.shell === null);
 			await click("? keys");
-			await click("Close help", 1000);
-			await until(() => !s.swb("drive", "capture").includes("Close help"), TAPE, "help closed by a click");
+			await click("Start here", 1000);
+			await until(() => !s.swb("drive", "capture").includes("Start here"), TAPE, "help closed by a click");
 			s.swb("drive", "resize", "90x30");
 			await waitDrive(s, "a narrow Deck, the roster alone", (x) => x.layout.rosterOnly && x.focus === "roster");
 			// No Stage beside the roster: hovering leaves the list unobstructed.
@@ -1942,9 +1943,9 @@ export const directors: Record<string, Director> = {
 				s.swb("drive", "wheel", direction, "70", "12");
 				await Bun.sleep(700);
 			}
-			await until(() => shows("↑ 3 ↓ 15"), TAPE, "four turns of the wheel down, one up");
+			await until(() => shows("↑ 3 ↓ 16"), TAPE, "four turns of the wheel down, one up");
 			await until(() => shows("+N folded family") && shows("↑ 18 ·"), TAPE, "j j and space to the end");
-			await until(() => shows("↑ 15 ↓ 3"), TAPE, "k k and ↑ back up");
+			await until(() => shows("↑ 15 ↓ 4"), TAPE, "k k and ↑ back up");
 			await until(() => !shows("PgUp/PgDn page"), TAPE, "q closes it");
 		},
 	},

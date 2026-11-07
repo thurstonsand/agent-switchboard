@@ -8,7 +8,7 @@ Sleep 1s
 Type "/Fix the flaky" Sleep 300ms Enter
 Sleep 300ms
 Escape
-Wait+Screen /cut off · .*resume unfinished turn/
+Wait+Screen /cut off · .*Resume unfinished turn/
 Sleep 1.2s
 Screenshot ../artifacts/phase6/videos/turn-endings-cut-off.png
 Sleep 1s
@@ -22,14 +22,14 @@ Sleep 1.5s
 Type "/Tidy the parser" Sleep 300ms Enter
 Sleep 300ms
 Escape
-Wait+Screen /stopped · .*wake & focus/
+Wait+Screen /stopped · .*Wake & focus/
 Sleep 1.2s
 Screenshot ../artifacts/phase6/videos/turn-endings-stopped.png
 Sleep 1.5s
 Type "/Bump the API" Sleep 300ms Enter
 Sleep 300ms
 Escape
-Wait+Screen /errored · .*wake & focus/
+Wait+Screen /errored · .*Wake & focus/
 Sleep 1.2s
 Screenshot ../artifacts/phase6/videos/turn-endings-errored.png
 Sleep 1s
@@ -43,7 +43,7 @@ Sleep 1.5s
 Type "/Fix the flaky" Sleep 300ms Enter
 Sleep 300ms
 Escape
-Wait+Screen /cut off · .*resume unfinished turn/
+Wait+Screen /cut off · .*Resume unfinished turn/
 Sleep 1s
 Type "w"
 Wait+Screen /continued/

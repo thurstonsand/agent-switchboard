@@ -86,11 +86,12 @@ test("the Deck's n opens on the default preset, puts its real TUI on the Stage, 
 	s.swb("drive", "resize", "80x24");
 	const compact = await waitState(
 		s,
-		"two content rows leave room for directories",
-		(x) => x.layout.rosterOnly && x.launch?.card?.length === 4,
+		"the narrow launch card retains its model details",
+		(x) => x.layout.rosterOnly && (x.launch?.card?.some((line) => line.includes("Opus 5.5")) ?? false),
 	);
 	expect(compact.launch?.card?.[1]).toContain("claude · opus");
-	expect(compact.launch?.card?.[2]).toContain("default effort");
+	expect(compact.launch?.card?.join("\n")).toContain("$4/$20 per Mtok");
+	expect(compact.launch?.card?.join("\n")).toContain("default effort");
 	s.swb("drive", "resize", "160x40");
 	// The menu keeps the shortlist's numbers; a number picks Codex, and Esc in a reopened menu keeps it.
 	s.keys("Tab");
@@ -99,6 +100,11 @@ test("the Deck's n opens on the default preset, puts its real TUI on the Stage, 
 	s.swb("drive", "resize", "65x24");
 	await until(() => s.screen().includes("Presets · project"), budgets.settle, "the narrow chooser retains its destination");
 	expect(s.screen().trimEnd().split("\n").at(-1)).not.toContain("choose");
+	s.swb("drive", "resize", "60x18");
+	await until(() => /↓ \d+ more/.test(s.screen()), budgets.settle, "the compact menu counts presets below");
+	for (let i = 1; i < (opened.picker?.presets.length ?? 0); i++) s.keys("Down");
+	await until(() => /↑ \d+ more/.test(s.screen()), budgets.settle, "the compact menu counts presets above");
+	expect(s.screen()).not.toMatch(/↓ \d+ more/);
 	s.swb("drive", "resize", "160x40");
 	// The automatic shortlist interleaves harnesses, and every digit keeps that association.
 	const shown = menu.picker?.menu?.shown ?? [];

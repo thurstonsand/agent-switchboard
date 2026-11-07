@@ -1397,7 +1397,7 @@ export class SettingsPane {
 			? `${cyan("/")} ${this.search.render(fieldWidth)[0] ?? ""}`
 			: this.query() !== ""
 				? `${cyan("/")} ${this.search.getValue()}`
-				: gray("/ search");
+				: `${bold("/")} search`;
 		return this.clickable(1, 0, [
 			[" ", null],
 			[field, { kind: "search" }],
@@ -1474,7 +1474,6 @@ export class SettingsPane {
 	itemLine(item: Item, i: number, y: number, left: number, width: number, labelWidth: number): string {
 		const selected = i === this.cursor && this.area === "list" && !this.searching;
 		const lit = selected || i === this.hover;
-		const mark = selected ? "▌" : " ";
 		const dropping = this.gesture.kind === "drag" && this.gesture.over === i && this.gesture.item !== i;
 		let line: string;
 		const parts: Part[] = [];
@@ -1520,7 +1519,7 @@ export class SettingsPane {
 				break;
 		}
 		line = this.clickable(y, left + 1, parts);
-		line = truncateToWidth(`${mark}${line}`, width, "…", true);
+		line = truncateToWidth(` ${line}`, width, "…", true);
 		if (dropping) return this.host.paint.cursor(line, true);
 		if (selected) return this.host.paint.cursor(line, true);
 		if (i === this.cursor) return bold(line);

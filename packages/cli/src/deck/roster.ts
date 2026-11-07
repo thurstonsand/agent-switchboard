@@ -376,10 +376,10 @@ function promptOverlay(width: number, height: number): Overlay[] {
 		keymap().filter((b) => b.command?.kind === "choose" || b.command?.kind === "cancel"),
 		width - 4,
 	);
-	const footerText = `  ${footer.map(([text]) => text).join("")}`;
+	const footerText = footer.map(([text]) => text).join("");
 	const footerY = lines.length;
 	lines.splice(footerY - 1, 0, gray(`├${"─".repeat(width - 2)}┤`), row(footerText));
-	let column = 3;
+	let column = 1;
 	for (const [i, [text, command]] of footer.entries()) {
 		const from = column;
 		column += visibleWidth(text);
@@ -389,7 +389,7 @@ function promptOverlay(width: number, height: number): Overlay[] {
 				from,
 				to: column,
 				command,
-				hot: row(`  ${footer.map(([part], j) => (i === j ? cursorLine(part, true) : part)).join("")}`),
+				hot: row(footer.map(([part], j) => (i === j ? cursorLine(part, true) : part)).join("")),
 			});
 	}
 	buttons.push({ y: 0, from: width - 4, to: width - 1, command: { kind: "cancel" }, hot: lines[0] as string });
@@ -431,7 +431,8 @@ function renderPicker(width: number, height: number): string[] {
 		? `${prompt}${model.path.render(Math.max(10, width - 2 - visibleWidth(prompt)))[0] ?? ""}`
 		: (model.search.render(Math.max(10, width - 2))[0] ?? "");
 	// The launch card goes on the Stage; with no room there, as on a narrow Deck, the roster draws it under its title.
-	const card = launchOnStage(width) || width < PEEK_MIN_COLS ? null : launchCard(choosing, Math.min(LAUNCH_COLS, width));
+	const noteRows = Math.max(0, height - 13 - (adding ? completedRows().length : pickRows().length));
+	const card = launchOnStage(width) || width < PEEK_MIN_COLS ? null : launchCard(choosing, Math.min(LAUNCH_COLS, width), noteRows);
 	for (const b of card?.buttons ?? []) frame.targets.push({ y: 1 + b.y, from: b.from, to: b.to, command: b.command });
 	frame.card = card ? card.lines.map((line) => Bun.stripANSI(line)) : null;
 	// While the menu is open, the rest of the picker waits behind it.
@@ -556,7 +557,7 @@ function list(rows: Row[], index: number, width: number, full: number, now: numb
 		const y = frame.listTop + out.length;
 		const line = truncateToWidth(rowLine(row, width, now), width, "…", true);
 		if (dragging()?.drop?.header.key === row.key) out.push(cursorLine(line, true));
-		else if (i === index) out.push(cursorLine(row.kind === "session" ? line : `▌${line.slice(1)}`, model.focus === "roster"));
+		else if (i === index) out.push(cursorLine(line, model.focus === "roster"));
 		else out.push(line);
 		if (row.kind === "session" && row.family.length > 0) {
 			const at = foldColumn(row);
@@ -656,7 +657,8 @@ function detailRows(width: number, top: number, detailsVisible: boolean): string
 		parts.push([panes.applied.view === "split" ? cursorLine(split, true) : split, { kind: "view", view: splitting ? "agent" : "split" }]);
 		// The shell is a toggle beside the views, not one of them.
 		const shell = `  ${key("s", "shell")}`;
-		if (!panes.narrow) parts.push([panes.applied.shell ? cursorLine(shell, true) : shell, { kind: "shell" }]);
+		if (parts.reduce((n, [text]) => n + visibleWidth(text), 0) + visibleWidth(shell) <= width - 1)
+			parts.push([panes.applied.shell ? cursorLine(shell, true) : shell, { kind: "shell" }]);
 	}
 	return [truncateToWidth(clickable(top, parts), Math.max(0, width - 1), "…")];
 }
@@ -817,9 +819,10 @@ function rowLine(row: Row, width: number, now: number): string {
 	const state = stateOf(e);
 	const meta = [!row.nest ? originMark(origin(e)).trim() : "", e.cwd !== e.project ? gray("⎇") : ""].filter(Boolean).join(" ");
 	const time = when.padStart(4);
-	const right = ` ${meta || " "} ${e.open && e.activity === "blocked" ? attention(time) : state === "dormant" || state === "archived" ? dim(time) : time} `;
+	const right = `  ${e.open && e.activity === "blocked" ? attention(time) : state === "dormant" || state === "archived" ? dim(time) : time} `;
 	const hidden = row.folded ? ` ${foldedTally(row.family.map((p) => p.entry))}` : "";
-	const titleWidth = width - visibleWidth(lead) - 2 - visibleWidth(hidden) - visibleWidth(right);
+	const badge = meta ? ` ${meta}` : "";
+	const titleWidth = width - visibleWidth(lead) - 2 - visibleWidth(hidden) - visibleWidth(right) - visibleWidth(badge);
 	const paint = ["blocked", "unseen", "cut-off", "errored"].includes(state)
 		? bold
 		: e.provisional || state === "archived"
@@ -829,13 +832,13 @@ function rowLine(row: Row, width: number, now: number): string {
 	const name = hovered ? displayName(e) : matchedText(displayName(e));
 	let title = truncateToWidth(matches(e) || !e.live ? paint(name) : gray(name), titleWidth, "…");
 	if (hovered) title = underline(title);
-	title += " ".repeat(Math.max(0, titleWidth - visibleWidth(title)));
-	return `${lead}${glyph(state, now)} ${title}${hidden}${right}`;
+	const pad = " ".repeat(Math.max(0, titleWidth - visibleWidth(title)));
+	return `${lead}${glyph(state, now)} ${title}${badge}${pad}${hidden}${right}`;
 }
 
 /**
  * A session row's left edge, after the cursor's bar: a nested row hangs from its parent's glyph on its family's guides;
- * a family's root leaves the gutter clear. Origin and folded counts sit beside the age.
+ * a family's root leaves the gutter clear. Folded counts sit beside the age.
  */
 function rowLead(row: SessionRow): string {
 	const indent = " ".repeat(row.depth * 2);
@@ -956,7 +959,7 @@ function launchOverlays(choosing: Choosing, width: number, height: number): Over
 			x: width + 1,
 			y: 0,
 			width: w,
-			view: launchCard(choosing, w),
+			view: launchCard(choosing, w, Infinity),
 			leaves: false,
 			hovers: null,
 		});
@@ -1008,13 +1011,13 @@ function presetNote(note: string, width: number): string[] {
  * The launch card: what a session from the picker starts on, its harness first, and the preset's note; its field opens
  * the menu. It sits beside the roster, or above the directory list in a narrow Deck.
  */
-function launchCard(choosing: Choosing, width: number): OverlayView {
+function launchCard(choosing: Choosing, width: number, noteRows: number): OverlayView {
 	const inner = width - 4;
 	const presets = pickerPresets();
 	const chosen = presets[chosenPreset(choosing)];
 	const menu = choosing.menu;
 	let value: string;
-	if (menu) value = menu.query === "" ? gray("type to filter presets") : `${menu.query}▌`;
+	if (menu) value = menu.query === "" ? "type to filter presets" : `${menu.query}▌`;
 	else if (chosen) value = presetField(chosen);
 	else {
 		const target = pickerTarget(choosing);
@@ -1039,13 +1042,15 @@ function launchCard(choosing: Choosing, width: number): OverlayView {
 			: choosing.mode === "pick"
 				? `Preset · ${bold("Tab")} change preset`
 				: "Preset";
+	const note = presetNote(chosen?.note ?? "", inner);
+	const kept = noteRows === 2 && note.length > 2 ? [note[0] as string, note.at(-1) as string] : note.slice(0, noteRows);
 	const lines = [
 		promptTitle(heading, width),
 		frame(field),
 		...(menu
 			? []
 			: [
-					...(panes.narrow ? [] : presetNote(chosen?.note ?? "", inner).map(frame)),
+					...kept.map(frame),
 					...(chosen
 						? [frame(gray(`${chosen.preset.effort ?? "default"} effort${chosen.preset.provider ? ` · ${chosen.preset.provider}` : ""}`))]
 						: []),
@@ -1089,7 +1094,8 @@ function launchMenu(choosing: Choosing, width: number, maxHeight: number): Overl
 	const from = Math.min(Math.max(0, (itemAt[menu.cursor] ?? 0) - room + 1), Math.max(0, items.length - room));
 	const to = Math.min(items.length, from + room);
 	const row = (content: string) => `${gray("│")} ${truncateToWidth(content, inner, "…", true)} ${gray("│")}`;
-	const lines = [gray(`├${"─".repeat(width - 2)}┤`), row(PRESET_HEADER)];
+	const rule = (label: string) => gray(`├${"─".repeat(Math.max(0, width - 2 - visibleWidth(label)))}${label}┤`);
+	const lines = [rule(from > 0 ? ` ↑ ${from} more ` : ""), row(PRESET_HEADER)];
 	const buttons: OverlayButton[] = [];
 	items.slice(from, to).forEach((line, i) => {
 		const n = itemAt.indexOf(from + i);
@@ -1098,12 +1104,11 @@ function launchMenu(choosing: Choosing, width: number, maxHeight: number): Overl
 			buttons.push({ y: lines.length, from: 2, to: 2 + inner, command: { kind: "choose", index: n }, hot: row(hoverLine(content)) });
 		lines.push(row(n === menu.cursor ? cursorLine(content, true) : content));
 	});
-	lines.push(gray(`├${"─".repeat(width - 2)}┤`), ...note.map(row), gray(`├${"─".repeat(width - 2)}┤`));
+	lines.push(rule(to < items.length ? ` ↓ ${items.length - to} more ` : ""), ...note.map(row), rule(""));
 	const hints = legendParts(
 		keymap().filter((b) => b.name === "⏎" || b.name === "esc"),
 		inner - 1,
-	);
-	hints.unshift([" ", null]);
+	).slice(1);
 	let x = 2;
 	for (const [text, command] of hints) {
 		const w = visibleWidth(text);
@@ -1223,8 +1228,8 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 		["Session", session],
 		["Organize", organize],
 	] as const) {
-		let line = `${heading}  `;
-		const gutter = visibleWidth(line);
+		const gutter = 10;
+		let line = heading.padEnd(gutter);
 		const column = Math.max(...group.filter((_, i) => i % 2 === 0).map(([label, k]) => visibleWidth(`${k} ${label}`))) + 2;
 		const paired =
 			heading === "Organize" &&
@@ -1233,7 +1238,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 			const text = act === "focus" ? bold(`${k} ${label}`) : key(k, label);
 			if ((heading === "Organize" && i > 0 && i % 2 === 0) || visibleWidth(line) + visibleWidth(text) > inner - 2) {
 				buttonLines.push(line.trimEnd());
-				line = paired ? " ".repeat(gutter) : visibleWidth(text) <= inner - 2 ? "  " : "";
+				line = visibleWidth(text) + gutter <= inner - 2 ? " ".repeat(gutter) : visibleWidth(text) <= inner - 2 ? "  " : "";
 			}
 			const from = visibleWidth(line);
 			buttons.push({ y: buttonLines.length, from, to: from + visibleWidth(text), command: { kind: "row", act, row: row.key }, text });

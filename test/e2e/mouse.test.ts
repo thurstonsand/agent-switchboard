@@ -131,10 +131,10 @@ test("the mouse reaches everything the keys do: a row's Peek, the hidden or narr
 	await waitState(s, "the shell hidden", (x) => x.layout.shell === null);
 
 	await click("? keys");
-	await onScreen("Close help", "the key help");
+	await onScreen("Start here", "the key help");
 	s.save("help.txt", s.screen());
-	await click("Close help", 140);
-	await until(() => !s.screen().includes("Close help"), budgets.settle, "help closed by a click");
+	await click("Start here", 140);
+	await until(() => !s.screen().includes("Start here"), budgets.settle, "help closed by a click");
 
 	// A Peek's buttons are its row's prefix keys: one closes a filter being typed, as the key does, and the query stays.
 	s.keys("M-a", "/");
@@ -448,6 +448,7 @@ test("narrow details expand by key and click, scroll, follow the selection, and 
 	expect(s.screen()).toContain("created");
 	expect(s.screen()).toContain("a Archive");
 	expect(s.screen()).toContain("PgUp/PgDn details");
+	expect(s.screen()).toContain("v split  s shell");
 	s.keys("s");
 	await onScreen("Until a message", "Snooze replaces expanded details");
 	expect(s.screen()).not.toContain("PgUp/PgDn details");

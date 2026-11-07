@@ -389,7 +389,7 @@ function syncTitle(): void {
 
 /** Where a conversation stopped short of a reply, when no Peek already explains it. */
 function ending(e: Entry, read: Transcript | null): string | null {
-	const wake = e.open && m.mode.kind === "roster" ? ` · ${bold("⏎")} ${e.cutOff ? "resume unfinished turn" : "wake & focus"}` : "";
+	const wake = e.open && m.mode.kind === "roster" ? ` · ${bold("⏎")} ${e.cutOff ? "Resume unfinished turn" : "Wake & focus"}` : "";
 	if (e.cutOff) return `${bold(red("! cut off"))} · ${CAUSES[e.cutOff]}${wake}`;
 	if (read?.ending?.kind === "stopped") return `– dormant · stopped${wake}`;
 	if (read?.ending?.kind === "error") return `${bold(red("errored"))}${wake}`;
@@ -2852,7 +2852,8 @@ async function showHelp(): Promise<void> {
 	if (!found) return;
 	const [client, cols, rows] = found;
 	const size = helpSize(m.config.prefix);
-	const fit = ["-w", String(Math.min(size.width, Number(cols))), "-h", String(Math.min(size.height + 3, Number(rows)))];
+	const left = !panes.narrow && Number(cols) - panes.rosterWidth() - 1 >= size.width ? panes.rosterWidth() + 1 : 0;
+	const fit = ["-x", String(left), "-y", "0", "-w", String(Number(cols) - left), "-h", rows];
 	await tmuxAsync(SESSIONS, "display-popup", "-c", client, "-E", "-B", ...fit, ...HELP_POPUP);
 }
 

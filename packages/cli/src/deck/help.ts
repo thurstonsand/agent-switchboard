@@ -20,7 +20,6 @@ function lines(prefix: string, columns = Infinity): string[] {
 		row("enter", "Focus session; wake if dormant"),
 		row(`${prefix} Tab`, "Return to roster from any pane; again goes back"),
 		row("q", "Leave the Deck as it is for the next swb"),
-		row("esc", "Close help"),
 	];
 	const move = [
 		bold("  In the roster · Move"),
@@ -138,7 +137,7 @@ export async function help(): Promise<void> {
 					: `${more} · j/k ↑/↓ scroll · PgUp/PgDn page · Esc closes`;
 		const shown = [...body, ...Array<string>(room() - body.length).fill(""), "", `  ${hint}`];
 		const framed = [
-			`${gray("╭─")} Keys ${gray("─".repeat(Math.max(0, width - 12)))} ✕ ${gray("╮")}`,
+			`${gray("╭─")} Keys ${gray("─".repeat(Math.max(0, width - 9)))}${gray("╮")}`,
 			...shown.map((line) => `${gray("│")}${truncateToWidth(line, width - 2, "", true)}${gray("│")}`),
 			gray(`╰${"─".repeat(width - 2)}╯`),
 		];

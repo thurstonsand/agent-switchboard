@@ -12,7 +12,7 @@ Screenshot ../artifacts/phase6/videos/mouse-hidden.png
 Wait+Screen /(?s)came from a click.*came from a click/
 Sleep 1s
 Screenshot ../artifacts/phase6/videos/mouse-shell.png
-Wait+Screen /Close help/
+Wait+Screen /Start here/
 Sleep 1s
 Screenshot ../artifacts/phase6/videos/mouse-help.png
 Wait+Screen /○ Refactor the parser/

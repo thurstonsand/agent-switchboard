@@ -119,10 +119,10 @@ test("roster navigation: h l space and a header click fold projects; g G jump; M
 	s.keys("M-a", "z");
 	await waitState(s, "the roster back", (x) => !x.layout.rosterHidden);
 	s.keys("M-a", "?");
-	await until(() => s.screen().includes("Close help"), budgets.settle, "the key help");
+	await until(() => s.screen().includes("Start here"), budgets.settle, "the key help");
 	s.save("help.txt", s.screen());
 	s.keys("x");
-	await until(() => !s.screen().includes("Close help"), budgets.settle, "help closed");
+	await until(() => !s.screen().includes("Start here"), budgets.settle, "help closed");
 	s.keys("M-a", "h");
 	await waitState(s, "roster", (x) => x.focus === "roster");
 	s.keys("q");
@@ -170,9 +170,7 @@ test("? fits every key in a tall Deck, and in a short one scrolls them by wheel 
 	s.keys(" ", " ");
 	await until(() => s.screen().includes(last) && /↑ \d+ ·/.test(s.screen()), budgets.settle, "space pages to the end");
 	s.keys("k", "k", "Up");
-	await until(() => s.screen().includes("↓ 3 more lines ·"), budgets.settle, "k and ↑ back up");
-	s.keys("j");
-	await until(() => s.screen().includes("↑ 16 ↓ 3"), budgets.settle, "j down, keeping the next heading with its entry");
+	await until(() => s.screen().includes("↑ 15 ↓ 4"), budgets.settle, "k and ↑ back up, keeping the next heading with its entry");
 	expect(s.screen()).not.toContain("Copy & settings");
 	s.keys("j");
 	await until(() => s.screen().includes("Copy & settings"), budgets.settle, "the heading with its first entry");
@@ -184,7 +182,7 @@ test("? fits every key in a tall Deck, and in a short one scrolls them by wheel 
 	s.swb("drive", "resize", "60x24");
 	await Bun.sleep(500);
 	s.keys("?");
-	await until(() => s.screen().includes("Close help"), budgets.settle, "compact help");
+	await until(() => s.screen().includes("Start here"), budgets.settle, "compact help");
 	expect(s.screen()).toContain("goes back");
 	expect(s.screen()).toMatch(/│ {20}swb +│/);
 	expect(s.screen()).toContain("Esc close");
