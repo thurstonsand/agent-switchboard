@@ -69,7 +69,7 @@ test("M-a e swaps the Stage to nvim in the session's directory, and back", async
 	await waitState(s, "the editor tab clicked", (x) => x.staged.view === "editor");
 	s.save("editor-tab.txt", s.screen());
 	await Bun.sleep(500);
-	s.swb("drive", "click", ...tab("agent"));
+	s.swb("drive", "click", ...tab("editor"));
 	await waitState(s, "the pi tab clicked", (x) => x.staged.view === "agent");
 });
 

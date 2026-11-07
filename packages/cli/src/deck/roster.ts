@@ -609,7 +609,7 @@ function detailRows(width: number, top: number, expanded: boolean): string[] {
 		parts.push([gray(`${keyName(model.config.prefix)} → `), null]);
 		const editor = panes.applied.view === "editor";
 		const splitting = viewOf(e) === "split";
-		const label = `${bold("e")} ${editor ? "agent" : "editor"}`;
+		const label = `${bold("e")} editor`;
 		if (!splitting) parts.push([editor ? cursorLine(label, true) : label, { kind: "view", view: editor ? "agent" : "editor" }]);
 		const split = `${splitting ? "" : "  "}${bold("v")} split`;
 		parts.push([panes.applied.view === "split" ? cursorLine(split, true) : split, { kind: "view", view: splitting ? "agent" : "split" }]);

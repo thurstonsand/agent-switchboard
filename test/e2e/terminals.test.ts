@@ -97,6 +97,10 @@ test("expanded details survive resizing an editor and split Deck through its nar
 		await waitState(s, "editor focused", (x) => x.focus === "editor");
 		s.keys("M-a", "h");
 		await waitState(s, "roster focused", (x) => x.focus === "roster");
+		if (view === "e") {
+			await until(() => s.screen().includes("e editor"), budgets.settle, "editor view keeps its own label");
+			expect(s.screen()).not.toContain("e agent");
+		}
 		for (const [size, width] of [
 			["80x30", "80"],
 			["40x15", "40"],
