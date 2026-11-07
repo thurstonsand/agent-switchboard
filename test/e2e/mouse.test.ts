@@ -447,6 +447,14 @@ test("narrow details expand by key and click, scroll, follow the selection, and 
 	expect(s.screen()).toContain("started by ↳ parent");
 	expect(s.screen()).toContain("created");
 	expect(s.screen()).toContain("a Archive");
+	expect(s.screen()).toContain("PgUp/PgDn details");
+	s.keys("s");
+	await onScreen("Until a message", "Snooze replaces expanded details");
+	expect(s.screen()).not.toContain("PgUp/PgDn details");
+	expect(s.screen()).not.toContain("got descendant");
+	s.keys("Escape");
+	await onScreen("got descendant", "details return after dismissing Snooze");
+	expect(s.screen()).toContain("PgUp/PgDn details");
 	expect(
 		s
 			.screen()

@@ -239,7 +239,7 @@ class Roster implements Component, Focusable {
 			lines.splice(prompt.y, 0, ...Array<string>(reserved).fill(""));
 		}
 		const detailTop = height - detailLines - 1 - messageRows;
-		const tabs = detailRows(width, detailTop);
+		const tabs = detailRows(width, detailTop, detail !== null);
 		if (detail) {
 			const y = detailTop + 1;
 			frame.details = { y, height: detail.lines.length, total: detail.total };
@@ -641,11 +641,11 @@ function detailView(row: Row | undefined, width: number, height: number): (Overl
 }
 
 /** The Stage's views and, without a Stage beside it, a disclosure for the selected session. */
-function detailRows(width: number, top: number): string[] {
+function detailRows(width: number, top: number, detailsVisible: boolean): string[] {
 	const e = cursorEntry() ?? (model.stage.staged === null ? null : (model.entries.get(model.stage.staged) ?? null));
 	if (!e) return [""];
 	const parts: Part[] = [[" ", null]];
-	if (panes.narrow && model.details.expanded) parts.push([gray("PgUp/PgDn details  ·  "), null]);
+	if (detailsVisible) parts.push([gray("PgUp/PgDn details  ·  "), null]);
 	if (model.stage.staged === e.id && e.open) {
 		parts.push([gray(`${keyName(model.config.prefix)} → `), null]);
 		const editor = panes.applied.view === "editor";
