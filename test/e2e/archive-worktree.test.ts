@@ -121,6 +121,7 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 	expect(deck.exitCode).toBe(0);
 	await cursorTo(s, id);
 	const ask = async () => {
+		await until(() => !s.screen().includes("Archive; delete clean worktree"), budgets.settle, "the previous archive prompt closed");
 		s.keys("a");
 		await waitState(s, "archive choice", (st) => st.mode === "archive");
 		await until(() => s.screen().includes("Archive; delete clean worktree"), budgets.settle, "delete button");
