@@ -1905,8 +1905,8 @@ export const directors: Record<string, Director> = {
 			await click(" shell ");
 			await waitDrive(s, "the shell closed", (x) => x.layout.shell === null);
 			await click("? keys");
-			await click("key or click closes", 1000);
-			await until(() => !s.swb("drive", "capture").includes("key or click closes"), TAPE, "help closed by a click");
+			await click("Close help", 1000);
+			await until(() => !s.swb("drive", "capture").includes("Close help"), TAPE, "help closed by a click");
 			s.swb("drive", "resize", "90x30");
 			await waitDrive(s, "a narrow Deck, the roster alone", (x) => x.layout.rosterOnly && x.focus === "roster");
 			// No Stage beside the roster: hovering leaves the list unobstructed.
@@ -1936,15 +1936,15 @@ export const directors: Record<string, Director> = {
 			await until(() => shows("j k ↑ ↓") && shows("Send literal Alt+a"), TAPE, "every key on a tall Deck");
 			await until(() => !shows("any key or click closes"), TAPE, "the help closed");
 			s.swb("drive", "resize", "140x24");
-			await until(() => shows("↓ 14 more lines · j/k ↑/↓ scroll"), TAPE, "the short Deck's help, its end below");
+			await until(() => shows("↓ 18 more lines · j/k ↑/↓ scroll"), TAPE, "the short Deck's help, its end below");
 			await Bun.sleep(1500);
 			for (const direction of ["down", "down", "down", "down", "up"]) {
 				s.swb("drive", "wheel", direction, "70", "12");
 				await Bun.sleep(700);
 			}
-			await until(() => shows("↑ 3 ↓ 11"), TAPE, "four turns of the wheel down, one up");
-			await until(() => shows("Send literal Alt+a") && shows("↑ 14 ·"), TAPE, "j j and space to the end");
-			await until(() => shows("↑ 11 ↓ 3"), TAPE, "k k and ↑ back up");
+			await until(() => shows("↑ 3 ↓ 15"), TAPE, "four turns of the wheel down, one up");
+			await until(() => shows("+N folded family") && shows("↑ 18 ·"), TAPE, "j j and space to the end");
+			await until(() => shows("↑ 15 ↓ 3"), TAPE, "k k and ↑ back up");
 			await until(() => !shows("PgUp/PgDn page"), TAPE, "q closes it");
 		},
 	},

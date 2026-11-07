@@ -12,10 +12,11 @@ Screenshot ../artifacts/phase6/videos/mouse-hidden.png
 Wait+Screen /(?s)came from a click.*came from a click/
 Sleep 1s
 Screenshot ../artifacts/phase6/videos/mouse-shell.png
-Wait+Screen /key or click closes/
+Wait+Screen /Close help/
 Sleep 1s
 Screenshot ../artifacts/phase6/videos/mouse-help.png
-Wait+Screen /(?s)Refactor the parser.{0,220}idle/
+Wait+Screen /○ Refactor the parser/
+Wait+Screen /i ▸ details/
 Sleep 1s
 Screenshot ../artifacts/phase6/videos/mouse-narrow-roster.png
 Wait+Screen /show list/

@@ -31,7 +31,7 @@ import { setOrReset, withValue } from "../write-config.ts";
 import { type Binding, bindingFor, legendParts } from "./model.ts";
 import { PRESET_HEADER, presetColumns } from "./preset-table.ts";
 import type { SettingsState } from "./protocol.ts";
-import { bold, cyan, gray, green, red, shortPath, yellow } from "./style.ts";
+import { bold, cyan, gray, green, key, red, shortPath, yellow } from "./style.ts";
 
 // Settings: every key of config.toml as a list to read and change, drawn by the roster across the whole Deck.
 // Setting a value back to the default takes the key out of the file.
@@ -1360,9 +1360,11 @@ export class SettingsPane {
 	header(width: number): string {
 		const filters: Part[] = [
 			[this.changedOnly ? " all " : this.host.paint.cursor(" all ", true), { kind: "filter", changed: false }],
-			[" · ", null],
-			[this.changedOnly ? this.host.paint.cursor(" changed ", true) : " changed ", { kind: "filter", changed: true }],
-			[` ${bold("c")} `, { kind: "filter", changed: !this.changedOnly }],
+			["  ", null],
+			[
+				this.changedOnly ? this.host.paint.cursor(key("c", "changed"), true) : key("c", "changed"),
+				{ kind: "filter", changed: !this.changedOnly },
+			],
 		];
 		const fw = filters.reduce((n, [text]) => n + visibleWidth(text), 0);
 		let left: Part[];
@@ -1596,7 +1598,7 @@ export class SettingsPane {
 		const cells = presetColumns(p.harness, p.agent ?? p.model ?? "", p.agent ? "agent" : (p.effort ?? "default"), p.provider ?? "");
 		const editing = this.editing?.kind === "text" && this.editing.target.kind === "note" && i === this.cursor;
 		return [
-			[`${String(index + 1).padStart(2)} `, null],
+			[`${bold(String(index + 1).padStart(2))} `, null],
 			[star, { kind: "star", at: i }],
 			[` ${cells.harness}`, null],
 			[bold(cells.model), null],

@@ -4,6 +4,8 @@ Source common.tape
 Type "# m names a Group; drag moves a session into one" Sleep 1s Enter
 Type "swb" Sleep 400ms Enter
 Wait+Screen /bravo/
+Alt+a
+Type "h"
 Sleep 2s
 Screenshot ../artifacts/phase6/videos/groups-project.png
 Type "/alpha" Sleep 400ms Enter

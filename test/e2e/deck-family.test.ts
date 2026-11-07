@@ -103,12 +103,12 @@ test("a session an agent started nests under it; its Peek's Parent action and p 
 	await waitState(s, "the matching child with its ancestors", (x) => x.filter === "g1" && sessionRows(x).length === 3);
 	expect(lineage(state(s))).toEqual(["root", "  c1", "    g1"]);
 	expect(rosterLine(" g1")).toContain("     └─ ● g1");
-	expect(s.screen()).toContain("1 of 7 · Esc clears");
+	expect(s.screen()).toContain("1 of 7  esc clears");
 	expect(s.screen()).not.toContain("Operators (0)");
 	expect(s.screen()).not.toContain("Archived (0)");
 	s.keys("Escape");
 	await waitState(s, "all families again", (x) => x.filter === "" && sessionRows(x).length === 7);
-	expect(s.screen()).not.toContain("Esc clears");
+	expect(s.screen()).not.toContain("esc clears");
 	s.keys("g");
 
 	const peekOf = async (id: string) => {

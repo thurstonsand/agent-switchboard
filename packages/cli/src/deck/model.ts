@@ -135,7 +135,7 @@ export function bindingFor<C>(bindings: Binding<C>[], data: string): Binding<C> 
 export function legendParts<C>(bindings: Binding<C>[], room: number): [text: string, command: C | null][] {
 	const shown = bindings.filter((b) => b.label !== null);
 	const width = () => shown.reduce((n, b) => n + 2 + visibleWidth(key(b.name, b.label as string)), -1);
-	while (shown.length > 1 && width() > room) shown.pop();
+	while (shown.length > 0 && width() > room - 1) shown.pop();
 	return shown.flatMap((b, i): [string, C | null][] => [
 		[i === 0 ? " " : "  ", null],
 		[key(b.name, b.label as string), b.command],

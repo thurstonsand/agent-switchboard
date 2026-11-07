@@ -1079,8 +1079,8 @@ const SECTION_KEYS: SectionKey[] = ["operators", "inactive", "snoozed", "archive
 
 /** `s`'s menu: Amp's presets. */
 export const SNOOZE_CHOICES: { label: string; snooze: SnoozePreset }[] = [
-	{ label: "1 hour", snooze: "one_hour" },
-	{ label: "1 day", snooze: "one_day" },
+	{ label: "An hour", snooze: "one_hour" },
+	{ label: "A day", snooze: "one_day" },
 	{ label: "Monday", snooze: "monday" },
 	{ label: "Until a message", snooze: "next_message" },
 ];
@@ -2615,7 +2615,16 @@ export function keymap(): Binding<Command>[] {
 		case "filter":
 			return [...ARROWS, bind(["enter"], "⏎", null, CHOOSE), bind(["escape"], "esc", null, CANCEL)];
 		case "name":
-			return [...ARROWS, bind(["enter"], "⏎", "choose", CHOOSE), bind(["escape"], "esc", "cancel", CANCEL)];
+			return [
+				...ARROWS,
+				...(mode.input.getValue() === ""
+					? nameChoices()
+							.slice(0, 9)
+							.map((_, i) => bind([String(i + 1)], String(i + 1), null, { kind: "choose", index: i }))
+					: []),
+				bind(["enter"], "⏎", "choose", CHOOSE),
+				bind(["escape"], "esc", "cancel", CANCEL),
+			];
 		case "snooze":
 			return [
 				bind(["up", "k"], "↑", null, step(-1)),
@@ -2761,7 +2770,7 @@ export function stageKeys(): Binding<Command>[] {
 	if (panes.applied.target === PLACEHOLDER || harnessStarting(panes.applied))
 		return [bind([], "esc", "roster", { kind: "roster", to: "focus" }), help];
 	return [
-		bind([], `${prefix} → h`, "roster", { kind: "roster", to: "focus" }),
+		bind([], `${prefix} → tab`, "roster", { kind: "roster", to: "focus" }),
 		bind([], "z", "hide", { kind: "roster", to: "hide" }),
 		bind([], "?", "keys", { kind: "help" }),
 	];
@@ -2863,7 +2872,7 @@ export function peekButtons(row: Row): [label: string, key: string, act: RowAct]
 			: !e.live
 				? "Wake & focus"
 				: e.errored
-					? "Inspect and retry"
+					? "Inspect error"
 					: e.activity === "blocked"
 						? "Focus to respond"
 						: "Focus";

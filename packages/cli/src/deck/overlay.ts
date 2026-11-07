@@ -1,5 +1,7 @@
 import { openSync, writeSync } from "node:fs";
 import tty from "node:tty";
+import { CURSOR_MARKER } from "@earendil-works/pi-tui";
+import { FAKE_CURSOR_END, FAKE_CURSOR_START } from "@earendil-works/pi-tui/dist/tui.js";
 import { SESSIONS, tmuxAsync, tmuxTry } from "../tmux.ts";
 import type { Command } from "./model.ts";
 
@@ -339,7 +341,14 @@ export class Overlays {
 		const { lines, buttons } = s.overlay.view;
 		const at = s.at;
 		const hot = at ? buttons.find((b) => b.y === at.y && at.x >= b.from && at.x < b.to) : undefined;
-		const frame = `\x1b[H${lines.map((line, y) => `${hot?.y === y ? hot.hot : line}\x1b[0m\x1b[K`).join("\r\n")}\x1b[J`;
+		// A float never takes focus, so resolve pi-tui's input markers to a drawn caret instead of a hardware cursor.
+		const painted = lines.map((line, y) =>
+			(hot?.y === y ? hot.hot : line)
+				.replaceAll(CURSOR_MARKER, "")
+				.replaceAll(FAKE_CURSOR_START, "\x1b[7m")
+				.replaceAll(FAKE_CURSOR_END, "\x1b[27m"),
+		);
+		const frame = `\x1b[H${painted.map((line) => `${line}\x1b[0m\x1b[K`).join("\r\n")}\x1b[J`;
 		if (frame === s.painted) return;
 		s.painted = frame;
 		this.write(s, frame);

@@ -227,7 +227,9 @@ class Roster implements Component, Focusable {
 		const tag = filterTag(width);
 		frame.listTop = tag === null ? 0 : 1;
 		const detailLines = 1 + (detail?.lines.length ?? 0);
-		const bodyHeight = Math.max(1, height - frame.listTop - 3 - detailLines - reserved);
+		const message = messageLine(now, height - 2);
+		const messageRows = message || (height >= 30 && rows.length <= height - frame.listTop - 3 - detailLines - reserved) ? 1 : 0;
+		const bodyHeight = Math.max(1, height - frame.listTop - 2 - messageRows - detailLines - reserved);
 		const lines = tag === null ? [] : [tag];
 		const beforeScroll = frame.scrollTop;
 		lines.push(...list(rows, index, width, bodyHeight, now));
@@ -237,7 +239,7 @@ class Roster implements Component, Focusable {
 			for (const target of frame.targets) if (target.y >= prompt.y) target.y += reserved;
 			lines.splice(prompt.y, 0, ...Array<string>(reserved).fill(""));
 		}
-		const detailTop = height - detailLines - 2;
+		const detailTop = height - detailLines - 1 - messageRows;
 		const tabs = detailRows(width, detailTop);
 		if (detail) {
 			const y = detailTop + 1;
@@ -252,7 +254,7 @@ class Roster implements Component, Focusable {
 			overflowRule(rows.slice(frame.scrollTop + frame.listHeight), "↓", width),
 			...tabs,
 			...(detail?.lines ?? []),
-			messageLine(now, height - 2),
+			...(messageRows ? [message] : []),
 			hints(height - 1, width),
 		);
 		place(
@@ -342,15 +344,18 @@ function pickerParts(width: number, height: number): Part[] {
 	const shown = Math.max(1, Math.min(choices.length, height - 4));
 	const from = Math.max(0, Math.min(naming.choice - shown + 1, choices.length - shown));
 	const title = `${naming.renaming ? "Rename Group" : "Group for"} ${naming.title}`;
-	const out: Part[] = [[title, null]];
+	const input = naming.input.render(Math.max(10, width - 2))[0] ?? "";
+	const out: Part[] = [
+		[title, null],
+		[` ${input}`, null],
+	];
 	for (let i = from; i < from + shown; i++) {
 		const choice = choices[i] as { label: string; name: string | null };
 		const label = choice.name === null ? dim(choice.label) : choice.label.startsWith("+ ") ? green(choice.label) : choice.label;
-		const line = truncateToWidth(`   ${label}`, width, "…", true);
+		const digit = naming.input.getValue() === "" && i < 9 ? bold(String(i + 1)) : " ";
+		const line = truncateToWidth(` ${digit} ${label}`, width, "…", true);
 		out.push([i === naming.choice ? cursorLine(line, true) : line, { kind: "choose", index: i }]);
 	}
-	const input = naming.input.render(Math.max(10, width - 2))[0] ?? "";
-	out.push([` ${input}`, null]);
 	return out;
 }
 
@@ -363,7 +368,7 @@ function promptOverlay(width: number, height: number): Overlay[] {
 	const mode = model.mode;
 	if (mode.kind !== "archive" && mode.kind !== "name" && mode.kind !== "snooze") return [];
 	const rosterWidth = width;
-	const insert = panes.narrow || mode.kind === "name";
+	const insert = panes.narrow;
 	width = insert ? width : Math.min(Math.max(width, 54), panes.width - rosterWidth - 1);
 	if (width < PEEK_MIN_COLS) return [];
 	const parts = pickerParts(width - 2, height - 2);
@@ -498,13 +503,20 @@ function renderPicker(width: number, height: number): string[] {
 
 /** The filter's tag, atop the list while one applies, is a button that clears it. */
 function filterTag(width: number): string | null {
-	if (query() === "" || filtering()) return null;
+	if (filtering()) {
+		const hint = ` · ${filterCount()}  ${key("esc", "clears")}`;
+		return clickable(0, [
+			[` ${model.filter.render(Math.max(1, width - visibleWidth(hint) - 2))[0] ?? ""}`, null],
+			[hint, { kind: "clearFilter" }],
+		]);
+	}
+	if (query() === "") return null;
 	const parts: Part[] = [
 		[" ", null],
 		[`${magenta(`/${model.filter.getValue()}`)} ✕`, { kind: "clearFilter" }],
-		[` · ${filterCount()} · ${bold("Esc")} clears`, { kind: "clearFilter" }],
+		[` · ${filterCount()}  ${key("esc", "clears")}`, { kind: "clearFilter" }],
 	];
-	return truncateToWidth(clickable(0, parts), width, "…");
+	return truncateToWidth(clickable(0, parts), width - 1, "…");
 }
 
 function filterCount(): string {
@@ -635,12 +647,12 @@ function detailRows(width: number, top: number): string[] {
 		parts.push([gray(`${keyName(model.config.prefix)} → `), null]);
 		const editor = panes.applied.view === "editor";
 		const splitting = viewOf(e) === "split";
-		const label = `${bold("e")} editor`;
+		const label = key("e", "editor");
 		if (!splitting) parts.push([editor ? cursorLine(label, true) : label, { kind: "view", view: editor ? "agent" : "editor" }]);
-		const split = `${splitting ? "" : "  "}${bold("v")} split`;
+		const split = `${splitting ? "" : "  "}${key("v", "split")}`;
 		parts.push([panes.applied.view === "split" ? cursorLine(split, true) : split, { kind: "view", view: splitting ? "agent" : "split" }]);
 		// The shell is a toggle beside the views, not one of them.
-		const shell = `  ${bold("s")} shell`;
+		const shell = `  ${key("s", "shell")}`;
 		if (!panes.narrow) parts.push([panes.applied.shell ? cursorLine(shell, true) : shell, { kind: "shell" }]);
 	}
 	return [truncateToWidth(clickable(top, parts), Math.max(0, width - 1), "…")];
@@ -671,11 +683,7 @@ function messageLine(now: number, y: number | null = null, withConfigError = tru
 function hints(y: number, cols: number): string {
 	if (archiving() !== null || nameMode() || snoozeMode()) return "";
 	if (filtering()) {
-		const hint = ` · ${filterCount()} · ${bold("Esc")} clears`;
-		return clickable(y, [
-			[` ${model.filter.render(Math.max(10, cols - visibleWidth(hint) - 1))[0] ?? ""}`, null],
-			[hint, { kind: "clearFilter" }],
-		]);
+		return legend(y, [{ keys: ["enter"], name: "⏎", label: "keep filter", command: { kind: "choose", index: null } }], cols, []);
 	}
 	const drag = dragging();
 	if (drag?.moved) {
@@ -684,8 +692,8 @@ function hints(y: number, cols: number): string {
 	}
 	const arrows: Part[] = [];
 	if (model.mode.kind === "roster" && model.focus === "stage") {
-		if (historyStep(-1) !== -1) arrows.push([`${bold("[")} ${dim("back")} `, { kind: "history", step: -1 }]);
-		if (historyStep(1) !== -1) arrows.push([`${bold("]")} ${dim("forward")}`, { kind: "history", step: 1 }]);
+		if (historyStep(-1) !== -1) arrows.push([key("[", "back"), { kind: "history", step: -1 }]);
+		if (historyStep(1) !== -1) arrows.push([`${arrows.length ? "  " : ""}${key("]", "forward")}`, { kind: "history", step: 1 }]);
 	}
 	let bindings = model.focus === "stage" ? stageKeys() : keymap();
 	if (model.focus === "roster" && (model.peek.settled || frame.details)) {
@@ -706,7 +714,9 @@ function hints(y: number, cols: number): string {
 function legend(y: number, bindings: Binding<Command>[], cols: number, trailing: Part[]): string {
 	if (model.mode.kind === "roster" && model.focus === "roster") {
 		const fixed = ["n", "?", ","];
-		trailing = fixed.flatMap((name, i): Part[] => {
+		// Reserve the longest primary action even while the Peek owns it, so the remaining hints never shift.
+		const shown = cols < 44 ? fixed.slice(0, 2) : fixed;
+		trailing = shown.flatMap((name, i): Part[] => {
 			const b = bindings.find((b) => b.name === name);
 			const label = name === "n" ? "new" : name === "?" ? "keys" : "settings";
 			const text = key(name, label);
@@ -722,7 +732,7 @@ function legend(y: number, bindings: Binding<Command>[], cols: number, trailing:
 	const parts = legendParts(bindings, trailing.length === 0 ? cols : cols - end - 2);
 	if (trailing.length === 0) return clickable(y, parts);
 	const used = parts.reduce((n, [text]) => n + visibleWidth(text), 0);
-	return clickable(y, [...parts, [" ".repeat(Math.max(1, cols - used - end - 1)), null], ...trailing]);
+	return clickable(y, [...parts, [" ".repeat(Math.max(2, cols - used - end - 1)), null], ...trailing]);
 }
 
 function pickLine(row: PickRow, width: number, cursor: boolean): string {
@@ -799,7 +809,7 @@ function rowLine(row: Row, width: number, now: number): string {
 				: age(e.activityAt, now);
 	const state = stateOf(e);
 	const meta = [!row.nest ? originMark(origin(e)).trim() : "", e.cwd !== e.project ? gray("⎇") : ""].filter(Boolean).join(" ");
-	const time = when.padStart(3);
+	const time = when.padStart(4);
 	const right = ` ${meta || " "} ${e.open && e.activity === "blocked" ? attention(time) : state === "dormant" || state === "archived" ? dim(time) : time} `;
 	const hidden = row.folded ? ` ${foldedTally(row.family.map((p) => p.entry))}` : "";
 	const titleWidth = width - visibleWidth(lead) - 2 - visibleWidth(hidden) - visibleWidth(right);
@@ -1132,7 +1142,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 		const changes = diff
 			? `  ${(diff.add ? green : gray)(`+${diff.add}`)} ${(diff.del ? red : gray)(`−${diff.del}`)}${gray(" uncommitted")}`
 			: "";
-		head.push(`${gray("⎇")}  ${matchedText(e.branch)}${changes}`);
+		head.push(`${gray("branch")} ${matchedText(e.branch)}${changes}`);
 	}
 	const group = groupOf(e);
 	const visible = panes.narrow ? [] : rosterRows().slice(frame.scrollTop, frame.scrollTop + frame.listHeight);

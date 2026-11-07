@@ -171,20 +171,27 @@ test("m names a session's Group, n joins it; dragging moves it between Groups, a
 	await cursorTo(s, a);
 	s.keys("m");
 	await waitState(s, "naming", (x) => x.mode === "name");
-	// The name's cursor is the terminal's, which tmux shows only while the roster's pane is the active one.
+	// The floating form draws its caret without taking the roster's keyboard; inline, it uses the terminal cursor.
 	s.keys("-l", "review");
 	const nameLine = () =>
 		s
-			.tmux(s.servers.sessions, "capture-pane", "-p", "-e", "-t", "=deck:.0")
+			.swb("drive", "capture", "--ansi")
 			.split("\n")
 			.find((line) => line.includes("/ review"));
 	await until(() => nameLine() !== undefined, budgets.settle, "the name typed");
+	expect(nameLine()).toContain("\x1b[7m");
+	expect(s.tmux(s.servers.drive, "display", "-p", "#{cursor_flag}")).toBe("0");
+	s.swb("drive", "resize", "80x30");
+	await waitState(s, "the inline Group form", (x) => x.layout.rosterOnly);
+	await until(() => nameLine() !== undefined && !nameLine()?.includes("\x1b[7m"), budgets.settle, "the inline caret");
 	expect(nameLine()).not.toContain("\x1b[7m");
 	expect(s.tmux(s.servers.drive, "display", "-p", "#{cursor_flag}")).toBe("1");
 	s.keys("Enter");
 	let st = await waitState(s, "alpha in review", (x) => groups(x).review?.join() === a && x.mode === "roster");
 	expect(groups(st)).toEqual({ review: [a], "(project)": sorted(b, w) });
 	await until(() => entry(s, a).group === "review", budgets.settle, "a's Group review in the db");
+	s.swb("drive", "resize", "140x40");
+	await waitState(s, "the Stage beside the roster", (x) => !x.layout.rosterOnly);
 	s.save("named.ansi", s.swb("drive", "capture", "--ansi"));
 
 	const bravo = lineOf(st, (r) => r.kind === "session" && r.id === b);
@@ -232,11 +239,10 @@ test("m names a session's Group, n joins it; dragging moves it between Groups, a
 	await cursorTo(s, b);
 	s.keys("m");
 	await waitState(s, "picking again", (x) => x.mode === "name");
-	const none = s
-		.screen()
-		.split("\n")
-		.findIndex((line) => line.includes("(no Group)"));
-	s.swb("drive", "click", "6", `${none}`);
+	await until(() => s.screen().includes("(no Group)"), budgets.settle, "the Group choices drawn");
+	const choices = s.screen().split("\n");
+	const none = choices.findIndex((line) => line.includes("(no Group)"));
+	s.swb("drive", "click", String((choices[none] as string).indexOf("(no Group)")), `${none}`);
 	st = await waitState(
 		s,
 		"bravo clicked back under its Project",

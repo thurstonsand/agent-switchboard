@@ -90,7 +90,7 @@ test("Settings edits config.toml by keyboard and mouse, keeps its comments, and 
 	await waitState(s, "search cleared", (x) => x.settings?.search === null);
 	s.swb("drive", "resize", "80x28");
 	await until(() => s.screen().includes("‹ Directories ›"), budgets.settle, "narrow Settings section");
-	expect(s.screen()).toMatch(/all +· +changed +c/);
+	expect(s.screen()).toMatch(/all +c changed/);
 	s.keys("c");
 	await waitState(s, "changed settings across sections", (x) => x.settings?.changedOnly === true);
 	await until(() => !s.screen().includes("‹ Directories ›"), budgets.settle, "filtered header has no section scope");

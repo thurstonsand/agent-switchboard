@@ -119,10 +119,10 @@ test("roster navigation: h l space and a header click fold projects; g G jump; M
 	s.keys("M-a", "z");
 	await waitState(s, "the roster back", (x) => !x.layout.rosterHidden);
 	s.keys("M-a", "?");
-	await until(() => s.screen().includes("key or click closes"), budgets.settle, "the key help");
+	await until(() => s.screen().includes("Close help"), budgets.settle, "the key help");
 	s.save("help.txt", s.screen());
 	s.keys("x");
-	await until(() => !s.screen().includes("key or click closes"), budgets.settle, "help closed");
+	await until(() => !s.screen().includes("Close help"), budgets.settle, "help closed");
 	s.keys("M-a", "h");
 	await waitState(s, "roster", (x) => x.focus === "roster");
 	s.keys("q");
@@ -137,7 +137,7 @@ test("? fits every key in a tall Deck, and in a short one scrolls them by wheel 
 	s.swb("drive", "start", "--size", "140x50");
 	await waitState(s, "the Deck", (x) => x.ready);
 	const first = "j k ↑ ↓";
-	const last = "Send literal Alt+a";
+	const last = "+N folded family";
 	s.keys("?");
 	await until(() => s.screen().includes("key or click closes"), budgets.settle, "the key help");
 	expect(s.screen()).toContain(first);
@@ -155,6 +155,8 @@ test("? fits every key in a tall Deck, and in a short one scrolls them by wheel 
 	await until(() => /↓ \d+ more lines · j\/k ↑\/↓ scroll/.test(s.screen()), budgets.settle, "the short help, its end below");
 	expect(s.screen()).toContain(first);
 	expect(s.screen()).not.toContain(last);
+	expect(s.screen()).toContain("Return to roster from any pane");
+	expect(s.screen()).toContain("Leave the Deck as it is");
 	expect(s.screen()).toContain("PgUp/PgDn page · Esc closes");
 	s.keys("PageDown");
 	await until(() => s.screen().includes(last), budgets.settle, "PageDown reaches the last keys");

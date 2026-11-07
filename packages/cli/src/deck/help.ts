@@ -8,11 +8,17 @@ const CLOSES = "any key or click closes";
 function lines(prefix: string, columns = Infinity): string[] {
 	prefix = keyName(prefix);
 	const row = (k: string, label: string) => `  ${bold(k.padEnd(17))} ${label}`;
-	const move = [
-		bold("  Move"),
+	const start = [
+		bold("  Start here · in the roster"),
 		row("j k ↑ ↓", "Move"),
+		row("enter", "Focus session; wake if dormant"),
+		row(`${prefix} Tab`, "Return to roster from any pane; again goes back"),
+		row("q", "Leave the Deck as it is for the next swb"),
+		row("esc", "Close help"),
+	];
+	const move = [
+		bold("  In the roster · Move"),
 		row("g G", "First / last"),
-		row("Enter", "Focus session; wake if dormant"),
 		row("l →", "Focus session / expand"),
 		row("h ←", "Fold family / collapse header"),
 		row("space", "Toggle header or family fold"),
@@ -36,22 +42,20 @@ function lines(prefix: string, columns = Infinity): string[] {
 		row("a", "Archive family or session / unarchive"),
 	];
 	const organize = [bold("  Organize"), row("s", "Snooze / unsnooze"), row("u", "Mark / unmark Unseen"), row("m", "Pick or rename Group")];
-	const settings = [
-		bold("  Copy & settings"),
-		row("y / Y", "Copy swb open <id> / @session:<id>"),
-		row(",", "Settings"),
-		row("q", "Leave the Deck as it is for the next swb"),
-	];
-	const left = [...move, "", ...relationships, "", ...lifecycle, "", ...organize, "", ...settings];
+	const settings = [bold("  Copy & settings"), row("y / Y", "Copy swb open <id> / @session:<id>"), row(",", "Settings")];
+	const left = [...start, "", ...move, "", ...relationships, "", ...lifecycle, "", ...organize, "", ...settings];
 	const states = [
 		bold("  State marks"),
-		"  ○ idle · running       – dormant · not running",
-		`  ${bold(cyan("◐"))} working              ${green("●")} Unseen · finished since last viewed`,
 		`  ${blockedMark("◆")} blocked · waiting for you`,
 		`  ${bold(red("!"))} cut off · resume unfinished turn`,
-		`  ✓ archived             ${bold(red("×"))} errored · inspect and retry`,
-		"  stopped: turn ended early on purpose; nothing to resume",
-		"  Snoozed · hidden until its time or next message",
+		`  ${bold(red("×"))} errored · inspect error`,
+		`  ${green("●")} Unseen · finished since last viewed`,
+		`  ${bold(cyan("◐"))} working`,
+		"  ○ idle · running",
+		"  – dormant · not running",
+		"  ✓ archived",
+		dim("  Stopped · turn ended early on purpose"),
+		dim("  Snoozed · until its time or next message"),
 		"",
 		bold("  Relationships & schedules"),
 		`  ${dim("⎇")}  worktree`,
@@ -59,49 +63,35 @@ function lines(prefix: string, columns = Infinity): string[] {
 		"  +N folded family       ◷ once / ↻ recurring schedule",
 	];
 	const right = [
-		...states,
-		"",
-		bold("  Views"),
+		bold("  From any pane · Views"),
+		`  ${prefix}, then key · hold to reveal pane keys`,
 		row(`${prefix} e`, "Swap agent / editor"),
 		row(`${prefix} v`, "Split editor beside agent"),
 		row(`${prefix} s`, "Shell beside / below / instead; ctrl-d closes"),
 		row(`${prefix} z`, "Hide / show roster; click ◂ to show"),
 		"",
 		bold("  From any pane · navigate"),
-		`  ${prefix}, then key · hold to reveal pane keys`,
 		row("Ctrl+h j k l", "Move through panes and nvim windows"),
 		row(`${prefix} h j k l`, "Focus the pane bearing that key"),
 		row(`${prefix} J K`, "Next / previous session; j k in roster"),
-		row(`${prefix} Tab`, "Roster / pane you left"),
 		"",
 		bold("  From any pane · session actions"),
-		row(`${prefix} S`, "Snooze / unsnooze"),
-		row(`${prefix} <key>`, "n N w x R a p u [ ] y Y / m , as in roster"),
+		row(`${prefix} + roster key`, "Run its action; S snoozes, s opens shell"),
 		row(`${prefix} d`, "Remove highlighted directory in picker"),
 		row(`${prefix} q / ?`, "Leave Deck from anywhere / help"),
 		row(`${prefix} ${prefix}`, `Send literal ${prefix}`),
+		"",
+		...states,
 	];
 	const width = Math.max(...left.map(visibleWidth)) + 4;
-	if (width + Math.max(...right.map(visibleWidth)) > columns)
-		return [
-			"",
-			...move,
-			row("/", "Filter; esc clears"),
-			row(`${prefix} Tab`, "Roster / pane you left"),
-			"",
-			...states,
-			"",
-			...lifecycle,
-			"",
-			...organize,
-			"",
-			...settings,
-			"",
-			...relationships.filter((line) => line !== row("/", "Filter; esc clears")),
-			"",
-			...right.slice(states.length + 1).filter((line) => line !== row(`${prefix} Tab`, "Roster / pane you left")),
-		];
-	return ["", ...left.map((line, i) => `${line}${" ".repeat(width - visibleWidth(line))}${right[i] ?? ""}`)];
+	if (width + Math.max(...right.map(visibleWidth)) > columns) return ["", ...left, "", ...right];
+	return [
+		"",
+		...Array.from(
+			{ length: Math.max(left.length, right.length) },
+			(_, i) => `${left[i] ?? ""}${" ".repeat(width - visibleWidth(left[i] ?? ""))}${right[i] ?? ""}`,
+		),
+	];
 }
 
 /** The popup that shows every line, its border and the hint below included, with room to its right. */

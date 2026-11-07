@@ -68,11 +68,21 @@ test("the mouse reaches everything the keys do: a row's Peek, the hidden or narr
 	await until(() => !entry(s, b).live, budgets.settle, "bravo stopped from its Peek");
 	expect(state(s).cursor).toBe(a);
 
+	const bravoY = find("bravo")[1];
 	await peekButton("alpha", a, "m Group…");
 	await waitState(s, "the Group picker", (x) => x.mode === "name");
+	await onScreen("Group for alpha", "the Group form drawn");
+	expect(Number(findRight("Group for alpha")[0])).toBeGreaterThan(42);
+	expect(find("bravo")[1]).toBe(bravoY);
 	s.save("group-picker.txt", s.screen());
 	await click("✕", 140);
 	await waitState(s, "the Group picker closed by its ✕", (x) => x.mode === "roster");
+	s.keys("m", "-l", "review2", "Enter");
+	await until(() => entry(s, a).group === "review2", budgets.settle, "a new Group typed into the floating form");
+	s.keys("m");
+	await onScreen("1 (no Group)", "numbered Group choices");
+	s.keys("1");
+	await until(() => entry(s, a).group === null, budgets.settle, "the number removes its Group");
 
 	await click("alpha");
 	await waitState(s, "alpha's pi focused", (x) => x.staged.id === a && x.staged.kind === "live" && x.focus === "stage", budgets.piReady);
@@ -91,10 +101,10 @@ test("the mouse reaches everything the keys do: a row's Peek, the hidden or narr
 	await waitState(s, "the shell hidden", (x) => x.layout.shell === null);
 
 	await click("? keys");
-	await onScreen("key or click closes", "the key help");
+	await onScreen("Close help", "the key help");
 	s.save("help.txt", s.screen());
-	await click("key or click closes", 140);
-	await until(() => !s.screen().includes("key or click closes"), budgets.settle, "help closed by a click");
+	await click("Close help", 140);
+	await until(() => !s.screen().includes("Close help"), budgets.settle, "help closed by a click");
 
 	// A Peek's buttons are its row's prefix keys: one closes a filter being typed, as the key does, and the query stays.
 	s.keys("M-a", "/");
@@ -336,7 +346,7 @@ test("Archive stays at its clicked action, Snooze stays at its row, and the Stag
 		await waitState(s, "form canceled", (st) => st.mode === "roster");
 	}
 	s.keys("s");
-	await onScreen("2 1 day", "numbered Snooze choices");
+	await onScreen("2 A day", "numbered Snooze choices");
 	await onScreen("⏎ choose  esc cancel", "menu-local controls");
 	s.keys("2");
 	await waitState(s, "number chooses Snooze", (st) => st.mode === "roster");
@@ -389,8 +399,9 @@ test("narrow details expand by key and click, scroll, follow the selection, and 
 	expect(s.screen()).not.toContain("got descendant");
 	s.keys("i", "/", "-l", "nothingmatches");
 	await onScreen("No matching sessions", "empty filter");
-	expect(s.screen().match(/Esc clears/g)).toHaveLength(1);
-	await click("Esc clears", 85);
+	expect(s.screen().match(/esc clears/g)).toHaveLength(1);
+	expect(Number(find("nothingmatches", 85)[1])).toBeLessThan(Number(find("No matching sessions", 85)[1]));
+	await click("esc clears", 85);
 	await waitState(s, "filter cleared by its recovery action", (x) => x.filter === "");
 	expect(s.screen()).toContain("parent");
 });

@@ -33,6 +33,8 @@ export function spinnerFrame(now: number): string {
 }
 
 export function key(name: string, label: string): string {
+	const prefix = name.indexOf(" → ");
+	if (prefix !== -1) return `${dim(name.slice(0, prefix + 3))}${bold(name.slice(prefix + 3))} ${label}`;
 	return `${bold(name)} ${label}`;
 }
 
