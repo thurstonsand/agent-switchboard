@@ -227,7 +227,7 @@ class Roster implements Component, Focusable {
 		frame.listTop = tag === null ? 0 : 1;
 		const detailLines = 1 + (detail?.lines.length ?? 0);
 		const message = messageLine(now, height - 2);
-		const messageRows = message || (height >= 30 && rows.length <= height - frame.listTop - 3 - detailLines - reserved) ? 1 : 0;
+		const messageRows = message ? 1 : 0;
 		const bodyHeight = Math.max(1, height - frame.listTop - 2 - messageRows - detailLines - reserved);
 		const lines = tag === null ? [] : [tag];
 		const beforeScroll = frame.scrollTop;
@@ -329,12 +329,7 @@ function pickerParts(width: number, height: number): Part[] {
 			...archiveNotes(e).map((note): Part => [` ${gray(note)}`, null]),
 			...keymap()
 				.filter((b) => b.label !== null && b.command?.kind !== "cancel")
-				.map(
-					(b): Part => [
-						` ${bold(b.name.padEnd(3))} ${b.label?.replace("delete clean worktree", bold(red("delete clean worktree")))}`,
-						b.command,
-					],
-				),
+				.map((b): Part => [` ${bold(b.name)} ${b.label?.replace("delete clean worktree", bold(red("delete clean worktree")))}`, b.command]),
 		];
 	}
 	const naming = nameMode();
@@ -379,12 +374,12 @@ function promptOverlay(width: number, height: number): Overlay[] {
 	);
 	const footer = legendParts(
 		keymap().filter((b) => b.command?.kind === "choose" || b.command?.kind === "cancel"),
-		width - 2,
+		width - 4,
 	);
-	const footerText = footer.map(([text]) => text).join("");
-	const footerY = lines.length - 1;
-	lines.splice(footerY, 0, row(footerText));
-	let column = 1;
+	const footerText = `  ${footer.map(([text]) => text).join("")}`;
+	const footerY = lines.length;
+	lines.splice(footerY - 1, 0, gray(`├${"─".repeat(width - 2)}┤`), row(footerText));
+	let column = 3;
 	for (const [i, [text, command]] of footer.entries()) {
 		const from = column;
 		column += visibleWidth(text);
@@ -394,7 +389,7 @@ function promptOverlay(width: number, height: number): Overlay[] {
 				from,
 				to: column,
 				command,
-				hot: row(footer.map(([part], j) => (i === j ? cursorLine(part, true) : part)).join("")),
+				hot: row(`  ${footer.map(([part], j) => (i === j ? cursorLine(part, true) : part)).join("")}`),
 			});
 	}
 	buttons.push({ y: 0, from: width - 4, to: width - 1, command: { kind: "cancel" }, hot: lines[0] as string });
@@ -700,12 +695,12 @@ function hints(y: number, cols: number): string {
 	}
 	if (model.mode.kind === "roster" && model.focus === "stage") {
 		const bindings = stageKeys();
-		const gutter = bindings[0]?.name === "tab" ? visibleWidth(`${keyName(model.config.prefix)} → `) : 0;
+		const prefix = bindings[0]?.name === "tab" ? ` ${keyName(model.config.prefix)} →` : "";
 		const history: Binding<Command>[] = [];
 		if (historyStep(-1) !== -1) history.push({ keys: [], name: "[", label: "back", command: { kind: "history", step: -1 } });
 		if (historyStep(1) !== -1) history.push({ keys: [], name: "]", label: "forward", command: { kind: "history", step: 1 } });
 		bindings.splice(1, 0, ...history);
-		return clickable(y, [[" ".repeat(gutter), null], ...legendParts(bindings, cols - gutter)]);
+		return clickable(y, [[gray(prefix), null], ...legendParts(bindings, cols - visibleWidth(prefix))]);
 	}
 	let bindings = keymap();
 	if (model.focus === "roster" && (model.peek.settled || frame.details)) {
@@ -733,7 +728,7 @@ function legend(y: number, bindings: Binding<Command>[], cols: number, trailing:
 			const label = name === "n" ? "new" : name === "?" ? "keys" : "settings";
 			const text = key(name, label);
 			return [
-				[i === 0 ? "" : cols < 44 ? " " : "  ", null],
+				[i === 0 ? "" : "  ", null],
 				[b?.label ? text : " ".repeat(visibleWidth(text)), b?.label ? b.command : null],
 			];
 		});
@@ -807,7 +802,7 @@ function rowLine(row: Row, width: number, now: number): string {
 		const lead = `${gray("┆")}${rowLead(row)}`;
 		return `${lead}${gray("◌")} ${gray(truncateToWidth(displayName(e), width - visibleWidth(lead) - 2, "…"))}`;
 	}
-	const mark = model.stage.staged === e.id ? (model.focus === "stage" ? cyan("▌") : cursorEntry() ? "▌" : dim("▌")) : " ";
+	const mark = model.stage.staged === e.id ? cyan("▌") : " ";
 	const lead = `${mark}${rowLead(row)}`;
 	// A snoozed row says when it wakes instead: ↘ for its next message. Mid-turn, the glyph already says it's active.
 	const when = !e.open
@@ -1037,8 +1032,8 @@ function launchCard(choosing: Choosing, width: number): OverlayView {
 	const destination = choosing.mode === "add" ? shortPath(addTarget()) : target?.kind === "target" ? targetName(target.target) : "";
 	const heading = menu
 		? panes.narrow && destination
-			? `Presets · ${destination}`
-			: "Presets"
+			? `Presets · ${destination} · ★ default`
+			: "Presets · ★ default"
 		: presets.length === 0
 			? "Harness"
 			: choosing.mode === "pick"
@@ -1090,11 +1085,11 @@ function launchMenu(choosing: Choosing, width: number, maxHeight: number): Overl
 	});
 	if (shown.length === 0) items.push(gray("nothing matches"));
 	const note = presetNote(presets[shown[menu.cursor] ?? -1]?.note ?? "", inner);
-	const room = Math.max(1, maxHeight - 7 - note.length);
+	const room = Math.max(1, maxHeight - 6 - note.length);
 	const from = Math.min(Math.max(0, (itemAt[menu.cursor] ?? 0) - room + 1), Math.max(0, items.length - room));
 	const to = Math.min(items.length, from + room);
 	const row = (content: string) => `${gray("│")} ${truncateToWidth(content, inner, "…", true)} ${gray("│")}`;
-	const lines = [gray(`├${"─".repeat(width - 2)}┤`), row("★ default preset"), row(PRESET_HEADER)];
+	const lines = [gray(`├${"─".repeat(width - 2)}┤`), row(PRESET_HEADER)];
 	const buttons: OverlayButton[] = [];
 	items.slice(from, to).forEach((line, i) => {
 		const n = itemAt.indexOf(from + i);
@@ -1103,8 +1098,12 @@ function launchMenu(choosing: Choosing, width: number, maxHeight: number): Overl
 			buttons.push({ y: lines.length, from: 2, to: 2 + inner, command: { kind: "choose", index: n }, hot: row(hoverLine(content)) });
 		lines.push(row(n === menu.cursor ? cursorLine(content, true) : content));
 	});
-	lines.push(gray(`├${"─".repeat(width - 2)}┤`), ...note.map((line) => row(gray(line))), row(""));
-	const hints = legendParts(keymap(), inner);
+	lines.push(gray(`├${"─".repeat(width - 2)}┤`), ...note.map(row), gray(`├${"─".repeat(width - 2)}┤`));
+	const hints = legendParts(
+		keymap().filter((b) => b.name === "⏎" || b.name === "esc"),
+		inner - 1,
+	);
+	hints.unshift([" ", null]);
 	let x = 2;
 	for (const [text, command] of hints) {
 		const w = visibleWidth(text);
@@ -1203,8 +1202,8 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	}
 	const turn: string[] = [];
 	if (info?.error) turn.push(rule, ...wrapTextWithAnsi(red(`✗ ${info.error}`), inner).slice(0, 3));
-	else if (panes.narrow && stateOf(e) === "errored" && info?.ending?.kind === "error")
-		turn.push(rule, ...wrapTextWithAnsi(`Error · ${info.ending.message}`, inner).slice(0, 2));
+	else if (stateOf(e) === "errored" && info?.ending?.kind === "error")
+		turn.push(rule, ...wrapTextWithAnsi(red(`× ${info.ending.message}`), inner).slice(0, 3));
 	else if (
 		info?.last &&
 		(panes.narrow || !(panes.applied.id === e.id && panes.applied.view !== "editor" && panes.applied.shell?.at !== "replace"))
@@ -1225,15 +1224,20 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 		["Organize", organize],
 	] as const) {
 		let line = `${heading}  `;
-		for (const [label, k, act] of group) {
+		const gutter = visibleWidth(line);
+		const column = Math.max(...group.filter((_, i) => i % 2 === 0).map(([label, k]) => visibleWidth(`${k} ${label}`))) + 2;
+		const paired =
+			heading === "Organize" &&
+			gutter + column + Math.max(...group.filter((_, i) => i % 2 === 1).map(([label, k]) => visibleWidth(`${k} ${label}`))) <= inner - 2;
+		for (const [i, [label, k, act]] of group.entries()) {
 			const text = act === "focus" ? bold(`${k} ${label}`) : key(k, label);
-			if (visibleWidth(line) + visibleWidth(text) > inner - 2) {
+			if ((heading === "Organize" && i > 0 && i % 2 === 0) || visibleWidth(line) + visibleWidth(text) > inner - 2) {
 				buttonLines.push(line.trimEnd());
-				line = visibleWidth(text) <= inner - 2 ? "  " : "";
+				line = paired ? " ".repeat(gutter) : visibleWidth(text) <= inner - 2 ? "  " : "";
 			}
 			const from = visibleWidth(line);
 			buttons.push({ y: buttonLines.length, from, to: from + visibleWidth(text), command: { kind: "row", act, row: row.key }, text });
-			line += `${text}  `;
+			line += text + " ".repeat(paired && i % 2 === 0 ? column - visibleWidth(text) : 2);
 		}
 		buttonLines.push(line.trimEnd());
 	}

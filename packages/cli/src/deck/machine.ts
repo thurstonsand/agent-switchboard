@@ -2852,7 +2852,7 @@ async function showHelp(): Promise<void> {
 	if (!found) return;
 	const [client, cols, rows] = found;
 	const size = helpSize(m.config.prefix);
-	const fit = ["-w", String(Math.min(size.width, Number(cols))), "-h", String(Math.min(size.height, Number(rows)))];
+	const fit = ["-w", String(Math.min(size.width, Number(cols))), "-h", String(Math.min(size.height + 3, Number(rows)))];
 	await tmuxAsync(SESSIONS, "display-popup", "-c", client, "-E", "-B", ...fit, ...HELP_POPUP);
 }
 

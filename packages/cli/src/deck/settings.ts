@@ -1362,7 +1362,7 @@ export class SettingsPane {
 			[this.changedOnly ? " all " : this.host.paint.cursor(" all ", true), { kind: "filter", changed: false }],
 			["  ", null],
 			[
-				this.changedOnly ? this.host.paint.cursor(key("c", "changed"), true) : key("c", "changed"),
+				this.changedOnly ? this.host.paint.cursor(key("c", "• changed"), true) : key("c", "• changed"),
 				{ kind: "filter", changed: !this.changedOnly },
 			],
 		];
@@ -1534,12 +1534,12 @@ export class SettingsPane {
 
 	settingParts(s: Setting, i: number, lit: boolean, labelWidth: number, width: number): Part[] {
 		const set = this.isSet(s);
-		const label = `${set ? "•" : " "}${truncateToWidth(s.label, labelWidth, "…", true)}  `;
+		const label = `${set ? "•" : " "} ${truncateToWidth(s.label, labelWidth, "…", true)}  `;
 		const editingHere = i === this.cursor ? this.editing : null;
 		if (editingHere?.kind === "text" && editingHere.target.kind === "setting")
 			return [
 				[label, null],
-				[this.inputCell(width - labelWidth - 6), null],
+				[this.inputCell(width - labelWidth - 7), null],
 			];
 		if (editingHere?.kind === "chord") {
 			const shown = editingHere.captured ? bold(editingHere.captured) : cyan("press a key…");

@@ -187,6 +187,13 @@ export async function cardEndings(s: Scenario, harness: "pi" | "claude" | "codex
 	s.save("quit.txt", await card(quit.id, "! cut off · shut down · ⏎ resume unfinished turn", "$ echo entered", "cut off · shut down"));
 	const stoppedCard = await card(stopped.id, "stopped · ⏎ wake & focus", "$ echo entered");
 	s.save("stopped.txt", stoppedCard);
+	await cursorTo(s, failed.id);
+	const failedPeek = await waitState(
+		s,
+		"the provider error in the wide Peek",
+		(x) => x.peek?.lines.some((line) => line.includes("invalid request: boom")) ?? false,
+	);
+	expect(failedPeek.peek?.lines.join("\n")).not.toContain("you fail boom");
 	const failedCard = await card(failed.id, "errored · ⏎ wake & focus", "invalid request: boom");
 	s.save("failed.txt", failedCard);
 	expect(stoppedCard).not.toContain("resume unfinished turn");
@@ -194,11 +201,7 @@ export async function cardEndings(s: Scenario, harness: "pi" | "claude" | "codex
 	s.swb("drive", "resize", "80x30");
 	await until(() => s.screen().includes("i ▸ details"), budgets.settle, "narrow details available");
 	s.keys("i");
-	await until(
-		() => s.screen().includes("Error ·") && s.screen().includes("invalid request: boom"),
-		budgets.settle,
-		"the provider error in narrow details",
-	);
+	await until(() => /× .*invalid request: boom/.test(s.screen()), budgets.settle, "the provider error in narrow details");
 	expect(s.screen()).not.toContain("you fail boom");
 	s.keys("i");
 	s.swb("drive", "resize", "140x40");

@@ -58,7 +58,7 @@ test("Settings edits config.toml by keyboard and mouse, keeps its comments, and 
 	expect(read()).toBe(COMMENTED.replace("# long weekends\n", "# long weekends\nwake_on_highlight = true\n"));
 	s.keys("j", "Enter");
 	await until(() => s.screen().includes("⏎ save"), budgets.settle, "editing the roster width");
-	expect(s.screen()).toContain("•Wake on highlight");
+	expect(s.screen()).toContain("• Wake on highlight");
 	expect(s.screen()).toContain("Columns, or a share of the Deck like 25%.");
 	expect(s.screen()).not.toContain("saves · esc cancels");
 	s.keys("Escape", "k");
@@ -66,7 +66,7 @@ test("Settings edits config.toml by keyboard and mouse, keeps its comments, and 
 	s.keys("Enter");
 	await waitState(s, "wake off", (x) => item(x, "wake_on_highlight")?.set === false);
 	expect(read()).toBe(COMMENTED);
-	expect(s.screen()).not.toContain("•Wake on highlight");
+	expect(s.screen()).not.toContain("• Wake on highlight");
 
 	// A duration typed in, read back as it's typed.
 	s.keys("j", "j", "j", "Enter", "C-u", "-l", "3d");
@@ -97,7 +97,7 @@ test("Settings edits config.toml by keyboard and mouse, keeps its comments, and 
 	await waitState(s, "search cleared", (x) => x.settings?.search === null);
 	s.swb("drive", "resize", "80x28");
 	await until(() => s.screen().includes("‹ Directories ›"), budgets.settle, "narrow Settings section");
-	expect(s.screen()).toMatch(/all +c changed/);
+	expect(s.screen()).toMatch(/all +c • changed/);
 	s.keys("c");
 	await waitState(s, "changed settings across sections", (x) => x.settings?.changedOnly === true);
 	await until(() => !s.screen().includes("‹ Directories ›"), budgets.settle, "filtered header has no section scope");

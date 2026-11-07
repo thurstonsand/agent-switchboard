@@ -54,6 +54,7 @@ function lines(prefix: string, columns = Infinity): string[] {
 	);
 	const states = [
 		bold("  State marks"),
+		`  ${cyan("▌")} on the Stage`,
 		`  ${blockedMark("◆")} blocked · waiting for you`,
 		`  ${bold(red("!"))} cut off · resume unfinished turn`,
 		`  ${bold(red("×"))} errored · inspect error`,
