@@ -89,7 +89,7 @@ The Operators section sits atop the roster: sessions that coordinate the others 
 
 ## Settings
 
-`,` in the roster, or `M-a ,` from anywhere, opens Settings across the whole Deck: every setting by section, with search (`/`) over names, descriptions, and the words you'd look for. Inherited values name their source; changed values are bold and offer a reset when selected. Setting a value back to the default takes it out of the file. Its explanation sits below its list, above the Shortlist for a harness toggle. Toggles and choices save at once; the rest edit in place and save on `⏎`. Every key works by mouse too. Changes apply to the Deck as soon as they're saved, whether from Settings or by hand.
+`,` in the roster, or `M-a ,` from anywhere, opens Settings across the whole Deck: every setting by section, with search (`/`) over names, descriptions, and the words you'd look for. Inherited values name their source; changed settings carry a `•` beside their label and offer `r reset` when selected. Setting a value back to the default takes it out of the file. Its explanation sits below its list, including while editing, above the Shortlist for a harness toggle. Toggles and choices save at once; the rest edit in place and save on `⏎`. Every key works by mouse too. Changes apply to the Deck as soon as they're saved, whether from Settings or by hand.
 
 Behind it is `${XDG_CONFIG_HOME:-~/.config}/agent-switchboard/config.toml`, which Settings edits in place, so your comments stay, except the ones on a key it removes. A file swb can't read stops every new swb command with the line at fault; an open Deck keeps what it had, says so in red, and `O` opens the file at that line.
 

@@ -266,7 +266,7 @@ test("a Peek follows the pointer and the cursor keys, leaves with the pointer, a
 	s.swb("drive", "move", ...find("bravo"));
 	const hovered = await waitState(s, "bravo's Peek", (x) => x.hover === b && x.peek?.id === b && x.peek.source === "pointer");
 	expect(hovered).toMatchObject({ cursor: a, staged: { id: staged } });
-	expect(hovered.peek?.lines.join("\n")).toContain("pi  bravo");
+	expect(hovered.peek?.lines.join("\n")).toContain("› bravo");
 	// The state names the Peek before its popup, a process of its own, has drawn it.
 	await onScreen("a Archive", "bravo's Peek drawn");
 	expect(hovered.peek?.lines.some((line) => line.trim() === "bravo")).toBe(false);

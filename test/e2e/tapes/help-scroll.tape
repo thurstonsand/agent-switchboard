@@ -18,7 +18,7 @@ Type "?"
 Wait+Screen /↓ 18 more lines · j\/k ↑\/↓ scroll/
 Sleep 1s
 Screenshot ../artifacts/phase6/videos/help-scroll-short.png
-Wait+Screen /↑ 4 ↓ 14/
+Wait+Screen /↑ 4 ↓ 15/
 Wait+Screen /↑ 3 ↓ 15/
 Sleep 1.5s
 Screenshot ../artifacts/phase6/videos/help-scroll-wheel.png

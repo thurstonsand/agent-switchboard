@@ -96,7 +96,6 @@ import {
 	type PeekSpot,
 	type PickRow,
 	type Row,
-	type RowAct,
 	type SessionRow,
 } from "./model.ts";
 import { type Overlay, type OverlayButton, Overlays, type OverlayView } from "./overlay.ts";
@@ -699,12 +698,16 @@ function hints(y: number, cols: number): string {
 		if (!drag.drop) return ` ${red("✗ not here")}`;
 		return drag.drop.name === null ? ` ⇢ out of its Group` : ` ⇢ into ${bold(drag.drop.name)}`;
 	}
-	const arrows: Part[] = [];
 	if (model.mode.kind === "roster" && model.focus === "stage") {
-		if (historyStep(-1) !== -1) arrows.push([key("[", "back"), { kind: "history", step: -1 }]);
-		if (historyStep(1) !== -1) arrows.push([`${arrows.length ? "  " : ""}${key("]", "forward")}`, { kind: "history", step: 1 }]);
+		const bindings = stageKeys();
+		const gutter = bindings[0]?.name === "tab" ? visibleWidth(`${keyName(model.config.prefix)} → `) : 0;
+		const history: Binding<Command>[] = [];
+		if (historyStep(-1) !== -1) history.push({ keys: [], name: "[", label: "back", command: { kind: "history", step: -1 } });
+		if (historyStep(1) !== -1) history.push({ keys: [], name: "]", label: "forward", command: { kind: "history", step: 1 } });
+		bindings.splice(1, 0, ...history);
+		return clickable(y, [[" ".repeat(gutter), null], ...legendParts(bindings, cols - gutter)]);
 	}
-	let bindings = model.focus === "stage" ? stageKeys() : keymap();
+	let bindings = keymap();
 	if (model.focus === "roster" && (model.peek.settled || frame.details)) {
 		const row = rosterRows().find((r) => r.key === (model.peek.settled?.id ?? cursorEntry()?.id));
 		const actions = row ? peekButtons(row).map(([, , act]) => act) : [];
@@ -713,7 +716,7 @@ function hints(y: number, cols: number): string {
 			return !(c?.kind === "activate" && c.enter) && !(c?.kind === "row" && actions.includes(c.act));
 		});
 	}
-	return legend(y, bindings, cols, arrows);
+	return legend(y, bindings, cols, []);
 }
 
 /**
@@ -724,13 +727,13 @@ function legend(y: number, bindings: Binding<Command>[], cols: number, trailing:
 	if (model.mode.kind === "roster" && model.focus === "roster") {
 		const fixed = ["n", "?", ","];
 		// Reserve the longest primary action even while the Peek owns it, so the remaining hints never shift.
-		const shown = cols < 44 ? fixed.slice(0, 2) : fixed;
+		const shown = cols < 38 ? fixed.slice(0, 2) : fixed;
 		trailing = shown.flatMap((name, i): Part[] => {
 			const b = bindings.find((b) => b.name === name);
 			const label = name === "n" ? "new" : name === "?" ? "keys" : "settings";
 			const text = key(name, label);
 			return [
-				[i === 0 ? "" : "  ", null],
+				[i === 0 ? "" : cols < 44 ? " " : "  ", null],
 				[b?.label ? text : " ".repeat(visibleWidth(text)), b?.label ? b.command : null],
 			];
 		});
@@ -893,7 +896,7 @@ function foldedTally(hidden: Entry[]): string {
 // covers the roster. A narrow Deck uses its bottom particulars instead. tmux puts a hover Peek away when
 // the pointer leaves (see deck.ts).
 
-const PEEK_COLS = 72;
+const PEEK_COLS = 60;
 
 /** The most of a folded family a Peek lists. */
 const PEEK_FOLD_ROWS = 8;
@@ -905,9 +908,15 @@ function peekOverlays(rows: Row[], width: number, height: number): Overlay[] {
 	const spot = model.peek.settled;
 	const row = spot && rows.find((r) => r.key === spot.id);
 	if (panes.narrow || !spot || row?.kind !== "session") return [];
-	const w = Math.min(PEEK_COLS, panes.width - width - 1);
+	let w = Math.min(PEEK_COLS, panes.width - width - 1);
 	if (w < PEEK_MIN_COLS || width < PEEK_MIN_COLS) return [];
-	const view = peekView(row, w, height, "left");
+	let view = peekView(row, w, height, "left");
+	const content = view.lines.slice(1, -1).map((line) => Bun.stripANSI(line).slice(2, -2).trimEnd());
+	const fit = Math.max(PEEK_MIN_COLS, ...content.filter((line) => !/^─+$/.test(line)).map((line) => visibleWidth(line) + 4));
+	if (fit < w) {
+		w = fit;
+		view = peekView(row, w, height, "left");
+	}
 	return [
 		{
 			id: "peek",
@@ -1200,7 +1209,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 		info?.last &&
 		(panes.narrow || !(panes.applied.id === e.id && panes.applied.view !== "editor" && panes.applied.shell?.at !== "replace"))
 	) {
-		const label = `${(info.last.who === "you" ? "you" : e.harness).padEnd(Math.max(3, e.harness.length))} `;
+		const label = info.last.who === "you" ? "you " : "  › ";
 		const pad = visibleWidth(label);
 		const text = wrapTextWithAnsi(info.last.text.replace(/\s+/g, " ").trim(), inner - pad);
 		const shown = text.length > 3 ? [...text.slice(0, 2), truncateToWidth(text.slice(2).join(" "), inner - pad, "…")] : text;
@@ -1211,27 +1220,22 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	const actions = peekButtons(row);
 	const session = actions.filter(([, , act]) => ["focus", "stop", "wake", "reload", "new", "parent"].includes(act));
 	const organize = actions.filter(([, , act]) => ["snooze", "archive", "group", "unseen"].includes(act));
-	const col = Math.max(Math.floor(inner / 2), ...session.map(([label, k]) => visibleWidth(` ${k} ${label}`) + 3));
-	const stacked = col + Math.max(...organize.map(([label, k]) => visibleWidth(` ${k} ${label}`))) > inner;
-	const button = (action: [string, string, RowAct] | undefined, from: number, width: number): string => {
-		if (!action) return " ".repeat(width);
-		const [label, k, act] = action;
-		const text = truncateToWidth(act === "focus" ? bold(` ${k} ${label}`) : ` ${bold(k)} ${label}`, width, "…", true);
-		buttons.push({ y: buttonLines.length, from, to: from + width, command: { kind: "row", act, row: row.key }, text });
-		return text;
-	};
-	if (stacked) {
-		for (const [heading, group] of [
-			["Session", session],
-			["Organize", organize],
-		] as const) {
-			buttonLines.push(` ${heading}`);
-			for (const action of group) buttonLines.push(button(action, 0, inner));
+	for (const [heading, group] of [
+		["Session", session],
+		["Organize", organize],
+	] as const) {
+		let line = `${heading}  `;
+		for (const [label, k, act] of group) {
+			const text = truncateToWidth(act === "focus" ? bold(`${k} ${label}`) : key(k, label), inner - 2, "…");
+			if (visibleWidth(line) + visibleWidth(text) > inner) {
+				buttonLines.push(line.trimEnd());
+				line = "  ";
+			}
+			const from = visibleWidth(line);
+			buttons.push({ y: buttonLines.length, from, to: from + visibleWidth(text), command: { kind: "row", act, row: row.key }, text });
+			line += `${text}  `;
 		}
-	} else {
-		buttonLines.push(`${" Session".padEnd(col)} Organize`);
-		for (let i = 0; i < Math.max(session.length, organize.length); i++)
-			buttonLines.push(`${button(session[i], 0, col - 3)}   ${button(organize[i], col, inner - col)}`);
+		buttonLines.push(line.trimEnd());
 	}
 	const body = [...head, ...(head.length + turn.length + 1 + buttonLines.length + 2 <= maxHeight ? turn : []), rule];
 	const buttonsAt = body.length;

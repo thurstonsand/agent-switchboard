@@ -49,7 +49,9 @@ function lines(prefix: string, columns = Infinity): string[] {
 	];
 	const organize = [bold("  Organize"), row("s", "Snooze / unsnooze"), row("u", "Mark / unmark Unseen"), row("m", "Pick or rename Group")];
 	const settings = [bold("  Copy & settings"), row("y / Y", "Copy swb open <id> / @session:<id>"), row(",", "Settings")];
-	const left = [...start, "", ...move, "", ...relationships, "", ...lifecycle, "", ...organize, "", ...settings].flatMap((s) => s.split("\n"));
+	const left = [...start, "", ...move, "", ...relationships, "", ...lifecycle, "", ...organize, "", ...settings].flatMap((s) =>
+		s.split("\n"),
+	);
 	const states = [
 		bold("  State marks"),
 		`  ${blockedMark("◆")} blocked · waiting for you`,
@@ -60,13 +62,15 @@ function lines(prefix: string, columns = Infinity): string[] {
 		"  ○ idle · running",
 		"  – dormant · not running",
 		"  ✓ archived",
-		dim("  Stopped · turn ended early on purpose"),
-		dim("  Snoozed · until its time or next message"),
+		"    Stopped · turn ended early on purpose",
+		"    Snoozed · until its time or next message",
 		"",
 		bold("  Relationships & schedules"),
 		`  ${dim("⎇")}  worktree`,
 		`  ${blue("↳")}  started by Operator or session; Peek names who`,
-		"  +N folded family       ◷ once / ↻ recurring schedule",
+		"  +N folded family",
+		"  ◷  once schedule",
+		"  ↻  recurring schedule",
 	];
 	const right = [
 		bold("  From any pane · Views"),
@@ -82,7 +86,7 @@ function lines(prefix: string, columns = Infinity): string[] {
 		row(`${prefix} J K`, "Next / previous session; j k in roster"),
 		"",
 		bold("  From any pane · session actions"),
-		row(`${prefix} + roster key`, "Run its action; S snoozes, s opens shell"),
+		row(`${prefix} key`, "Run roster action; S snoozes, s opens shell"),
 		row(`${prefix} d`, "Remove highlighted directory in picker"),
 		row(`${prefix} q / ?`, "Leave Deck from anywhere / help"),
 		row(`${prefix} ${prefix}`, `Send literal ${prefix}`),
@@ -112,13 +116,18 @@ export async function help(): Promise<void> {
 	const prefix = loadConfig().prefix;
 	let all = lines(prefix, process.stdout.columns - 2);
 	let top = 0;
+	let page = 1;
 	const room = () => Math.max(1, process.stdout.rows - 4);
 	const overflow = () => Math.max(0, all.length - room());
 	const draw = () => {
 		const width = process.stdout.columns;
 		all = lines(prefix, width - 2);
 		top = Math.max(0, Math.min(overflow(), top));
-		const below = all.length - top - room();
+		const body = all.slice(top, top + room());
+		// A heading at the page's foot belongs with its first entry on the next page.
+		if (body.length > 1 && body.at(-1)?.startsWith("\x1b[1m  ")) body.pop();
+		page = body.length;
+		const below = all.length - top - page;
 		const more = [top > 0 ? `↑ ${top}` : "", below > 0 ? `↓ ${below} more lines` : ""].filter(Boolean).join(" ");
 		const hint =
 			overflow() === 0
@@ -126,7 +135,7 @@ export async function help(): Promise<void> {
 				: width < 80
 					? `${more.replace(" lines", "")} · j/k scroll · PgDn page · Esc close`
 					: `${more} · j/k ↑/↓ scroll · PgUp/PgDn page · Esc closes`;
-		const shown = [...all.slice(top, top + room()), "", `  ${hint}`];
+		const shown = [...body, ...Array<string>(room() - body.length).fill(""), "", `  ${hint}`];
 		const framed = [
 			`${gray("╭─")} Keys ${gray("─".repeat(Math.max(0, width - 12)))} ✕ ${gray("╮")}`,
 			...shown.map((line) => `${gray("│")}${truncateToWidth(line, width - 2, "", true)}${gray("│")}`),
@@ -144,7 +153,7 @@ export async function help(): Promise<void> {
 	process.stdin.on("data", (data: Buffer) => input.process(data));
 	await new Promise<void>((resolve) =>
 		input.on("data", (data) => {
-			const step = overflow() === 0 ? null : scroll(data, room());
+			const step = overflow() === 0 ? null : scroll(data, page);
 			if (step === null) resolve();
 			else {
 				top += step;

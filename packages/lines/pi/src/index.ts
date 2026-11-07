@@ -113,7 +113,7 @@ export default function (pi: ExtensionAPI) {
 	const showFailure = () =>
 		ui?.setStatus(
 			"swb",
-			`roster: \x1b[1mR\x1b[22m reload · \x1b[1;31mswb: not recording\x1b[22;39m · transcript saved · ${failureText()}\x1b[22m`,
+			`\x1b[1;31mswb: not recording\x1b[22;39m · roster: \x1b[1mR\x1b[22m reload · transcript saved · ${failureText()}\x1b[22m`,
 		);
 
 	const connect = (): Db => {

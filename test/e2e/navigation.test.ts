@@ -172,7 +172,11 @@ test("? fits every key in a tall Deck, and in a short one scrolls them by wheel 
 	s.keys("k", "k", "Up");
 	await until(() => s.screen().includes("↓ 3 more lines ·"), budgets.settle, "k and ↑ back up");
 	s.keys("j");
-	await until(() => s.screen().includes("↓ 2 more lines ·"), budgets.settle, "j down");
+	await until(() => s.screen().includes("↑ 16 ↓ 3"), budgets.settle, "j down, keeping the next heading with its entry");
+	expect(s.screen()).not.toContain("Copy & settings");
+	s.keys("j");
+	await until(() => s.screen().includes("Copy & settings"), budgets.settle, "the heading with its first entry");
+	expect(s.screen()).toContain("Copy swb open");
 	expect(state(s).cursor).toBe(cursor);
 	s.keys("q");
 	await until(() => !s.screen().includes("PgUp/PgDn page"), budgets.settle, "q closes it");

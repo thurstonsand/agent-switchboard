@@ -31,7 +31,7 @@ import { setOrReset, withValue } from "../write-config.ts";
 import { type Binding, bindingFor, legendParts } from "./model.ts";
 import { PRESET_HEADER, presetColumns } from "./preset-table.ts";
 import type { SettingsState } from "./protocol.ts";
-import { bold, cyan, gray, green, key, red, shortPath, yellow } from "./style.ts";
+import { bold, cyan, gray, green, key, keyName, red, shortPath, yellow } from "./style.ts";
 
 // Settings: every key of config.toml as a list to read and change, drawn by the roster across the whole Deck.
 // Setting a value back to the default takes the key out of the file.
@@ -657,7 +657,7 @@ export class SettingsPane {
 				return gray("a whole number then s, m, h, or d: 30m, 72h, 3d");
 			}
 		}
-		return gray("⏎ saves · esc cancels");
+		return "";
 	}
 
 	// ── prose ──────────────────────────────────────────────────────────
@@ -1534,7 +1534,7 @@ export class SettingsPane {
 
 	settingParts(s: Setting, i: number, lit: boolean, labelWidth: number, width: number): Part[] {
 		const set = this.isSet(s);
-		const label = ` ${truncateToWidth(s.label, labelWidth, "…", true)}  `;
+		const label = `${set ? "•" : " "}${truncateToWidth(s.label, labelWidth, "…", true)}  `;
 		const editingHere = i === this.cursor ? this.editing : null;
 		if (editingHere?.kind === "text" && editingHere.target.kind === "setting")
 			return [
@@ -1558,13 +1558,7 @@ export class SettingsPane {
 		if (!set && s.fallback().from && s.control.kind !== "prose") parts.push([`  ${gray(`(${s.fallback().from})`)}`, null]);
 		if (lit && s.control.kind !== "prose") {
 			const fallback = s.fallback();
-			if (set)
-				parts.push(
-					["   ", null],
-					[gray(`default ${show(s, fallback.value)}`), null],
-					["  ", null],
-					[gray("↺ reset"), { kind: "reset", at: i }],
-				);
+			if (set) parts.push(["   ", null], [gray(`default ${show(s, fallback.value)}`), null]);
 		}
 		return parts;
 	}
@@ -1723,7 +1717,7 @@ export class SettingsPane {
 		const s = this.settingOf(item);
 		let text = s?.description ?? (this.searching ? "" : SECTION_ABOUT[SECTIONS[this.section] as Section]);
 		const editing = this.editing;
-		if (editing?.kind === "text") return [`   ${this.textNote(editing)}`, ""];
+		const note = editing?.kind === "text" ? this.textNote(editing) : "";
 		if (editing?.kind === "chord")
 			return [
 				editing.error
@@ -1735,7 +1729,8 @@ export class SettingsPane {
 			const choice = this.choices()[item.index];
 			text = choice?.reason ?? choice?.note ?? "";
 		}
-		return wrapTextWithAnsi(text, width - 2).map((line) => `  ${line}`);
+		text = text.replaceAll("M-a", keyName(this.host.loaded().config.prefix));
+		return [...(note ? [`  ${note}`] : []), ...wrapTextWithAnsi(text, width - 2).map((line) => `  ${line}`)];
 	}
 
 	/** The config error has the whole list's place while it stands, so the message line doesn't repeat it. */

@@ -2770,7 +2770,7 @@ export function stageKeys(): Binding<Command>[] {
 	if (panes.applied.target === PLACEHOLDER || harnessStarting(panes.applied))
 		return [bind([], "esc", "roster", { kind: "roster", to: "focus" }), help];
 	return [
-		bind([], `${prefix} → tab`, "roster", { kind: "roster", to: "focus" }),
+		bind([], "tab", "roster", { kind: "roster", to: "focus" }),
 		bind([], "z", "hide", { kind: "roster", to: "hide" }),
 		bind([], "?", "keys", { kind: "help" }),
 	];
