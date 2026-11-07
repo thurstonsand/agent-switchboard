@@ -2,7 +2,7 @@ import { expect } from "bun:test";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState } from "../../../packages/cli/src/deck/protocol.ts";
-import { projectRoot, SCHEMA_VERSION } from "../../../packages/shared/src/index.ts";
+import { SCHEMA_VERSION } from "../../../packages/shared/src/index.ts";
 import { claudeAutoMode, recalled, subagentDone } from "../harness/agents.ts";
 import { config, cursorTo, launched, launchTry, seed } from "../harness/deck.ts";
 import { git, gitRepo, gitWorktree, type LsEntry, type PiPackage, release, repo, type Scenario, until, which } from "../harness/index.ts";
@@ -344,10 +344,9 @@ export const directors: Record<string, Director> = {
 				);
 			}
 			// The Deck opens on the flaky test with every section unfolded.
-			s.query("DELETE FROM deck_layouts");
+			s.query("DELETE FROM deck_layout");
 			s.query(
-				"INSERT INTO deck_layouts (project_root, state, saved_at) VALUES (?, ?, ?)",
-				projectRoot(switchboard),
+				"INSERT INTO deck_layout (id, state, saved_at) VALUES (1, ?, ?)",
 				JSON.stringify({ selectedKey: flaky, rosterCols: null, collapsed: [], expanded: ["inactive", "snoozed", "archived"] }),
 				Date.now(),
 			);
