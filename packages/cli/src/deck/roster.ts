@@ -595,7 +595,8 @@ function clickable(y: number, parts: Part[]): string {
 
 /** Narrow details reuse the Peek, with scrolling when a short terminal cannot show it all. */
 function detailView(row: Row | undefined, width: number, height: number): (OverlayView & { total: number }) | null {
-	if (!panes.narrow || !model.details.expanded || row?.kind !== "session" || model.mode.kind !== "roster") return null;
+	// tmux resizes the unzoomed panes before the narrow layout zooms the roster; details need the same room as a floating Peek.
+	if (width < PEEK_MIN_COLS || !panes.narrow || !model.details.expanded || row?.kind !== "session" || model.mode.kind !== "roster") return null;
 	const view = peekView(row, width, Infinity, "right");
 	const top = Math.min(model.details.top, Math.max(0, view.lines.length - height));
 	return {

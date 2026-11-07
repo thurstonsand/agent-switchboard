@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import type { DeckState } from "../../packages/cli/src/deck/protocol.ts";
-import { cursorTo, seed, state, terminal, waitState } from "./harness/deck.ts";
+import { config, cursorTo, seed, state, terminal, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -78,6 +78,35 @@ test("a narrow terminal shows one pane at a time: Enter shows pi, M-a h returns 
 	await waitState(s, "both panes again", (x) => !x.layout.rosterOnly && !x.layout.rosterHidden);
 	await until(() => s.screen().includes("narrow-one") && s.screen().includes(" swb "), budgets.settle, "roster and pi side by side");
 	s.save("widened.txt", s.screen());
+});
+
+test("expanded details survive resizing an editor and split Deck through its narrow threshold", async () => {
+	s = scenario("phase5", "resize-details");
+	config(s, 'editor = "cat -v"');
+	const [id] = (await seed(s, { turns: ["resize-details"] })) as [string];
+	s.swb("drive", "start", "--size", "80x30", "--theme", "tokyo-night");
+	await cursorTo(s, id);
+	s.keys("i");
+	await until(() => s.screen().includes("Organize"), budgets.settle, "expanded details");
+	for (const view of ["e", "v"]) {
+		s.swb("drive", "resize", "175x48");
+		await waitState(s, "wide Deck", (x) => !x.layout.rosterOnly);
+		s.keys("Enter");
+		await waitState(s, "session focused", (x) => x.focus !== "roster" && x.staged.kind === "live", budgets.piReady);
+		s.keys("M-a", view);
+		await waitState(s, "editor focused", (x) => x.focus === "editor");
+		s.keys("M-a", "h");
+		await waitState(s, "roster focused", (x) => x.focus === "roster");
+		for (const [size, width] of [
+			["80x30", "80"],
+			["40x15", "40"],
+		] as const) {
+			s.swb("drive", "resize", size);
+			await waitState(s, `responsive Deck at ${size}`, (x) => x.layout.width === Number(width) && x.layout.rosterOnly);
+			await until(() => s.screen().includes("details") && !s.screen().includes("Bun v"), budgets.settle, "full-width roster and details");
+			expect(s.tmux(s.servers.sessions, "display", "-p", "-t", "=deck:.0", "#{pane_width}")).toBe(width);
+		}
+	}
 });
 
 test("every swb attaches its terminal to the one Deck: swb open in one moves it in all, keys from any reach it, and q leaves from the one that typed it", async () => {
