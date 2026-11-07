@@ -144,6 +144,53 @@ test("the mouse reaches everything the keys do: a row's Peek, the hidden or narr
 	expect(state(s).cursor).toBe(a);
 });
 
+test("Escape followed by mouse motion clears the filter without typing the report", async () => {
+	s = scenario("phase6", "escape-mouse");
+	const [a, b] = (await seed(s, { turns: ["alpha"], title: "alpha" }, { turns: ["bravo"], title: "bravo" })) as [string, string];
+	s.swb("drive", "start", "--size", "80x28");
+	await waitState(s, "the narrow Deck", (x) => x.ready && x.layout.rosterOnly);
+	const raw = (data: string) => s.tmux(s.servers.sessions, "send-keys", "-t", "=deck:.0", "-l", data);
+	const clientRaw = (data: string) =>
+		s.tmux(s.servers.drive, "send-keys", "-t", "=drive:", "-H", ...[...Buffer.from(data)].map((b) => b.toString(16).padStart(2, "0")));
+	for (const narrow of [true, false]) {
+		s.swb("drive", "resize", narrow ? "80x28" : "140x40");
+		await waitState(s, "the roster resized", (x) => x.layout.rosterOnly === narrow);
+		await cursorTo(s, a);
+		await onScreen("bravo", "the hover target");
+		const [x, y] = find("bravo");
+		const report = narrow ? "[<35;62;2M" : `[<35;${x};${y}M`;
+		s.keys("/", "-l", "zzz");
+		await waitState(s, "the filter before input through tmux", (x) => x.filter === "zzz");
+		clientRaw(`\x1b\x1b${report}`);
+		await waitState(s, "Escape and motion through the tmux client clear the filter", (x) => x.mode === "roster" && x.filter === "");
+		for (const chunks of [
+			[`\x1b\x1b${report}`],
+			["\x1b\x1b", report],
+			["\x1b", "\x1b", report.slice(0, -1), "M"],
+			["\x1b[27;3u", report],
+		]) {
+			s.keys("/", "-l", "zzz");
+			await waitState(s, "the empty filter", (x) => x.mode === "filter" && x.filter === "zzz");
+			await onScreen("No matching sessions", "the empty result");
+			for (const chunk of chunks) raw(chunk);
+			await waitState(s, `Escape clears with ${chunks.length} input chunks`, (x) => x.mode === "roster" && x.filter === "");
+			await onScreen("alpha", "the session restored");
+			expect(s.screen()).not.toContain("[<35;");
+		}
+	}
+	s.keys("Escape");
+	await cursorTo(s, a);
+	s.keys("m");
+	await waitState(s, "the Group form", (x) => x.mode === "name");
+	await onScreen("Group for alpha", "the floating form");
+	const [x, y] = find("bravo");
+	clientRaw(`\x1b\x1b[<35;${x};${y}M`);
+	await waitState(s, "Escape closes Group and the recovered mouse opens bravo's Peek", (x) => x.mode === "roster" && x.peek?.id === b);
+	s.keys("Escape", "/");
+	raw("\x1b[200~literal[<35;62;2M\x1b[201~");
+	await waitState(s, "pasted mouse-like text stays literal", (x) => x.mode === "filter" && x.filter === "literal[<35;62;2m");
+});
+
 test("a blocked Peek focuses its own session to respond, even while another row is selected", async () => {
 	s = scenario("phase6", "peek-respond");
 	const [a, b] = (await seed(s, { turns: ["alpha"], title: "alpha" }, { turns: ["bravo"], title: "bravo" })) as [string, string];

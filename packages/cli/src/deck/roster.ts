@@ -3,7 +3,6 @@ import { basename } from "node:path";
 import {
 	type Component,
 	type Focusable,
-	ProcessTerminal,
 	sliceByColumn,
 	TuiAltScreen,
 	type TuiMouseEvent,
@@ -122,6 +121,7 @@ import {
 	underline,
 	wakeAt,
 } from "./style.ts";
+import { DeckTerminal } from "./terminal.ts";
 
 function glyph(state: State, now: number): string {
 	switch (state) {
@@ -1446,7 +1446,7 @@ function viewState(): DeckState {
 	};
 }
 
-const tui = new TuiAltScreen(new ProcessTerminal(), true, undefined, { mouse: true });
+const tui = new TuiAltScreen(new DeckTerminal(), true, undefined, { mouse: true });
 
 const roster = new Roster();
 
