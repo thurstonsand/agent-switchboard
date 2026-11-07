@@ -61,7 +61,7 @@ test("M-a e swaps the Stage to nvim in the session's directory, and back", async
 
 	const tab = (label: string): [string, string] => {
 		const lines = s.screen().split("\n");
-		const y = lines.findIndex((line) => /: .* v split /.test(line));
+		const y = lines.findIndex((line) => /→ .* v split /.test(line));
 		expect(y).toBeGreaterThan(-1);
 		return [String((lines[y] as string).indexOf(` ${label} `) + 1), String(y)];
 	};
@@ -69,7 +69,7 @@ test("M-a e swaps the Stage to nvim in the session's directory, and back", async
 	await waitState(s, "the editor tab clicked", (x) => x.staged.view === "editor");
 	s.save("editor-tab.txt", s.screen());
 	await Bun.sleep(500);
-	s.swb("drive", "click", ...tab("pi"));
+	s.swb("drive", "click", ...tab("agent"));
 	await waitState(s, "the pi tab clicked", (x) => x.staged.view === "agent");
 });
 

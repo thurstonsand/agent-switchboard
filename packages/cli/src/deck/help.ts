@@ -47,12 +47,15 @@ function lines(prefix: string, columns = Infinity): string[] {
 		bold("  State marks"),
 		"  ○ idle · running       – dormant · not running",
 		`  ${bold(cyan("◐"))} working              ${green("●")} Unseen · finished since last viewed`,
-		`  ${blockedMark("◆")} blocked              ${bold(red("!"))} cut off · resume unfinished turn`,
+		`  ${blockedMark("◆")} blocked · waiting for you`,
+		`  ${bold(red("!"))} cut off · resume unfinished turn`,
 		`  ✓ archived             ${bold(red("×"))} errored · inspect and retry`,
+		dim("  stopped: turn ended early on purpose; nothing to resume"),
+		"",
+		bold("  Relationships & schedules"),
 		`  ${dim("⎇")}  worktree`,
-		`  ${blue("⌁")}  started by Operator ↳ started by session`,
+		`  ${blue("↳")}  started by Operator or session; Peek names who`,
 		"  +N folded family       ◷ once / ↻ recurring schedule",
-		"  stopped: turn ended early on purpose; nothing to resume",
 	];
 	const right = [
 		...states,

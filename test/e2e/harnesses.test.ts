@@ -83,6 +83,15 @@ test("the Deck's n opens on the default preset, puts its real TUI on the Stage, 
 	// The launch card on the Stage says what runs: the harness, then the model.
 	const card = await waitState(s, "the launch card", (x) => (x.launch?.card ?? null) !== null);
 	expect(card.launch?.card?.[1]).toContain("claude · opus");
+	s.swb("drive", "resize", "80x24");
+	const compact = await waitState(
+		s,
+		"two content rows leave room for directories",
+		(x) => x.layout.rosterOnly && x.launch?.card?.length === 4,
+	);
+	expect(compact.launch?.card?.[1]).toContain("claude · opus");
+	expect(compact.launch?.card?.[2]).toContain("default effort");
+	s.swb("drive", "resize", "160x40");
 	// The menu keeps the shortlist's numbers; a number picks Codex, and Esc in a reopened menu keeps it.
 	s.keys("Tab");
 	const menu = await waitState(s, "the menu", (x) => x.launch?.menu?.some((l) => l.includes("codex")) ?? false);
@@ -142,7 +151,7 @@ test("the Deck's n opens on the default preset, puts its real TUI on the Stage, 
 	await cursorTo(s, id);
 	await waitState(s, "the dormant card", (x) => x.staged.kind === "dormant" && x.staged.id === id);
 	await until(() => /claude\s+SWB-from-the-deck/.test(s.screen()), budgets.settle, "Claude's reply on the card, labelled claude");
-	expect(s.screen()).toMatch(/ claude +e editor +v split/);
+	expect(s.screen()).toMatch(/Alt\+a → e editor +v split/);
 	expect(state(s).rows.some((r) => r.kind === "session" && r.id === id)).toBe(true);
 	s.save("claude-card.txt", s.screen());
 });

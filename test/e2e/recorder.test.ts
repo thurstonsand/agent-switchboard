@@ -207,7 +207,7 @@ test("swb refuses a db newer than itself, and a recorder started against a misma
 			const text = s.tmux(server, "capture-pane", "-p", "-t", "pi");
 			return (
 				text.includes(
-					`swb: not recording · update swb + pi; roster: R reload · db v${SCHEMA_VERSION + 1}; line expects v${SCHEMA_VERSION}`,
+					`swb: not recording · transcript saved · update swb + pi; roster: R reload · db v${SCHEMA_VERSION + 1}; line expects v${SCHEMA_VERSION}`,
 				) && text
 			);
 		},

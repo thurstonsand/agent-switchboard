@@ -12,7 +12,6 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { VIEWS } from "@swb/shared";
 import { mark } from "@swb/shared/trace";
 import { displayName, openDescendants, projectName } from "../derive.ts";
 import { targetName } from "../dirs.ts";
@@ -365,7 +364,7 @@ function promptOverlay(width: number, height: number): Overlay[] {
 	if (mode.kind !== "archive" && mode.kind !== "name" && mode.kind !== "snooze") return [];
 	const rosterWidth = width;
 	const insert = panes.narrow || mode.kind === "name";
-	width = insert ? width : Math.min(Math.max(width, PEEK_COLS), panes.width - rosterWidth - 1);
+	width = insert ? width : Math.min(Math.max(width, 54), panes.width - rosterWidth - 1);
 	if (width < PEEK_MIN_COLS) return [];
 	const parts = pickerParts(width - 2, height - 2);
 	const row = (line: string) => `${gray("│")}${truncateToWidth(line, width - 2, "…", true)}${gray("│")}`;
@@ -510,7 +509,7 @@ function list(rows: Row[], index: number, width: number, full: number, now: numb
 		height--;
 		if (index >= frame.scrollTop + height) frame.scrollTop = index - height + 1;
 		const first = rows[frame.scrollTop];
-		const header = first?.kind === "session" ? rows.find((r) => r.key === first.header) : first;
+		const header = first?.kind === "session" ? rows.find((r) => r.key === first.header) : undefined;
 		const name = header?.kind === "header" ? (header.group ?? projectName(header.project)) : header?.kind === "section" ? header.label : "";
 		pinned.push(overflowRule(rows.slice(0, frame.scrollTop), "↑", width, name));
 		frame.listTop++;
@@ -526,12 +525,7 @@ function list(rows: Row[], index: number, width: number, full: number, now: numb
 		const y = frame.listTop + out.length;
 		const line = truncateToWidth(rowLine(row, width, now), width, "…", true);
 		if (dragging()?.drop?.header.key === row.key) out.push(cursorLine(line, true));
-		else if (i === index)
-			out.push(
-				row.kind === "session"
-					? cursorLine(line, model.focus === "roster")
-					: line.replace(/[▸▾]/, (mark) => cursorLine(mark, model.focus === "roster")),
-			);
+		else if (i === index) out.push(cursorLine(row.kind === "session" ? line : `▌${line.slice(1)}`, model.focus === "roster"));
 		else out.push(line);
 		if (row.kind === "session" && row.family.length > 0) {
 			const at = foldColumn(row);
@@ -541,7 +535,6 @@ function list(rows: Row[], index: number, width: number, full: number, now: numb
 	out.length = height;
 	if (rows.length === 0) {
 		out[0] = model.snapshot ? (query() ? "   No matching sessions" : "   no sessions yet · n new") : dim("   loading…");
-		if (query() && height > 1) out[1] = clickable(frame.listTop + 1, [[`   ${bold("Esc")} clear filter`, { kind: "clearFilter" }]]);
 	}
 	return [...pinned, ...out];
 }
@@ -596,7 +589,8 @@ function clickable(y: number, parts: Part[]): string {
 /** Narrow details reuse the Peek, with scrolling when a short terminal cannot show it all. */
 function detailView(row: Row | undefined, width: number, height: number): (OverlayView & { total: number }) | null {
 	// tmux resizes the unzoomed panes before the narrow layout zooms the roster; details need the same room as a floating Peek.
-	if (width < PEEK_MIN_COLS || !panes.narrow || !model.details.expanded || row?.kind !== "session" || model.mode.kind !== "roster") return null;
+	if (width < PEEK_MIN_COLS || !panes.narrow || !model.details.expanded || row?.kind !== "session" || model.mode.kind !== "roster")
+		return null;
 	const view = peekView(row, width, Infinity, "right");
 	const top = Math.min(model.details.top, Math.max(0, view.lines.length - height));
 	return {
@@ -612,15 +606,16 @@ function detailRows(width: number, top: number, expanded: boolean): string[] {
 	if (!e) return [""];
 	const parts: Part[] = [[" ", null]];
 	if (model.stage.staged === e.id && e.open) {
-		parts.push([gray(`${keyName(model.config.prefix)}:`), null]);
-		for (const view of VIEWS) {
-			// The first view is the session's own TUI, whichever harness that is.
-			const accelerator = view === "split" ? "v " : view === panes.applied.view || viewOf(e) === "split" ? "" : "e ";
-			const label = ` ${accelerator}${view === "agent" ? e.harness : view} `;
-			parts.push([view === panes.applied.view ? cursorLine(label, true) : label, { kind: "view", view }]);
-		}
+		parts.push([gray(`${keyName(model.config.prefix)} → `), null]);
+		const editor = panes.applied.view === "editor";
+		const splitting = viewOf(e) === "split";
+		const label = `${bold("e")} ${editor ? "agent" : "editor"}`;
+		if (!splitting) parts.push([editor ? cursorLine(label, true) : label, { kind: "view", view: editor ? "agent" : "editor" }]);
+		const split = `${splitting ? "" : "  "}${bold("v")} split`;
+		parts.push([panes.applied.view === "split" ? cursorLine(split, true) : split, { kind: "view", view: splitting ? "agent" : "split" }]);
 		// The shell is a toggle beside the views, not one of them.
-		if (!panes.narrow) parts.push([panes.applied.shell ? cursorLine(" s shell", true) : " s shell", { kind: "shell" }]);
+		const shell = `  ${bold("s")} shell`;
+		if (!panes.narrow) parts.push([panes.applied.shell ? cursorLine(shell, true) : shell, { kind: "shell" }]);
 	}
 	if (panes.narrow && cursorEntry())
 		parts.push(
@@ -628,7 +623,7 @@ function detailRows(width: number, top: number, expanded: boolean): string[] {
 			[`${bold("i")} ${expanded ? "▾" : "▸"} details`, { kind: "details" }],
 			...(expanded ? ([[gray(" · PgUp/PgDn scroll"), null]] as Part[]) : []),
 		);
-	return [truncateToWidth(clickable(top, parts), width, "…")];
+	return [truncateToWidth(clickable(top, parts), Math.max(0, width - 1), "…")];
 }
 
 /** A toast, else the config error, which stays until the file is fixed and opens it on a click; y makes it clickable. */
@@ -663,7 +658,10 @@ function hints(y: number, cols: number): string {
 		);
 	if (filtering()) {
 		const hint = ` · ${filterCount()} · ${bold("Esc")} clears`;
-		return ` ${model.filter.render(Math.max(10, cols - visibleWidth(hint) - 1))[0] ?? ""}${hint}`;
+		return clickable(y, [
+			[` ${model.filter.render(Math.max(10, cols - visibleWidth(hint) - 1))[0] ?? ""}`, null],
+			[hint, { kind: "clearFilter" }],
+		]);
 	}
 	if (nameMode()) return legend(y, keymap(), cols, []);
 	const drag = dragging();
@@ -759,8 +757,9 @@ function overlayConfirm(
 function rowLine(row: Row, width: number, now: number): string {
 	if (row.kind === "header") {
 		const count = gray(` (${row.count})`);
-		const name = row.group === null ? bold(matchedText(projectName(row.project))) : matchedText(row.group);
-		return `${" ".repeat(1 + row.depth * 2)}${row.collapsed ? "▸" : "▾"} ${name}${count}`;
+		const name = row.group === null ? matchedText(projectName(row.project)) : matchedText(row.group);
+		const title = row.group === null && row.depth === 0 ? bold(name) : name;
+		return `${" ".repeat(1 + row.depth * 2)}${row.collapsed ? "▸" : "▾"} ${title}${count}`;
 	}
 	if (row.kind === "section") {
 		const label = ` ${row.expanded ? "▾" : "▸"} ${row.label} ${gray(`(${row.count})`)} `;
@@ -773,7 +772,7 @@ function rowLine(row: Row, width: number, now: number): string {
 		const lead = `${gray("┆")}${rowLead(row)}`;
 		return `${lead}${gray("◌")} ${gray(truncateToWidth(displayName(e), width - visibleWidth(lead) - 2, "…"))}`;
 	}
-	const mark = model.stage.staged === e.id ? (model.focus === "stage" ? cyan("▌") : "▌") : " ";
+	const mark = model.stage.staged === e.id ? (model.focus === "stage" ? cyan("▌") : cursorEntry() ? "▌" : dim("▌")) : " ";
 	const lead = `${mark}${rowLead(row)}`;
 	// A snoozed row says when it wakes instead: ↘ for its next message. Mid-turn, the glyph already says it's active.
 	const when = !e.open
@@ -781,7 +780,7 @@ function rowLine(row: Row, width: number, now: number): string {
 		: e.snoozed
 			? e.snoozedUntil === null
 				? "↘"
-				: wakeAt(e.snoozedUntil, now)
+				: `◷ ${wakeAt(e.snoozedUntil, now)}`
 			: e.activity === "working"
 				? ""
 				: age(e.activityAt, now);
@@ -818,7 +817,7 @@ function rowLead(row: SessionRow): string {
 }
 
 function originMark(from: "session" | "operator" | null): string {
-	return from === "operator" ? blue("⌁") : from === "session" ? "↳" : " ";
+	return from === "operator" ? blue("↳") : from === "session" ? "↳" : " ";
 }
 
 /** Where a row's fold is: the column a click on it folds or opens its family from. */
@@ -862,7 +861,7 @@ function foldedTally(hidden: Entry[]): string {
 // covers the roster. A narrow Deck uses its bottom particulars instead. tmux puts a hover Peek away when
 // the pointer leaves (see deck.ts).
 
-const PEEK_COLS = 54;
+const PEEK_COLS = 72;
 
 /** The most of a folded family a Peek lists. */
 const PEEK_FOLD_ROWS = 8;
@@ -939,7 +938,14 @@ function launchOverlays(choosing: Choosing, width: number, height: number): Over
 
 /** A path too long for the Peek keeps its end, where the directories that tell sessions apart are. */
 function tailOf(path: string, width: number): string {
-	return visibleWidth(path) <= width ? path : `…${path.slice(path.length - width + 1)}`;
+	if (visibleWidth(path) <= width) return path;
+	const parts = path.split("/");
+	while (parts.length > 1) {
+		parts.shift();
+		const tail = `…/${parts.join("/")}`;
+		if (visibleWidth(tail) <= width) return tail;
+	}
+	return truncateToWidth(`…/${parts[0]}`, width, "…");
 }
 
 function ago(at: number, now: number): string {
@@ -1003,7 +1009,7 @@ function launchCard(choosing: Choosing, width: number): OverlayView {
 		...(menu
 			? []
 			: [
-					...presetNote(chosen?.note ?? "", inner).map(frame),
+					...(panes.narrow ? [] : presetNote(chosen?.note ?? "", inner).map(frame)),
 					...(chosen
 						? [frame(gray(`${chosen.preset.effort ?? "default"} effort${chosen.preset.provider ? ` · ${chosen.preset.provider}` : ""}`))]
 						: []),
@@ -1089,12 +1095,13 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	const titleLines = title.length > 2 ? [title[0] as string, truncateToWidth(title.slice(1).join(" "), inner, "…")] : title;
 	if (!Bun.stripANSI(rowLine(row, panes.narrow ? width : panes.rosterWidth(), now)).includes(displayName(e)))
 		head.push(...titleLines.map((line) => bold(line)));
-	head.push(...wrapTextWithAnsi(`${glyph(stateOf(e), now)} ${status(e)}${launchElapsed(e, now)}`, inner));
-	head.push(
-		`${gray("created")} ${ago(e.createdAt, now)} · ${e.open ? `${gray("active")} ${e.activity !== "idle" ? "now" : ago(e.activityAt, now)}` : `${gray("archived")} ${ago(archivedKey(e), now)}`}`,
-	);
+	const state = `${glyph(stateOf(e), now)} ${status(e)}${e.snoozed ? " · snoozed" : ""}${launchElapsed(e, now)}`;
+	const times = `${gray("created")} ${ago(e.createdAt, now)} · ${e.open ? `${gray("active")} ${e.activity !== "idle" ? "now" : ago(e.activityAt, now)}` : `${gray("archived")} ${ago(archivedKey(e), now)}`}`;
+	if (panes.narrow && visibleWidth(`${state} · ${times}`) <= inner) head.push(`${state} · ${times}`);
+	else head.push(...wrapTextWithAnsi(state, inner), times);
 	const harness = `${e.harness} · `;
-	head.push(rule, `${harness}${tailOf(shortPath(e.cwd), inner - visibleWidth(harness))}`);
+	if (!panes.narrow) head.push(rule);
+	head.push(`${harness}${tailOf(shortPath(e.cwd), inner - visibleWidth(harness))}`);
 	const info = model.peek.info.get(e.id)?.info;
 	if (e.branch) {
 		const diff = info?.diff;

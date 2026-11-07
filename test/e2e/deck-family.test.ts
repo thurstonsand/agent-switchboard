@@ -95,7 +95,7 @@ test("a session an agent started nests under it; its Peek's Parent action and p 
 	expect(rosterLine(" c1")).toContain("  └─ ● c1");
 	expect(rosterLine(" g1")).toContain("     └─ ● g1");
 	expect(rosterLine(" port")).toMatch(/● port\s+↳/);
-	expect(rosterLine(" bump")).toMatch(/● bump\s+⌁/);
+	expect(rosterLine(" bump")).toMatch(/● bump\s+↳/);
 	s.save("families.txt", s.screen());
 	s.save("families.ansi", s.swb("drive", "capture", "--ansi"));
 
@@ -123,7 +123,7 @@ test("a session an agent started nests under it; its Peek's Parent action and p 
 	expect(portPeek.some((l) => l.includes("started by ↳ c1"))).toBe(true);
 	expect(portPeek.some((l) => l.includes("p Parent"))).toBe(true);
 	expect(portPeek.some((l) => l.includes("in project"))).toBe(true);
-	expect((await peekOf(bump)).some((l) => l.includes("started by ⌁  op"))).toBe(true);
+	expect((await peekOf(bump)).some((l) => l.includes("started by ↳  op"))).toBe(true);
 	s.save("peek-bump.txt", s.screen());
 
 	await cursorTo(s, port);

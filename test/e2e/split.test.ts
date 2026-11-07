@@ -49,7 +49,7 @@ function shells(s: Scenario): string[] {
 		.filter((line) => line.endsWith("\tshell"));
 }
 
-test("M-a v splits the editor at 65% beside pi; M-a h and l walk all three panes; the split follows the session", async () => {
+test("M-a v splits the Stage equally between editor and pi; M-a h and l walk all three panes; the split follows the session", async () => {
 	s = scenario("phase4", "split");
 	config(s, 'editor = "cat -v"');
 	const [other] = (await seed(s, { turns: ["other"] })) as [string];
@@ -61,7 +61,7 @@ test("M-a v splits the editor at 65% beside pi; M-a h and l walk all three panes
 	const [roster, editor, pi] = panes(s) as [Pane, Pane, Pane];
 	expect(panes(s).length).toBe(3);
 	expect(roster.width).toBe(42);
-	expect(Math.abs(editor.width / (editor.width + pi.width + 1) - 0.65)).toBeLessThan(0.02);
+	expect(Math.abs(editor.width - pi.width)).toBeLessThanOrEqual(1);
 	// Even from pi view with the keyboard on pi, splitting means I want to look at the editor.
 	await until(() => activePane(s) === 1, budgets.settle, "the keyboard on the editor");
 	await waitState(s, "focus on the editor", (x) => x.focus === "editor");
@@ -354,11 +354,11 @@ test("the shell opens beside a wide pi and below a tall one, keeps its side whil
 	);
 	s.swb("drive", "resize", "200x50");
 	await waitState(s, "still beside at 200x50", (x) => x.layout.width === 200 && x.layout.shell === "beside");
-	// Splitting with the shell beside still gives the Editor 65% of the Stage, and the shell goes under pi.
+	// Splitting with the shell beside still halves the Stage, and the shell goes under pi.
 	st = await prefixKeys(s, "M-a", "v", "split, the shell below pi", (x) => x.layout.split && x.layout.shell === "below");
 	await until(() => boxes(s).length === 4, budgets.settle, "four panes");
 	const [, splitEditor, splitPi, splitShell] = boxes(s) as [Box, Box, Box, Box];
-	expect(Math.abs(splitEditor.width / (splitEditor.width + splitPi.width + 1) - 0.65)).toBeLessThan(0.02);
+	expect(Math.abs(splitEditor.width - splitPi.width)).toBeLessThanOrEqual(1);
 	expect(splitShell.left).toBe(splitPi.left);
 	// tmux takes M-a l to whichever of pi and the shell had the keyboard last.
 	if ((await prefixKeys(s, "M-a", "l", "M-a l off the editor", (x) => x.focus !== "editor")).focus !== "shell")

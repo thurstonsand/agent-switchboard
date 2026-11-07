@@ -525,7 +525,7 @@ export class StagePanes {
 						"-h",
 						"-d",
 						"-l",
-						"35%",
+						"50%",
 						"-t",
 						this.main.pane,
 						"-P",

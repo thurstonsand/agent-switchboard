@@ -1427,10 +1427,7 @@ export class SettingsPane {
 		// Headings keep their place above the first row in view.
 		if (!this.scrolledAway && this.scroll > 0 && items[this.scroll - 1]?.kind === "heading" && this.cursor - this.scroll + 1 < room)
 			this.scroll--;
-		const labelWidth = Math.min(
-			36,
-			Math.max(12, ...items.map((i) => (i.kind === "setting" && i.s.control.kind !== "paths" ? visibleWidth(i.s.label) : 0))),
-		);
+		const labelWidth = Math.min(40, Math.max(12, ...items.map((i) => (i.kind === "setting" ? visibleWidth(i.s.label) : 0))));
 		const rows: string[] = [];
 		for (let i = this.scroll; rows.length < listHeight && i < items.length; i++) {
 			const y = this.listTop + rows.length;
@@ -1583,7 +1580,7 @@ export class SettingsPane {
 
 	shortlistParts(i: number): Part[] {
 		const custom = this.host.loaded().config.presets !== null;
-		const title = bold("Shortlist");
+		const title = `${bold("Shortlist")} ${gray("· ★ default")}`;
 		const right: Part = custom ? [gray("↺"), { kind: "reset", at: i }] : ["", null];
 		const listed = this.host.catalog() === null && !custom ? [gray("   finding harnesses…"), null] : null;
 		return [[title, null], ...(listed ? [listed as [string, null]] : []), [" ", null], right];

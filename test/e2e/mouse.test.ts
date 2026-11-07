@@ -44,7 +44,7 @@ async function peekButton(row: string, id: string, button: string): Promise<void
 /** Whether `text` on line `y` sits on a background fill: the last background code before it isn't a reset. */
 function filled(y: number, text: string): boolean {
 	const before = (s.swb("drive", "capture", "--ansi").split("\n")[y] as string).split(text)[0] as string;
-	return [...before.matchAll(/\[(48;2;[\d;]+|49)m/g)].at(-1)?.[1] !== "49";
+	return [...before.matchAll(/\[(48;2;[\d;]+|49|0)m/g)].at(-1)?.[1]?.startsWith("48;2;") === true;
 }
 
 async function onScreen(text: string, what: string): Promise<void> {
@@ -211,9 +211,9 @@ test("a Peek follows the pointer and the cursor keys, leaves with the pointer, a
 	// A control lights only while the pointer is on it: leaving the roster for pi puts it out.
 	const [tabX, tabY] = find(" editor ");
 	s.swb("drive", "move", tabX, tabY);
-	await until(() => filled(Number(tabY), " editor "), budgets.settle, "the editor tab lit under the pointer");
+	await until(() => filled(Number(tabY), " editor"), budgets.settle, "the editor tab lit under the pointer");
 	s.swb("drive", "move", "100", "35");
-	await until(() => !filled(Number(tabY), " editor "), budgets.settle, "the editor tab out once the pointer is on pi");
+	await until(() => !filled(Number(tabY), " editor"), budgets.settle, "the editor tab out once the pointer is on pi");
 
 	// The cursor's keys bring its Peek.
 	s.keys(toB);
@@ -345,8 +345,8 @@ test("narrow details expand by key and click, scroll, follow the selection, and 
 	expect(s.screen()).not.toContain("got descendant");
 	s.keys("i", "/", "-l", "nothingmatches");
 	await onScreen("No matching sessions", "empty filter");
-	expect(s.screen()).toContain("Esc clear filter");
-	await click("Esc clear filter", 85);
+	expect(s.screen().match(/Esc clears/g)).toHaveLength(1);
+	await click("Esc clears", 85);
 	await waitState(s, "filter cleared by its recovery action", (x) => x.filter === "");
 	expect(s.screen()).toContain("parent");
 });
