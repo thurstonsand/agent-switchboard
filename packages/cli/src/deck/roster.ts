@@ -1104,7 +1104,11 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	if (!Bun.stripANSI(rowLine(row, panes.narrow ? width : panes.rosterWidth(), now)).includes(displayName(e)))
 		head.push(...titleLines.map((line) => bold(line)));
 	const state = `${glyph(stateOf(e), now)} ${status(e)}${e.snoozed ? " · snoozed" : ""}${launchElapsed(e, now)}`;
-	const times = `${gray("created")} ${ago(e.createdAt, now)} · ${e.open ? `${gray("active")} ${e.activity !== "idle" ? "now" : ago(e.activityAt, now)}` : `${gray("archived")} ${ago(archivedKey(e), now)}`}`;
+	const activity =
+		e.activity === "blocked"
+			? attention(`waiting ${age(e.activityAt, now)}`)
+			: `${gray("active")} ${e.activity === "working" ? "now" : ago(e.activityAt, now)}`;
+	const times = `${gray("created")} ${ago(e.createdAt, now)} · ${e.open ? activity : `${gray("archived")} ${ago(archivedKey(e), now)}`}`;
 	if (panes.narrow && visibleWidth(`${state} · ${times}`) <= inner) head.push(`${state} · ${times}`);
 	else head.push(...wrapTextWithAnsi(state, inner), times);
 	const harness = `${e.harness} · `;

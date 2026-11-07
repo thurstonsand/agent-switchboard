@@ -152,6 +152,10 @@ test("a blocked Peek focuses its own session to respond, even while another row 
 	expect(state(s).peek).toBeNull();
 	expect(s.screen()).toContain("Confirm deploy?");
 	await cursorTo(s, b);
+	s.swb("drive", "move", ...find("alpha"));
+	const blocked = await waitState(s, "alpha's blocked Peek", (x) => x.peek?.id === a);
+	expect(blocked.peek?.lines.join("\n")).toContain("waiting now");
+	expect(blocked.peek?.lines.join("\n")).not.toContain("active now");
 	await peekButton("alpha", a, "⏎ Focus to respond");
 	await waitState(s, "alpha, not bravo, focused", (x) => x.staged.id === a && x.focus === "stage");
 	await onScreen("Confirm deploy?", "the dialog ready for an answer");
