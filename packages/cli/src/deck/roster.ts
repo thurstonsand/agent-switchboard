@@ -406,6 +406,11 @@ function snoozeMenu(width: number): Part[] {
 	if (!snoozing) return [];
 	const now = Date.now();
 	const out: Part[] = [[`Snooze ${snoozing.title}`, null]];
+	const e = model.entries.get(snoozing.id);
+	if (e?.activity === "blocked")
+		out.push(...wrapTextWithAnsi("Blocked sessions stay visible until answered.", width - 2).map((line): Part => [` ${line}`, null]));
+	else if (e?.cutOff || e?.errored)
+		out.push(...wrapTextWithAnsi("Sessions needing attention stay visible.", width - 2).map((line): Part => [` ${line}`, null]));
 	SNOOZE_CHOICES.forEach((choice, i) => {
 		const until = presetUntil(choice.snooze, now);
 		const at = until === null ? "↘" : wakeAt(until, now);
@@ -1111,6 +1116,13 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	const times = `${gray("created")} ${ago(e.createdAt, now)} · ${e.open ? activity : `${gray("archived")} ${ago(archivedKey(e), now)}`}`;
 	if (panes.narrow && visibleWidth(`${state} · ${times}`) <= inner) head.push(`${state} · ${times}`);
 	else head.push(...wrapTextWithAnsi(state, inner), times);
+	if (e.snooze && !e.snoozed)
+		head.push(
+			...wrapTextWithAnsi(
+				`Snoozed until ${e.snooze.until === null ? "next message" : wakeAt(e.snooze.until, now)} · visible for attention`,
+				inner,
+			),
+		);
 	const harness = `${e.harness} · `;
 	if (!panes.narrow) head.push(rule);
 	head.push(`${harness}${tailOf(shortPath(e.cwd), inner - visibleWidth(harness))}`);

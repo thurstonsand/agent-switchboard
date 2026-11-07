@@ -309,6 +309,7 @@ function snapshot(): Polled {
 			errored: false,
 			inactive: false,
 			snoozed: false,
+			snooze: null,
 			snoozedUntil: null,
 			reload: null,
 			createdAt: runtime.started_at,

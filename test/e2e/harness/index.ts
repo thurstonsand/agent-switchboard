@@ -75,6 +75,7 @@ export type LsEntry = {
 	cutOff: "shutdown" | "killed" | "restart" | null;
 	errored: boolean;
 	inactive: boolean;
+	snooze: { until: number | null } | null;
 	reload: "continue" | "idle" | null;
 	activityAt: number;
 	archivedAt: number | null;

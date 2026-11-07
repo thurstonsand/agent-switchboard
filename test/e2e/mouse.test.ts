@@ -156,12 +156,42 @@ test("a blocked Peek focuses its own session to respond, even while another row 
 	const blocked = await waitState(s, "alpha's blocked Peek", (x) => x.peek?.id === a);
 	expect(blocked.peek?.lines.join("\n")).toContain("waiting now");
 	expect(blocked.peek?.lines.join("\n")).not.toContain("active now");
+	await peekButton("alpha", a, "s Snooze…");
+	await onScreen("Blocked sessions stay visible until answered.", "the snooze exception explained");
+	s.keys("1");
+	await waitState(s, "the snooze menu closed", (x) => x.mode === "roster");
+	s.swb("drive", "move", ...find("bravo"));
+	s.swb("drive", "move", ...find("alpha"));
+	const snoozed = await waitState(
+		s,
+		"the held snooze in alpha's Peek",
+		(x) => x.peek?.lines.some((l) => l.includes("s Unsnooze")) ?? false,
+	);
+	expect(snoozed.peek?.lines.join("\n")).toContain("Snoozed until");
+	expect(snoozed.peek?.lines.join("\n")).toContain("visible for attention");
+	expect(snoozeOf(s, a).snoozed).toBe(false);
+	await peekButton("alpha", a, "s Unsnooze");
+	await until(() => entry(s, a).snooze === null, budgets.settle, "the held snooze removed");
+	expect(state(s).mode).toBe("roster");
+	s.swb("drive", "move", ...find("bravo"));
+	await peekButton("alpha", a, "s Snooze…");
+	s.keys("4");
+	await waitState(s, "the next-message snooze chosen", (x) => x.mode === "roster");
+	s.swb("drive", "move", ...find("bravo"));
+	s.swb("drive", "move", ...find("alpha"));
+	await waitState(
+		s,
+		"the next-message snooze displayed",
+		(x) => x.peek?.lines.some((l) => l.includes("Snoozed until next message")) ?? false,
+	);
 	await peekButton("alpha", a, "⏎ Focus to respond");
 	await waitState(s, "alpha, not bravo, focused", (x) => x.staged.id === a && x.focus === "stage");
 	await onScreen("Confirm deploy?", "the dialog ready for an answer");
 	s.keys("Enter");
 	await until(() => entry(s, a).activity === "idle", budgets.settle, "alpha answered");
-	expect(s.screen()).toContain("tool done deploy");
+	expect(snoozeOf(s, a).snoozed).toBe(true);
+	await waitState(s, "alpha hidden in Snoozed after answering", (x) => !x.rows.some((r) => r.kind === "session" && r.id === a));
+	expect(s.screen()).toContain("Snoozed (1)");
 });
 
 test("a Peek follows the pointer and the cursor keys, leaves with the pointer, and never takes pi's keys", async () => {

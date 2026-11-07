@@ -34,6 +34,8 @@ export type SessionState = {
 	inactive: boolean;
 	/** Out of the way until a time or its next message; blocked, cut off, or errored, it shows anyway. */
 	snoozed: boolean;
+	/** A snooze still in effect, including while attention keeps the session visible. */
+	snooze: { until: number | null } | null;
 	/** When a snoozed session's snooze ends; null while it waits for a message, or isn't snoozed. */
 	snoozedUntil: number | null;
 	/** A reload waiting for its turn to end, or for the clock to start it again, and how it comes back. */
@@ -211,6 +213,7 @@ function derive(row: SessionRow, w: World): SessionState {
 		errored,
 		inactive: open && !operator && !snoozed && activityAt < w.now - w.inactiveAfterMs && activity === "idle" && !unseen,
 		snoozed,
+		snooze: open && holds ? { until: row.snoozed_until } : null,
 		snoozedUntil: snoozed ? row.snoozed_until : null,
 		reload: open ? row.reload : null,
 		createdAt: row.created_at,

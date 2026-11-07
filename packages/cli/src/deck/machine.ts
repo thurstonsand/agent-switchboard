@@ -2049,7 +2049,7 @@ function toggleSnooze(row = selected()): void {
 	const e = row.entry;
 	if (!e.open) toast("archived; unarchive it first", "info");
 	else if (e.provisional) toast("nothing to snooze before the first prompt", "error");
-	else if (e.snoozed) {
+	else if (e.snooze) {
 		const req = nextReq();
 		if (row.key === selected()?.key) m.pin = { index: resolveCursor(rosterRows()), req, answered: false };
 		post({ type: "snooze", req, id: e.id, snooze: "off" });
@@ -2873,7 +2873,7 @@ export function peekButtons(row: Row): [label: string, key: string, act: RowAct]
 		items.push(e.live ? ["Shut down", "x", "stop"] : ["Wake in background", "w", "wake"]);
 		if (!e.provisional && !e.snoozed)
 			items.push([e.markedUnseen ? "Unmark Unseen" : isUnseen(e) ? "Keep Unseen" : "Mark Unseen", "u", "unseen"]);
-		if (!e.provisional) items.push(e.snoozed ? ["Unsnooze", "s", "snooze"] : ["Snooze…", "s", "snooze"], ["Archive", "a", "archive"]);
+		if (!e.provisional) items.push(e.snooze ? ["Unsnooze", "s", "snooze"] : ["Snooze…", "s", "snooze"], ["Archive", "a", "archive"]);
 		if (!e.operator) items.push(["Group…", "m", "group"]);
 	}
 	if (parentOf(e)) items.push(["Parent", "p", "parent"]);
