@@ -10,6 +10,7 @@ import { displayName, openDescendants, projectName, type SessionState, sessionSt
 import { checkBody, SwbError } from "./errors.ts";
 import { requestedGroup } from "./groups.ts";
 import { type Caller, launchFlags, presetLaunch } from "./harnesses.ts";
+import { trustClaudeFolder } from "./lines.ts";
 import { markSnoozed, snoozeChange } from "./schedules.ts";
 import {
 	archive,
@@ -173,11 +174,13 @@ export async function launchSession(db: Db, l: Launch): Promise<ToolResult> {
 			})
 		: l.briefing;
 	ensureSessionsServer();
+	if (harness === "claude") await trustClaudeFolder(dir);
 	const host = db.tx(() =>
 		launch(db, {
 			...launchFlags(target),
 			cwd: dir,
 			resume: null,
+			trust: true,
 			...(sessionId ? { sessionId } : {}),
 			prompt,
 			...(l.title && harness === "claude" ? { title: l.title } : {}),

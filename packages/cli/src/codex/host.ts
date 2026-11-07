@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, openSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
-import { type Db, stateDir } from "@swb/shared";
+import { checkoutRoot, type Db, stateDir } from "@swb/shared";
 import { frame, listen, type Message, markDelivered, pendingFor, unmarkDelivered } from "@swb/shared/mailbox";
 import {
 	endHosting,
@@ -105,6 +105,7 @@ export async function codexHost(args: string[], updated = false): Promise<void> 
 			effort: { type: "string" },
 			prompt: { type: "string" },
 			continue: { type: "boolean" },
+			trust: { type: "boolean" },
 			operator: { type: "boolean" },
 		},
 	});
@@ -116,6 +117,8 @@ export async function codexHost(args: string[], updated = false): Promise<void> 
 
 	await declareCodexServer();
 	// Both read config: the server for the model's instructions and tools, the TUI for its trust check.
+	// Codex keys trust by the project root, where it looks for the project's own .codex config: the checkout's root.
+	const trust = values.trust ? ["-c", `projects={${JSON.stringify(checkoutRoot(process.cwd()))}={trust_level="trusted"}}`] : [];
 	const operator = values.operator ? codexOperatorConfig().flatMap((value) => ["-c", value]) : [];
 	const db = openStore();
 	const transcript = values.resume
@@ -140,6 +143,7 @@ export async function codexHost(args: string[], updated = false): Promise<void> 
 			"--listen",
 			`unix://${socket}`,
 			...codexServerOverrides(SWB),
+			...trust,
 			...operator,
 			...(provider ? ["-c", `model_provider=${JSON.stringify(provider)}`] : []),
 		],
@@ -182,6 +186,7 @@ export async function codexHost(args: string[], updated = false): Promise<void> 
 			`unix://${socket}`,
 			"-c",
 			'tui.terminal_title=["session-id","status"]',
+			...trust,
 			...operator,
 			...(values.model ? ["--model", values.model] : []),
 			...(values.effort ? ["-c", `model_reasoning_effort="${values.effort}"`] : []),

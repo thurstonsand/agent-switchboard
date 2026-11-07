@@ -363,8 +363,14 @@ export type LaunchSpec = {
 	model?: string;
 	effort?: Effort;
 	agent?: string;
-	/** The session that launched this one; an agent launch also skips pi's trust prompt. */
+	/** The session that launched this one. */
 	parentId?: string;
+	/**
+	 * Its folder is trusted without asking, as an agent's launch needs: no one is at a trust prompt. pi and Codex take it
+	 * as a flag. Claude Code has none, so launchSession writes it to Claude Code's config under the folder's Project root,
+	 * which a wake that moves the session there finds trusted already.
+	 */
+	trust: boolean;
 	/** The Group its first session starts in. */
 	group?: string | null;
 };
@@ -380,8 +386,7 @@ function harnessCommand(spec: LaunchSpec, host: string): string[] {
 			// --session-id only searches the starting directory's sessions, and a moved-away one would mint a fresh
 			// session under this id. Always resume the recorded transcript.
 			const id = spec.resume ? ["--session", spec.resume.transcript] : spec.sessionId ? ["--session-id", spec.sessionId] : [];
-			// An agent's launch has no one at the trust prompt.
-			const approve = spec.parentId || spec.sessionId ? ["--approve"] : [];
+			const approve = spec.trust ? ["--approve"] : [];
 			const provider = spec.provider ? ["--provider", spec.provider] : [];
 			return ["pi", ...id, ...approve, ...provider, ...model, ...effort, ...prompt];
 		}
@@ -416,6 +421,7 @@ function harnessCommand(spec: LaunchSpec, host: string): string[] {
 				...(spec.resume?.notice ? ["--recovery-notice", spec.resume.notice] : []),
 				// Codex picks a cut-off turn back up from its own history, with no prompt from swb.
 				...(spec.resume?.continueTurn ? ["--continue"] : []),
+				...(spec.trust ? ["--trust"] : []),
 				...(spec.cwd === operatorDir() ? ["--operator"] : []),
 				...model,
 				...effort,
@@ -682,7 +688,10 @@ export function wake(db: Db, id: string, then: Wake): string {
 		const recorded = new Set(db.all("SELECT tmux_session FROM runtimes").map((row) => row.tmux_session as string));
 		const inFlight = hosts.find(([name]) => resuming.has(name as string) && !recorded.has(name as string));
 		if (inFlight) return inFlight[0] as string;
-		const session = db.get("SELECT cwd, project_root, harness, transcript, phase, effort FROM sessions WHERE session_id = ?", id);
+		const session = db.get(
+			"SELECT cwd, project_root, harness, transcript, phase, effort, parent_id FROM sessions WHERE session_id = ?",
+			id,
+		);
 		if (!session) throw new SwbError(`no session ${id}`);
 		// tmux starts a missing directory in $HOME, away from the session's Project.
 		const cwd = statSync(session.cwd as string, { throwIfNoEntry: false })?.isDirectory()
@@ -708,6 +717,9 @@ export function wake(db: Db, id: string, then: Wake): string {
 			harness,
 			cwd,
 			resume: { id, transcript: session.transcript as string, continueTurn: then !== "idle" && cutOff, notice },
+			// No one may be at a trust prompt: an agent started it, or it moved to its Project root. A session you started in
+			// place keeps whatever you answered there.
+			trust: session.parent_id !== null || notice !== null,
 			...(then === "continue" && !cutOff ? { prompt: RELOADED } : {}),
 			...(effort && HARNESS_EFFORTS.claude.includes(effort) ? { effort } : {}),
 		});

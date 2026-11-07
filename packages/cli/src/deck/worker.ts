@@ -142,7 +142,7 @@ async function startNew(message: NewSession): Promise<void> {
 			);
 		}
 		ensureSessionsServer();
-		const host = db.tx(() => launch(db, { ...launchFlags(target), cwd: message.cwd, resume: null, group: message.group }));
+		const host = db.tx(() => launch(db, { ...launchFlags(target), cwd: message.cwd, resume: null, group: message.group, trust: false }));
 		launched.add(host);
 		post({ type: "launched", req: message.req, host });
 	} catch (error) {

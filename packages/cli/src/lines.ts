@@ -1,7 +1,7 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { stateDir } from "@swb/shared";
+import { projectRoot, stateDir } from "@swb/shared";
 // Macros inline the tool schemas as JSON at build time, rather than bundling their TypeBox objects here.
 import { readerToolsAsJson, toolLabels, toolsAsJson } from "@swb/shared/tools" with { type: "macro" };
 import { READER_PROMPT } from "@swb/shared/tools";
@@ -49,6 +49,50 @@ export const READER_PROMPT = ${JSON.stringify(READER_PROMPT)};
 `,
 	);
 	return dir;
+}
+
+const claudeConfig = (): string => join(process.env.CLAUDE_CONFIG_DIR || homedir(), ".claude.json");
+
+/** How long Claude Code's config lock goes untouched before Claude Code counts its holder dead and takes it over. */
+const CLAUDE_LOCK_STALE_MS = 10_000;
+
+/**
+ * Marks a folder trusted in Claude Code's config, as answering its trust dialog does, under the key Claude Code uses:
+ * the folder's Project root, the main checkout of a linked worktree, which also covers every worktree of it. Claude Code has no flag that skips the dialog, and an agent's launch has no one to answer
+ * it. The write holds Claude Code's own lock, the directory beside the file, so a running Claude Code, which reads the
+ * file again under that lock before each of its writes, keeps it.
+ */
+export async function trustClaudeFolder(dir: string): Promise<void> {
+	const path = claudeConfig();
+	const key = projectRoot(dir);
+	const held = `${path}.lock`;
+	const until = Date.now() + 2 * CLAUDE_LOCK_STALE_MS;
+	for (;;) {
+		try {
+			mkdirSync(held);
+			break;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+		}
+		const touched = statSync(held, { throwIfNoEntry: false })?.mtimeMs;
+		if (touched !== undefined && Date.now() - touched > CLAUDE_LOCK_STALE_MS) rmSync(held, { recursive: true, force: true });
+		else if (Date.now() > until) throw new SwbError(`Claude Code has held ${held} for over ${(2 * CLAUDE_LOCK_STALE_MS) / 1000} s`);
+		else await Bun.sleep(50);
+	}
+	try {
+		let config: { projects?: Record<string, Record<string, unknown>> };
+		try {
+			config = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
+		} catch (error) {
+			throw new SwbError(`${path}: ${(error as Error).message}`);
+		}
+		if (config.projects?.[key]?.hasTrustDialogAccepted === true) return;
+		config.projects = { ...config.projects, [key]: { ...config.projects?.[key], hasTrustDialogAccepted: true } };
+		writeFileSync(`${path}.${process.pid}.tmp`, JSON.stringify(config, null, 2), { mode: 0o600 });
+		renameSync(`${path}.${process.pid}.tmp`, path);
+	} finally {
+		rmSync(held, { recursive: true, force: true });
+	}
 }
 
 const codexConfig = (): string => join(process.env.CODEX_HOME || join(homedir(), ".codex"), "config.toml");

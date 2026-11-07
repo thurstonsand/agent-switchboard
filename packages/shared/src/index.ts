@@ -133,6 +133,11 @@ export function projectRoot(cwd: string): string {
 	return common ? dirname(common) : cwd;
 }
 
+/** The top of the checkout cwd is in, a linked worktree's own; else the cwd. */
+export function checkoutRoot(cwd: string): string {
+	return git(cwd, "rev-parse", "--show-toplevel") ?? cwd;
+}
+
 const WORKTREE_QUERY = ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"];
 
 function worktreeFrom(result: string | null): { path: string; common: string } | null {

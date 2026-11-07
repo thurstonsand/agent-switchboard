@@ -529,6 +529,60 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"trust-wake": {
+		harnesses: ["claude", "codex"],
+		setup: async (s) => {
+			files(s);
+			gitRepo(s, s.project);
+			const wt = gitWorktree(s, s.project, "feat", `${s.project}-feat`);
+			for (const dir of ["api", "web", ".codex"]) mkdirSync(join(wt, dir));
+			writeFileSync(join(wt, ".codex/config.toml"), 'developer_instructions = "SWB-trusted-codex"\n');
+			// Files that make pi ask whether to trust its folder.
+			mkdirSync(join(s.project, "docs/.pi"), { recursive: true });
+			writeFileSync(join(s.project, "docs/.pi/settings.json"), "{}\n");
+			await launch(s, "claude", "Coordinator");
+		},
+		run: async (s) => {
+			const coordinator = s.ls()[0]?.id as string;
+			const wt = `${s.project}-feat`;
+			const children = await waitLs(
+				s,
+				"pi, Claude Code, and Codex each through their first turn",
+				(ls) => ls.filter((e) => e.parentId === coordinator && e.activity === "idle").length === 3,
+				120_000,
+			).then((ls) => ls.filter((e) => e.parentId === coordinator));
+			expect(Object.fromEntries(children.map((e) => [e.harness, e.cwd]))).toEqual({
+				claude: join(wt, "api"),
+				codex: join(wt, "web"),
+				pi: join(s.project, "docs"),
+			});
+			expect(JSON.stringify(s.requests("codex"))).toContain("SWB-trusted-codex");
+			await Bun.sleep(1500);
+			for (const e of children) s.tmux(s.servers.sessions, "kill-session", "-t", `=${hostOf(s, e.id)}`);
+			await waitLs(s, "all three dormant", (ls) => children.every((c) => ls.find((e) => e.id === c.id)?.live === false));
+			// The worktree goes; Claude Code and Codex wake in the main checkout, pi in place.
+			await until(
+				// Only the API session hears from the Coordinator; a resume's notice is its newest text, so look through the whole request.
+				() =>
+					s
+						.requests("claude")
+						.some(
+							(r) => String(r.context).includes('Message from session \\"Coordinator\\"') && String(r.context).includes("Is the API done?"),
+						),
+				120_000,
+				"Claude Code taking its message",
+			);
+			// The coordinator is Claude Code, so every Codex request is the Web session's.
+			await until(() => JSON.stringify(s.requests("codex")).includes("Is the web app done?"), 120_000, "Codex taking its message");
+			const woken = await waitLs(s, "all three live again", (ls) => children.every((c) => ls.find((e) => e.id === c.id)?.live === true));
+			expect(Object.fromEntries(woken.filter((e) => e.parentId === coordinator).map((e) => [e.harness, e.cwd]))).toEqual({
+				claude: s.project,
+				codex: s.project,
+				pi: join(s.project, "docs"),
+			});
+		},
+	},
+
 	"first-turn": {
 		run: async (s) => {
 			await entered(s, "first");

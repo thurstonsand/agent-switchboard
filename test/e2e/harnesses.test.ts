@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { commands, host, launched, pane, ready, send, type } from "./harness/agents.ts";
 import { config, cursorTo, entry, seed, state, waitState } from "./harness/deck.ts";
-import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
+import { budgets, git, gitRepo, gitWorktree, release, type Scenario, scenario, until } from "./harness/index.ts";
 
 // Claude Code and Codex, as swb hosts them: the real TUIs in the sessions server, scripted by fake model servers.
 
@@ -287,6 +287,52 @@ test("session_launch and a scheduled launch, from pi, Claude Code, or Codex, sta
 		["codex scheduled", "night shift"],
 		["pi scheduled", "night shift"],
 	]);
+});
+
+test("sessions an agent starts in a worktree no harness has trusted start, and a message still reaches each after a wake, in place or moved out of the deleted worktree", async () => {
+	s = scenario("harnesses", "trust", { packages: [], recorder: true, harnesses: ["claude", "codex"] });
+	const parent = await launched(s, "pi", "reply parent up");
+	const main = gitRepo(s, join(s.root, "repo"));
+	const wt = gitWorktree(s, main, "feat");
+	mkdirSync(join(wt, ".codex"));
+	writeFileSync(join(wt, ".codex/config.toml"), 'developer_instructions = "SWB-trusted-codex"\n');
+	const ids = {} as Record<"pi" | "claude" | "codex", string>;
+	for (const harness of ["pi", "claude", "codex"] as const) {
+		// A folder below the worktree's root, which none of the harnesses keys its trust by.
+		const dir = join(wt, harness);
+		mkdirSync(dir);
+		// Files that make pi ask whether to trust the folder.
+		if (harness === "pi") {
+			mkdirSync(join(dir, ".pi"));
+			writeFileSync(join(dir, ".pi/settings.json"), "{}\n");
+		}
+		const launch = Bun.spawnSync([join(s.bin, "swb"), "launch", "--harness", harness, "--cwd", dir, "--from", parent.id], {
+			env: s.env,
+			stdin: new Blob([`reply SWB-unseen-${harness}`]),
+		});
+		expect(launch.stderr.toString()).toBe("");
+		ids[harness] = (JSON.parse(launch.stdout.toString()).details as { id: string }).id;
+		await until(() => entry(s, ids[harness])?.activity === "idle", ready, `${harness}'s first turn`);
+	}
+	expect(String(s.requests("codex").find((r) => String(r.context).includes("SWB-unseen-codex"))?.context)).toContain("SWB-trusted-codex");
+	// Claude Code's own key for a worktree: its main checkout, which covers the worktree and the checkout alike.
+	const claudeJson = JSON.parse(readFileSync(join(s.home, ".claude.json"), "utf8")) as { projects: Record<string, unknown> };
+	expect(claudeJson.projects[main]).toMatchObject({ hasTrustDialogAccepted: true });
+	expect(claudeJson.projects[wt]).toBeUndefined();
+
+	const wakeWith = async (harness: "pi" | "claude" | "codex", body: string) => {
+		s.tmux(s.servers.sessions, "kill-session", "-t", `=${host(s, ids[harness])}`);
+		await until(() => !entry(s, ids[harness]).live, budgets.settle, `${harness} dormant`);
+		expect((await send(s, parent.id, ids[harness], body)).details).toMatchObject({ delivered: true, woke: true });
+	};
+	// In place: pi's --approve covered its first run only.
+	await wakeWith("pi", "reply SWB-woken-pi");
+	// Moved: the worktree is gone, so each wakes in the main checkout, which no one has trusted for Codex.
+	git(s, main, "worktree", "remove", "--force", wt);
+	for (const harness of ["claude", "codex"] as const) {
+		await wakeWith(harness, `SWB-moved-${harness} are you there`);
+		expect(entry(s, ids[harness]).cwd).toBe(main);
+	}
 });
 
 test("on a code-mode-only model, Codex offers swb's tools directly, beside its own subagents, and session_launch starts a session", async () => {
