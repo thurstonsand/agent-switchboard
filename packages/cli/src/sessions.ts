@@ -471,6 +471,7 @@ export function launch(db: Db, spec: LaunchSpec): string {
 		"PI_CLIPBOARD_OSC52=1",
 		// Claude Code's own scheduler dies with its process; swb's schedules are the ones that last.
 		...(spec.harness === "claude" ? ["-e", "CLAUDE_CODE_DISABLE_CRON=1"] : []),
+		...(spec.harness === "claude" && spec.cwd === operatorDir() ? ["-e", "SWB_OPERATOR=1"] : []),
 		`exec env -u TMUX -u TMUX_PANE SHELL=${shell} ${shell} -lic ${quote(command)}`,
 		";",
 		"set",

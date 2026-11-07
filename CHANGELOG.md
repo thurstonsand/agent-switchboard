@@ -17,6 +17,7 @@ Schema v12: update swb and the pi line together, and run `swb quit` with the swb
 ### Fixed
 
 - A message reaches its session once while swb's database is busy for longer than five seconds. Claude Code could take it twice, Codex was steered with it again every few seconds until the database freed up, and pi stopped recording altogether: its session read as working for good, and took the message a second time once it restarted. Every line now marks a message delivered before handing it over, and holds its records until the database takes them, saying so meanwhile.
+- `session_recall` works in a Claude Code Operator. It failed with `no tool named "Agent" in this session`: the Operator's settings took the Agent tool away to keep its model from starting subagents, and the reader starts through it. The line now offers an Operator's model no agent types instead, so its own subagents are still refused.
 - `swb_update_session` that refuses one change makes none. Retitling and snoozing an archived session in one call used to keep the new title while refusing the snooze.
 - Renaming a Codex session whose app-server went away just then fails instead of waiting forever.
 - A harness whose model listing fails keeps the list it found last, beside the error. The shortlist lost which efforts each model takes, and the add search offered none of its models.

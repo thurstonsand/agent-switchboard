@@ -31,7 +31,7 @@ const SETTINGS = `${JSON.stringify({ sessions: { subagents: { enable: false } } 
 
 /**
  * What keeps a Claude Code Operator to its folder, as `claude --settings`: every instruction file but the folder's
- * AGENTS.md excluded, the user's and any above it, and no subagents, which the Deck can't see.
+ * AGENTS.md excluded, the user's and any above it. The line keeps its model from starting subagents, given SWB_OPERATOR.
  */
 export function claudeOperatorSettings(): string {
 	const ancestors: string[] = [];
@@ -48,7 +48,6 @@ export function claudeOperatorSettings(): string {
 				["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", ".claude/CLAUDE.md", ".claude/rules/**"].map((f) => join(dir, f)),
 			),
 		],
-		permissions: { deny: ["Agent"] },
 	});
 }
 

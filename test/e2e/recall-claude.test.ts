@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { claudeAutoMode, host, launched, pane, ready, recalled, type } from "./harness/agents.ts";
 import { entry } from "./harness/deck.ts";
@@ -249,6 +249,39 @@ test("in auto mode, Claude Code's handback delivers the reader's answer, and swb
 	expect(readerNotified()).toBe(false);
 	expect(pane(s, caller.id)).not.toContain("Prompt dropped");
 	expect(pane(s, caller.id)).not.toContain("Prompt not submitted");
+});
+
+test("an Operator's session_recall starts its reader, though its model can't start a subagent", async () => {
+	s = scenario("recall-claude", "operator", { packages: [], recorder: true, harnesses: ["claude"] });
+	const operator = join(s.env.XDG_CONFIG_HOME as string, "agent-switchboard", "operator");
+	mkdirSync(operator, { recursive: true });
+	const claudeJson = join(s.home, ".claude.json");
+	const trusted = JSON.parse(readFileSync(claudeJson, "utf8")) as { projects: Record<string, unknown> };
+	trusted.projects[operator] = { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true };
+	writeFileSync(claudeJson, JSON.stringify(trusted));
+	const target = await launched(s, "claude", "reply SWB-operator-target");
+	await until(() => recalled(s, target.id).includes("SWB-operator-target"), 15000, "target transcript on disk");
+	const launch = Bun.spawnSync([join(s.bin, "swb"), "launch", "--harness", "claude", "--cwd", operator], {
+		env: s.env,
+		stdin: new Blob(["reply operator up"]),
+	});
+	const { id } = JSON.parse(launch.stdout.toString()).details as { id: string };
+	await until(() => entry(s, id)?.activity === "idle", ready, "the Operator's first turn");
+	expect(entry(s, id).operator).toBe(true);
+	type(s, id, `ask-id ${target.id} :: What markers?`);
+	await until(() => pane(s, id).includes("recalled: reader found: SWB-operator-target"), 30000, "the reader's answer");
+	await until(() => entry(s, id).activity === "idle", 10000, "the answer settled");
+	const subagent = { description: "Read a session", subagent_type: "Explore", prompt: "reply SWB-operator-subagent" };
+	type(s, id, `call Agent ${JSON.stringify(subagent)}`);
+	await until(
+		() =>
+			s
+				.requests("claude")
+				.some((r) => String(r.prompt).startsWith("call Agent") && String(r.toolOutput).includes("Agent type 'Explore' not found")),
+		30000,
+		"the Operator's own subagent refused",
+	);
+	expect(s.requests("claude").some((r) => r.prompt === subagent.prompt)).toBe(false);
 });
 
 test("two session_recalls in one response run their readers at once", async () => {

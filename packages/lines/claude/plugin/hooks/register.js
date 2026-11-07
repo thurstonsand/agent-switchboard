@@ -170,6 +170,7 @@ const line = {
 async function env($, name) {
 	if (name === "SWB_BIN") return (await $.env.get("SWB_BIN")) ?? "";
 	if (name === "SWB_TMUX_SESSION") return (await $.env.get("SWB_TMUX_SESSION")) ?? "";
+	if (name === "SWB_OPERATOR") return (await $.env.get("SWB_OPERATOR")) ?? "";
 	return (await $.env.get("SWB_DB")) ?? "";
 }
 
@@ -520,6 +521,12 @@ export function register(on) {
 	});
 
 	on("agent.offer", { agent: "swb:reader" }, () => ({ isOffered: false }));
+	// An Operator's model starts no subagents, which the Deck can't see; the Agent tool stays, for session_recall's reader.
+	on("agent.offer", async ($, e, next) => ((await env($, "SWB_OPERATOR")) ? { isOffered: false } : next(e)));
+	on("tool.describe", { tool: "Agent" }, async ($, e, next) => {
+		const described = await next(e);
+		return (await env($, "SWB_OPERATOR")) ? { ...described, isDeferred: true } : described;
+	});
 
 	on("turn.start", async ($, e, next) => {
 		await init($);
