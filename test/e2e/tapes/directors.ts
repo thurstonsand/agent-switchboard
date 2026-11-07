@@ -2,6 +2,7 @@ import { expect } from "bun:test";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState } from "../../../packages/cli/src/deck/protocol.ts";
+import { projectRoot, SCHEMA_VERSION } from "../../../packages/shared/src/index.ts";
 import { claudeAutoMode, recalled, subagentDone } from "../harness/agents.ts";
 import { config, cursorTo, launched, launchTry, seed } from "../harness/deck.ts";
 import { git, gitRepo, gitWorktree, type LsEntry, type PiPackage, release, repo, type Scenario, until, which } from "../harness/index.ts";
@@ -117,7 +118,306 @@ function typeInto(s: Scenario, id: string, text: string): void {
 	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(hostOf(s, id)), "Enter");
 }
 
+/** A launch as session_launch makes one, its briefing its first prompt; returns its id once it's recorded. */
+async function launchAs(
+	s: Scenario,
+	harness: "pi" | "claude" | "codex",
+	cwd: string,
+	title: string,
+	briefing: string,
+	options: { group?: string; from?: string } = {},
+): Promise<string> {
+	const args = ["--harness", harness, "--cwd", cwd, "--title", title];
+	if (options.group) args.push("--group", options.group);
+	if (options.from) args.push("--from", options.from);
+	const proc = Bun.spawn([`${s.bin}/swb`, "launch", ...args], {
+		env: s.env,
+		cwd,
+		stdin: new Blob([briefing]),
+		stdout: "pipe",
+		stderr: "inherit",
+	});
+	return (JSON.parse(await proc.stdout.text()) as { details: { id: string } }).details.id;
+}
+
+const settled = (s: Scenario, title: string, id: string) =>
+	waitLs(s, `${title} idle`, (ls) => ls.find((e) => e.id === id)?.activity === "idle", 2 * TAPE);
+
+/** Prompts a session through its own TUI and waits for that turn to settle. */
+async function turn(s: Scenario, id: string, text: string): Promise<void> {
+	const prompted = () => s.query<{ at: number }>("select last_prompt_at as at from sessions where session_id = ?", id)[0]?.at ?? 0;
+	const before = prompted();
+	typeInto(s, id, text);
+	await waitLs(s, text, (ls) => prompted() > before && ls.find((e) => e.id === id)?.activity === "idle");
+}
+
+/** Marks sessions visited now, as a look at each on the Stage would. */
+function visited(s: Scenario, ...ids: string[]): void {
+	for (const id of ids)
+		s.query(
+			"INSERT INTO marks (session_id, visited_at) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET visited_at = excluded.visited_at",
+			id,
+			Date.now() + 1000,
+		);
+}
+
+/**
+ * The tape asks for each step by filtering the roster for that step's text, which also puts the cursor on the row the
+ * frame wants, and leaving the filter up; the director takes the steps in order, clearing each filter before it acts, so
+ * neither side races the other.
+ */
+async function onRequest(s: Scenario, steps: [string, () => Promise<void> | void][]): Promise<void> {
+	const filter = () => {
+		try {
+			const st = drive(s);
+			// Committed with Enter: while the tape is still typing, the roster is in filter mode.
+			return st.mode === "roster" ? st.filter : null;
+		} catch {
+			return null;
+		}
+	};
+	for (const [marker, step] of steps) {
+		await until(() => filter() === marker, 3 * TAPE, `the tape asking for ${marker}`);
+		s.keys("Escape");
+		await until(() => filter() === "", TAPE, `${marker} cleared`);
+		await step();
+	}
+}
+
 export const directors: Record<string, Director> = {
+	// The design review's gallery: one populated Deck, every state at once, and every surface swb draws on it.
+	gallery: {
+		harnesses: ["claude", "codex"],
+		setup: async (s) => {
+			const root = join(s.project, "..");
+			const switchboard = gitRepo(s, join(root, "switchboard"));
+			const billing = gitRepo(s, join(root, "billing-api"));
+			const notes = join(root, "notes");
+			mkdirSync(join(switchboard, "src/deck"), { recursive: true });
+			writeFileSync(join(switchboard, "README.md"), "# switchboard\n\nEvery agent session, from its first turn until it's archived.\n");
+			writeFileSync(join(switchboard, "src/deck/peek.ts"), "export const PEEK_MS = 2000;\n");
+			writeFileSync(join(billing, "README.md"), "# billing-api\n\nInvoices, webhooks, and the v3 schema.\n");
+			const held = (name: string) =>
+				`${name}:\n\t@echo entered > $$HOME/e2e-signals/${name}.entered; until [ -e $$HOME/e2e-signals/${name}.release ]; do sleep 0.1; done\n`;
+			writeFileSync(join(billing, "Makefile"), held("lint"));
+			for (const repo of [switchboard, billing]) {
+				git(s, repo, "add", ".");
+				git(s, repo, "commit", "-q", "-m", "files");
+			}
+			const peekPolish = gitWorktree(s, switchboard, "peek-polish");
+			writeFileSync(join(switchboard, "src/deck/peek.ts"), "export const PEEK_MS = 2000;\nexport const PEEK_OPEN_MS = 80;\n");
+			writeFileSync(join(switchboard, "src/deck/retry.test.ts"), 'test("retries", () => {});\n');
+			writeFileSync(join(billing, "schema.sql"), "create table invoices_v3 (id integer primary key);\n");
+			mkdirSync(notes);
+			const operator = join(s.env.XDG_CONFIG_HOME as string, "agent-switchboard", "operator");
+			mkdirSync(operator, { recursive: true });
+			for (const dir of [switchboard, billing, peekPolish]) s.trust(dir);
+			config(s, `editor = "${NVIM} --clean ."\n`);
+
+			// Oldest first, one at a time: the roster lists each Project's sessions newest first.
+			const start = async (harness: "pi" | "claude" | "codex", cwd: string, title: string, reply: string, options = {}) => {
+				const id = await launchAs(s, harness, cwd, title, `reply ${reply}`, options);
+				await settled(s, title, id);
+				return id;
+			};
+			const triage = await start("pi", operator, "Morning triage", "two sessions need you: a deploy to approve, and a cut-off migration");
+			const spike = await start("pi", billing, "Spike: try SQLite FTS for invoice search", "works, but not worth it yet");
+			const bump = await start("pi", switchboard, "Bump pi to 0.71", "bumped; tests are green");
+			const typo = await start("pi", switchboard, "Fix the typo in the README", "fixed");
+			const ci = await start("pi", switchboard, "Wait on CI for #150", "CI is still running the e2e matrix");
+			const roadmap = await start("pi", notes, "Plan the Q1 roadmap", "three themes: persistence, recall, and polish");
+			const review = await start("claude", switchboard, "Review #142: the snooze menu", "two nits, otherwise good", { group: "review" });
+			const check = await start("pi", switchboard, "Check CI on #142", "watching the checks on #142", { from: review });
+			const peek = await start("codex", peekPolish, "Polish the Peek", "the Peek now waits 80 ms before it opens");
+			const migrate = await start("pi", billing, "Migrate invoices to the v3 schema", "the v3 tables are in schema.sql");
+			const client = await start("pi", billing, "Bump the API client to v4", "the client builds against v4");
+			const tidy = await start("claude", billing, "Tidy the webhook handlers", "three handlers share one parser now");
+			await start("pi", switchboard, "Draft the v0.13 release notes", "notes drafted, eleven entries", { from: triage });
+			const parser = await start(
+				"pi",
+				switchboard,
+				"Refactor the parser so error recovery survives nested blocks",
+				"the parser recovers inside nested blocks now",
+			);
+			const flaky = await start("pi", switchboard, "Fix the flaky retry test", "Found it: the retry test races the clock.");
+
+			// A Message between sessions, and a tool call after it, for the pi line's own rendering.
+			const message = {
+				session: check,
+				message: "CI is green on #142: all 38 checks passed. Merge when you're ready.",
+				report_back: false,
+			};
+			typeInto(s, roadmap, `call session_send_message ${JSON.stringify(message)}`);
+			await until(
+				() => s.query("select 1 from messages where target_id = ? and delivered_at is not null", check).length > 0,
+				TAPE,
+				"the message delivered",
+			);
+			await Bun.sleep(1000);
+			await settled(s, "check", check);
+			await turn(s, check, "call session_list {}");
+			const schedule = (from: string, body: string, ...args: string[]) => {
+				const result = Bun.spawnSync([`${s.bin}/swb`, "schedule", "--from", from, ...args], {
+					env: s.env,
+					cwd: switchboard,
+					stdin: new Blob([body]),
+					stderr: "pipe",
+				});
+				if (result.exitCode !== 0) throw new Error(`swb schedule: ${result.stderr.toString()}`);
+			};
+			schedule(check, "Recheck CI on #142; if green, tell the review.", "--at", "PT2H", "--schedule-label", "Recheck CI on #142");
+			schedule(check, "Post a one-line CI status to triage.", "--cron", "57 8 * * 1-5", "--schedule-label", "Weekdays, 8:57 AM");
+
+			// The pi line refusing to record, as it does under a newer schema: its footer turns red and stays so.
+			const conn = s.db();
+			conn.exec("PRAGMA user_version = 99");
+			conn.close();
+			typeInto(s, roadmap, "reply noted");
+			await until(
+				() => s.tmux(s.servers.sessions, "capture-pane", "-p", "-t", `=${hostOf(s, roadmap)}:`).includes("not recording"),
+				TAPE,
+				"the red footer",
+			);
+			const restored = s.db();
+			restored.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+			restored.close();
+
+			// Every Activity and ending at once.
+			await turn(s, flaky, "tool npm test -- retry");
+			typeInto(s, flaky, "hold gallery-retry");
+			await entered(s, "gallery-retry");
+			typeInto(s, parser, "confirm gallery-deploy");
+			await entered(s, "gallery-deploy");
+			typeInto(s, client, "fail the model is overloaded");
+			typeInto(s, migrate, "hold gallery-migrate");
+			await entered(s, "gallery-migrate");
+			typeInto(s, tidy, "run make lint");
+			await entered(s, "lint");
+			// Claude Code writes its transcript a few seconds behind.
+			await Bun.sleep(5000);
+			const [{ pid }] = s.query<{ pid: number }>("select pid from runtimes where session_id = ?", migrate) as [{ pid: number }];
+			process.kill(pid, "SIGKILL");
+			s.tmux(s.servers.sessions, "send-keys", "-t", `=${hostOf(s, tidy)}:`, "Escape");
+			await waitLs(s, "blocked, working, errored, stopped, and cut off", (ls) => {
+				const of = (id: string) => ls.find((e) => e.id === id);
+				return (
+					of(parser)?.activity === "blocked" &&
+					of(flaky)?.activity === "working" &&
+					of(client)?.errored === true &&
+					of(tidy)?.activity === "idle" &&
+					of(migrate)?.live === false
+				);
+			});
+			for (const id of [tidy, spike, bump, typo]) s.tmux(s.servers.sessions, "kill-session", "-t", `=${hostOf(s, id)}`);
+			release(s, "gallery-migrate");
+			release(s, "lint");
+
+			s.swb("snooze", ci, "one_day");
+			s.swb("archive", bump);
+			s.swb("archive", typo);
+			// Seen, all but the release notes, which stay Unseen.
+			visited(s, triage, spike, ci, roadmap, review, check, peek, migrate, client, tidy, parser, flaky);
+			// Last touched a week ago, so it's Inactive.
+			const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
+			s.query(
+				"UPDATE sessions SET created_at = ?, last_prompt_at = ?, last_settled_at = ? WHERE session_id = ?",
+				weekAgo,
+				weekAgo,
+				weekAgo,
+				spike,
+			);
+			s.query("UPDATE marks SET visited_at = ? WHERE session_id = ?", weekAgo + 1000, spike);
+			// Ages short of Inactive, so the roster's right column isn't all "now".
+			for (const [id, hours] of [
+				[roadmap, 3],
+				[client, 5],
+				[review, 26],
+				[peek, 50],
+			] as const) {
+				const at = Date.now() - hours * 3600 * 1000;
+				s.query(
+					"UPDATE sessions SET created_at = MIN(created_at, ?), last_prompt_at = ?, last_settled_at = ? WHERE session_id = ?",
+					at,
+					at,
+					at,
+					id,
+				);
+			}
+			// The Deck opens on the flaky test with every section unfolded.
+			s.query("DELETE FROM deck_layouts");
+			s.query(
+				"INSERT INTO deck_layouts (project_root, state, saved_at) VALUES (?, ?, ?)",
+				projectRoot(switchboard),
+				JSON.stringify({ selectedKey: flaky, rosterCols: null, collapsed: [], expanded: ["inactive", "snoozed", "archived"] }),
+				Date.now(),
+			);
+		},
+		run: async (s) => {
+			// The pointer rests on a row for its Peek, long enough for the tape's frame, then moves off onto the Stage.
+			const hover = (title: string) => async () => {
+				const [x, y] = await onScreen(s, title, 42);
+				s.swb("drive", "move", String(x), String(y));
+				await waitDrive(s, `${title}'s Peek`, (st) => st.peek?.source === "pointer");
+				await Bun.sleep(4000);
+				s.swb("drive", "move", "100", "30");
+			};
+			// The Deck and pi ask for colors again only when a light/dark report flips the scheme, so between two light themes
+			// they'd keep the first; the report goes both ways, as if from a fresh terminal. The Stage then takes the
+			// keyboard: an unfocused one dims toward the real terminal's colors, which in VHS stay City Ruins.
+			const theme = (name: string, scheme: "light" | "dark") => async () => {
+				s.swb("drive", "theme", name);
+				await Bun.sleep(500);
+				for (const report of scheme === "light" ? [1, 2] : [2, 1]) {
+					s.tmux(s.servers.drive, "set-buffer", "-b", "report", `\x1b[?997;${report}n`);
+					s.tmux(s.servers.drive, "paste-buffer", "-S", "-d", "-b", "report", "-t", "=drive:");
+					await Bun.sleep(300);
+				}
+				s.keys("Enter");
+			};
+			const file = join(s.env.XDG_CONFIG_HOME as string, "agent-switchboard", "config.toml");
+			const good = readFileSync(file, "utf8");
+			await onRequest(s, [
+				["nested blocks", hover("Refactor the parser")],
+				["check ci", hover("Check CI on #142")],
+				// A hand edit gone wrong while the Deck is open, then put right.
+				["v0.13", () => writeFileSync(file, `${good}modle = "opus"\n`)],
+				["release notes", () => writeFileSync(file, good)],
+				["retry test", theme("copied-city", "light")],
+				[
+					"survives nested",
+					() => {
+						s.keys("Enter");
+						return hover("Refactor the parser")();
+					},
+				],
+				["the flaky", theme("catppuccin-mocha", "dark")],
+				["flaky retry", theme("tokyo-night", "dark")],
+				["fix the flaky", theme("solarized-light", "light")],
+				[
+					"flaky retry test",
+					async () => {
+						await theme("city-ruins", "dark")();
+						s.keys("M-a", "h");
+						s.swb("drive", "resize", "96x40");
+					},
+				],
+			]);
+			await Bun.sleep(4000);
+		},
+	},
+
+	// Claude Code and Codex on their own, without swb, in the gallery's terminal: references for the design review.
+	references: {
+		harnesses: ["claude", "codex"],
+		setup: async (s) => {
+			gitRepo(s, s.project);
+			files(s);
+			git(s, s.project, "add", ".");
+			git(s, s.project, "commit", "-q", "-m", "files");
+			writeFileSync(join(s.project, "src/main.ts"), 'console.log("hello, v3");\n');
+		},
+	},
+
 	settings: {
 		harnesses: ["claude", "codex"],
 		setup: async (s) => {
@@ -1021,12 +1321,12 @@ export const directors: Record<string, Director> = {
 			s.keys("a");
 			await waitDrive(s, "family and worktree choices", (st) => st.archive?.all === 2);
 			await Bun.sleep(3000);
-			for (const text of ["a this", "esc abort", "archive + delete worktree", "all 2 + delete this worktree"]) {
+			for (const text of ["Archive; keep worktree", "esc Cancel", "Archive; delete clean", "Family (2); delete"]) {
 				const [x, y] = await onScreen(s, text, 42);
 				s.swb("drive", "move", String(x), String(y));
 				await Bun.sleep(700);
 			}
-			const [x, y] = await onScreen(s, "all 2 + delete this worktree", 42);
+			const [x, y] = await onScreen(s, "Family (2); delete", 42);
 			s.swb("drive", "click", String(x), String(y));
 			await waitLs(s, "archived and deleted", (ls) => ls.find((e) => e.id === id)?.open === false);
 			expect(s.ls().find((e) => e.id === child)?.open).toBe(false);
@@ -1594,7 +1894,7 @@ export const directors: Record<string, Director> = {
 			await waitDrive(s, "the Deck up", (x) => x.ready);
 			await click("Refactor");
 			await waitDrive(s, "its pi focused by a click", (x) => x.focus === "stage" && x.staged.kind === "live");
-			await click("hide list");
+			await click("hide");
 			await waitDrive(s, "the roster hidden", (x) => x.layout.rosterHidden);
 			await Bun.sleep(1000);
 			await click("show list");
@@ -1610,10 +1910,10 @@ export const directors: Record<string, Director> = {
 			await until(() => !s.swb("drive", "capture").includes("key or click closes"), TAPE, "help closed by a click");
 			s.swb("drive", "resize", "90x30");
 			await waitDrive(s, "a narrow Deck, the roster alone", (x) => x.layout.rosterOnly && x.focus === "roster");
-			// No Stage beside the roster: the roster draws the Peek itself, at its right edge.
+			// No Stage beside the roster: hovering leaves the list unobstructed.
 			const [dx, dy] = await onScreen(s, "Draft", 90);
 			s.swb("drive", "move", String(dx), String(dy));
-			await waitDrive(s, "Draft's Peek in the narrow roster", (x) => x.peek?.lines[0]?.startsWith("╭") === true);
+			await waitDrive(s, "no Peek over the narrow roster", (x) => x.peek === null);
 			await Bun.sleep(3000);
 			await click("Refactor", 20);
 			await waitDrive(s, "pi alone", (x) => x.focus === "stage");
@@ -1634,19 +1934,19 @@ export const directors: Record<string, Director> = {
 		run: async (s) => {
 			const shows = (text: string) => s.swb("drive", "capture").includes(text);
 			await waitDrive(s, "the Deck up", (x) => x.ready);
-			await until(() => shows("j k ↑ ↓      move") && shows("a literal M-a"), TAPE, "every key on a tall Deck");
+			await until(() => shows("j k ↑ ↓") && shows("Send literal Alt+a"), TAPE, "every key on a tall Deck");
 			await until(() => !shows("any key or click closes"), TAPE, "the help closed");
 			s.swb("drive", "resize", "140x24");
-			await until(() => shows("↓ 19 · j k, wheel scroll"), TAPE, "the short Deck's help, its end below");
+			await until(() => shows("↓ 14 more lines · j/k ↑/↓ scroll"), TAPE, "the short Deck's help, its end below");
 			await Bun.sleep(1500);
 			for (const direction of ["down", "down", "down", "down", "up"]) {
 				s.swb("drive", "wheel", direction, "70", "12");
 				await Bun.sleep(700);
 			}
-			await until(() => shows("↑ 3 ↓ 16"), TAPE, "four turns of the wheel down, one up");
-			await until(() => shows("a literal M-a") && shows("↑ 19 ·"), TAPE, "j j and space to the end");
-			await until(() => shows("↑ 16 ↓ 3"), TAPE, "k k and ↑ back up");
-			await until(() => !shows("wheel scroll"), TAPE, "q closes it");
+			await until(() => shows("↑ 3 ↓ 11"), TAPE, "four turns of the wheel down, one up");
+			await until(() => shows("Send literal Alt+a") && shows("↑ 14 ·"), TAPE, "j j and space to the end");
+			await until(() => shows("↑ 11 ↓ 3"), TAPE, "k k and ↑ back up");
+			await until(() => !shows("PgUp/PgDn page"), TAPE, "q closes it");
 		},
 	},
 
@@ -1693,11 +1993,11 @@ export const directors: Record<string, Director> = {
 			await point("Refactor");
 			await waitDrive(s, "Refactor's Peek, the cursor still on Fix", (x) => x.peek?.id === refactor && x.cursor === flaky);
 			await Bun.sleep(2500);
-			await point("Wake w", true);
+			await point("w Wake", true);
 			await Bun.sleep(2500);
-			const [x, y] = await onScreen(s, "Wake w", 1000, 43);
+			const [x, y] = await onScreen(s, "w Wake", 1000, 43);
 			s.swb("drive", "click", String(x), String(y));
-			await waitDrive(s, "Refactor woken from its Peek", (st) => st.peek?.lines.some((line) => line.includes("Stop x")) === true);
+			await waitDrive(s, "Refactor woken from its Peek", (st) => st.peek?.lines.some((line) => line.includes("x Stop")) === true);
 			await Bun.sleep(2500);
 			s.swb("drive", "move", "100", "30");
 			await waitDrive(s, "the Peek gone with the pointer", (st) => st.peek === null && st.hover === null);
