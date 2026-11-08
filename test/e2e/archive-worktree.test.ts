@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pane, ready, settled, type } from "./harness/agents.ts";
-import { cursorTo, entry, launched, waitState } from "./harness/deck.ts";
+import { cursorTo, entry, launched, state, waitState } from "./harness/deck.ts";
 import { budgets, git, gitRepo, gitWorktree, type Scenario, scenario, until } from "./harness/index.ts";
 import { swbIn } from "./harness/schedules.ts";
 
@@ -121,10 +121,10 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 	expect(deck.exitCode).toBe(0);
 	await cursorTo(s, id);
 	const ask = async () => {
-		await until(() => !s.screen().includes("Archive; delete clean worktree"), budgets.settle, "the previous archive prompt closed");
+		await until(() => !s.screen().includes("Archive; delete worktree"), budgets.settle, "the previous archive prompt closed");
 		s.keys("a");
 		await waitState(s, "archive choice", (st) => st.mode === "archive");
-		await until(() => s.screen().includes("Archive; delete clean worktree"), budgets.settle, "delete button");
+		await until(() => s.screen().includes("Archive; delete worktree"), budgets.settle, "delete button");
 	};
 	// A row moving into Archived shifts the prompt under a click aimed from the screen before it, so each waits.
 	const archive = async (other: string) => {
@@ -137,8 +137,8 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 	};
 	const clickDelete = () => {
 		const lines = s.screen().split("\n");
-		const y = lines.findIndex((line) => line.includes("Archive; delete clean worktree"));
-		s.swb("drive", "click", String((lines[y] as string).indexOf("Archive; delete clean worktree") + 1), String(y));
+		const y = lines.findIndex((line) => line.includes("Archive; delete worktree"));
+		s.swb("drive", "click", String((lines[y] as string).indexOf("Archive; delete worktree") + 1), String(y));
 	};
 	await ask();
 	s.keys("Escape");
@@ -155,9 +155,18 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 	await waitState(s, "unarchive shown", (st) => st.rows.some((row) => row.kind === "session" && row.id === id && row.state !== "archived"));
 	await cursorTo(s, id);
 	writeFileSync(join(tree, "keep.txt"), "valuable work\n");
-	await ask();
-	clickDelete();
-	await waitState(s, "dirty refusal", (st) => st.toasts.some((t) => t.text.includes("untracked")));
+	await until(() => !s.screen().includes("Archive; delete worktree"), budgets.settle, "the previous archive prompt closed");
+	s.keys("a");
+	await waitState(s, "archive choice", (st) => st.mode === "archive");
+	// The prompt flags a dirty worktree before asking, and doesn't offer to delete it.
+	await until(() => s.screen().includes("Uncommitted changes"), budgets.settle, "the dirty worktree flagged");
+	expect(s.screen()).not.toContain("delete worktree");
+	s.keys("d");
+	await Bun.sleep(500);
+	expect(state(s)).toMatchObject({ mode: "archive" });
+	expect(state(s).toasts.some((t) => t.text.includes("untracked"))).toBe(false);
+	s.keys("Escape");
+	await waitState(s, "cancelled", (st) => st.mode === "roster");
 	expect(entry(s, id).open).toBe(true);
 	expect(readFileSync(join(tree, "keep.txt"), "utf8")).toBe("valuable work\n");
 	git(s, tree, "add", "keep.txt");
@@ -237,9 +246,9 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 	await cursorTo(s, id);
 	await ask();
 	// The prompt counts the family as the Deck sees it, which can be a snapshot behind the launches.
-	await until(() => s.screen().includes("Family (3); delete clean worktree"), budgets.settle, "the whole family offered");
+	await until(() => s.screen().includes("Family (3); delete worktree"), budgets.settle, "the whole family offered");
 	const lines = s.screen().split("\n");
-	const y = lines.findIndex((line) => line.includes("Family (3); delete clean worktree"));
+	const y = lines.findIndex((line) => line.includes("Family (3); delete worktree"));
 	expect(y).toBeGreaterThan(0);
 	s.swb("drive", "click", String((lines[y] as string).indexOf("Family (3)") + 1), String(y));
 	// Its own scheduled launch goes with it, once it says so.

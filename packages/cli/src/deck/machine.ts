@@ -990,6 +990,9 @@ function onWorker(message: FromWorker): void {
 		case "peek":
 			onPeekInfo(message.id, message.info);
 			break;
+		case "dirty":
+			if (m.mode.kind === "archive" && m.mode.id === message.id) m.mode.dirty = message.dirty;
+			break;
 		case "done": {
 			const { req, error } = message;
 			if (m.pin?.req === req) {
@@ -1973,7 +1976,8 @@ function toggleArchived(row = selected()): void {
 	if (e.open && (asks || e.pending.length > 0)) {
 		m.selectedKey = e.id;
 		m.hover = null;
-		enter({ kind: "archive", at: promptAnchor(row), id: e.id, chosen: asks ? null : { all: false, deleteWorktree: false } });
+		enter({ kind: "archive", at: promptAnchor(row), id: e.id, chosen: asks ? null : { all: false, deleteWorktree: false }, dirty: null });
+		if (e.worktree) post({ type: "dirty", id: e.id, worktree: e.worktree });
 		return;
 	}
 	// Only the cursor's own row moving takes the cursor along; archived, it lingers where it is.
@@ -2646,8 +2650,11 @@ export function keymap(): Binding<Command>[] {
 			const answer = (all: boolean, deleteWorktree: boolean): Command => ({ kind: "archiveAnswer", all, deleteWorktree });
 			const out = [bind(["a"], "a", e?.worktree ? "Archive; keep worktree" : "Archive this session", answer(false, false))];
 			if (family > 0) out.push(bind(["A"], "A", `Archive family (${family + 1})`, answer(true, false)));
-			if (e?.worktree) out.push(bind(["d"], "d", "Archive; delete clean worktree", answer(false, true)));
-			if (e?.worktree && family > 0) out.push(bind(["D"], "D", `Family (${family + 1}); delete clean worktree`, answer(true, true)));
+			// Deleting a dirty worktree is refused, so it isn't offered; the prompt says why.
+			if (e?.worktree && !mode.dirty) {
+				out.push(bind(["d"], "d", "Archive; delete worktree", answer(false, true)));
+				if (family > 0) out.push(bind(["D"], "D", `Family (${family + 1}); delete worktree`, answer(true, true)));
+			}
 			out.push(bind(["escape"], "esc", "cancel", CANCEL));
 			return out;
 		}
@@ -2682,7 +2689,8 @@ function pickerKeys(choosing: Choosing): Binding<Command>[] {
 	return [
 		bind(["enter"], "⏎", "start", CHOOSE),
 		...(pickerPresets().length > 0 ? [bind(["tab", "shift+tab"], "⇥", null, { kind: "menu" })] : []),
-		bind(["escape"], "esc", "cancel", CANCEL),
+		// The launch card's corner says it.
+		bind(["escape"], "esc", null, CANCEL),
 		// The prefix key, which reaches the roster through tmux.
 		bind([], `${keyName(m.config.prefix)} d`, "remove", { kind: "remove" }),
 		...ARROWS,
@@ -2743,7 +2751,8 @@ function rosterKeys(row: Row | undefined): Binding<Command>[] {
 		bind([" "], "space", null, { kind: "activate", enter: false }),
 		bind(["right", "l"], "l", null, { kind: "unfold", open: true }),
 		bind(["left", "h"], "h", null, { kind: "unfold", open: false }),
-		bind(["escape"], "esc", null, { kind: "clearFilter" }),
+		// A Peek on view goes first, as its esc says; then the filter.
+		bind(["escape"], "esc", null, m.peek.settled ? { kind: "dismissPeek" } : { kind: "clearFilter" }),
 		bind(["w"], "w", null, onRow("wake")),
 		bind(["x"], "x", null, onRow("stop")),
 		bind(["R"], "R", null, onRow("reload")),

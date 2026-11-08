@@ -239,7 +239,8 @@ class Roster implements Component, Focusable {
 			lines.splice(prompt.y, 0, ...Array<string>(reserved).fill(""));
 		}
 		const detailTop = height - detailLines - 1 - messageRows;
-		const tabs = detailRows(width, detailTop, detail !== null);
+		const keys = footerKeys(width);
+		const tabs = [keys.views.length > 0 ? keyRow(detailTop, keys.views, keys, width, keys.prefix) : ""];
 		if (detail) {
 			const y = detailTop + 1;
 			frame.details = { y, height: detail.lines.length, total: detail.total };
@@ -250,11 +251,11 @@ class Roster implements Component, Focusable {
 			}
 		}
 		lines.push(
-			overflowRule(rows.slice(frame.scrollTop + frame.listHeight), "↓", width),
+			overflowRule(rows.slice(frame.scrollTop + frame.listHeight), "↓", width, "", prefixAbove()),
 			...tabs,
 			...(detail?.lines ?? []),
 			...(messageRows ? [message] : []),
-			hints(height - 1, width),
+			hints(height - 1, width, keys),
 		);
 		place(
 			lines,
@@ -324,12 +325,14 @@ function pickerParts(width: number, height: number): Part[] {
 	if (model.mode.kind === "archive") {
 		const e = model.entries.get(model.mode.id);
 		if (!e) return [];
+		const dirty = model.mode.dirty;
 		return [
-			[`Archive ${displayName(e)}`, null],
+			["Archive", null],
 			...archiveNotes(e).map((note): Part => [` ${gray(note)}`, null]),
 			...keymap()
 				.filter((b) => b.label !== null && b.command?.kind !== "cancel")
-				.map((b): Part => [` ${bold(b.name)} ${b.label?.replace("delete clean worktree", bold(red("delete clean worktree")))}`, b.command]),
+				.map((b): Part => [` ${bold(b.name)} ${b.label?.replace("delete worktree", bold(red("delete worktree")))}`, b.command]),
+			...(dirty ? [[` ${attention("Uncommitted changes")}`, null] as Part] : []),
 		];
 	}
 	const naming = nameMode();
@@ -337,7 +340,7 @@ function pickerParts(width: number, height: number): Part[] {
 	const choices = nameChoices();
 	const shown = Math.max(1, Math.min(choices.length, height - 4));
 	const from = Math.max(0, Math.min(naming.choice - shown + 1, choices.length - shown));
-	const title = `${naming.renaming ? "Rename Group" : "Group for"} ${naming.title}`;
+	const title = naming.renaming ? "Rename Group" : "Group";
 	const input = naming.input.render(Math.max(10, width - 2))[0] ?? "";
 	const out: Part[] = [
 		[title, null],
@@ -353,16 +356,23 @@ function pickerParts(width: number, height: number): Part[] {
 	return out;
 }
 
-function promptTitle(title: string, width: number): string {
-	const label = truncateToWidth(` ${title} `, width - 7, "…");
-	return `${gray("╭─")}${label}${gray("─".repeat(Math.max(0, width - visibleWidth(label) - 7)))} ✕ ${gray("─╮")}`;
+/** A box's top border: its title, and the key that closes it, which a click presses too. */
+function promptTitle(title: string, width: number, hot = false): string {
+	const label = truncateToWidth(` ${title} `, width - 9, "…");
+	const close = hot ? cursorLine(" esc ", true) : ` ${bold("esc")} `;
+	return `${gray("╭─")}${label}${gray("─".repeat(Math.max(0, width - visibleWidth(label) - 9)))}${close}${gray("─╮")}`;
+}
+
+/** The click target over promptTitle's esc. */
+function closeButton(title: string, width: number, command: Command): OverlayButton {
+	return { y: 0, from: width - 7, to: width - 2, command, hot: promptTitle(title, width, true) };
 }
 
 function promptOverlay(width: number, height: number): Overlay[] {
 	const mode = model.mode;
 	if (mode.kind !== "archive" && mode.kind !== "name" && mode.kind !== "snooze") return [];
 	const rosterWidth = width;
-	const insert = panes.narrow;
+	const insert = menuRow(width) !== null;
 	width = insert ? width : Math.min(Math.max(width, 54), panes.width - rosterWidth - 1);
 	if (width < PEEK_MIN_COLS) return [];
 	const parts = pickerParts(width - 2, height - 2);
@@ -372,27 +382,16 @@ function promptOverlay(width: number, height: number): Overlay[] {
 	const buttons: OverlayButton[] = parts.flatMap(([line, command], y) =>
 		command ? [{ y, from: 1, to: width - 1, command, hot: row(cursorLine(truncateToWidth(line, width - 2, "…", true), true)) }] : [],
 	);
-	const footer = legendParts(
-		keymap().filter((b) => b.command?.kind === "choose" || b.command?.kind === "cancel"),
-		width - 4,
-	);
-	const footerText = footer.map(([text]) => text).join("");
-	const footerY = lines.length;
-	lines.splice(footerY - 1, 0, gray(`├${"─".repeat(width - 2)}┤`), row(footerText));
-	let column = 1;
-	for (const [i, [text, command]] of footer.entries()) {
-		const from = column;
-		column += visibleWidth(text);
-		if (command)
-			buttons.push({
-				y: footerY,
-				from,
-				to: column,
-				command,
-				hot: row(footer.map(([part], j) => (i === j ? cursorLine(part, true) : part)).join("")),
-			});
+	buttons.push(closeButton(title, width, { kind: "cancel" }));
+	// Under its row, the menu carries the rest of the row's title above it, so the row reads whole.
+	const subject = insert ? rosterRows().find((r) => r.key === mode.at.row) : undefined;
+	if (subject?.kind === "session") {
+		const rest = sessionLine(subject, rosterWidth, Date.now()).rest;
+		const rows = rosterRows();
+		const cursor = rows[cursorIndex(rows)]?.key === subject.key;
+		lines.unshift(...rest.map((line) => (cursor ? cursorLine(line, model.focus === "roster") : line)));
+		for (const b of buttons) b.y += rest.length;
 	}
-	buttons.push({ y: 0, from: width - 4, to: width - 1, command: { kind: "cancel" }, hot: lines[0] as string });
 	const x = insert ? 0 : Math.max(rosterWidth + 1, Math.min(mode.at.x, panes.width - width));
 	const y = insert
 		? frame.listTop + rosterRows().findIndex((r) => r.key === mode.at.row) - frame.scrollTop + 1
@@ -404,7 +403,7 @@ function snoozeMenu(width: number): Part[] {
 	const snoozing = snoozeMode();
 	if (!snoozing) return [];
 	const now = Date.now();
-	const out: Part[] = [[`Snooze ${snoozing.title}`, null]];
+	const out: Part[] = [["Snooze", null]];
 	const e = model.entries.get(snoozing.id);
 	if (e?.activity === "blocked")
 		out.push(...wrapTextWithAnsi("Blocked sessions stay visible until answered.", width - 2).map((line): Part => [` ${line}`, null]));
@@ -492,7 +491,7 @@ function renderPicker(width: number, height: number): string[] {
 	while (lines.length < height - 2) lines.push("");
 	lines.push(messageLine(Date.now()));
 	// The remove prompt carries its own keys.
-	lines.push(choosing.confirm || choosing.menu ? "" : legend(lines.length, keymap(), width, []));
+	lines.push(choosing.confirm || choosing.menu ? "" : legend(lines.length, keymap(), width));
 	return lines.map((line) => truncateToWidth(line, width, "…", true));
 }
 
@@ -558,6 +557,7 @@ function list(rows: Row[], index: number, width: number, full: number, now: numb
 		const line = truncateToWidth(rowLine(row, width, now), width, "…", true);
 		if (dragging()?.drop?.header.key === row.key) out.push(cursorLine(line, true));
 		else if (i === index) out.push(cursorLine(line, model.focus === "roster"));
+		else if (row.key === peekRow(width)) out.push(hoverLine(line));
 		else out.push(line);
 		if (row.kind === "session" && row.family.length > 0) {
 			const at = foldColumn(row);
@@ -571,15 +571,30 @@ function list(rows: Row[], index: number, width: number, full: number, now: numb
 	return [...pinned, ...out];
 }
 
-function overflowRule(hidden: Row[], arrow: string, width: number, section = ""): string {
-	if (hidden.length === 0) return gray("─".repeat(width));
+/**
+ * A rule with what its list hides past it; `lead`, the prefix every key below it takes, heads it, and moves the count to
+ * its end. Like a section's rule, it stops a column short of the roster's edge, where every row's content ends.
+ */
+function overflowRule(hidden: Row[], arrow: string, width: number, section = "", lead = false): string {
+	const head = lead ? ` ${bold(keyName(model.config.prefix))} ` : "";
 	const states = hidden.flatMap((r) => (r.kind === "session" ? [stateOf(r.entry)] : []));
 	const counts = (["blocked", "cut-off", "errored", "unseen"] as State[]).flatMap((state) => {
 		const n = states.filter((s) => s === state).length;
 		return n ? [`${glyph(state, Date.now())}${n}`] : [];
 	});
-	const label = ` ${arrow} ${hidden.length} ${counts.join(" ")}${section ? ` · ${section}` : ""} `;
-	return `${label}${gray("─".repeat(Math.max(0, width - visibleWidth(label))))}`;
+	const label = hidden.length === 0 ? "" : ` ${[arrow, hidden.length, ...counts].join(" ")}${section ? ` · ${section}` : ""} `;
+	const fill = (n: number) => gray("─".repeat(Math.max(0, n)));
+	const room = width - 1 - visibleWidth(head) - visibleWidth(label);
+	if (lead) return `${head}${label ? `${fill(room - 1)}${label}${fill(1)}` : fill(room)}`;
+	return label ? `${label}${fill(room)}` : ` ${fill(room - 1)}`;
+}
+
+/**
+ * Whether every key under the roster's foot takes the prefix, as the Stage's own do while it has the keyboard; the rule
+ * above them names it once. Otherwise only the views' row does, and names it itself.
+ */
+function prefixAbove(): boolean {
+	return model.mode.kind === "roster" && model.focus === "stage" && stageKeys()[0]?.name === "tab";
 }
 
 /** What the prompt says above its answers: what goes with the session, or the schedules archiving cancels. */
@@ -601,7 +616,7 @@ function archiveNotes(e: Entry): string[] {
 		];
 	}
 	const family = openDescendants(model.entries.values(), e.id);
-	return [family.length > 0 ? `${family.length} child session${family.length === 1 ? "" : "s"}` : "Branch kept with either choice"];
+	return family.length > 0 ? [`${family.length} child session${family.length === 1 ? "" : "s"}`] : [];
 }
 
 /** Joins the parts into row y's line, recording where each clickable one lands. */
@@ -641,26 +656,98 @@ function detailView(row: Row | undefined, width: number, height: number): (Overl
 	};
 }
 
-/** The Stage's views and, without a Stage beside it, a disclosure for the selected session. */
-function detailRows(width: number, top: number, detailsVisible: boolean): string[] {
+/** The Stage's views for the session on it, as key cells. */
+function viewCells(): Part[] {
 	const e = cursorEntry() ?? (model.stage.staged === null ? null : (model.entries.get(model.stage.staged) ?? null));
-	if (!e) return [""];
-	const parts: Part[] = [[" ", null]];
-	if (detailsVisible) parts.push([gray("PgUp/PgDn details  ·  "), null]);
-	if (model.stage.staged === e.id && e.open) {
-		parts.push([gray(`${keyName(model.config.prefix)} → `), null]);
-		const editor = panes.applied.view === "editor";
-		const splitting = viewOf(e) === "split";
-		const label = key("e", "editor");
-		if (!splitting) parts.push([editor ? cursorLine(label, true) : label, { kind: "view", view: editor ? "agent" : "editor" }]);
-		const split = `${splitting ? "" : "  "}${key("v", "split")}`;
-		parts.push([panes.applied.view === "split" ? cursorLine(split, true) : split, { kind: "view", view: splitting ? "agent" : "split" }]);
-		// The shell is a toggle beside the views, not one of them.
-		const shell = `  ${key("s", "shell")}`;
-		if (parts.reduce((n, [text]) => n + visibleWidth(text), 0) + visibleWidth(shell) <= width - 1)
-			parts.push([panes.applied.shell ? cursorLine(shell, true) : shell, { kind: "shell" }]);
+	if (!e || model.stage.staged !== e.id || !e.open) return [];
+	const editor = panes.applied.view === "editor";
+	const splitting = viewOf(e) === "split";
+	const cells: Part[] = [];
+	const label = key("e", "editor");
+	// Split, editor isn't a view to switch to; its cell stays, blank, so the keys beside it keep their columns.
+	cells.push(
+		splitting
+			? [" ".repeat(visibleWidth(label)), null]
+			: [editor ? cursorLine(label, true) : label, { kind: "view", view: editor ? "agent" : "editor" }],
+	);
+	const split = key("v", "split");
+	cells.push([panes.applied.view === "split" ? cursorLine(split, true) : split, { kind: "view", view: splitting ? "agent" : "split" }]);
+	// The shell is a toggle beside the views, not one of them.
+	const shell = key("s", "shell");
+	cells.push([panes.applied.shell ? cursorLine(shell, true) : shell, { kind: "shell" }]);
+	return cells;
+}
+
+/**
+ * The roster's two rows of keys at its foot, the Stage's views over the mode's own, laid in shared columns so each key
+ * sits over the one below it: from the left while the Stage has the keyboard, else at the right end, where the
+ * roster's pinned keys are and each row's left edge is its own. `legend` is null in a mode with a line of its own.
+ */
+type FooterKeys = {
+	views: Part[];
+	/** At the right end, the prefix the views take, at their row's left edge, outside the shared columns. */
+	prefix: Part[];
+	legend: Part[] | null;
+	lead: Binding<Command>[];
+	widths: number[];
+	right: boolean;
+};
+
+function footerKeys(cols: number): FooterKeys {
+	const below = legendKeys(cols);
+	const right = below?.right ?? true;
+	// From the left, nothing is pinned, so a blank cell needn't hold a column.
+	let views = right ? viewCells() : viewCells().filter(([text]) => text.trim() !== "");
+	let legend = below?.cells ?? [];
+	const prefixed = views.length > 0 && !prefixAbove();
+	const prefix: Part = [`${bold(keyName(model.config.prefix))} ${gray("→")}`, null];
+	// From the left, the prefix takes a column of its own; at the right end, it keeps the row's left edge.
+	if (prefixed && !right) {
+		views = [prefix, ...views];
+		legend = [["", null], ...legend];
 	}
-	return [truncateToWidth(clickable(top, parts), Math.max(0, width - 1), "…")];
+	const lead = prefixed && right ? visibleWidth(prefix[0]) + 2 : 0;
+	const rows = [views, legend];
+	for (;;) {
+		const widths = columnWidths(rows, right);
+		if (spanOf(widths) <= cols - 2 - lead || widths.length === 0) {
+			const [v, l] = rows as [Part[], Part[]];
+			return { views: v, prefix: prefixed && right ? [prefix] : [], legend: below ? l : null, lead: below?.lead ?? [], widths, right };
+		}
+		// What doesn't fit goes from the end; at the right end, from both rows alike, so their columns stay paired.
+		for (const r of rows) if (right || r.length === widths.length) r.pop();
+	}
+}
+
+/** Each shared column's width, its cells counted from the left, or from the right end with `right`. */
+function columnWidths(rows: Part[][], right: boolean): number[] {
+	const n = Math.max(0, ...rows.map((r) => r.length));
+	return Array.from({ length: n }, (_, i) => Math.max(0, ...rows.map((r) => visibleWidth(r[right ? r.length - n + i : i]?.[0] ?? ""))));
+}
+
+function spanOf(widths: number[]): number {
+	return widths.reduce((n, w) => n + w, 0) + 2 * Math.max(0, widths.length - 1);
+}
+
+/**
+ * One row of footer keys in the shared columns, which end a column short of the roster's edge, where every row's content
+ * does. At the right end, `lead`, the views' prefix or the mode's leading keys, keeps the row's left edge.
+ */
+function keyRow(y: number, cells: Part[], keys: FooterKeys, cols: number, lead: Part[] = []): string {
+	const { widths, right } = keys;
+	const n = widths.length;
+	const parts: Part[] = [[" ", null], ...lead];
+	let x = parts.reduce((w, [text]) => w + visibleWidth(text), 0);
+	let column = right ? cols - 1 - spanOf(widths) : 1;
+	for (let i = 0; i < n; i++) {
+		const cell = cells[right ? cells.length - n + i : i];
+		if (cell) {
+			parts.push([" ".repeat(Math.max(0, column - x)), null], cell);
+			x = Math.max(x, column) + visibleWidth(cell[0]);
+		}
+		column += (widths[i] as number) + 2;
+	}
+	return clickable(y, parts);
 }
 
 /** A toast, else the config error, which stays until the file is fixed and opens it on a click; y makes it clickable. */
@@ -685,27 +772,36 @@ function messageLine(now: number, y: number | null = null, withConfigError = tru
 }
 
 /** The legend line: a field being typed into, where a drag would land, or the keys the mode takes. */
-function hints(y: number, cols: number): string {
+function hints(y: number, cols: number, keys: FooterKeys): string {
 	if (archiving() !== null || nameMode() || snoozeMode()) return "";
 	if (filtering()) {
-		return legend(y, [{ keys: ["enter"], name: "⏎", label: "keep filter", command: { kind: "choose", index: null } }], cols, []);
+		return legend(y, [{ keys: ["enter"], name: "⏎", label: "keep filter", command: { kind: "choose", index: null } }], cols);
 	}
 	const drag = dragging();
 	if (drag?.moved) {
 		if (!drag.drop) return ` ${red("✗ not here")}`;
 		return drag.drop.name === null ? ` ⇢ out of its Group` : ` ⇢ into ${bold(drag.drop.name)}`;
 	}
-	if (model.mode.kind === "roster" && model.focus === "stage") {
+	if (!keys.legend) return legend(y, keymap(), cols);
+	if (!keys.right) return keyRow(y, keys.legend, keys, cols);
+	const start = cols - 1 - spanOf(keys.widths);
+	return keyRow(y, keys.legend, keys, cols, legendParts(keys.lead, start - 1).slice(1));
+}
+
+/** The keys under the views row: the Stage's own while it has the keyboard, else the roster's, its pinned ones as cells. */
+function legendKeys(cols: number): { cells: Part[]; lead: Binding<Command>[]; right: boolean } | null {
+	if (model.mode.kind !== "roster") return null;
+	const cell = (b: Binding<Command>): Part => [key(b.name, b.label as string), b.command];
+	if (model.focus === "stage") {
 		const bindings = stageKeys();
-		const prefix = bindings[0]?.name === "tab" ? ` ${keyName(model.config.prefix)} →` : "";
 		const history: Binding<Command>[] = [];
 		if (historyStep(-1) !== -1) history.push({ keys: [], name: "[", label: "back", command: { kind: "history", step: -1 } });
 		if (historyStep(1) !== -1) history.push({ keys: [], name: "]", label: "forward", command: { kind: "history", step: 1 } });
 		bindings.splice(1, 0, ...history);
-		return clickable(y, [[gray(prefix), null], ...legendParts(bindings, cols - visibleWidth(prefix))]);
+		return { cells: bindings.filter((b) => b.label !== null).map(cell), lead: [], right: false };
 	}
 	let bindings = keymap();
-	if (model.focus === "roster" && (model.peek.settled || frame.details)) {
+	if (model.peek.settled || frame.details) {
 		const row = rosterRows().find((r) => r.key === (model.peek.settled?.id ?? cursorEntry()?.id));
 		const actions = row ? peekButtons(row).map(([, , act]) => act) : [];
 		bindings = bindings.filter((b) => {
@@ -713,35 +809,20 @@ function hints(y: number, cols: number): string {
 			return !(c?.kind === "activate" && c.enter) && !(c?.kind === "row" && actions.includes(c.act));
 		});
 	}
-	return legend(y, bindings, cols, []);
+	const fixed = ["n", "?", ","];
+	const shown = cols < 38 ? fixed.slice(0, 2) : fixed;
+	// Pinned keys keep their columns: one that doesn't apply leaves its cell blank rather than shifting the rest.
+	const cells = shown.map((name): Part => {
+		const b = bindings.find((b) => b.name === name);
+		const text = key(name, name === "n" ? "new" : name === "?" ? "keys" : "settings");
+		return b?.label ? [text, b.command] : [" ".repeat(visibleWidth(text)), null];
+	});
+	return { cells, lead: bindings.filter((b) => !fixed.includes(b.name)), right: true };
 }
 
-/**
- * A keymap's labelled bindings as buttons, in its order, and `trailing` at the right end. What doesn't fit goes whole,
- * from the end.
- */
-function legend(y: number, bindings: Binding<Command>[], cols: number, trailing: Part[]): string {
-	if (model.mode.kind === "roster" && model.focus === "roster") {
-		const fixed = ["n", "?", ","];
-		// Reserve the longest primary action even while the Peek owns it, so the remaining hints never shift.
-		const shown = cols < 38 ? fixed.slice(0, 2) : fixed;
-		trailing = shown.flatMap((name, i): Part[] => {
-			const b = bindings.find((b) => b.name === name);
-			const label = name === "n" ? "new" : name === "?" ? "keys" : "settings";
-			const text = key(name, label);
-			return [
-				[i === 0 ? "" : "  ", null],
-				[b?.label ? text : " ".repeat(visibleWidth(text)), b?.label ? b.command : null],
-			];
-		});
-		bindings = bindings.filter((b) => !fixed.includes(b.name));
-	}
-	const end = trailing.reduce((n, [text]) => n + visibleWidth(text), 0);
-	// Trailing parts keep a column of their own either side.
-	const parts = legendParts(bindings, trailing.length === 0 ? cols : cols - end - 2);
-	if (trailing.length === 0) return clickable(y, parts);
-	const used = parts.reduce((n, [text]) => n + visibleWidth(text), 0);
-	return clickable(y, [...parts, [" ".repeat(Math.max(2, cols - used - end - 1)), null], ...trailing]);
+/** A keymap's labelled bindings as buttons, in its order. What doesn't fit goes whole, from the end. */
+function legend(y: number, bindings: Binding<Command>[], cols: number): string {
+	return clickable(y, legendParts(bindings, cols));
 }
 
 function pickLine(row: PickRow, width: number, cursor: boolean): string {
@@ -797,12 +878,42 @@ function rowLine(row: Row, width: number, now: number): string {
 		const label = ` ${row.expanded ? "▾" : "▸"} ${row.label} ${gray(`(${row.count})`)} `;
 		return `${label}${gray("─".repeat(Math.max(0, width - visibleWidth(label) - 1)))}`;
 	}
+	return sessionLine(row, width, now).line;
+}
+
+/** Where a row-anchored menu sits in the roster, under its row's: that row's key, or null while the menu floats beside it. */
+function menuRow(width: number): string | null {
+	const mode = model.mode;
+	if (mode.kind !== "archive" && mode.kind !== "name" && mode.kind !== "snooze") return null;
+	return panes.narrow || width >= PEEK_MIN_COLS ? mode.at.row : null;
+}
+
+/** The row the Peek shows beside, when there's room on the Stage for one. */
+function peekRow(width: number): string | null {
+	const spot = model.peek.settled;
+	if (panes.narrow || !spot || width < PEEK_MIN_COLS || Math.min(PEEK_COLS, panes.width - width) < PEEK_MIN_COLS) return null;
+	return spot.id;
+}
+
+/**
+ * A session's row, and the rest of a title it can't hold: while a menu sits under it, wrapped below it, since the
+ * roster is still then; on the Peek's row, `over`, which the Peek carries on across the divider, and the time it keeps.
+ */
+function sessionLine(
+	row: SessionRow,
+	width: number,
+	now: number,
+): { line: string; rest: string[]; over: { title: string; right: string } | null } {
 	const e = row.entry;
 	// Mid-drag, the session being carried is a hollow outline of itself.
 	const drag = dragging();
 	if (drag?.moved && drag.id === e.id) {
 		const lead = `${gray("┆")}${rowLead(row)}`;
-		return `${lead}${gray("◌")} ${gray(truncateToWidth(displayName(e), width - visibleWidth(lead) - 2, "…"))}`;
+		return {
+			line: `${lead}${gray("◌")} ${gray(truncateToWidth(displayName(e), width - visibleWidth(lead) - 2, "…"))}`,
+			rest: [],
+			over: null,
+		};
 	}
 	const mark = model.stage.staged === e.id ? cyan("▌") : " ";
 	const lead = `${mark}${rowLead(row)}`;
@@ -829,11 +940,34 @@ function rowLine(row: Row, width: number, now: number): string {
 			? gray
 			: (s: string) => s;
 	const hovered = model.peek.settled?.source === "pointer" && model.peek.settled.id === e.id;
-	const name = hovered ? displayName(e) : matchedText(displayName(e));
-	let title = truncateToWidth(matches(e) || !e.live ? paint(name) : gray(name), titleWidth, "…");
-	if (hovered) title = underline(title);
+	const style = (text: string) => {
+		const name = hovered ? text : matchedText(text);
+		const styled = matches(e) || !e.live ? paint(name) : gray(name);
+		return hovered ? underline(styled) : styled;
+	};
+	const full = displayName(e);
+	let title = truncateToWidth(style(full), titleWidth, "…");
+	let rest: string[] = [];
+	if (row.key === menuRow(width) && visibleWidth(full) > titleWidth) {
+		const first = wrapTextWithAnsi(full, titleWidth)[0] ?? "";
+		title = style(first);
+		const column = visibleWidth(lead) + 2;
+		const room = width - column - 1;
+		const more = wrapTextWithAnsi(full.slice(first.length).trimStart(), room);
+		const shown = more.length > 2 ? [more[0] as string, truncateToWidth(more.slice(1).join(" "), room, "…")] : more;
+		rest = shown.map((line) => truncateToWidth(`${mark}${" ".repeat(column - 1)}${style(line)}`, width, "", true));
+	}
+	if (row.key === peekRow(width)) {
+		// The whole title, uncut, split where the roster ends; the time moves to the Peek's far edge.
+		const whole = `${lead}${glyph(state, now)} ${style(full)}${badge}`;
+		return {
+			line: sliceByColumn(whole, 0, width),
+			rest,
+			over: { title: sliceByColumn(whole, width, Math.max(0, visibleWidth(whole) - width)), right: `${hidden}${right}` },
+		};
+	}
 	const pad = " ".repeat(Math.max(0, titleWidth - visibleWidth(title)));
-	return `${lead}${glyph(state, now)} ${title}${badge}${pad}${hidden}${right}`;
+	return { line: `${lead}${glyph(state, now)} ${title}${badge}${pad}${hidden}${right}`, rest, over: null };
 }
 
 /**
@@ -900,29 +1034,57 @@ const PEEK_COLS = 60;
 const PEEK_FOLD_ROWS = 8;
 
 /**
- * The settled Peek, beside its row on the Stage. While the pointer is on it, it holds as if on its row.
+ * The settled Peek, hung off its row at the divider, which is its left edge. Its row is one of its edges: the title runs
+ * on from the roster across it, tinted as the row is, to the time at the Peek's far side, and its border, with the close
+ * key, wraps one line past it. It opens down from the row, or up when only that holds it. While the pointer is on it, it
+ * holds as if on its row.
  */
 function peekOverlays(rows: Row[], width: number, height: number): Overlay[] {
 	const spot = model.peek.settled;
-	const row = spot && rows.find((r) => r.key === spot.id);
-	if (panes.narrow || !spot || row?.kind !== "session") return [];
-	let w = Math.min(PEEK_COLS, panes.width - width - 1);
-	if (w < PEEK_MIN_COLS || width < PEEK_MIN_COLS) return [];
-	let view = peekView(row, w, height, "left");
+	const index = rows.findIndex((r) => r.key === spot?.id);
+	const row = rows[index];
+	if (!spot || row?.kind !== "session" || peekRow(width) !== spot.id) return [];
+	const over = sessionLine(row, width, Date.now()).over as { title: string; right: string };
+	let w = Math.min(PEEK_COLS, panes.width - width);
+	let view = peekView(row, w, height - 2, "left");
 	const content = view.lines.slice(1, -1).map((line) => Bun.stripANSI(line).slice(2, -2).trimEnd());
-	const fit = Math.max(PEEK_MIN_COLS, ...content.filter((line) => !/^─+$/.test(line)).map((line) => visibleWidth(line) + 4));
+	const fit = Math.max(
+		PEEK_MIN_COLS,
+		visibleWidth(over.title) + visibleWidth(over.right) + 1,
+		// The frame and its padding, and the two columns an action row keeps free before it wraps.
+		...content.filter((line) => !/^─+$/.test(line)).map((line) => visibleWidth(line) + 6),
+	);
 	if (fit < w) {
 		w = fit;
-		view = peekView(row, w, height, "left");
+		view = peekView(row, w, height - 2, "left");
 	}
+	const below = spot.y > 0 ? height - spot.y + 1 : 0;
+	const above = spot.y + 2;
+	const up = view.lines.length + 2 > below && above > below;
+	if (view.lines.length + 2 > (up ? above : below)) view = peekView(row, w, (up ? above : below) - 2, "left");
+	const border = (hot: boolean) =>
+		`${gray(`${up ? "╰" : "╭"}${"─".repeat(w - 8)}`)}${hot ? cursorLine(" esc ", true) : ` ${bold("esc")} `}${gray(`─${up ? "╯" : "╮"}`)}`;
+	const room = w - 1 - visibleWidth(over.right);
+	// The slice leaves the title's style open, a hover's underline among it, so it's closed before the gap.
+	const strip = `${truncateToWidth(over.title, room, "…")}\x1b[0m${" ".repeat(Math.max(0, room - visibleWidth(over.title)))}${over.right}`;
+	const title = `${index === cursorIndex(rows) ? cursorLine(strip, model.focus === "roster") : hoverLine(strip)}${gray("│")}`;
+	const rule = gray(`├${"─".repeat(w - 2)}┤`);
+	const body = view.lines.slice(1, -1);
+	const lines = up
+		? [gray(`╭${"─".repeat(w - 2)}╮`), ...body, rule, title, border(false)]
+		: [border(false), title, rule, ...body, gray(`╰${"─".repeat(w - 2)}╯`)];
+	const buttons = [
+		...view.buttons.filter((b) => b.command.kind !== "dismissPeek").map((b) => ({ ...b, y: b.y + (up ? 0 : 2) })),
+		{ y: up ? lines.length - 1 : 0, from: w - 7, to: w - 2, command: { kind: "dismissPeek" } as Command, hot: border(true) },
+	];
 	return [
 		{
 			id: "peek",
 			about: spot.id,
-			x: width + 1,
-			y: Math.max(0, Math.min(spot.y - 1, height - view.lines.length)),
+			x: width,
+			y: up ? spot.y + 2 - lines.length : spot.y - 1,
 			width: w,
-			view,
+			view: { lines, buttons },
 			leaves: true,
 			hovers: spot.id,
 		},
@@ -1061,7 +1223,7 @@ function launchCard(choosing: Choosing, width: number, noteRows: number): Overla
 	return {
 		lines,
 		buttons: [
-			{ y: 0, from: width - 4, to: width - 1, command: { kind: "cancel" }, hot: lines[0] as string },
+			closeButton(heading, width, { kind: "cancel" }),
 			...(presets.length === 0
 				? []
 				: [{ y: 1, from: margin, to: margin + inner, command: { kind: "menu" } as Command, hot: frame(cursorLine(field, true)) }]),
@@ -1090,7 +1252,7 @@ function launchMenu(choosing: Choosing, width: number, maxHeight: number): Overl
 	});
 	if (shown.length === 0) items.push(gray("nothing matches"));
 	const note = presetNote(presets[shown[menu.cursor] ?? -1]?.note ?? "", inner);
-	const room = Math.max(1, maxHeight - 6 - note.length);
+	const room = Math.max(1, maxHeight - 4 - note.length);
 	const from = Math.min(Math.max(0, (itemAt[menu.cursor] ?? 0) - room + 1), Math.max(0, items.length - room));
 	const to = Math.min(items.length, from + room);
 	const row = (content: string) => `${gray("│")} ${truncateToWidth(content, inner, "…", true)} ${gray("│")}`;
@@ -1104,25 +1266,7 @@ function launchMenu(choosing: Choosing, width: number, maxHeight: number): Overl
 			buttons.push({ y: lines.length, from: 2, to: 2 + inner, command: { kind: "choose", index: n }, hot: row(hoverLine(content)) });
 		lines.push(row(n === menu.cursor ? cursorLine(content, true) : content));
 	});
-	lines.push(rule(to < items.length ? ` ↓ ${items.length - to} more ` : ""), ...note.map(row), rule(""));
-	const hints = legendParts(
-		keymap().filter((b) => b.name === "⏎" || b.name === "esc"),
-		inner - 1,
-	).slice(1);
-	let x = 2;
-	for (const [text, command] of hints) {
-		const w = visibleWidth(text);
-		if (command)
-			buttons.push({
-				y: lines.length,
-				from: x,
-				to: x + w,
-				command,
-				hot: row(hints.map(([s, c]) => (c === command ? cursorLine(s, true) : s)).join("")),
-			});
-		x += w;
-	}
-	lines.push(row(hints.map(([text]) => text).join("")), gray(`╰${"─".repeat(width - 2)}╯`));
+	lines.push(rule(to < items.length ? ` ↓ ${items.length - to} more ` : ""), ...note.map(row), gray(`╰${"─".repeat(width - 2)}╯`));
 	return { lines, buttons };
 }
 
@@ -1138,14 +1282,9 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	const head: string[] = [];
 	const title = wrapTextWithAnsi(displayName(e), inner);
 	const titleLines = title.length > 2 ? [title[0] as string, truncateToWidth(title.slice(1).join(" "), inner, "…")] : title;
-	if (!Bun.stripANSI(rowLine(row, panes.narrow ? width : panes.rosterWidth(), now)).includes(displayName(e)))
-		head.push(...titleLines.map((line) => bold(line)));
+	if (panes.narrow && !Bun.stripANSI(rowLine(row, width, now)).includes(displayName(e))) head.push(...titleLines.map((line) => bold(line)));
 	const state = `${glyph(stateOf(e), now)} ${status(e)}${e.snoozed ? " · snoozed" : ""}${launchElapsed(e, now)}`;
-	const activity =
-		e.activity === "blocked"
-			? attention(`waiting ${age(e.activityAt, now)}`)
-			: `${gray("active")} ${e.activity === "working" ? "now" : ago(e.activityAt, now)}`;
-	const times = `${gray("created")} ${ago(e.createdAt, now)} · ${e.open ? activity : `${gray("archived")} ${ago(archivedKey(e), now)}`}`;
+	const times = `${gray("created")} ${ago(e.createdAt, now)} · ${e.open ? `${gray("active")} ${e.activity === "working" ? "now" : ago(e.activityAt, now)}` : `${gray("archived")} ${ago(archivedKey(e), now)}`}`;
 	if (panes.narrow && visibleWidth(`${state} · ${times}`) <= inner) head.push(`${state} · ${times}`);
 	else head.push(...wrapTextWithAnsi(state, inner), times);
 	if (e.snooze && !e.snoozed)
@@ -1260,9 +1399,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	return {
 		lines,
 		buttons: [
-			...(open === "left"
-				? [{ y: 0, from: width - 4, to: width - 1, command: { kind: "dismissPeek" } as Command, hot: lines[0] as string }]
-				: []),
+			...(open === "left" ? [closeButton("Peek", width, { kind: "dismissPeek" })] : []),
 			...links
 				.filter((link) => 1 + link.at < lines.length - 1)
 				.map((link) => ({

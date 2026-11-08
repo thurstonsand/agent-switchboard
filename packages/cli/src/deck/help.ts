@@ -2,7 +2,7 @@ import { decodeKittyPrintable, matchesKey, StdinBuffer, truncateToWidth, visible
 import { loadConfig } from "../config.ts";
 import { blockedMark, blue, bold, cyan, dim, gray, green, keyName, red } from "./style.ts";
 
-const CLOSES = "any key or click closes";
+const CLOSES = "any key to close";
 
 /** The popup's lines, the hint under them aside: a blank line, then a key and what it does on each. */
 function lines(prefix: string, columns = Infinity): string[] {

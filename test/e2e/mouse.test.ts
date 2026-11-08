@@ -49,6 +49,12 @@ function filled(y: number, text: string): boolean {
 	return [...before.matchAll(/\[(48;2;[\d;]+|49|0)m/g)].at(-1)?.[1]?.startsWith("48;2;") === true;
 }
 
+/** The roster line a menu titled `title` opened under: the one above its top border. */
+function menuUnder(title: string): string {
+	const lines = s.screen().split("\n");
+	return lines[lines.findIndex((line) => line.includes(`╭─ ${title} `)) - 1] ?? "";
+}
+
 async function onScreen(text: string, what: string): Promise<void> {
 	await until(() => s.screen().includes(text), budgets.settle, what);
 }
@@ -98,17 +104,15 @@ test("the mouse reaches everything the keys do: a row's Peek, the hidden or narr
 	await until(() => !entry(s, b).live, budgets.settle, "bravo stopped from its Peek");
 	expect(state(s).cursor).toBe(a);
 
-	const bravoY = find("bravo")[1];
 	await peekButton("alpha", a, "m Group…");
 	await waitState(s, "the Group picker", (x) => x.mode === "name");
-	await onScreen("Group for alpha", "the Group form drawn");
-	expect(Number(findRight("Group for alpha")[0])).toBeGreaterThan(42);
-	expect(find("bravo")[1]).toBe(bravoY);
+	await onScreen("╭─ Group ", "the Group form drawn");
+	expect(menuUnder("Group")).toContain("alpha");
 	s.save("group-picker.txt", s.screen());
-	await click("✕", 140);
-	await waitState(s, "the Group picker closed by its ✕", (x) => x.mode === "roster");
+	await click(" esc ");
+	await waitState(s, "the Group picker closed by its esc", (x) => x.mode === "roster");
 	s.keys("m", "-l", "review2", "Enter");
-	await until(() => entry(s, a).group === "review2", budgets.settle, "a new Group typed into the floating form");
+	await until(() => entry(s, a).group === "review2", budgets.settle, "a new Group typed into the form");
 	s.keys("m");
 	await onScreen("1 (no Group)", "numbered Group choices");
 	s.keys("1");
@@ -144,6 +148,9 @@ test("the mouse reaches everything the keys do: a row's Peek, the hidden or narr
 	await peekButton("bravo", b, "u Keep Unseen");
 	await waitState(s, "the filter closed by the Peek's button", (x) => x.mode === "roster" && x.filter === "a");
 	await until(() => entry(s, b).markedUnseen, budgets.settle, "bravo marked Unseen from its Peek");
+	// Esc closes the Peek first, as its corner says; the next clears the filter.
+	s.keys("Escape");
+	await waitState(s, "the Peek closed, the filter kept", (x) => x.peek === null && x.filter === "a");
 	s.keys("Escape");
 	await waitState(s, "the filter cleared", (x) => x.filter === "");
 
@@ -212,7 +219,7 @@ test("Escape followed by mouse motion clears the filter without typing the repor
 	await cursorTo(s, a);
 	s.keys("m");
 	await waitState(s, "the Group form", (x) => x.mode === "name");
-	await onScreen("Group for alpha", "the floating form");
+	await onScreen("╭─ Group ", "the Group form drawn");
 	const [x, y] = find("bravo");
 	clientRaw(`\x1b\x1b[<35;${x};${y}M`);
 	await waitState(s, "Escape closes Group and the recovered mouse opens bravo's Peek", (x) => x.mode === "roster" && x.peek?.id === b);
@@ -241,10 +248,11 @@ test("a blocked Peek focuses its own session to respond, even while another row 
 	await cursorTo(s, b);
 	s.swb("drive", "move", ...find("alpha"));
 	const blocked = await waitState(s, "alpha's blocked Peek", (x) => x.peek?.id === a);
-	expect(blocked.peek?.lines.join("\n")).toContain("waiting now");
+	expect(blocked.peek?.lines.join("\n")).toContain("· active");
 	expect(blocked.peek?.lines.join("\n")).not.toContain("active now");
+	expect(blocked.peek?.lines.join("\n")).not.toContain("waiting");
 	await peekButton("alpha", a, "s Snooze…");
-	await onScreen("Blocked sessions stay visible until answered.", "the snooze exception explained");
+	await onScreen("Blocked sessions stay visible", "the snooze exception explained");
 	s.keys("1");
 	await waitState(s, "the snooze menu closed", (x) => x.mode === "roster");
 	s.swb("drive", "move", ...find("bravo"));
@@ -309,11 +317,15 @@ test("a Peek follows the pointer and the cursor keys, leaves with the pointer, a
 
 	s.keys("s");
 	await waitState(s, "the hovered session's Snooze menu", (x) => x.mode === "snooze");
-	await onScreen("Snooze bravo", "the prompt names the Peek's target, not alpha");
-	expect(s.screen()).not.toContain("Snooze alpha");
+	await onScreen("╭─ Snooze ", "the Snooze menu drawn");
+	expect(menuUnder("Snooze")).toContain("bravo");
 	s.keys("Escape");
 	s.swb("drive", "move", ...find("bravo"));
 	await waitState(s, "bravo's Peek restored by pointer movement", (x) => x.peek?.id === b);
+	s.keys("Escape");
+	await waitState(s, "Escape closes the Peek, as its corner says", (x) => x.peek === null);
+	s.swb("drive", "move", ...find("bravo", 20));
+	await waitState(s, "bravo's Peek back under the pointer", (x) => x.peek?.id === b);
 	s.keys(toB);
 	await waitState(s, "navigation dismisses the pointer's Peek", (x) => x.hover === null && x.cursor === b && x.peek?.source !== "pointer");
 	s.keys(toA, "Escape");
@@ -363,11 +375,12 @@ test("a Peek follows the pointer and the cursor keys, leaves with the pointer, a
 	await onScreen("typed past the peek", "every key in pi");
 });
 
-test("Archive stays at its clicked action, Snooze stays at its row, and the Stage's last message is not repeated", async () => {
+test("Archive and Snooze open under their row at any width, and the Stage's last message is not repeated", async () => {
 	s = scenario("phase6", "anchored-prompts");
 	const parent = await launched(s, "reply parent response", { cwd: s.project, title: "parent" });
 	await launched(s, "reply descendant response", { from: parent, title: "child" });
 	const later = await launched(s, "reply later", { cwd: s.project, title: "later" });
+	const long = await launched(s, "reply long", { cwd: s.project, title: "long: a title that runs well past the roster's width" });
 	s.swb("snooze", later, "one_hour");
 	s.swb("drive", "start", "--size", "175x48");
 	await waitState(s, "the Deck", (x) => x.ready);
@@ -377,22 +390,20 @@ test("Archive stays at its clicked action, Snooze stays at its row, and the Stag
 	const shown = await waitState(s, "the parent's Peek", (x) => x.peek?.id === parent);
 	expect(shown.peek?.lines.join("\n")).not.toContain("parent response");
 	await onScreen("a Archive", "the Archive action");
+	const row = Number(find("parent")[1]);
 	const [x, y] = findRight("a Archive");
 	s.swb("drive", "move", x, y);
 	s.swb("drive", "click", x, y);
 	await waitState(s, "the Archive form", (st) => st.mode === "archive");
-	await onScreen("Archive parent", "the anchored form drawn");
-	const [formX, formY] = find("Archive parent", 175);
-	expect(Math.abs(Number(formY) - Number(y))).toBeLessThanOrEqual(1);
-	expect(Math.abs(Number(formX) - Number(x))).toBeLessThanOrEqual(4);
-	await click("✕", 175);
+	await onScreen("╭─ Archive ", "the form drawn under its row");
+	expect(Number(find("╭─ Archive ")[1])).toBe(row + 1);
+	await click(" esc ");
 	await waitState(s, "the form closed without archiving", (st) => st.mode === "roster");
 	expect(entry(s, parent).open).toBe(true);
-	const row = Number(find("parent")[1]);
 	s.keys("s");
 	await waitState(s, "Snooze", (st) => st.mode === "snooze");
-	await onScreen("Snooze parent", "the Snooze form drawn");
-	expect(Number(findRight("Snooze parent")[1])).toBe(row + 1);
+	await onScreen("╭─ Snooze ", "the Snooze form drawn");
+	expect(Number(find("╭─ Snooze ")[1])).toBe(row + 1);
 	expect(
 		s
 			.screen()
@@ -403,12 +414,41 @@ test("Archive stays at its clicked action, Snooze stays at its row, and the Stag
 	// Exercise the client's Escape binding, not only a key injected into its pane.
 	s.tmux(s.servers.sessions, "send-keys", "-K", "-c", s.tmux(s.servers.sessions, "list-clients", "-F", "#{client_tty}"), "Escape");
 	await waitState(s, "Snooze canceled", (st) => st.mode === "roster");
+	// A row truncates its title, except beside its Peek, where it runs on into the Peek's edge on one line, and under its
+	// own menu, where the roster holds still and it wraps whole.
+	const truncated = () =>
+		s
+			.screen()
+			.split("\n")
+			.some((line) => /long: .*…/.test(line.slice(0, 42)));
+	const intoPeek = () =>
+		s
+			.screen()
+			.split("\n")
+			.some((line) => /long: a title that runs well past the roster's width\s.*│/.test(line));
+	await cursorTo(s, long);
+	await until(intoPeek, budgets.settle, "the long title running on into its Peek");
+	s.keys("m");
+	await onScreen("╭─ Group ", "the Group menu under the long title");
+	const roster = s
+		.screen()
+		.split("\n")
+		.map((line) => line.slice(0, 42));
+	const titleAt = roster.findIndex((line) => line.includes("long:"));
+	const menuAt = roster.findIndex((line) => line.includes("╭─ Group "));
+	expect(roster[titleAt]).not.toContain("…");
+	const wrapped = roster.slice(titleAt, menuAt).map((line) => line.replace(/[▌●]|\s+now\s*$/g, "").trim());
+	expect(wrapped.join(" ")).toBe("long: a title that runs well past the roster's width");
+	s.keys("Escape");
+	await waitState(s, "Group canceled", (st) => st.mode === "roster");
+	await until(() => truncated() || intoPeek(), budgets.settle, "the title on one line again");
+	await cursorTo(s, parent);
 	s.swb("drive", "resize", "85x30");
 	await waitState(s, "narrow roster", (st) => st.layout.rosterOnly);
 	for (const [key, title] of [
-		["s", "Snooze parent"],
-		["m", "Group for parent"],
-		["a", "Archive parent"],
+		["s", "╭─ Snooze "],
+		["m", "╭─ Group "],
+		["a", "╭─ Archive "],
 	] as const) {
 		s.keys(key);
 		await onScreen(title, "the narrow form");
@@ -424,7 +464,8 @@ test("Archive stays at its clicked action, Snooze stays at its row, and the Stag
 	}
 	s.keys("s");
 	await onScreen("2 A day", "numbered Snooze choices");
-	await onScreen("⏎ choose  esc cancel", "menu-local controls");
+	await onScreen("╭─ Snooze ", "the Snooze menu");
+	expect(s.screen()).toMatch(/╭─ Snooze ─+ esc ─╮/);
 	s.keys("2");
 	await waitState(s, "number chooses Snooze", (st) => st.mode === "roster");
 	await until(() => snoozeOf(s, parent).snoozed, budgets.settle, "parent snoozed by number");
@@ -447,15 +488,20 @@ test("narrow details expand by key and click, scroll, follow the selection, and 
 	expect(s.screen()).toContain("started by ↳ parent");
 	expect(s.screen()).toContain("created");
 	expect(s.screen()).toContain("a Archive");
-	expect(s.screen()).toContain("PgUp/PgDn details");
-	expect(s.screen()).toContain("v split  s shell");
+	// The views' keys sit over the roster's own, column for column.
+	const footer = s.screen().split("\n");
+	const views = footer.find((line) => /^ Alt\+a → +e editor/.test(line)) as string;
+	const below = footer.find((line) => line.includes(", settings")) as string;
+	expect([views.indexOf("e editor"), views.indexOf("v split"), views.indexOf("s shell")]).toEqual([
+		below.indexOf("n new"),
+		below.indexOf("? keys"),
+		below.indexOf(", settings"),
+	]);
 	s.keys("s");
 	await onScreen("Until a message", "Snooze replaces expanded details");
-	expect(s.screen()).not.toContain("PgUp/PgDn details");
 	expect(s.screen()).not.toContain("got descendant");
 	s.keys("Escape");
 	await onScreen("got descendant", "details return after dismissing Snooze");
-	expect(s.screen()).toContain("PgUp/PgDn details");
 	expect(
 		s
 			.screen()
@@ -472,7 +518,7 @@ test("narrow details expand by key and click, scroll, follow the selection, and 
 	await click("i ▸ details", 85);
 	await onScreen("got descendant", "expanded by click");
 	s.swb("drive", "resize", "60x18");
-	await until(() => !s.screen().includes("a Archive") && s.screen().includes("PgUp/PgDn"), budgets.settle, "short details");
+	await until(() => !s.screen().includes("a Archive") && s.screen().includes("PgDn"), budgets.settle, "short details");
 	expect(s.screen()).toMatch(/╭[^\n]*╮/);
 	expect(s.screen()).toMatch(/╰[^\n]*↓ \d+ more[^\n]*╯/);
 	s.keys("NPage");
@@ -480,7 +526,8 @@ test("narrow details expand by key and click, scroll, follow the selection, and 
 	expect(s.screen()).toMatch(/╭[^\n]*↑ \d+[^\n]*╮/);
 	expect(s.screen()).toMatch(/╰[^\n]*╯/);
 	await click("m Group…", 60);
-	await onScreen("Group for child", "the details action targets its session");
+	await onScreen("╭─ Group ", "the Group menu");
+	expect(menuUnder("Group")).toContain("child");
 	s.keys("Escape", "PPage");
 	await onScreen("created", "details scrolled back");
 	s.swb("drive", "resize", "85x30");

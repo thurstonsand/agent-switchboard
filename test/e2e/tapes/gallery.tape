@@ -13,7 +13,9 @@ Sleep 3s
 Screenshot ../artifacts/phase6/videos/gallery-01-deck.png
 
 Alt+a
-Type "/nested blocks"
+Type "/"
+Wait+Screen /esc clears/
+Type "nested blocks"
 Sleep 1s
 Enter
 Sleep 1s
@@ -25,7 +27,9 @@ Sleep 5s
 
 # A Peek with a parent, a Group, and Schedules.
 Alt+a
-Type "/check ci"
+Type "/"
+Wait+Screen /esc clears/
+Type "check ci"
 Sleep 1s
 Enter
 Sleep 1s
@@ -36,7 +40,9 @@ Screenshot ../artifacts/phase6/videos/gallery-03-peek-family.png
 Sleep 5s
 
 Alt+a
-Type "/Migrate"
+Type "/"
+Wait+Screen /esc clears/
+Type "Migrate"
 Sleep 1.5s
 Enter
 Escape
@@ -46,7 +52,9 @@ Screenshot ../artifacts/phase6/videos/gallery-04-cut-off-card.png
 
 # Hiding the roster takes the keyboard to the Stage, which would wake a dormant session, so on a live one.
 Alt+a
-Type "/Plan the Q1"
+Type "/"
+Wait+Screen /esc clears/
+Type "Plan the Q1"
 Sleep 1.5s
 Enter
 Escape
@@ -65,7 +73,9 @@ Type "h"
 Sleep 1s
 
 Alt+a
-Type "/Tidy"
+Type "/"
+Wait+Screen /esc clears/
+Type "Tidy"
 Sleep 1.5s
 Enter
 Escape
@@ -85,7 +95,9 @@ Escape
 Sleep 1s
 
 Alt+a
-Type "/snooze menu"
+Type "/"
+Wait+Screen /esc clears/
+Type "snooze menu"
 Sleep 1.5s
 Enter
 Escape
@@ -111,13 +123,15 @@ Escape
 Sleep 1s
 
 Alt+a
-Type "/Polish the Peek"
+Type "/"
+Wait+Screen /esc clears/
+Type "Polish the Peek"
 Sleep 1.5s
 Enter
 Escape
 Sleep 2s
 Type "a"
-Wait+Screen /Branch kept/
+Wait+Screen /keep worktree/
 Sleep 1s
 Screenshot ../artifacts/phase6/videos/gallery-13-archive-worktree.png
 Escape
@@ -135,7 +149,9 @@ Sleep 1s
 
 # config.toml broken by hand while the Deck is open: the roster's line, then Settings on the error.
 Alt+a
-Type "/v0.13"
+Type "/"
+Wait+Screen /esc clears/
+Type "v0.13"
 Sleep 1s
 Enter
 Sleep 1s
@@ -148,7 +164,9 @@ Screenshot ../artifacts/phase6/videos/gallery-16-config-error.png
 Escape
 Sleep 1s
 Alt+a
-Type "/release notes"
+Type "/"
+Wait+Screen /esc clears/
+Type "release notes"
 Sleep 1s
 Enter
 Sleep 3s
@@ -162,7 +180,9 @@ Escape
 Sleep 1s
 
 Alt+a
-Type "/Check CI"
+Type "/"
+Wait+Screen /esc clears/
+Type "Check CI"
 Sleep 1.5s
 Enter
 Escape
@@ -171,7 +191,9 @@ Sleep 3s
 Screenshot ../artifacts/phase6/videos/gallery-18-message.png
 
 Alt+a
-Type "/Q1 roadmap"
+Type "/"
+Wait+Screen /esc clears/
+Type "Q1 roadmap"
 Sleep 1.5s
 Enter
 Escape
@@ -180,7 +202,9 @@ Sleep 3s
 Screenshot ../artifacts/phase6/videos/gallery-19-not-recording.png
 
 Alt+a
-Type "/Check CI"
+Type "/"
+Wait+Screen /esc clears/
+Type "Check CI"
 Sleep 1.5s
 Enter
 Escape
@@ -203,7 +227,9 @@ Sleep 1.5s
 
 # Copied City, City Ruins' light twin.
 Alt+a
-Type "/retry test"
+Type "/"
+Wait+Screen /esc clears/
+Type "retry test"
 Sleep 1s
 Enter
 Sleep 1s
@@ -212,7 +238,9 @@ Wait+Screen /races the clock/
 Sleep 3s
 Screenshot ../artifacts/phase6/videos/gallery-22-light-deck.png
 Alt+a
-Type "/survives nested"
+Type "/"
+Wait+Screen /esc clears/
+Type "survives nested"
 Sleep 1s
 Enter
 Sleep 1s
@@ -224,7 +252,9 @@ Sleep 5s
 
 # Other terminals' themes, for how the Deck takes on whatever palette it's given.
 Alt+a
-Type "/the flaky"
+Type "/"
+Wait+Screen /esc clears/
+Type "the flaky"
 Sleep 1s
 Enter
 Sleep 1s
@@ -233,7 +263,9 @@ Wait+Screen /races the clock/
 Sleep 3s
 Screenshot ../artifacts/phase6/videos/gallery-24-catppuccin-mocha.png
 Alt+a
-Type "/flaky retry"
+Type "/"
+Wait+Screen /esc clears/
+Type "flaky retry"
 Sleep 1s
 Enter
 Sleep 1s
@@ -242,7 +274,9 @@ Wait+Screen /races the clock/
 Sleep 3s
 Screenshot ../artifacts/phase6/videos/gallery-25-tokyo-night.png
 Alt+a
-Type "/fix the flaky"
+Type "/"
+Wait+Screen /esc clears/
+Type "fix the flaky"
 Sleep 1s
 Enter
 Sleep 1s
@@ -253,7 +287,9 @@ Screenshot ../artifacts/phase6/videos/gallery-26-solarized-light.png
 
 # A narrow terminal, back in City Ruins: the roster alone.
 Alt+a
-Type "/flaky retry test"
+Type "/"
+Wait+Screen /esc clears/
+Type "flaky retry test"
 Sleep 1s
 Enter
 Sleep 1s

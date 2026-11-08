@@ -107,7 +107,12 @@ test("expanded details survive resizing an editor and split Deck through its nar
 		] as const) {
 			s.swb("drive", "resize", size);
 			await waitState(s, `responsive Deck at ${size}`, (x) => x.layout.width === Number(width) && x.layout.rosterOnly);
-			await until(() => s.screen().includes("details") && !s.screen().includes("Bun v"), budgets.settle, "full-width roster and details");
+			await until(
+				() => (width === "40" ? /╰ ↓ \d+ more · PgDn ─+╯/.test(s.screen()) : s.screen().includes("Organize")),
+				budgets.settle,
+				"full-width details, with a border paging hint when clipped",
+			);
+			expect(s.screen()).not.toContain("Bun v");
 			expect(s.tmux(s.servers.sessions, "display", "-p", "-t", "=deck:.0", "#{pane_width}")).toBe(width);
 		}
 	}

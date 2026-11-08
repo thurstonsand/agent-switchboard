@@ -96,11 +96,11 @@ test("the Deck's n opens on the default preset, puts its real TUI on the Stage, 
 	// The menu keeps the shortlist's numbers; a number picks Codex, and Esc in a reopened menu keeps it.
 	s.keys("Tab");
 	const menu = await waitState(s, "the menu", (x) => x.launch?.menu?.some((l) => l.includes("codex")) ?? false);
-	expect(menu.launch?.menu?.some((l) => l.includes("choose") && l.includes("cancel"))).toBe(true);
+	expect(menu.launch?.card?.[0]).toMatch(/ esc ─╮$/);
 	s.swb("drive", "resize", "65x24");
 	await until(() => s.screen().includes("Presets · project"), budgets.settle, "the narrow chooser retains its destination");
 	expect(s.screen().trimEnd().split("\n").at(-1)).not.toContain("choose");
-	s.swb("drive", "resize", "60x18");
+	s.swb("drive", "resize", "60x16");
 	await until(() => /↓ \d+ more/.test(s.screen()), budgets.settle, "the compact menu counts presets below");
 	for (let i = 1; i < (opened.picker?.presets.length ?? 0); i++) s.keys("Down");
 	await until(() => /↑ \d+ more/.test(s.screen()), budgets.settle, "the compact menu counts presets above");
@@ -119,11 +119,11 @@ test("the Deck's n opens on the default preset, puts its real TUI on the Stage, 
 	const keep = await until(
 		() => {
 			const lines = s.screen().split("\n");
-			const y = lines.findIndex((line) => line.includes("esc cancel"));
-			return y >= 0 && { y, x: (lines[y] as string).indexOf("esc cancel") };
+			const y = lines.findIndex((line) => /╭─ Preset.* esc ─╮/.test(line));
+			return y >= 0 && { y, x: (lines[y] as string).indexOf(" esc ─╮") + 2 };
 		},
 		budgets.settle,
-		"the preset card's cancel action",
+		"the preset card's esc",
 	);
 	s.swb("drive", "click", String(keep.x), String(keep.y));
 	const kept = await waitState(s, "the menu closed", (x) => x.picker?.menu === null && x.launch?.card?.[1]?.includes("codex") === true);
@@ -157,7 +157,7 @@ test("the Deck's n opens on the default preset, puts its real TUI on the Stage, 
 	await cursorTo(s, id);
 	await waitState(s, "the dormant card", (x) => x.staged.kind === "dormant" && x.staged.id === id);
 	await until(() => /claude\s+SWB-from-the-deck/.test(s.screen()), budgets.settle, "Claude's reply on the card, labelled claude");
-	expect(s.screen()).toMatch(/Alt\+a → e editor +v split/);
+	expect(s.screen()).toMatch(/^ Alt\+a → +e editor +v split/m);
 	expect(state(s).rows.some((r) => r.kind === "session" && r.id === id)).toBe(true);
 	s.save("claude-card.txt", s.screen());
 });

@@ -6,7 +6,7 @@ Type "swb" Sleep 400ms Enter
 Wait+Screen /Plan the v3 migration/
 Sleep 1.5s
 Type "a"
-Wait+Screen /esc cancel/
+Wait+Screen /Archive this session/
 Sleep 1.2s
 Screenshot ../artifacts/phase6/videos/modes-archive.png
 Alt+a

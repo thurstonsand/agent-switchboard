@@ -34,11 +34,7 @@ test("a on a session that started others still open asks first: esc keeps them, 
 	let st = await waitState(s, "the archive prompt", (x) => x.mode === "archive");
 	// Everything it started, in any Project, and none of it seen yet.
 	expect(st.archive).toEqual({ id: root, counts: "●3", all: 4, cancels: null });
-	await until(
-		() => s.screen().includes("A Archive family (4)") && s.screen().includes("esc cancel"),
-		budgets.settle,
-		"the prompt's choices",
-	);
+	await until(() => s.screen().includes("A Archive family (4)") && / esc ─╮/.test(s.screen()), budgets.settle, "the prompt's choices");
 	s.save("prompt.txt", s.screen());
 	s.save("prompt.ansi", s.swb("drive", "capture", "--ansi"));
 	s.keys("Escape");
@@ -100,10 +96,10 @@ test("archiving cancels every schedule a session set or receives: a names them a
 			.query<{ label: string }>("SELECT schedule_label AS label FROM schedules WHERE next_at IS NOT NULL AND cancelled_at IS NULL")
 			.map((r) => r.label)
 			.sort();
-	/** The archive prompt beside the roster, including its own cancel action. */
+	/** The archive prompt under its row in the roster, including its own cancel action. */
 	const prompt = () => {
 		const screen = s.screen().split("\n");
-		const lines = screen.map((line) => line.slice(43, 97).replace(/^│|│$/g, "").trim());
+		const lines = screen.map((line) => line.slice(0, 42).replace(/^│|│$/g, "").trim());
 		const top = lines.findIndex((line) => line.startsWith("╭─ Archive"));
 		const bottom = lines.findIndex((line, i) => i > top && line.startsWith("╰"));
 		return top === -1 ? [] : lines.slice(top + 1, bottom).filter((line) => !line.startsWith("├"));
@@ -115,23 +111,15 @@ test("archiving cancels every schedule a session set or receives: a names them a
 	await cursorTo(s, lead);
 	s.keys("a");
 	await waitState(s, "the family prompt", (x) => x.mode === "archive" && x.archive?.cancels === null);
-	await until(() => prompt().at(-1) === "esc cancel", budgets.settle, "the family prompt's answers");
-	expect(prompt()).toEqual(["1 child session", "a Archive this session", "A Archive family (2)", "esc cancel"]);
+	await until(() => prompt().at(-1) === "A Archive family (2)", budgets.settle, "the family prompt's answers");
+	expect(prompt()).toEqual(["1 child session", "a Archive this session", "A Archive family (2)"]);
 	s.keys("A");
 	await waitState(s, "the schedules prompt", (x) => x.archive?.cancels != null);
 	await until(() => prompt().includes("◷ child's check-in"), budgets.settle, "the schedules all 2 cancel");
 	// Each session's, set or received, soonest first, under its title.
 	const own = prompt().slice(2, 5);
 	expect(own.toSorted()).toEqual(["↻ nightly build", "↻ standup", "◷ check on lead"]);
-	expect(prompt()).toEqual([
-		"Cancels schedules:",
-		"lead",
-		...own,
-		"child",
-		"◷ child's check-in",
-		"a Archive 2; cancel schedules",
-		"esc cancel",
-	]);
+	expect(prompt()).toEqual(["Cancels schedules:", "lead", ...own, "child", "◷ child's check-in", "a Archive 2; cancel schedules"]);
 	s.save("prompt-family.txt", s.screen());
 	s.keys("Escape");
 	await waitState(s, "the prompt gone", (x) => x.mode === "roster" && x.archive === null);
@@ -143,7 +131,7 @@ test("archiving cancels every schedule a session set or receives: a names them a
 	s.keys("a");
 	await waitState(s, "its own schedules", (x) => x.archive?.cancels?.length === 3);
 	await until(() => prompt()[1] === own[0], budgets.settle, "the schedules it alone cancels");
-	expect(prompt()).toEqual(["Cancels schedules:", ...own, "a Archive 1; cancel schedules", "esc cancel"]);
+	expect(prompt()).toEqual(["Cancels schedules:", ...own, "a Archive 1; cancel schedules"]);
 	s.save("prompt.txt", s.screen());
 	s.keys("a");
 	await until(() => !entry(s, lead).open, budgets.settle, "lead archived alone");
@@ -155,7 +143,7 @@ test("archiving cancels every schedule a session set or receives: a names them a
 	s.keys("a");
 	await waitState(s, "the schedules prompt for peer", (x) => x.archive?.cancels != null);
 	await until(() => prompt().includes("◷ peer's own"), budgets.settle, "the schedule it cancels");
-	expect(prompt()).toEqual(["Cancels schedules:", "◷ peer's own", "a Archive 1; cancel schedules", "esc cancel"]);
+	expect(prompt()).toEqual(["Cancels schedules:", "◷ peer's own", "a Archive 1; cancel schedules"]);
 	s.save("prompt-schedules-only.txt", s.screen());
 	s.keys("Escape");
 	await waitState(s, "the prompt gone", (x) => x.mode === "roster");

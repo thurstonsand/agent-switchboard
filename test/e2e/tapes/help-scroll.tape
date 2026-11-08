@@ -9,7 +9,7 @@ Show
 Wait+Screen /Archived/
 Sleep 1.5s
 Type "?"
-Wait+Screen /any key or click closes/
+Wait+Screen /any key to close/
 Sleep 2.5s
 Screenshot ../artifacts/phase6/videos/help-scroll-tall.png
 Type "x"

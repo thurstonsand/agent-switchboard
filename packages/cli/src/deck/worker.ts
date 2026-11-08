@@ -515,6 +515,14 @@ function diffOf(cwd: string): Promise<Diff | null> {
 	return diff;
 }
 
+/** Whether a worktree has the modified or untracked files that deleting it refuses, for the archive prompt to say so. */
+async function dirty(id: string, worktree: string): Promise<void> {
+	const git = Bun.spawn(["git", "-C", worktree, "status", "--porcelain", "--untracked-files=all"], { stdout: "pipe", stderr: "ignore" });
+	const out = await new Response(git.stdout).text();
+	await git.exited;
+	post({ type: "dirty", id, dirty: out.length > 0 });
+}
+
 /** A Peek's extras. A transcript that won't read says so in place of the last turn, and the rest still shows. */
 async function peek(id: string, cwd: string, path: string | null, harness: Harness): Promise<void> {
 	let last: Turn | null = null;
@@ -633,6 +641,9 @@ async function handle(message: ToWorker): Promise<void> {
 			break;
 		case "peek":
 			void peek(message.id, message.cwd, message.transcript, message.harness);
+			return;
+		case "dirty":
+			void dirty(message.id, message.worktree);
 			return;
 		case "colors":
 			profile = message.colors;

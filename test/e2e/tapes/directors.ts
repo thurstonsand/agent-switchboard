@@ -178,7 +178,7 @@ async function onRequest(s: Scenario, steps: [string, () => Promise<void> | void
 	};
 	for (const [marker, step] of steps) {
 		await until(() => filter() === marker, 3 * TAPE, `the tape asking for ${marker}`);
-		s.keys("Escape");
+		s.keys("Escape", "Escape");
 		await until(() => filter() === "", TAPE, `${marker} cleared`);
 		await step();
 	}
@@ -1320,7 +1320,7 @@ export const directors: Record<string, Director> = {
 			s.keys("a");
 			await waitDrive(s, "family and worktree choices", (st) => st.archive?.all === 2);
 			await Bun.sleep(3000);
-			for (const text of ["Archive; keep worktree", "esc Cancel", "Archive; delete clean", "Family (2); delete"]) {
+			for (const text of ["Archive; keep worktree", " esc ", "Archive; delete worktree", "Family (2); delete"]) {
 				const [x, y] = await onScreen(s, text, 42);
 				s.swb("drive", "move", String(x), String(y));
 				await Bun.sleep(700);
@@ -1935,7 +1935,7 @@ export const directors: Record<string, Director> = {
 			const shows = (text: string) => s.swb("drive", "capture").includes(text);
 			await waitDrive(s, "the Deck up", (x) => x.ready);
 			await until(() => shows("j k ↑ ↓") && shows("Send literal Alt+a"), TAPE, "every key on a tall Deck");
-			await until(() => !shows("any key or click closes"), TAPE, "the help closed");
+			await until(() => !shows("any key to close"), TAPE, "the help closed");
 			s.swb("drive", "resize", "140x24");
 			await until(() => shows("↓ 18 more lines · j/k ↑/↓ scroll"), TAPE, "the short Deck's help, its end below");
 			await Bun.sleep(1500);

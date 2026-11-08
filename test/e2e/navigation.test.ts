@@ -139,14 +139,14 @@ test("? fits every key in a tall Deck, and in a short one scrolls them by wheel 
 	const first = "j k ↑ ↓";
 	const last = "+N folded family";
 	s.keys("?");
-	await until(() => s.screen().includes("key or click closes"), budgets.settle, "the key help");
+	await until(() => s.screen().includes("any key to close"), budgets.settle, "the key help");
 	expect(s.screen()).toContain(first);
 	expect(s.screen()).toContain(last);
 	expect(s.screen()).toContain("State marks");
 	expect(s.screen()).toContain("Unseen · finished since last viewed");
 	expect(s.screen()).toContain("Alt+a, then key");
 	s.keys("x");
-	await until(() => !s.screen().includes("key or click closes"), budgets.settle, "help closed");
+	await until(() => !s.screen().includes("any key to close"), budgets.settle, "help closed");
 
 	s.swb("drive", "resize", "140x24");
 	await Bun.sleep(500);

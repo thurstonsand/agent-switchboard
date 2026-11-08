@@ -207,6 +207,7 @@ export type ToWorker =
 	| { type: "reload"; req: number; id: string }
 	| { type: "transcript"; id: string; path: string; harness: Harness }
 	| { type: "peek"; id: string; cwd: string; transcript: string | null; harness: Harness }
+	| { type: "dirty"; id: string; worktree: string }
 	| { type: "colors"; colors: TerminalProfile }
 	| { type: "view"; req: number; id: string; view: View }
 	| { type: "group"; req: number; ids: string[]; name: string | null }
@@ -231,6 +232,7 @@ export type FromWorker =
 	| { type: "stopFailed"; text: string }
 	| { type: "transcript"; id: string; transcript: Transcript | null; error: string | null }
 	| { type: "peek"; id: string; info: PeekInfo }
+	| { type: "dirty"; id: string; dirty: boolean }
 	| { type: "editor"; dir: string; name: string | null; text: string | null }
 	| { type: "shell"; req: number; dir: string; name: string | null; text: string | null }
 	| { type: "dirs"; trees: TargetTree[] }

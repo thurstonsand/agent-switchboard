@@ -171,7 +171,7 @@ test("m names a session's Group, n joins it; dragging moves it between Groups, a
 	await cursorTo(s, a);
 	s.keys("m");
 	await waitState(s, "naming", (x) => x.mode === "name");
-	// The floating form draws its caret without taking the roster's keyboard; inline, it uses the terminal cursor.
+	// The form sits in the roster under its row, so it uses the terminal cursor rather than drawing a caret.
 	s.keys("-l", "review");
 	const nameLine = () =>
 		s
@@ -179,8 +179,8 @@ test("m names a session's Group, n joins it; dragging moves it between Groups, a
 			.split("\n")
 			.find((line) => line.includes("/ review"));
 	await until(() => nameLine() !== undefined, budgets.settle, "the name typed");
-	expect(nameLine()).toContain("\x1b[7m");
-	expect(s.tmux(s.servers.drive, "display", "-p", "#{cursor_flag}")).toBe("0");
+	expect(nameLine()).not.toContain("\x1b[7m");
+	expect(s.tmux(s.servers.drive, "display", "-p", "#{cursor_flag}")).toBe("1");
 	s.swb("drive", "resize", "80x30");
 	await waitState(s, "the inline Group form", (x) => x.layout.rosterOnly);
 	await until(() => nameLine() !== undefined && !nameLine()?.includes("\x1b[7m"), budgets.settle, "the inline caret");

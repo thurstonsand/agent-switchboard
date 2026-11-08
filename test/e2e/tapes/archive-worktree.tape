@@ -3,7 +3,7 @@ Source common.tape
 Hide
 Type "swb drive start && swb drive theme dark && tmux -L swb-drive-$SWB_INSTANCE attach" Enter
 Show
-Wait+Screen /delete clean worktree/
+Wait+Screen /delete worktree/
 Sleep 1s
 Screenshot ../artifacts/phase6/videos/archive-worktree.png
 Sleep 3s

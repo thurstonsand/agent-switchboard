@@ -43,7 +43,12 @@ test("swb_update_session groups and retitles in one call, pi takes the title as 
 	await waitState(s, "pi's rename on the roster", (x) => row(x, caller)?.title === "Planner");
 
 	s.keys("-l", `call swb_show_session {"session":"${a}","view":"editor"}`, "Enter");
-	const shown = await waitState(s, "alpha in its editor", (x) => x.staged.id === a && x.staged.view === "editor");
+	const shown = await waitState(
+		s,
+		"alpha focused in its editor",
+		(x) => x.staged.id === a && x.staged.view === "editor" && x.focus === "editor",
+		budgets.piReady,
+	);
 	expect(shown).toMatchObject({ cursor: a, focus: "editor", staged: { savedView: "editor" } });
 	await until(() => own(a) === "Auth rewrite", budgets.piReady, "alpha's pi taking its title as it starts");
 	expect(s.query("SELECT title FROM marks WHERE session_id = ?", a)).toEqual([{ title: null }]);
