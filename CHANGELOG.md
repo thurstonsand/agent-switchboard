@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-08
+
 ### Changed
 
 - The Peek's row is one of its edges. A title the roster cuts runs on across the divider along the Peek's edge, with its age at the Peek's far side and the row's tint across it, ending in `…` only when even that can't hold it. The Peek opens upward when it can't fit below its row, and its title is never written twice. Its actions sit in aligned Session and Organize columns, wrapping whole rather than cutting a label short, and an errored session's provider error shows in both widths.
