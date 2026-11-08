@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The Peek's row is one of its edges. A title the roster cuts runs on across the divider along the Peek's edge, with its age at the Peek's far side and the row's tint across it, ending in `…` only when even that can't hold it. The Peek opens upward when it can't fit below its row, and its title is never written twice. Its actions sit in aligned Session and Organize columns, wrapping whole rather than cutting a label short, and an errored session's provider error shows in both widths.
+- Archive, Snooze, and Group open directly under their row, at any width, and the row wraps its whole title while they're open. Snooze and Group take number keys for their choices.
+- Every box, the Peek, the launch card, and the row menus among them, closes from a clickable `esc` in its top border. The `✕` buttons and the `⏎ choose  esc cancel` rows are gone. Esc puts a Peek away before it clears a filter.
+- Archive on a worktree with uncommitted changes leaves out its delete choices and says `Uncommitted changes`, so it no longer offers a deletion that can only fail.
+- The keys under the roster sit in one column grid, each over the one below it. The Deck's prefix is named once: on the rule when the Stage has the keyboard, and before the views when the roster does, where only they need it. `s shell` stays whenever it fits, narrow too.
+- Help fills the terminal's height, sits beside the roster when the Stage has room for it, leads with moving, focusing, and leaving, and closes on any key.
+- The roster's `▌` marks only the session on the Stage; the cursor is its tint alone, on Project and Group headers too. The `↳` and `⎇` badges follow their title instead of sitting by the age.
+- The new-session picker counts the presets its menu hides above and below, and a narrow launch card keeps the model's name and price when there's room. A split Stage gives the editor and the agent half each.
+- Settings marks a changed setting with `•` beside its label, keeps its explanation while it's edited, and searches every section at once.
+
+### Fixed
+
+- Resizing a Deck with a session's details expanded down to a very narrow width no longer kills the roster, which left a one-column pane and `swb deck state` failing with ECONNREFUSED.
+- Esc followed by mouse movement no longer types the mouse's raw bytes into the filter.
+- Narrow Help wraps its descriptions instead of cutting them off. Expanded details keep their frame while they scroll, and its border counts what's hidden above and below; nothing else claims PgUp/PgDn, so a Snooze menu over the details no longer advertises them.
+- A blocked session's Peek gives the age its roster row shows instead of `active now`. One that's snoozed but showing for attention names when its snooze ends and offers Unsnooze.
+- pi's `swb: not recording` footer puts `roster: R reload` first, so a narrow pane cuts the diagnostic instead of the way out.
+- The editor view's `e editor` lights up while the editor is on, as `v split` does.
+
 ## [0.13.0] - 2026-11-07
 
 Schema v12: update swb and the pi line together, and run `swb quit` with the swb you have before installing this one: this swb finds the sessions it runs by a mark an older one didn't leave, so it can't see, stop, or quit those.
