@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { type as prompt } from "./harness/agents.ts";
+import { pane, type as prompt } from "./harness/agents.ts";
 import { cursorTo, entry, launched, rowIndex, seed, state, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 import { snoozeOf } from "./harness/schedules.ts";
@@ -385,7 +385,9 @@ test("Archive and Snooze open under their row at any width, and the Stage's last
 	s.swb("drive", "start", "--size", "175x48");
 	await waitState(s, "the Deck", (x) => x.ready);
 	await cursorTo(s, parent);
-	await onScreen("parent response", "the parent's Stage");
+	// Read pi's own pane: the cursor's Peek may already cover the reply on the Deck's screen.
+	await until(() => pane(s, parent).includes("parent response"), budgets.settle, "the parent's reply");
+	await waitState(s, "the parent on the Stage", (x) => x.staged.id === parent);
 	s.swb("drive", "move", ...find("parent"));
 	const shown = await waitState(s, "the parent's Peek", (x) => x.peek?.id === parent);
 	expect(shown.peek?.lines.join("\n")).not.toContain("parent response");

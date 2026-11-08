@@ -2,8 +2,6 @@
 
 ## [Unreleased]
 
-## [0.14.0] - 2026-11-08
-
 ### Changed
 
 - The Peek's row is one of its edges. A title the roster cuts runs on across the divider along the Peek's edge, with its age at the Peek's far side and the row's tint across it, ending in `…` only when even that can't hold it. The Peek opens upward when it can't fit below its row, and its title is never written twice. Its actions sit in aligned Session and Organize columns, wrapping whole rather than cutting a label short, and an errored session's provider error shows in both widths.
@@ -24,6 +22,11 @@
 - A blocked session's Peek gives the age its roster row shows instead of `active now`. One that's snoozed but showing for attention names when its snooze ends and offers Unsnooze.
 - pi's `swb: not recording` footer puts `roster: R reload` first, so a narrow pane cuts the diagnostic instead of the way out.
 - The editor view's `e editor` lights up while the editor is on, as `v split` does.
+
+
+## [0.14.0] - 2026-11-08
+
+Never published: its release stopped on a test that read the Deck's screen while a Peek covered what it waited for. 0.14.1 carries its changes.
 
 ## [0.13.0] - 2026-11-07
 
