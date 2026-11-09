@@ -15,6 +15,7 @@ Session search and ask across harnesses are a separate piece of work.
 I run Claude Code and Codex sessions alongside pi, and lose track of them the same way. Worse, sessions in different harnesses can't talk to each other: pi-sessions connects pi to pi only.
 
 Research ([thread](https://ampcode.com/threads/T-01a13611-7076-75bb-b88f-f1d6a013beab)) and two spikes against the real binaries settled what each harness offers:
+
 - **Claude Code ≥ 2.1.287** has mods: in-process plugin hooks that can register tools, read session identity, run processes, and inject text into the conversation. A message appended as `context` to a tool result is read by the model within the same turn; `$.prompt.submit` starts a turn when idle.
 - **Codex CLI ≥ 0.149** runs its TUI against an app-server (`codex --remote unix://…`). Another client of the same server sees every thread's status notifications without subscribing, and `turn/start` starts an idle thread's turn or steers a running one. The TUI writes the id of the thread it displays into the terminal title when told to (`-c tui.terminal_title=["session-id","status"]`), which tmux exposes as `#{pane_title}`. MCP tool calls carry the calling thread in `_meta.threadId`.
 - T3 Code, which runs every harness headless, showed what to steal: one coordination service behind thin per-harness transports, caller identity the model can't forge, and send modes that steer rather than interrupt.
@@ -37,6 +38,7 @@ Research ([thread](https://ampcode.com/threads/T-01a13611-7076-75bb-b88f-f1d6a01
 ### Vocabulary
 
 [CONTEXT.md](../../CONTEXT.md) gains:
+
 - **Harness**: the agent program a Session runs in: pi, Claude Code, or Codex.
 - **Line**: a harness's integration with swb, which records its sessions and carries messages in and out.
 - **Message**: text one Session sends another, delivered through swb's mailbox.

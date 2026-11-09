@@ -15,6 +15,7 @@ I run many Pi sessions in parallel, mostly on a corporate Mac. When the machine 
 T3 Code gets the workflow right: threads grouped by project, live status, and an explicit "I'm done with this". But it's a GUI app that does far more than I need. Herdr isn't available on the work Mac, and agent-deck is unreliable with Pi.
 
 The previous attempt was ansiblonomicon's design 15: a recovery recorder writing a JSON tree, plus a Go `sessions` CLI. It failed in practice for three reasons:
+
 - **Quitting ended tracking**, so "I closed it" and "I'm done" were the same act.
 - **Too many sessions got in**: subagents, RPC sessions, and stray `pi` runs.
 - **Getting back in was cumbersome**: find the id, cd, resume, rebuild the layout.
@@ -22,6 +23,7 @@ The previous attempt was ansiblonomicon's design 15: a recovery recorder writing
 It has since been retired outright.
 
 Scenarios this design must handle:
+
 - **Reboot.** Two sessions were idle and one was mid-turn. After the reboot, the roster shows all three exactly where they were. The mid-turn one carries ⚠ Interrupted. Selecting one shows its whole conversation at once; `w` or Enter brings its real pi back within a second or two, and nothing auto-continues.
 - **Away from the keyboard.** An agent finishes while I'm in another session. Its row turns unseen (●). It clears once I've been looking at it for a second.
 - **Done.** I finish a task and archive it. It leaves the roster, its pi exits, and if no other open session shares its directory, so does that directory's editor. A week later, a new prompt in it from Archived brings it back.
@@ -51,6 +53,7 @@ Scenarios this design must handle:
 ### Vocabulary
 
 [CONTEXT.md](../../CONTEXT.md) is authoritative. The key terms:
+
 - **Session**: one conversation, shown by its title, or its id when it has no title.
 - **Open** / **Archived**.
 - **Live** / **Dormant**: internal runtime facts. The roster shows Dormant as Idle.
@@ -104,11 +107,13 @@ Exit codes: 0 means success. 1 means a failed action, with the reason on stderr;
 ```
 
 The Stage shows one of three **views** of the selected session, and each session remembers the one it was left on (`marks.view`):
+
 - **pi**: the session alone.
 - **editor**: its directory's Editor alone.
 - **split**: the Editor on the left at 65% and pi on the right at 35%, as `ide` laid them out. In split view the Stage is two panes, each holding one of those sessions' own panes.
 
 **Layout rules**, which the Deck state reports as `layout`:
+
 - The roster is `roster_width` wide (42 columns by default, at most half the Deck), re-asserted on every resize because tmux would otherwise scale it with the window. A width I drag the border to replaces it for the life of that Deck. A Deck narrower than 100 columns shows the roster alone, and Enter zooms the Stage to full width; `M-a z` or `M-a h` returns, as does a click on the status line's `◂`.
 - Split needs a Deck at least 160 columns wide. Narrower, a split session shows pi view, and `marks.view` keeps `split` so widening restores it.
 - Split applies only to a live session. Every card (dormant, loading, pi exited, empty) fills a single Stage pane, and a session that comes up in split gains its editor pane then.
@@ -118,6 +123,7 @@ The Stage shows one of three **views** of the selected session, and each session
 The final visual spec comes from the Deck mock rounds (see [ticket 09](../wayfinding/session-manager/tickets/09-roster-tui-prototype.md) and `prototypes/deck/`). The implementing agent treats the last accepted mock as the visual reference. This document fixes behavior.
 
 **Roster** (bare keys):
+
 - `j`/`k`/arrows move; `g`/`G` jump to the ends.
 - `Enter` focuses the Stage. On a dormant session it wakes pi and moves the keyboard to the loading card at once; pi gets the keyboard the moment it's ready. `esc` on the loading card hands the keyboard back to the roster without stopping the wake, exactly as if I had pressed `w`. `esc` is never bound once pi has the keyboard, because it means something to pi.
 - `a` toggles: it archives an open session and unarchives an archived one. There is no separate undo key. After `a` the cursor stays in place, on the row that followed, instead of chasing the session into its new section. On a session that started others still open, in any Project, `a` first opens a prompt beneath its row: the family's states counted by glyph (`○` for every finished one, idle or not running), then `Archive a this A all N esc abort`, each a button. `a a` archives it alone, as one `a` does anywhere else. `M-a a` from the Stage moves the keyboard to the prompt. Unarchiving brings back only the one session.
@@ -134,6 +140,7 @@ The final visual spec comes from the Deck mock rounds (see [ticket 09](../wayfin
 - `l` on a session row is Enter, unless it's folded, when `l` opens the fold; on a collapsed header it expands. `h` on an expanded header collapses it, and on a session row folds its family; otherwise it does nothing. Space, or a click on the fold's `▾`/`▸`, toggles a fold. Clicking, Enter, or space on a header toggles it. Clicking a session row is Enter: a click is a choice, unlike the cursor passing over it. `q` quits the Deck.
 
 **Prefix** (`M-a`, rebindable), handled by swb's tmux server:
+
 - `Tab` toggles focus between the roster and the Stage. `h` and `l` move focus one pane left or right: roster, then editor and pi in split view.
 - `e` swaps the view between pi and the Editor. In split it does nothing.
 - `v` toggles split view. Entering split puts the keyboard on the editor; leaving it shows the pane that had the keyboard, full width.
@@ -144,6 +151,7 @@ The final visual spec comes from the Deck mock rounds (see [ticket 09](../wayfin
 Clicking a pane focuses it. The bindings target panes by index rather than `{left}`/`{right}`, which stop resolving while a pane is zoomed.
 
 **Roster order**:
+
 - Open sessions are grouped by Project. Projects sort alphabetically and stay put; sessions within a project sort by `activity_at`, newest first.
 - Beneath a Project, one level deep and sorted by label: its Groups (`marks.group_name`). Its remaining sessions follow them, directly under the Project. A session another starts begins in its parent's Group, copied once at its first turn when both share a Project; from then on a Group is a session's own, and moving either leaves the other where it is. Groups are never stored on their own: a Group is the set of open sessions carrying its name, so it vanishes with its last one and returns when one is unarchived.
 - Within a bucket, a session nests under the session that started it, drawn on pi's `/resume` guides (`├─`, `└─`, `│`), three columns a generation. Families and siblings sort by the newest activity anywhere beneath them. A row with a family carries `▾`, or `▸` folded, where its guide meets it; a folded row counts what it hides, `+N`, and of those the blocked `◆` and unseen `●`, and its Peek lists them, each a button to it. A session whose parent isn't right above it (in another Project, archived, or an Operator) is marked `↳`, or `⌁` when an Operator started it, and its Peek says `started by <parent>`, a button that does `p`. Lineage is derived from `parent_id` on every render, never stored.
@@ -241,6 +249,7 @@ CREATE TABLE dirs (
 ```
 
 Derived, never stored:
+
 - **Archived**: `archived_at >= last_prompt_at`.
 - **Live**: a runtime row for the session with the current `boot_id`, `kill(pid, 0)` succeeds, and its `tmux_session` exists on the sessions server.
 - **Provisional**: a live runtime whose `session_id` has no `sessions` row yet: a new session before its first turn. The roster shows it as a "new session" row in its project, so the Deck can select and show it; it is never persisted as a Session.
@@ -320,11 +329,13 @@ Events and the writes they make. Each write is synchronous and one transaction.
 Failure: the recorder shows a persistent red footer status (`swb: not recording: <reason>`) and an error notify, then stays failed for the rest of that process. A `user_version` mismatch is a failure.
 
 `/archive`:
+
 - If a turn is running, it refuses with "turn running: wait for it to complete".
 - Otherwise it writes `marks.archived_at` and calls `ctx.shutdown()`.
 - The tmux `session-closed` hook then runs `swb gc`, which reaps the editor.
 
 `swb_update_session`, a tool registered only in managed processes, archives or unarchives a session, the current one by default:
+
 - Archiving the current session writes the same mark and calls `ctx.shutdown()` mid-turn; pi defers that until the turn settles, so the final message lands and the session is not Interrupted.
 - A retry, compaction, or queued message inside that turn doesn't reopen it; only a new turn from idle does.
 - Archiving another session is refused while it is mid-turn. Unarchiving doesn't restart it.
@@ -513,6 +524,7 @@ next swb invocation: runtime rows with a stale boot_id or dead pid → not live
 ### 1. The Deck: the session's own pane, swapped into a tmux window
 
 The Stage is a slot in the Deck's tmux window, and showing a session swaps that session's own pane into it.
+
 - There is one tmux between the terminal and the harness, so keys, colors, mouse, focus, synchronized output, and OSC 8 links reach the harness as they do in any tmux.
 - A switch is a `swap-pane` over a control-mode client, about a millisecond of tmux work.
 
@@ -563,11 +575,13 @@ Once `/new` exists, a tmux session can't keep a session's id as its name, so nam
 ### 12. Distribution: one tag, three artifacts
 
 A `vX.Y.Z` tag runs `.github/workflows/release.yml`:
+
 - it builds `swb` for linux-x64 and darwin-arm64 as GitHub release assets;
 - it bundles `packages/pi` (with `shared` inlined and pi's host packages left external) into a generated `pi` branch;
 - it publishes the same bundle to npm as `@thurstonsand/pi-agent-switchboard`, through Trusted Publishing.
 
 CI sets versions from the tag; nothing is bumped locally. Following pi-sessions' `npm-release` skill:
+
 - the work Mac installs `swb` with mise `github:` at `latest`, plus pi `git:…@pi`, because its npm mirror lags;
 - personal hosts list the package in ansiblonomicon's `PERSONAL_PACKAGES`: the local checkout on the Mac, npm elsewhere.
 
@@ -664,6 +678,7 @@ CI sets versions from the tag; nothing is bumped locally. Following pi-sessions'
 ## Implementation Gotchas
 
 Traps found during the spikes and mocks that the sections above don't already spell out:
+
 - `PRAGMA data_version` changes only for commits made by other connections. Compare it on one long-lived connection, and expect it not to move for that connection's own writes.
 - `agent_end` is not idle: a queued follow-up can start another turn. Only `agent_settled` means the turn finished with nothing queued.
 - pi swallows extension errors. A recorder that throws just stops recording, so every recorder failure has to surface itself, through the red footer.
@@ -676,6 +691,7 @@ Traps found during the spikes and mocks that the sections above don't already sp
 One autonomous agent runs Phases 0–7 in order; Phase 8 happens after Thurston reviews and tags a release. Every phase leaves `main` green, under `mise run check` (lint, typecheck, build) and `mise run e2e`, and ends with a commit. There are **no unit tests**: every validation is an end-to-end scenario against the real built `swb`, real pi 1.0.4 with the faux provider, the real recorder, an isolated db, and private tmux servers (`SWB_INSTANCE=e2e-<rand>`, disposable `HOME`/`XDG_*`/`PI_CODING_AGENT_DIR`). Every phase also saves visual evidence (`swb drive capture` text, plus `--ansi`) under `test/e2e/artifacts/<phase>/`, which is gitignored and attached to the PR. Read [CONTEXT.md](../../CONTEXT.md), AGENTS.md, DEV.md, this doc, and the [e2e research](../wayfinding/session-manager/research/deterministic-pi-e2e.md) first.
 
 Two settings exist so tests needn't mock anything. Both are real user-facing keys, not test hooks:
+
 - `inactive_after = "72h"`, so a test can set `"2s"`.
 - `clipboard = "pbcopy"`, so a test can point it at a file.
 

@@ -35,7 +35,6 @@
 - pi's `swb: not recording` footer puts `roster: R reload` first, so a narrow pane cuts the diagnostic instead of the way out.
 - The editor view's `e editor` lights up while the editor is on, as `v split` does.
 
-
 ## [0.14.0] - 2026-11-08
 
 Never published: its release stopped on a test that read the Deck's screen while a Peek covered what it waited for. 0.14.1 carries its changes.
