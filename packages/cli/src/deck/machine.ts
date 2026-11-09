@@ -6,9 +6,11 @@ import {
 	isKeyRelease,
 	matchesKey,
 	type RgbColor,
+	stripTerminalSequences,
 	type TerminalColors,
 	type TuiMouseEvent,
 	type TuiMouseEventResult,
+	visibleWidth,
 } from "@earendil-works/pi-tui";
 import { configDir, type Harness, operatorDir, type SnoozePreset, type View } from "@swb/shared";
 import { harnessName } from "@swb/shared/mailbox";
@@ -89,6 +91,7 @@ const m: Model = {
 	focusedPane: rosterPane,
 	ready: false,
 	toasts: [],
+	aim: null,
 	transcripts: new Map<string, { transcript: Transcript | null; error: string | null }>(),
 	transcriptsAsked: new Map<string, number>(),
 	localViews: new Map<string, { view: View; req: number }>(),
@@ -1028,6 +1031,40 @@ worker.onerror = (event: ErrorEvent) => {
 
 worker.onmessage = (event: MessageEvent<FromWorker>) => dispatch(() => onWorker(event.data));
 
+/** Syncs posted to the worker, by req, each settling once its reply is committed. */
+const syncs = new Map<number, () => void>();
+
+/**
+ * Settles once the Deck has committed every snapshot the worker could take from the moment it was asked: the db and
+ * tmux as they were then, and every request posted to the worker before it that the worker answers at once.
+ */
+export function caughtUp(): Promise<void> {
+	const req = nextReq();
+	const { promise, resolve } = Promise.withResolvers<void>();
+	syncs.set(req, resolve);
+	post({ type: "sync", req });
+	return promise;
+}
+
+/**
+ * Whether a press on `line`, as the frame it hit-tests against draws it, at column `x` goes ahead. With a driver's aim
+ * waiting, it does only where that frame shows the aimed text under it: a frame that moved between the driver reading
+ * the screen and the press landing drops the press instead of giving it to whatever moved there.
+ */
+export function aimed(line: string, x: number): boolean {
+	const aim = m.aim;
+	if (!aim || aim.outcome !== null) return true;
+	const plain = stripTerminalSequences(line);
+	const width = visibleWidth(aim.text);
+	let hit = false;
+	for (let at = plain.indexOf(aim.text); at !== -1 && !hit; at = plain.indexOf(aim.text, at + 1)) {
+		const from = visibleWidth(plain.slice(0, at));
+		hit = x >= from && x < from + width;
+	}
+	aim.outcome = hit ? "hit" : "missed";
+	return hit;
+}
+
 function onWorker(message: FromWorker): void {
 	switch (message.type) {
 		case "restore":
@@ -1041,6 +1078,10 @@ function onWorker(message: FromWorker): void {
 			break;
 		case "snapshot":
 			onSnapshot(message.snapshot);
+			break;
+		case "synced":
+			syncs.get(message.req)?.();
+			syncs.delete(message.req);
 			break;
 		case "launched": {
 			const launch = m.launches.find((l) => l.req === message.req);
@@ -3105,6 +3146,13 @@ export async function handleCommand(cmd: string, argv: string[]): Promise<void> 
 		case "pointer-out":
 			dispatch(pointerOut);
 			break;
+		// `swb drive click --on`: the press it's about to send must land on this text.
+		case "aim": {
+			const [text] = argv;
+			if (!text) throw new Error("aim takes the text to click");
+			m.aim = { text, outcome: null };
+			break;
+		}
 		case "esc":
 			dispatch(() => {
 				for (const launch of m.launches) launch.keyboard = false;

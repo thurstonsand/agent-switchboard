@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- `swb drive click --on TEXT` clicks the one place on the Deck showing TEXT, and `click X Y --on TEXT` that cell. The Deck drops the press if its frame has since moved something else there, and `--on TEXT` alone aims again.
+
+### Changed
+
+- `swb deck state`, and `swb drive`'s `state`, `wait`, `capture`, `keys`, `click`, and `wheel`, first wait for the Deck to catch up with everything that happened before them and come to rest. `SWB_DRIVE_NOW=1` takes the Deck as it is.
+
 ### Fixed
 
 - `swb deck state` no longer drops text from a Peek, menu, or launch card line after a text field's cursor.

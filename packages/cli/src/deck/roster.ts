@@ -24,10 +24,12 @@ import { DECK } from "./conf.ts";
 import { rosterPane, sock } from "./env.ts";
 import {
 	addTarget,
+	aimed,
 	archiveCancels,
 	archivedKey,
 	archiving,
 	boot,
+	caughtUp,
 	chosenPreset,
 	commit,
 	completedRows,
@@ -175,6 +177,11 @@ function cardStream(): Response {
 const ARCHIVE_SCHEDULES = 3;
 
 class Roster implements Component, Focusable {
+	/** The lines the last frame drew, which a press aimed by `swb drive click --on` is checked against. */
+	private drawn: string[] = [];
+	/** A press dropped for missing its aim, whose release and click go with it. */
+	private dropping = false;
+
 	get capturesViewportInput(): boolean {
 		return panes.narrow && model.details.expanded && model.mode.kind === "roster";
 	}
@@ -197,10 +204,20 @@ class Roster implements Component, Focusable {
 	}
 
 	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+		if (event.button === "left" && event.type === "press") this.dropping = !aimed(this.drawn[event.y] ?? "", event.x);
+		if (this.dropping && event.type !== "move") {
+			if (event.type === "click") this.dropping = false;
+			return { handled: true };
+		}
 		return onMouse(event);
 	}
 
 	render(width: number): string[] {
+		this.drawn = this.draw(width);
+		return this.drawn;
+	}
+
+	private draw(width: number): string[] {
 		const t0 = performance.now();
 		const height = tui.terminal.rows;
 		const settings = settingsPane();
@@ -1593,6 +1610,7 @@ function viewState(): DeckState {
 		),
 		colors: model.colors,
 		toasts: model.toasts.filter((t) => t.until > Date.now()).map((t) => ({ text: t.text, level: t.level })),
+		aim: model.aim,
 		perf: {
 			render: perf.render.summary(),
 			switchClient: perf.switchClient.summary(),
@@ -1614,11 +1632,28 @@ const overlays = new Overlays({
 	failed: (message) => toast(message, "error"),
 	left: onPointerOut,
 	pressed: onOverlayPress,
+	aimed,
 	hovered: onOverlayHover,
 	changed: () => commit(),
 });
 
 tui.setFocus(roster);
+
+const SETTLE_MS = 15_000;
+
+/**
+ * Settles once the Deck has caught up with the db and tmux as they were when asked, and come to rest: every frame that
+ * brought drawn, every float placed, and every pane moved.
+ */
+async function settled(): Promise<void> {
+	await caughtUp();
+	for (let waited = true; waited; ) {
+		// The frame a change asked for, drawn now rather than when the frame rate allows; its floats follow in a microtask.
+		tui.renderNow();
+		await Bun.sleep(0);
+		waited = (await panes.settled()) || (await overlays.settled());
+	}
+}
 
 tui.start();
 
@@ -1660,7 +1695,14 @@ Bun.serve({
 	idleTimeout: 0,
 	async fetch(req) {
 		const url = new URL(req.url);
-		if (req.method === "GET" && url.pathname === "/state") return Response.json(viewState());
+		if (req.method === "GET" && url.pathname === "/state") {
+			if (url.searchParams.has("settled")) {
+				const late = Bun.sleep(SETTLE_MS).then(() => true);
+				if (await Promise.race([settled().then(() => false), late]))
+					return new Response(`the Deck didn't settle within ${SETTLE_MS / 1000} s`, { status: 503 });
+			}
+			return Response.json(viewState());
+		}
 		if (req.method === "GET" && url.pathname === "/card") return cardStream();
 		if (req.method === "POST" && url.pathname === "/cmd") {
 			const body = await req.json();

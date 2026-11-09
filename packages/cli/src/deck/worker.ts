@@ -64,6 +64,8 @@ let mirroredServer = "";
 const transcripts = new Map<string, { mtimeMs: number; transcript: Transcript }>();
 /** Hosts this Deck launched whose pi hasn't registered yet. */
 const launched = new Set<string>();
+/** Syncs the roster asked for, each answered by the first tick after it that sends what it read. */
+const syncs: number[] = [];
 const ORPHAN_DEAD_S = 10;
 const REAP_GRACE_MS = 10_000;
 /** Reaped hosts this Deck has sent SIGKILL, until their tmux session is gone. */
@@ -461,10 +463,13 @@ function tick(): Set<string> {
 	reap(snap, staged, reaped);
 	if (asking.size > 0) return names;
 	const json = JSON.stringify(snap);
-	if (json === lastJson) return names;
-	lastJson = json;
-	post({ type: "snapshot", snapshot: snap });
-	postedNow();
+	if (json !== lastJson) {
+		lastJson = json;
+		post({ type: "snapshot", snapshot: snap });
+		postedNow();
+	}
+	// Behind the snapshot this tick read, which a tick held back for git doesn't send.
+	for (const req of syncs.splice(0)) post({ type: "synced", req });
 	return names;
 }
 
@@ -562,6 +567,11 @@ async function handle(message: ToWorker): Promise<void> {
 		}
 		case "refresh":
 			refresh(message.models);
+			return;
+		case "sync":
+			syncs.push(message.req);
+			// Before init there's no config to tick with; the first tick after it answers.
+			if (listening) poll();
 			return;
 		case "layout":
 			saveLayout(db, message.layout);

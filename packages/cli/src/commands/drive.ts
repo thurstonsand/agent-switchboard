@@ -1,9 +1,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { stateDir } from "@swb/shared";
 import { DECK } from "../deck/conf.ts";
-import { fetchState } from "../deck/deck.ts";
+import { fetchState, postCommand } from "../deck/deck.ts";
 import { SwbError, UsageError } from "../errors.ts";
 import { cleanEnv, DRIVE, killServer, quote, SESSIONS, SWB, tmux, tmuxClient, tmuxTry } from "../tmux.ts";
 import { HARNESS_CONF, theme, themeCommands } from "./drive-terminal.ts";
@@ -21,6 +22,13 @@ function sgr(button: number, col: number, row: number, release = false): string 
 
 const READY_MS = 15_000;
 
+/**
+ * Whether the driver reads and types into a Deck only once it has caught up and come to rest, as it does unless
+ * SWB_DRIVE_NOW=1. A Deck whose worker is blocked, on a held db lock say, never catches up; a driver testing how it
+ * copies meanwhile reads it as it is.
+ */
+const SETTLE = process.env.SWB_DRIVE_NOW !== "1";
+
 /** Whether the drive pane's terminal is on the Deck: a client of swb's server with the pane's tty. */
 function driven(): boolean {
 	const tty = harness("display", "-p", "-t", PANE, "#{pane_tty}");
@@ -36,7 +44,7 @@ async function waitReady(): Promise<void> {
 	const deadline = Date.now() + READY_MS;
 	while (Date.now() < deadline) {
 		if (driven()) {
-			const state = await fetchState().catch(() => null);
+			const state = await fetchState(false).catch(() => null);
 			if (state?.ready === true) return;
 		}
 		await Bun.sleep(50);
@@ -58,6 +66,53 @@ async function raw(...sequences: string[]): Promise<void> {
 		// As hex bytes: sent as keys, the ESC could be re-encoded under the harness's extended-keys mode.
 		harness("send-keys", "-t", PANE, "-H", ...[...Buffer.from(sequence)].map((b) => b.toString(16).padStart(2, "0")));
 		await Bun.sleep(40);
+	}
+}
+
+/** The cells a line of the screen shows `text` at, by the column each starts in. */
+function columnsOf(line: string, text: string): number[] {
+	const found: number[] = [];
+	for (let at = line.indexOf(text); at !== -1; at = line.indexOf(text, at + 1)) found.push(visibleWidth(line.slice(0, at)));
+	return found;
+}
+
+const AIM_TRIES = 5;
+const AIM_MS = 5000;
+
+/**
+ * Clicks the middle of the one place on the driven screen showing `text`, read once the Deck has settled, or the cell
+ * `at` when given. The Deck checks the press against the frame it hit-tests with and drops it where that frame doesn't
+ * show `text` under it, so a screen that moved between reading and pressing costs another aim, never a click on
+ * whatever moved under it. A cell given is pressed once: aiming again would only press it again.
+ */
+async function clickOn(text: string, at: [number, number] | null): Promise<void> {
+	requireDeck();
+	for (let tries = 1; ; tries++) {
+		await fetchState(SETTLE);
+		const screen = harness("capture-pane", "-p", "-t", PANE);
+		let cell = at;
+		if (cell === null) {
+			const found = screen.split("\n").flatMap((line, y) => columnsOf(line, text).map((x): [number, number] => [x, y]));
+			if (found.length !== 1)
+				throw new SwbError(`drive: click --on ${JSON.stringify(text)}: on screen ${found.length} times, not once\n${screen}`);
+			const [x, y] = found[0] as [number, number];
+			cell = [x + Math.floor((visibleWidth(text) - 1) / 2), y];
+		}
+		const [col, y] = cell;
+		await postCommand("aim", [text]);
+		await raw(sgr(0, col, y), sgr(0, col, y, true));
+		const deadline = Date.now() + AIM_MS;
+		let outcome = (await fetchState(false)).aim?.outcome ?? null;
+		while (outcome === null && Date.now() < deadline) {
+			await Bun.sleep(20);
+			outcome = (await fetchState(false)).aim?.outcome ?? null;
+		}
+		if (outcome === "hit") return;
+		if (outcome === null)
+			throw new SwbError(`drive: click --on ${JSON.stringify(text)}: the press at ${col},${y} reached no control of the Deck\n${screen}`);
+		if (at !== null)
+			throw new SwbError(`drive: click ${at.join(" ")} --on ${JSON.stringify(text)}: the Deck shows something else there\n${screen}`);
+		if (tries === AIM_TRIES) throw new SwbError(`drive: click --on ${JSON.stringify(text)}: the screen moved under ${AIM_TRIES} aims`);
 	}
 }
 
@@ -108,7 +163,7 @@ export async function drive(args: string[]): Promise<void> {
 		}
 		case "state":
 			requireDeck();
-			console.log(JSON.stringify(await fetchState()));
+			console.log(JSON.stringify(await fetchState(SETTLE)));
 			break;
 		case "wait": {
 			const { values, positionals } = parseArgs({
@@ -125,13 +180,15 @@ export async function drive(args: string[]): Promise<void> {
 			let seen: unknown;
 			while (Date.now() < deadline) {
 				requireDeck();
-				seen = at(await fetchState(), path);
+				seen = at(await fetchState(SETTLE), path);
 				if (String(seen) === want) return;
 				await Bun.sleep(50);
 			}
 			throw new SwbError(`drive: ${path} is ${JSON.stringify(seen)}, not ${want}, after ${values.timeout} ms`);
 		}
 		case "keys": {
+			// Into a Deck that has caught up, so a key acts on everything that happened before it.
+			if (SETTLE && driven()) await fetchState(true);
 			// In order, as typed: `-l TEXT` is literal text, anything else a tmux key name.
 			let delay = 30;
 			for (let i = 0; i < rest.length; i++) {
@@ -144,6 +201,8 @@ export async function drive(args: string[]): Promise<void> {
 			break;
 		}
 		case "capture":
+			// As state does: a Deck on screen has caught up with everything before this, and drawn it.
+			if (SETTLE && driven()) await fetchState(true);
 			process.stdout.write(`${harness("capture-pane", "-p", ...(rest.includes("--ansi") ? ["-e"] : []), "-t", PANE)}\n`);
 			break;
 		case "theme":
@@ -153,13 +212,20 @@ export async function drive(args: string[]): Promise<void> {
 			await raw(rest[0] === "out" ? "\x1b[O" : "\x1b[I");
 			break;
 		case "click": {
-			const [col, row] = rest.map(Number) as [number, number];
+			const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { on: { type: "string" } } });
+			const [col, row] = positionals.map(Number) as [number, number];
+			if (values.on !== undefined) {
+				await clickOn(values.on, positionals.length === 0 ? null : [col, row]);
+				break;
+			}
+			if (SETTLE && driven()) await fetchState(true);
 			await raw(sgr(0, col, row), sgr(0, col, row, true));
 			break;
 		}
 		case "wheel": {
 			const [direction, col, row] = [rest[0], Number(rest[1]), Number(rest[2])];
 			if (direction !== "up" && direction !== "down") throw new UsageError(`drive: wheel takes up or down, got ${direction}`);
+			if (SETTLE && driven()) await fetchState(true);
 			await raw(sgr(direction === "up" ? 64 : 65, col, row));
 			break;
 		}

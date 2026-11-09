@@ -6,7 +6,7 @@ export async function deckCommand(args: string[]): Promise<void> {
 	const [verb, ...rest] = args;
 	if (verb !== "state") throw new UsageError(`deck: unknown verb ${verb ?? "(none)"}`);
 	const { values } = parseArgs({ args: rest, options: { json: { type: "boolean" } } });
-	const state = await fetchState();
+	const state = await fetchState(true);
 	if (values.json) {
 		console.log(JSON.stringify(state));
 		return;

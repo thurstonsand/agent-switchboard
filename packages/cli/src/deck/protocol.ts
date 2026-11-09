@@ -172,8 +172,13 @@ export type DeckState = {
 	rows: StateRow[];
 	colors: { background: string | null; scheme: string | null };
 	toasts: { text: string; level: "info" | "error" }[];
+	/** What `swb drive click --on` aimed at, and whether the press that followed landed on it or was dropped. */
+	aim: Aim | null;
 	perf: { render: StatSummary; switchClient: StatSummary; keyToSwitch: StatSummary; keyToFrame: StatSummary };
 };
+
+/** Text a driver means to click, and the outcome of the press it sends: null until one comes. */
+export type Aim = { text: string; outcome: "hit" | "missed" | null };
 
 /** Where the shell sits against the pane holding the agent, or that it replaces the agent in its pane, when neither half would have room. */
 export type ShellAt = "below" | "beside" | "replace";
@@ -215,11 +220,12 @@ export type ToWorker =
 	| { type: "shell"; req: number; dir: string }
 	| { type: "dirs" }
 	| { type: "addDir"; path: string }
-	| { type: "removeDir"; path: string };
+	| { type: "removeDir"; path: string }
+	| { type: "sync"; req: number };
 
 /**
  * What the worker sends back. A request that carries `req` gets exactly one reply carrying it: `launched` or
- * `launchFailed` for wake, reload, and new, and `done` for the rest. The roster applies a reply only where it still holds
+ * `launchFailed` for wake, reload, and new, `synced` for sync, and `done` for the rest. The roster applies a reply only where it still holds
  * that `req`, so one for a request it has since moved past changes nothing but its error.
  */
 export type FromWorker =
@@ -237,4 +243,6 @@ export type FromWorker =
 	| { type: "shell"; req: number; dir: string; name: string | null; text: string | null }
 	| { type: "dirs"; trees: TargetTree[] }
 	| { type: "catalog"; catalog: Catalog }
+	/** Every snapshot the worker could take since its sync came in has gone out ahead of this. */
+	| { type: "synced"; req: number }
 	| { type: "error"; text: string };

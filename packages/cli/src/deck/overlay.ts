@@ -62,6 +62,8 @@ export type OverlayHost = {
 	left: () => void;
 	/** A click on a button. */
 	pressed: (command: Command, at: { x: number; y: number }) => void;
+	/** Whether a press on this line, at this column, goes ahead: one a driver aimed elsewhere is dropped. */
+	aimed: (line: string, x: number) => boolean;
 	/** The pointer moving over one that hovers a row. */
 	hovered: (row: string) => void;
 	/** Something shown went by itself. */
@@ -72,6 +74,8 @@ export class Overlays {
 	private readonly shown = new Map<string, Shown>();
 	private want: Overlay[] = [];
 	private running = false;
+	/** The placing passes in progress, while running. */
+	private passes = Promise.resolve();
 	private dirty = false;
 	/** The kill-pane commands in @swb_leave, as last set. */
 	private leave = "";
@@ -98,7 +102,14 @@ export class Overlays {
 		}
 		if (this.placed()) return;
 		this.dirty = true;
-		if (!this.running) void this.run();
+		if (!this.running) this.passes = this.run();
+	}
+
+	/** Settles once the floats are as the last sync wanted them; true when that took a pass still placing them. */
+	async settled(): Promise<boolean> {
+		const waited = this.running;
+		while (this.running) await this.passes;
+		return waited;
 	}
 
 	/** What an overlay on screen shows, without its color, or null when it isn't. */
@@ -335,7 +346,7 @@ export class Overlays {
 				// A float on its way out still shows the buttons of a mode that may be gone.
 				if (!this.want.includes(s.overlay)) continue;
 				const hit = s.overlay.view.buttons.find((b) => b.y === at.y && at.x >= b.from && at.x < b.to);
-				if (!hit) continue;
+				if (!hit || !this.host.aimed(s.overlay.view.lines[at.y] ?? "", at.x)) continue;
 				this.host.pressed(hit.command, { x: s.x + at.x, y: s.y + at.y });
 			}
 		}

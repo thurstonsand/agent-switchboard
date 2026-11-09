@@ -75,8 +75,8 @@ const USAGE = `swb: Agent Switchboard
                                the MCP server a Claude Code or Codex session lists swb's tools from
   swb drive start [--size COLSxROWS] [--theme THEME] [-- swb-args]
   swb drive keys [--delay MS] [-l TEXT]… [KEY…] | capture [--ansi] | theme THEME | focus in|out
-            | click X Y | wheel up|down X Y | move X Y | drag X1 Y1 X2 Y2 [--hold] | release X Y (0-based cells) | resize COLSxROWS | clipboard | stop
-  swb drive state | wait PATH=VALUE [--timeout MS]
+            | click X Y | click --on TEXT | wheel up|down X Y | move X Y | drag X1 Y1 X2 Y2 [--hold] | release X Y (0-based cells) | resize COLSxROWS | clipboard | stop
+  swb drive state | wait PATH=VALUE [--timeout MS]   (these, capture, keys, click, and wheel wait for the Deck to catch up and come to rest; SWB_DRIVE_NOW=1 skips that)
   swb deck state [--json]
   swb migrate                  create or upgrade the db
   swb --version`;

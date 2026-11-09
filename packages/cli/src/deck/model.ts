@@ -5,7 +5,7 @@ import type { Target, TargetTree } from "../dirs.ts";
 import type { Catalog } from "../harnesses.ts";
 import type { DeckIntent } from "./deck.ts";
 import type { Overlay } from "./overlay.ts";
-import type { Entry, PeekInfo, Snapshot, TerminalProfile, Transcript } from "./protocol.ts";
+import type { Aim, Entry, PeekInfo, Snapshot, TerminalProfile, Transcript } from "./protocol.ts";
 import type { SettingsPane } from "./settings.ts";
 import { key } from "./style.ts";
 
@@ -206,6 +206,8 @@ export type Model = {
 	focusedPane: string;
 	ready: boolean;
 	toasts: Toast[];
+	/** A driver's aim at text on screen: the next press goes ahead only where the frame shows that text. */
+	aim: Aim | null;
 	transcripts: Map<string, { transcript: Transcript | null; error: string | null }>;
 	/** The activity each dormant session's transcript was last asked for at; one that moved on since is read again. */
 	transcriptsAsked: Map<string, number>;

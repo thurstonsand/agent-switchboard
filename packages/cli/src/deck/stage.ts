@@ -82,6 +82,8 @@ export class StagePanes {
 
 	private ops = Promise.resolve();
 	private layouts = Promise.resolve();
+	/** The queues as they stood when settled() last found them in place. */
+	private settledAt = { ops: this.ops, layouts: this.layouts };
 	/** A layout waiting for the one running to finish; every call meanwhile shares it. */
 	private layoutQueued: Promise<void> | null = null;
 	/** Whether the roster should be hidden, which syncRoster makes so; rosterHidden is what tmux shows. */
@@ -133,6 +135,21 @@ export class StagePanes {
 	/** Runs op once every change queued before it is in place. */
 	queue(op: () => Promise<void>): void {
 		this.ops = this.ops.then(op);
+	}
+
+	/**
+	 * Settles once every change and layout queued so far is in place, and every one they queued in turn; true when any
+	 * was queued since the last time it settled.
+	 */
+	async settled(): Promise<boolean> {
+		let waited = false;
+		while (this.ops !== this.settledAt.ops || this.layouts !== this.settledAt.layouts) {
+			waited = true;
+			const at = { ops: this.ops, layouts: this.layouts };
+			await Promise.allSettled([at.ops, at.layouts]);
+			this.settledAt = at;
+		}
+		return waited;
 	}
 
 	/** In split, the keyboard goes to pi. */

@@ -364,9 +364,13 @@ async function postIntent(intent: DeckIntent): Promise<void> {
 	}
 }
 
-export async function fetchState(): Promise<DeckState> {
-	const response = await fetch("http://deck/state", { unix: deckSocket() });
-	if (!response.ok) throw new SwbError(`deck: GET /state: ${response.status}`);
+/**
+ * The Deck as a driver sees it. `settled` waits for it to catch up with the db and tmux as they are now, and come to
+ * rest, so the state holds everything that happened before asking.
+ */
+export async function fetchState(settled: boolean): Promise<DeckState> {
+	const response = await fetch(`http://deck/state${settled ? "?settled" : ""}`, { unix: deckSocket() });
+	if (!response.ok) throw new SwbError(`deck: GET /state: ${response.status} ${await response.text()}`);
 	return (await response.json()) as DeckState;
 }
 
