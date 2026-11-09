@@ -21,6 +21,7 @@ One `vX.Y.Z` tag on `main` produces three things, all from `.github/workflows/re
 - Release from `main` with `mise run release X.Y.Z`. Nothing else bumps a version, and CI never commits.
 - The released version lives on `main` in `packages/lines/pi/package.json`. The npm package publishes it, and `release:build` stamps the swb binaries with it.
 - `CHANGELOG.md` holds the human release notes: `## [Unreleased]`, then `## [X.Y.Z] - YYYY-MM-DD` sections, newest first. `mise run check` fails when a heading doesn't parse, versions don't strictly descend, or the latest release isn't the version in `package.json`. The npm package ships the changelog, so pi shows a release's entries after an update. The annotated tag and the GitHub release carry the same section.
+- Versions follow semantic versioning: a release with any new feature (an `Added` entry), a raised floor (a higher minimum Pi, Node, OS, or other dependency version), or anything breaking is at least minor, and breaking is major from 1.0 on; patch is only for fixes and dependency updates.
 - Stable tags are immutable. Never force-push a release tag.
 - The `pi` branch is generated. Never edit it by hand.
 
