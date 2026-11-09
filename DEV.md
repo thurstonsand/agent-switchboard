@@ -13,6 +13,7 @@ Always prefer mise tasks over running tools directly.
 ```sh
 mise run check          # full verification gate
 mise run e2e            # real pi in a private tmux server, scripted by the faux provider
+mise run e2e:soak       # e2e tests again and again with every CPU busy, counting failures; `-- --help` for options
 mise run install        # build swb from this checkout into ~/.local/bin
 mise run dist:pi        # build the pi extension bundle exactly as the release publishes it
 mise run release:check  # build every release artifact into a scratch dir and smoke-test this host's binary

@@ -134,6 +134,11 @@ else
 fi
 """
 
+[tasks."e2e:soak"]
+description = "Run e2e tests again and again with every CPU busy, and count which failed; `mise run e2e:soak -- --help` for options"
+depends = ["build", "dist:pi"]
+run = "bun test/e2e/soak.ts"
+
 [tasks.evidence]
 description = "Render every VHS tape"
 depends = ["build", "dist:pi"]
