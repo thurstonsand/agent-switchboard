@@ -142,15 +142,21 @@ const MIGRATIONS: string[] = [
 	);
 	INSERT INTO deck_layout (id, state, saved_at) SELECT 1, state, saved_at FROM deck_layouts ORDER BY saved_at DESC LIMIT 1;
 	DROP TABLE deck_layouts;`,
+	// The last Visit that ended its Unseen: reading it starts inactive_after over.
+	"ALTER TABLE marks ADD COLUMN read_at INTEGER",
 ];
 
 if (MIGRATIONS.length !== SCHEMA_VERSION) throw new Error(`${MIGRATIONS.length} migrations for schema v${SCHEMA_VERSION}`);
 
-export function markVisited(db: Db, id: string): void {
+/** Records a Visit; `read` when it found the session Unseen. */
+export function markVisited(db: Db, id: string, read: boolean): void {
+	const now = Date.now();
 	db.run(
-		"INSERT INTO marks (session_id, visited_at) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET visited_at = excluded.visited_at",
+		`INSERT INTO marks (session_id, visited_at, read_at) VALUES (?1, ?2, ?3)
+		 ON CONFLICT (session_id) DO UPDATE SET visited_at = excluded.visited_at, read_at = coalesce(excluded.read_at, read_at)`,
 		id,
-		Date.now(),
+		now,
+		read ? now : null,
 	);
 }
 

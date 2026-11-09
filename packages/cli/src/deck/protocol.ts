@@ -198,7 +198,7 @@ export type ToWorker =
 	| { type: "config"; config: Config }
 	| { type: "refresh"; models: boolean }
 	| NewSession
-	| { type: "visit"; id: string }
+	| { type: "visit"; id: string; read: boolean }
 	| { type: "markUnseen"; id: string; marked: boolean }
 	| { type: "archive"; req: number; ids: string[]; deleteWorktreeFor?: string }
 	| { type: "unarchive"; req: number; id: string }

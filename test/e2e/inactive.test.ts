@@ -50,7 +50,12 @@ test("Inactive after inactive_after, never while blocked or unseen or working", 
 	await cursorTo(s, unseen);
 	s.keys("Enter");
 	await waitState(s, "unseen live on view", (x) => x.staged.id === unseen && x.staged.kind === "live", budgets.piReady);
-	await until(() => entry(s, unseen).inactive, 8000, "visited, then inactive");
+	// Unseen long past inactive_after, it waits that long again once read.
+	await until(() => !entry(s, unseen).unseen, budgets.settle, "unseen read");
+	const read = Date.now();
+	expect(entry(s, unseen).inactive).toBe(false);
+	await until(() => entry(s, unseen).inactive, 8000, "read, then inactive");
+	expect(Date.now() - read).toBeGreaterThanOrEqual(1500);
 	await until(() => title(s) === "swb", budgets.settle, "the title counting nothing");
 	const st = await waitState(s, "Inactive section", (x) => x.rows.some((r) => r.kind === "section" && r.label === "Inactive"));
 	s.save("inactive.txt", `${s.screen()}\n${JSON.stringify(st.rows, null, 2)}`);

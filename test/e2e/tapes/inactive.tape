@@ -1,7 +1,7 @@
-# Sessions quiet past inactive_after (8 s here) fold into Inactive, but never while still Unseen.
+# Sessions quiet past inactive_after (8 s here) fold into Inactive, but never while still Unseen; reading one starts its 8 s over.
 Source common.tape
 
-Type "# inactive_after = 8s: quiet sessions fold into Inactive, but an Unseen one waits for my visit" Sleep 1s Enter
+Type "# inactive_after = 8s: quiet sessions fold into Inactive, an Unseen one waits 8s from when I read it" Sleep 1s Enter
 Type "swb" Sleep 400ms Enter
 Wait+Screen /▾ \S+ \(1\)/
 Sleep 2s
@@ -25,4 +25,7 @@ Enter
 Sleep 2s
 Alt+a
 Type "h"
-Sleep 12s
+Sleep 1s
+Screenshot ../artifacts/phase6/videos/inactive-read.png
+Sleep 11s
+Screenshot ../artifacts/phase6/videos/inactive-folded.png

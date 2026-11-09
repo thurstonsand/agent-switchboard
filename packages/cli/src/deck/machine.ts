@@ -652,7 +652,7 @@ function syncVisit(): void {
 	if (m.stage.visitTimer) clearTimeout(m.stage.visitTimer);
 	m.stage.visitTimer = null;
 	// Turns that landed while I watched are seen.
-	if (m.stage.watched && m.stage.visited) post({ type: "visit", id: m.stage.watched });
+	if (m.stage.watched && m.stage.visited) visit(m.stage.watched);
 	m.stage.visited = false;
 	m.stage.watched = id;
 	if (id === null) return;
@@ -662,7 +662,7 @@ function syncVisit(): void {
 				m.stage.visitTimer = null;
 				if (m.stage.watched !== id) return;
 				m.stage.visited = true;
-				post({ type: "visit", id });
+				visit(id);
 				remember(id);
 			}),
 		VISIT_MS,
@@ -720,6 +720,10 @@ function arrivalTmux(...args: string[]): void {
 			(error: Error) => toast(`arrival: ${error.message}`, "error"),
 		),
 	);
+}
+
+function visit(id: string): void {
+	post({ type: "visit", id, read: m.entries.get(id)?.unseen === true });
 }
 
 /** A Visit somewhere new drops what lay ahead, as a browser's history does; one where `[` or `]` landed changes nothing. */
@@ -1001,7 +1005,7 @@ function onSnapshot(next: Snapshot): void {
 	if (e) readTranscript(e, false);
 	// A turn that lands while I'm already watching is seen as it lands; commit settles what I'm watching.
 	afterCommit(() => {
-		if (m.stage.watched && m.stage.visited && m.entries.get(m.stage.watched)?.unseen) post({ type: "visit", id: m.stage.watched });
+		if (m.stage.watched && m.stage.visited && m.entries.get(m.stage.watched)?.unseen) visit(m.stage.watched);
 	});
 	checkReady();
 }

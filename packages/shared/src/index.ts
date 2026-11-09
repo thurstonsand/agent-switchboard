@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 
 export { Db, isBusy, type Param, type Row } from "./db.ts";
 
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 /** How swb exits when its db stayed locked past busy_timeout, EX_TEMPFAIL: a caller may try again. */
 export const BUSY_EXIT = 75;

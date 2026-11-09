@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- A session left Unseen longer than `inactive_after` no longer folds into Inactive the moment it's read: reading it starts `inactive_after` over.
 - A Peek's buttons stay clickable when the Deck redraws while tmux is creating its floating pane.
 - Settings keeps config.toml's comments where they were: resetting a section's last setting no longer deletes the comment above the next section, and a new top-level setting goes above the comment that introduces the first section instead of between it and its header.
 

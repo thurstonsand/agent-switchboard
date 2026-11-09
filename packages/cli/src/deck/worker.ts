@@ -591,7 +591,7 @@ async function handle(message: ToWorker): Promise<void> {
 		case "visit":
 			// A provisional session has no row to mark until its first prompt.
 			readDb();
-			if (rows.some((row) => row.session_id === message.id)) markVisited(db, message.id);
+			if (rows.some((row) => row.session_id === message.id)) markVisited(db, message.id, message.read);
 			break;
 		case "markUnseen":
 			markUnseen(db, message.id, message.marked);

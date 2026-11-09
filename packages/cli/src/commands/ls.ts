@@ -24,7 +24,7 @@ Lists every Session, open and archived, with its derived state.
   markedUnseen open, not snoozed, and I marked it Unseen after my last Visit
   cutOff       how its process ended mid-turn, when not live: "shutdown" (its harness quit), "killed" (it died without quitting), or "restart" (an earlier boot); else null
   errored      its last turn ended on its provider's error, and none has started since
-  inactive     open, not an Operator, not snoozed, and its whole Family has had no activity within inactive_after, none of it blocked or unseen
+  inactive     open, not an Operator, not snoozed, and its whole Family has had no activity, and none of it been read out of Unseen, within inactive_after, none of it blocked or unseen
   snoozed      open and snoozed, neither blocked, cut off, nor errored
   snooze       held snooze even while attention keeps it visible: {until: epoch ms}, {until: null} for next message, or null
   snoozedUntil epoch ms a snoozed session's snooze ends, or null when it waits for a message

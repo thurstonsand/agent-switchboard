@@ -237,7 +237,7 @@ function track(db: Db, s: Adoptable, archived: boolean, at: Place): void {
 		s.lastAt,
 	);
 	if (archived) db.run("INSERT INTO marks (session_id, archived_at, visited_at) VALUES (?, ?, ?)", s.id, s.lastAt, s.lastAt);
-	else markVisited(db, s.id);
+	else markVisited(db, s.id, false);
 }
 
 /** Tracks a session pi, Claude Code, or Codex ran outside swb, as a dormant row, and opens a Deck on it. */
