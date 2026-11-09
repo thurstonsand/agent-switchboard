@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Settings keeps config.toml's comments where they were: resetting a section's last setting no longer deletes the comment above the next section, and a new top-level setting goes above the comment that introduces the first section instead of between it and its header.
+
 ## [0.14.2] - 2026-11-09
 
 ### Changed
