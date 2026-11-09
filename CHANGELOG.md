@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `swb deck state` no longer drops text from a Peek, menu, or launch card line after a text field's cursor.
+
 ## [0.15.0] - 2026-11-09
 
 Schema v13: update swb and the pi line together.

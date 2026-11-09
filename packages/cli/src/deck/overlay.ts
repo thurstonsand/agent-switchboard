@@ -1,6 +1,6 @@
 import { openSync, writeSync } from "node:fs";
 import tty from "node:tty";
-import { CURSOR_MARKER } from "@earendil-works/pi-tui";
+import { CURSOR_MARKER, stripTerminalSequences } from "@earendil-works/pi-tui";
 import { FAKE_CURSOR_END, FAKE_CURSOR_START } from "@earendil-works/pi-tui/dist/tui.js";
 import { SESSIONS, tmuxAsync, tmuxTry } from "../tmux.ts";
 import type { Command } from "./model.ts";
@@ -104,7 +104,9 @@ export class Overlays {
 	/** What an overlay on screen shows, without its color, or null when it isn't. */
 	painted(id: string): { about: string; lines: string[] } | null {
 		const s = this.shown.get(id);
-		return s && s.painted !== "" ? { about: s.overlay.about, lines: s.overlay.view.lines.map((line) => Bun.stripANSI(line)) } : null;
+		return s && s.painted !== ""
+			? { about: s.overlay.about, lines: s.overlay.view.lines.map((line) => stripTerminalSequences(line)) }
+			: null;
 	}
 
 	/** tmux ran @swb_leave, which killed what leaves with the pointer and unset the option. */

@@ -4,6 +4,7 @@ import {
 	type Component,
 	type Focusable,
 	sliceByColumn,
+	stripTerminalSequences,
 	TuiAltScreen,
 	type TuiMouseEvent,
 	type TuiMouseEventResult,
@@ -433,9 +434,9 @@ function renderPicker(width: number, height: number): string[] {
 	const noteRows = Math.max(0, height - 13 - (adding ? completedRows().length : pickRows().length));
 	const card = launchOnStage(width) || width < PEEK_MIN_COLS ? null : launchCard(choosing, Math.min(LAUNCH_COLS, width), noteRows);
 	for (const b of card?.buttons ?? []) frame.targets.push({ y: 1 + b.y, from: b.from, to: b.to, command: b.command });
-	frame.card = card ? card.lines.map((line) => Bun.stripANSI(line)) : null;
+	frame.card = card ? card.lines.map((line) => stripTerminalSequences(line)) : null;
 	// While the menu is open, the rest of the picker waits behind it.
-	const muted = (line: string) => (choosing.menu ? gray(Bun.stripANSI(line)) : line);
+	const muted = (line: string) => (choosing.menu ? gray(stripTerminalSequences(line)) : line);
 	const lines = [
 		muted(` ${bold(adding ? "add a directory" : "new session in")}`),
 		...(card?.lines ?? []),
@@ -1039,7 +1040,7 @@ function peekOverlays(rows: Row[], width: number, height: number): Overlay[] {
 	const over = sessionLine(row, width, Date.now()).over as { title: string; right: string };
 	let w = Math.min(PEEK_COLS, panes.width - width);
 	let view = peekView(row, w, height - 2, "left");
-	const content = view.lines.slice(1, -1).map((line) => Bun.stripANSI(line).slice(2, -2).trimEnd());
+	const content = view.lines.slice(1, -1).map((line) => stripTerminalSequences(line).slice(2, -2).trimEnd());
 	const fit = Math.max(
 		PEEK_MIN_COLS,
 		visibleWidth(over.title) + visibleWidth(over.right) + 1,
@@ -1276,7 +1277,8 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	const head: string[] = [];
 	const title = wrapTextWithAnsi(displayName(e), inner);
 	const titleLines = title.length > 2 ? [title[0] as string, truncateToWidth(title.slice(1).join(" "), inner, "…")] : title;
-	if (panes.narrow && !Bun.stripANSI(rowLine(row, width, now)).includes(displayName(e))) head.push(...titleLines.map((line) => bold(line)));
+	if (panes.narrow && !stripTerminalSequences(rowLine(row, width, now)).includes(displayName(e)))
+		head.push(...titleLines.map((line) => bold(line)));
 	const state = `${glyph(stateOf(e), now)} ${status(e)}${e.snoozed ? " · snoozed" : ""}${launchElapsed(e, now)}`;
 	const times = `${gray("created")} ${ago(e.createdAt, now)} · ${e.open ? `${gray("active")} ${e.activity === "working" ? "now" : ago(e.activityAt, now)}` : `${gray("archived")} ${ago(archivedKey(e), now)}`}`;
 	if (panes.narrow && visibleWidth(`${state} · ${times}`) <= inner) head.push(`${state} · ${times}`);
@@ -1502,7 +1504,7 @@ function pickerState(): PickerState | null {
 /** An overlay as it's on screen, without its color: over the roster's lines, or floating. */
 function overlayShown(id: string): { about: string; lines: string[] } | null {
 	const o = frame.over.find((o) => o.id === id);
-	return o ? { about: o.about, lines: o.view.lines.map((line) => Bun.stripANSI(line)) } : overlays.painted(id);
+	return o ? { about: o.about, lines: o.view.lines.map((line) => stripTerminalSequences(line)) } : overlays.painted(id);
 }
 
 function viewState(): DeckState {
@@ -1527,7 +1529,7 @@ function viewState(): DeckState {
 			const family = openDescendants(model.entries.values(), e.id);
 			const chosen = model.mode.kind === "archive" ? model.mode.chosen : null;
 			const cancels = chosen ? archiveCancels(e, chosen.all).flatMap((g) => g.schedules.map((p) => p.scheduleLabel)) : null;
-			return { id: e.id, counts: Bun.stripANSI(familyTally(family)), all: family.length + 1, cancels };
+			return { id: e.id, counts: stripTerminalSequences(familyTally(family)), all: family.length + 1, cancels };
 		})(),
 		settings: settingsPane()?.state() ?? null,
 		configError: model.configError?.message ?? null,
@@ -1571,7 +1573,7 @@ function viewState(): DeckState {
 						kind: "session",
 						id: row.entry.id,
 						title: displayName(row.entry),
-						glyph: Bun.stripANSI(glyph(stateOf(row.entry), 0)),
+						glyph: stripTerminalSequences(glyph(stateOf(row.entry), 0)),
 						state: stateOf(row.entry),
 						provisional: row.entry.provisional,
 						group: labels.get(row.header) ?? null,
