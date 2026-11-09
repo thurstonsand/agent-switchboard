@@ -9,7 +9,7 @@
         "@earendil-works/pi-ai": "^1.5.0",
         "@earendil-works/pi-coding-agent": "1.5.0",
         "@openai/codex": "0.166.0",
-        "@thurstonsand/pi-wt": "^1.16.0",
+        "@thurstonsand/pi-wt": "^1.16.1",
         "@types/bun": "1.4.4",
         "pi-sessions": "^0.23.0",
         "typebox": "1.3.27",
@@ -193,7 +193,7 @@
 
     "@thurstonsand/pi-agent-switchboard": ["@thurstonsand/pi-agent-switchboard@workspace:packages/lines/pi"],
 
-    "@thurstonsand/pi-wt": ["@thurstonsand/pi-wt@1.16.0", "", { "peerDependencies": { "@earendil-works/pi-coding-agent": "*", "@earendil-works/pi-tui": "*" } }, "sha512-cWXQzA2fio52+Ei3vvN/v7zuUNvh9CXCIm9djwnT5IGTF4+II0vxxPl9AYaVd4vtmD6EIzfeoTSOEijNpJGkOw=="],
+    "@thurstonsand/pi-wt": ["@thurstonsand/pi-wt@1.16.1", "", { "peerDependencies": { "@earendil-works/pi-coding-agent": "*", "@earendil-works/pi-tui": "*" } }, "sha512-bW4mF3dkUVYvm4fgnbwBMDTVfXumjL4LcO+YWu/EiHeV09k6jsnWgtubf9djuG24baGXjdAA5QfnuwFbcKynow=="],
 
     "@types/bun": ["@types/bun@1.4.4", "", { "dependencies": { "bun-types": "1.4.4" } }, "sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ=="],
 
