@@ -12,6 +12,7 @@ jobs:
   agree:
     name: The tag, the version, and the changelog agree
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
     steps:
@@ -36,6 +37,7 @@ jobs:
     name: Release binaries, the pi branch, and the npm package
     needs: ci
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: npm
     permissions:
       contents: write
@@ -44,7 +46,10 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # A tag build publishes, so it installs fresh rather than restoring a cache a PR could have written.
       - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        with:
+          cache: false
       - run: bun install --frozen-lockfile
 
       - name: Release notes from the changelog

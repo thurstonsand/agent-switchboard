@@ -12,15 +12,30 @@ node = "26"
 "conda:ffmpeg" = "9.0.2"
 "github:thurstonsand/wt" = "1.16.1"
 "aqua:neovim/neovim" = "0.12.6"
+hk = "2.11.1"
+# hk's check and fix hooks run jactionlint, which runs shellcheck over every `run:` script. Renovate
+# does not know mise's `jactionlint` shorthand, so the backend is spelled out.
+"aqua:jdx/jactionlint" = "2.5.0"
+shellcheck = "0.11.0"
+
+[env]
+HK_MISE = "1"
 
 [tasks.bootstrap]
 run = "bun install --frozen-lockfile"
 
 [tasks.lint]
+depends = ["lint:*"]
+
+[tasks."lint:biome"]
 run = "biome check ."
 
+[tasks."lint:actions"]
+description = "Lint GitHub Actions workflows"
+run = "hk check --all --step jactionlint"
+
 [tasks.fix]
-run = "biome check --write ."
+run = ["biome check --write .", "hk fix --all --step jactionlint"]
 
 [tasks.typecheck]
 depends = ["bootstrap"]

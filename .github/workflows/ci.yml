@@ -6,10 +6,20 @@ on:
   pull_request:
   workflow_call:
 
+permissions:
+  contents: read
+
+# Not `github.workflow`: when release.yml calls this workflow, that names the caller, whose group
+# would then wait on itself.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   tests:
     name: Tests (${{ matrix.shard }}/6)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -35,6 +45,7 @@ jobs:
     if: always()
     needs: tests
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - run: test "$RESULT" = success
         env:

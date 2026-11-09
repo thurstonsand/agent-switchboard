@@ -1,0 +1,15 @@
+amends "package://github.com/jdx/hk/releases/download/v2.11.1/hk@2.11.1#/Config.pkl"
+import "package://github.com/jdx/hk/releases/download/v2.11.1/hk@2.11.1#/Builtins.pkl"
+
+local linters = new Mapping<String, Step> {
+    ["jactionlint"] = Builtins.jactionlint
+}
+
+hooks {
+    ["check"] {
+        steps = linters
+    }
+    ["fix"] {
+        steps = linters
+    }
+}
