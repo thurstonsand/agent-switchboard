@@ -90,7 +90,7 @@ test("a timed snooze holds through a conversation and shows while blocked or cut
 	expect(refused.err.trim()).toBe("swb: snooze until: 2020-01-01T09:00:00-05:00 has passed");
 });
 
-test("a timed snooze that runs out with no turn comes back Unseen, and stays out of Inactive until I visit it", async () => {
+test("a timed snooze that runs out with no turn comes back Unseen, and stays out of Inactive until inactive_after past my visit", async () => {
 	s = scenario("schedules", "snooze-ends");
 	config(s, 'inactive_after = "3s"\n');
 	s.swb("drive", "start", "--", "new");
@@ -122,7 +122,8 @@ test("a timed snooze that runs out with no turn comes back Unseen, and stays out
 	await waitState(s, "on the Stage", (x) => x.focus === "stage" && x.staged.id === id);
 	s.swb("drive", "focus", "in");
 	await until(() => !entry(s, id).unseen, 3000, "visited once focused");
-	expect(snoozeOf(s, id)).toMatchObject({ snoozed: false, inactive: true });
+	expect(snoozeOf(s, id)).toMatchObject({ snoozed: false, inactive: false });
+	await until(() => snoozeOf(s, id).inactive, 8000, "inactive_after from the visit");
 });
 
 test("the Deck's Snoozed section: s snoozes from the roster, the row says when it wakes, Enter doesn't unsnooze it, M-a S does, and the next Deck doesn't start on it", async () => {
