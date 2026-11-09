@@ -24,7 +24,7 @@ import { loginShell } from "../sessions.ts";
 import type { DeckLayout } from "../store.ts";
 import { quote, SESSIONS, tmuxAsync } from "../tmux.ts";
 import { writeConfig } from "../write-config.ts";
-import { DECK, PLACEHOLDER } from "./conf.ts";
+import { ARRIVAL_HOLD_MS, DECK, PLACEHOLDER } from "./conf.ts";
 import { Control } from "./control.ts";
 import { type DeckIntent, HELP_POPUP, rosterCols, SPLIT_FROM } from "./deck.ts";
 import { rosterPane, stagePane, stageShows, startIntent } from "./env.ts";
@@ -66,6 +66,8 @@ import { attention, bold, cyan, dimColors, gray, green, hex, keyName, mix, red, 
 const VISIT_MS = 1000;
 
 const HIGHLIGHT_MS = 500;
+const DECK_OPTIONS = `=${DECK}:`;
+const UNHOLD = ["set", "-u", "-t", DECK_OPTIONS, "@swb_arrival_held", ";", "set", "-u", "-t", DECK_OPTIONS, "@swb_arrival_touched"];
 
 const TOAST_MS = 3500;
 
@@ -103,6 +105,7 @@ const m: Model = {
 		visited: false,
 		visitTimer: null,
 		highlightTimer: null,
+		arrival: null,
 	},
 	shellsShown: new Set<string>(),
 	shellsAsked: new Map<string, number>(),
@@ -593,6 +596,7 @@ function apply(): void {
 	const prev = panes.applied;
 	panes.sync(d, stageLabel(d));
 	syncVisit();
+	syncArrival();
 	const e = d.id === null ? undefined : m.entries.get(d.id);
 	if (d.host && e?.open && viewOf(e) !== "agent" && m.snapshot && !m.snapshot.editors[e.cwd]) {
 		const ask = m.editors.get(e.cwd);
@@ -662,6 +666,59 @@ function syncVisit(): void {
 				remember(id);
 			}),
 		VISIT_MS,
+	);
+}
+
+/**
+ * Says on the Stage's border that `from` switched the Deck to `id`, once the Stage shows it. tmux takes the word away
+ * when a key or press says I've seen it: at the hold's end if one came during it, at the first one after otherwise.
+ */
+function arrive(id: string, from: Entry): void {
+	if (m.stage.arrival) clearTimeout(m.stage.arrival.held);
+	const text = `↪ ${displayName(from)} switched you here`;
+	const held = setTimeout(() => {
+		if (m.stage.arrival?.id === id)
+			arrivalTmux("if", "-F", "-t", DECK_OPTIONS, "#{@swb_arrival_touched}", `set -u -t ${DECK_OPTIONS} @swb_arrival`, ";", ...UNHOLD);
+	}, ARRIVAL_HOLD_MS);
+	m.stage.arrival = { id, held };
+	afterCommit(() =>
+		arrivalTmux(
+			"set",
+			"-t",
+			DECK_OPTIONS,
+			"@swb_arrival",
+			text,
+			";",
+			"set",
+			"-t",
+			DECK_OPTIONS,
+			"@swb_arrival_held",
+			"1",
+			";",
+			"set",
+			"-u",
+			"-t",
+			DECK_OPTIONS,
+			"@swb_arrival_touched",
+		),
+	);
+}
+
+/** The word goes with the session it was about; coming back to it isn't arriving again. */
+function syncArrival(): void {
+	if (!m.stage.arrival || m.stage.arrival.id === m.stage.staged) return;
+	clearTimeout(m.stage.arrival.held);
+	m.stage.arrival = null;
+	arrivalTmux("set", "-u", "-t", DECK_OPTIONS, "@swb_arrival", ";", ...UNHOLD);
+}
+
+/** In line with the Stage's swaps, so the word lands on the pane it's about. */
+function arrivalTmux(...args: string[]): void {
+	panes.queue(() =>
+		tmuxAsync(SESSIONS, ...args).then(
+			() => {},
+			(error: Error) => toast(`arrival: ${error.message}`, "error"),
+		),
 	);
 }
 
@@ -3062,6 +3119,7 @@ export async function handleCommand(cmd: string, argv: string[]): Promise<void> 
 				reveal(id);
 				// Asking to be taken there means as much as clicking its row: a dormant one starts.
 				focusEntry(e);
+				arrive(id, m.entries.get(from) as Entry);
 				if (view !== undefined && view !== viewOf(e)) showView(e, view as View);
 			});
 			break;

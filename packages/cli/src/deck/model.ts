@@ -159,6 +159,8 @@ type StageState = {
 	visited: boolean;
 	visitTimer: Timer | null;
 	highlightTimer: Timer | null;
+	/** The session another switched the Deck to, while tmux may still show the word it left, and its hold's end. */
+	arrival: { id: string; held: Timer } | null;
 };
 
 type PeekState = {

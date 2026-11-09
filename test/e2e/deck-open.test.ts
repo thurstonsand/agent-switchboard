@@ -40,6 +40,7 @@ test("swb_show_session moves the Deck onto the session it names while the Deck s
 	await reply(s, "caller");
 	const caller = state(s).staged.id as string;
 
+	const asked = Date.now();
 	s.keys("-l", `call swb_show_session {"session":"${a}"}`, "Enter");
 	await waitState(s, "alpha shown", (x) => x.cursor === a && x.staged.id === a);
 	// Dormant until now, it starts with the keyboard on it, as a click on its row would.
@@ -48,12 +49,29 @@ test("swb_show_session moves the Deck onto the session it names while the Deck s
 	expect(entry(s, a).live).toBe(true);
 	s.save("shown.txt", s.screen());
 
+	// Its border says it was switched to. A key during the 10 s hold doesn't take that away, but the hold's end does.
+	const arrived = (from = "") => s.screen().includes(`${from} switched you here`);
+	await until(() => arrived(), budgets.settle, "word of the switch");
+	s.keys("BSpace");
+	await Bun.sleep(asked + 9_500 - Date.now());
+	expect(arrived()).toBe(true);
+	await until(() => !arrived(), budgets.settle, "the word gone as the hold ends");
+
 	// The caller runs on, but the Deck has moved off it, so it has nothing to switch.
 	expect(entry(s, caller).live).toBe(true);
 	const unseen = s.swbTry("show", b, "--from", caller);
 	expect(unseen.code).not.toBe(0);
 	expect(unseen.err).toContain("the Deck isn't showing this session");
 	expect(state(s)).toMatchObject({ cursor: a, staged: { id: a } });
+
+	// Untouched through its hold, the word stays until the first key after it.
+	s.keys("-l", `call swb_show_session {"session":"${b}"}`, "Enter");
+	await waitState(s, "beta live", (x) => x.staged.id === b && x.staged.kind === "live", budgets.piReady);
+	await until(() => arrived("alpha"), budgets.settle, "word from alpha");
+	await Bun.sleep(11_000);
+	expect(arrived("alpha")).toBe(true);
+	s.keys("BSpace");
+	await until(() => !arrived(), 2_000, "the word gone at the first key");
 });
 
 test("a session woken from its card and stopped again shows the turns it took meanwhile", async () => {

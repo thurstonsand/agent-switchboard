@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- When a session switches the Deck to another with `swb_show_session`, the Stage's border says so: "↪ Morning triage switched you here". It stays at least 10 seconds; a key or click during them takes it away when they end, and after them, the first key or click does.
+
 ### Fixed
 
 - A Peek's buttons stay clickable when the Deck redraws while tmux is creating its floating pane.

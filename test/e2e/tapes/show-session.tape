@@ -16,4 +16,9 @@ Type "show Rotate the staging certs" Sleep 400ms Enter
 Wait+Screen /\/infra/
 Sleep 2s
 Screenshot ../artifacts/phase6/videos/show-session.png
-Sleep 1.5s
+Sleep 9s
+Screenshot ../artifacts/phase6/videos/show-session-held.png
+Backspace
+Sleep 1s
+Screenshot ../artifacts/phase6/videos/show-session-seen.png
+Sleep 1s

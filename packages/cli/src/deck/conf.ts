@@ -38,6 +38,16 @@ const LEAVE = `set -u @swb_watch ; if -F '#{@swb_leave}' { run-shell -C '#{@swb_
 const IN_ROSTER = "#{==:#{pane_id},#{@swb_roster}}";
 
 /**
+ * A session that switched the Deck to another leaves word on the other's agent pane, the one pane that carries
+ * @swb_host, in the Deck's @swb_arrival. It holds for ARRIVAL_HOLD_MS, a key or press meanwhile marks it touched, and
+ * the Deck ends the hold by taking it away if touched; after that, the first key or press takes it away. tmux keeps it
+ * all, so no keystroke starts a process.
+ */
+export const ARRIVAL_HOLD_MS = 10_000;
+const ARRIVAL_SEEN = "if -F '#{@swb_arrival}' { if -F '#{@swb_arrival_held}' { set @swb_arrival_touched 1 } { set -u @swb_arrival } }";
+const ARRIVAL_LABEL = "#{?#{&&:#{@swb_arrival},#{@swb_host}}, #[fg=black bg=yellow bold] #{@swb_arrival} #[default],}";
+
+/**
  * The pane each of prefix h, j, k, l reaches from the focused one, kept in window options for the border labels. tmux's
  * {left-of} and the rest wrap around, so an edge sets none; from the roster, l goes back to the pane it was left from.
  */
@@ -60,11 +70,12 @@ const PANE_LABEL = [
 	"#[fg=black bg=cyan bold] #{@swb_label} #[default],",
 	`#{?#{&&:#{client_prefix},${PANE_KEY}},#[fg=black bg=yellow bold] ${PANE_KEY} #[default],}`,
 	"#[fg=brightblack] #{@swb_label} #[default]},}",
+	ARRIVAL_LABEL,
 ].join("");
 
 /** A mouse binding that hands an overlay its event, never selecting it, and otherwise puts away what leaves first. */
 function overlayAware(key: string, otherwise: string): string {
-	return `bind -n ${key} if -F '${OVER_OVERLAY}' { send-keys -M } { if -F '${POINTER_AWAY}' { ${LEAVE} } ; ${otherwise} }`;
+	return `bind -n ${key} { ${ARRIVAL_SEEN} ; if -F '${OVER_OVERLAY}' { send-keys -M } { if -F '${POINTER_AWAY}' { ${LEAVE} } ; ${otherwise} } }`;
 }
 
 /** A hook on a window that runs only for the Deck's: a session's own window changes too, as panes swap in and out of it. */
@@ -98,10 +109,11 @@ export function deckConf(): string[] {
 		"set -g status-position top",
 		"set -g status-style default",
 		`set -g status-format[0] "#[range=user|roster] #[bold]◂ #{s/C-/Ctrl+/:#{s/M-/Alt+/:prefix}} z#[nobold] show list #[norange]"`,
-		`bind -n MouseDown1Status if -F '#{==:#{mouse_status_range},roster}' { if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { ${roster("focus")} } }`,
-		`bind -n Any if -F '#{mouse_pane}' { if -F '${POINTER_AWAY}' { ${LEAVE} } ; send-keys -M } { if -F '${KEY_AWAY}' { ${LEAVE} } ; send-keys }`,
+		`bind -n MouseDown1Status { ${ARRIVAL_SEEN} ; if -F '#{==:#{mouse_status_range},roster}' { if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { ${roster("focus")} } } }`,
+		// The mouse events left to Any are mostly the pointer's motion, which passes over an arrival without taking it away.
+		`bind -n Any if -F '#{mouse_pane}' { if -F '${POINTER_AWAY}' { ${LEAVE} } ; send-keys -M } { ${ARRIVAL_SEEN} ; if -F '${KEY_AWAY}' { ${LEAVE} } ; send-keys }`,
 		// A card's own process hears Esc, but a harness starting on the Stage would take it as typeahead; its pane is tagged until it registers.
-		`bind -n Escape { if -F '${KEY_AWAY}' { ${LEAVE} } ; if -F '#{@swb_starting}' { ${deckCmd("esc")} } { send-keys Escape } }`,
+		`bind -n Escape { ${ARRIVAL_SEEN} ; if -F '${KEY_AWAY}' { ${LEAVE} } ; if -F '#{@swb_starting}' { ${deckCmd("esc")} } { send-keys Escape } }`,
 		// tmux's own defaults, but for overlays; a right click on a pane that takes no mouse no longer opens tmux's menu.
 		overlayAware("MouseDown1Pane", "select-pane -t= ; send-keys -M"),
 		overlayAware(
@@ -134,7 +146,9 @@ export function deckConf(): string[] {
 		`bind j if -F '${IN_ROSTER}' { ${notify("__deck key J")} } { ${nav("j")} }`,
 		`bind k if -F '${IN_ROSTER}' { ${notify("__deck key K")} } { ${nav("k")} }`,
 		`bind l if -F '#{||:#{@swb_narrow},#{||:#{pane_index},#{@swb_hidden}}}' { ${nav("l")} } { ${backToStage} }`,
-		...(["h", "j", "k", "l"] as const).map((k) => `bind -n C-${k} if -F '#{@swb_editor}' { send-keys C-${k} } { ${nav(k)} }`),
+		...(["h", "j", "k", "l"] as const).map(
+			(k) => `bind -n C-${k} { ${ARRIVAL_SEEN} ; if -F '#{@swb_editor}' { send-keys C-${k} } { ${nav(k)} } }`,
+		),
 		// z says which it means as it's pressed, so it lands the same whichever order it and an h just after reach the roster.
 		`bind z if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { if -F '#{@swb_hidden}' { ${roster("show")} } { ${roster("hide")} } }`,
 		...[..."nNawxRyY/JKmdSpu,[]"].map((k) => `bind ${k} ${notify(`__deck key ${k}`)}`),
