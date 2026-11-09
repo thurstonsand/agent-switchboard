@@ -285,6 +285,8 @@ test("agents use swb's tools across harnesses: list, message, launch, and cancel
 
 	type(s, pi.id, `call session_send_message {"session":"${claude.id}","message":"SWB-pi-asks claude","report_back":false}`);
 	await until(() => pane(s, claude.id).includes("got SWB-pi-asks claude"), ready, "Claude answering pi's tool call");
+	// Claude draws its reply before its Stop hook records the turn idle, and the listing below reads the record.
+	await settled(s, claude.id, "Claude done answering pi");
 
 	// The collapsed result counts sessions; the full list is available on demand.
 	type(s, pi.id, "call session_list {}");

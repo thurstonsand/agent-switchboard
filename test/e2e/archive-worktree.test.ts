@@ -178,6 +178,8 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 	expect(entry(s, id).open).toBe(true);
 	git(s, s.project, "worktree", "unlock", tree);
 	const other = await launched(s, "reply shared", { cwd: tree, title: "Still using it" });
+	// launched() sees it in the db; its row lands on the Deck a poll later, above this one, moving the prompt under a click.
+	await waitState(s, "the sharer on the Deck", (st) => st.rows.some((r) => r.kind === "session" && r.id === other));
 	await cursorTo(s, id);
 	await ask();
 	clickDelete();
