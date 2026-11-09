@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+Schema v13: update swb and the pi line together.
+
 ### Added
 
 - When a session switches the Deck to another with `swb_show_session`, the Stage's border says so: "↪ Morning triage switched you here". It stays at least 10 seconds; a key or click during them takes it away when they end, and after them, the first key or click does.
