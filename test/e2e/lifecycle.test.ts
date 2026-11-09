@@ -96,7 +96,6 @@ test("swb adopt tracks a session pi ran outside swb, wakes it managed, and refus
 		budgets.piReady,
 	);
 	await reply(s, "inside");
-	await until(() => entry(s, id).activity === "idle", budgets.settle, "idle");
 	expect(entry(s, id)).toMatchObject({ open: true, live: true });
 	const text = readFileSync(transcript as string, "utf8");
 	expect(text).toContain("outside");

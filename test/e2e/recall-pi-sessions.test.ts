@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { settled } from "./harness/agents.ts";
 import { entry, piSessions, reply, sessionRows, state, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 
@@ -57,15 +58,15 @@ test("managed pi yields recall to swb, keeps subagents, and stays yielded after 
 	])
 		expect(managed).toContain(name);
 	expect(managed).not.toContain("session_handoff");
-	await until(() => entry(s, parent).activity === "idle", budgets.settle, "parent idle");
 	// Answered by swb's reader, whose recall_read reads swb's own record of the session.
+	const asked = Date.now();
 	s.keys("-l", `ask-id ${parent} :: what did it say?`, "Enter");
 	await until(
 		() => s.screen().includes("asked: reader found: SWB-parent-mark"),
 		budgets.settle,
 		"swb's reader answering in a pi with pi-sessions",
 	);
-	await until(() => entry(s, parent).activity === "idle", budgets.settle, "parent idle after asking");
+	await settled(s, parent, "parent idle after asking", asked);
 	const starts = s.signal("session_start");
 	s.keys("-l", "/reload", "Enter");
 	await until(() => s.signal("session_start").length > starts.length, budgets.piReady, "reload session_start");

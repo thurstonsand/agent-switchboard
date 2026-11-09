@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { SCHEMA_VERSION } from "../../packages/shared/src/index.ts";
+import { settled } from "./harness/agents.ts";
 import { config, waitState } from "./harness/deck.ts";
 import { budgets, release, repo, type Scenario, scenario, until, which } from "./harness/index.ts";
 import { entry, prompt, runtimes, startManaged, waitFor } from "./harness/recorder.ts";
@@ -34,9 +35,10 @@ async function firstTurn(): Promise<void> {
 	// Unfocused, so the Deck watching the turn land doesn't Visit it.
 	s.swb("drive", "focus", "out");
 	await waitState(s, "terminal unfocused", (x) => !x.terminalFocused);
+	const since = Date.now();
 	release(s, "first");
-	const idle = await until(() => entry(s, runtime.session_id).activity === "idle" && entry(s, runtime.session_id), budgets.settle, "idle");
-	expect(idle).toMatchObject({ live: true, unseen: true });
+	await settled(s, runtime.session_id, "idle", since);
+	expect(entry(s, runtime.session_id)).toMatchObject({ live: true, unseen: true });
 
 	await prompt(s, "/name Recorder smoke");
 	await until(() => entry(s, runtime.session_id).title === "Recorder smoke", budgets.settle, "the title");
@@ -80,8 +82,9 @@ test("blocked during an attention span, working after it, idle only once the tur
 	// Unfocused, so the Deck watching the turn land doesn't Visit it.
 	s.swb("drive", "focus", "out");
 	await waitState(s, "terminal unfocused", (x) => !x.terminalFocused);
+	const since = Date.now();
 	release(s, "gate");
-	await until(() => entry(s, runtime.session_id).activity === "idle", budgets.settle, "idle");
+	await settled(s, runtime.session_id, "idle", since);
 	expect(entry(s, runtime.session_id).unseen).toBe(true);
 });
 
@@ -93,8 +96,9 @@ test("blocked while pi's own dialog waits on me mid-turn, idle once answered and
 	await until(() => entry(s, runtime.session_id)?.activity === "blocked", budgets.settle, "blocked on the dialog");
 	await until(() => s.screen().includes("Confirm deploy?"), budgets.settle, "the dialog on screen");
 	s.save("dialog.txt", s.screen());
+	const since = Date.now();
 	s.keys("Enter");
-	await until(() => entry(s, runtime.session_id).activity === "idle", budgets.settle, "idle once answered");
+	await settled(s, runtime.session_id, "idle once answered", since);
 	expect(s.screen()).toContain("tool done deploy");
 });
 
@@ -110,15 +114,15 @@ test("a dialog inside a Glimpse span: still blocked after the dialog closes, unt
 	// The dialog's end reaches the line a microtask later; long enough for it to have cleared a lone wait.
 	await Bun.sleep(1000);
 	expect(entry(s, runtime.session_id).activity).toBe("blocked");
+	const since = Date.now();
 	release(s, "gate");
-	await until(() => entry(s, runtime.session_id).activity === "idle", budgets.settle, "idle once the span resolves");
+	await settled(s, runtime.session_id, "idle once the span resolves", since);
 });
 
 test("/reload keeps recording, /new moves the runtime row to a new id and leaves the old session dormant", async () => {
 	s = scenario("phase1", "reload-new");
 	const runtime = await startManaged(s);
-	await prompt(s, "reply before");
-	await until(() => entry(s, runtime.session_id)?.activity === "idle", budgets.settle, "first turn");
+	await settled(s, runtime.session_id, "first turn", await prompt(s, "reply before"));
 	await prompt(s, "/reload");
 	await Bun.sleep(1000);
 	await prompt(s, "/name after reload");
@@ -129,8 +133,7 @@ test("/reload keeps recording, /new moves the runtime row to a new id and leaves
 	expect(moved.tmux_session).toBe(runtime.tmux_session);
 	expect(runtimes(s)).toHaveLength(1);
 	expect(entry(s, runtime.session_id)).toMatchObject({ live: false, activity: "idle", cutOff: null, open: true });
-	await prompt(s, "reply second");
-	await until(() => entry(s, moved.session_id)?.activity === "idle", budgets.settle, "second session idle");
+	await settled(s, moved.session_id, "second session idle", await prompt(s, "reply second"));
 	expect(s.ls()).toHaveLength(2);
 });
 
@@ -139,8 +142,7 @@ test("a migration under a running recorder turns its footer red at the next writ
 	config(s, 'editor = "cat -v"\n[keys]\nprefix = "C-b"\n');
 	const runtime = await startManaged(s);
 	s.swb("drive", "resize", "175x40");
-	await prompt(s, "reply one");
-	await until(() => entry(s, runtime.session_id)?.activity === "idle", budgets.settle, "first turn");
+	await settled(s, runtime.session_id, "first turn", await prompt(s, "reply one"));
 	const before = rows();
 	const conn = s.db();
 	conn.exec("PRAGMA user_version = 99");
@@ -231,8 +233,7 @@ test("swb refuses a db newer than itself, and a recorder started against a misma
 test("kill-server leaves an idle session dormant and a mid-turn one cut off", async () => {
 	s = scenario("phase1", "kill-server");
 	const first = await startManaged(s);
-	await prompt(s, "reply idle one");
-	await until(() => entry(s, first.session_id)?.activity === "idle", budgets.settle, "first idle");
+	await settled(s, first.session_id, "first idle", await prompt(s, "reply idle one"));
 	s.swb("drive", "stop");
 	s.swb("drive", "start", "--", "new");
 	const second = await until(() => runtimes(s).find((r) => r.tmux_session !== first.tmux_session), budgets.piReady, "second runtime");

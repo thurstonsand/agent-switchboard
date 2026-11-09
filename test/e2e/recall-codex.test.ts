@@ -2,8 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CodexClient, type Notification } from "../../packages/cli/src/codex/client.ts";
-import { host, launched, pane, ready, type } from "./harness/agents.ts";
-import { entry } from "./harness/deck.ts";
+import { answered, host, launched, pane, ready, settled, type } from "./harness/agents.ts";
 import { type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -66,7 +65,7 @@ test("Codex asks live Codex, pi, and archived sessions without a rollout, roster
 		] as const) {
 			if (prompt.startsWith("ask-id")) s.swb("archive", target.id);
 			const start = s.requests("codex").length;
-			type(s, caller.id, prompt);
+			const since = type(s, caller.id, prompt);
 			const asking = await until(
 				() =>
 					s
@@ -76,8 +75,7 @@ test("Codex asks live Codex, pi, and archived sessions without a rollout, roster
 				ready,
 				"the reader's answer returned to the caller's model",
 			);
-			await until(() => pane(s, caller.id).includes(`asked: reader found: ${marker}`), ready, "the reader's answer in the caller TUI");
-			await until(() => entry(s, caller.id).activity === "idle", ready, "the caller idle");
+			await answered(s, caller.id, `asked: reader found: ${marker}`, "the reader's answer in the caller TUI", since);
 			const requests = s.requests("codex").slice(start);
 			const first = requests.find((r) => (r.texts as string[]).at(-1)?.startsWith("Question about session"));
 			s.save(
@@ -148,7 +146,7 @@ test("Codex's reader reads with its own shell under a read-only sandbox, with no
 	);
 	const caller = await launched(s, "codex", "reply SWB-shell");
 	writeFileSync(join(s.project, "notes.txt"), "first\nSWB-file-line\nlast\n");
-	type(s, caller.id, `ask-id ${caller.id} :: reader-shell notes.txt`);
+	let since = type(s, caller.id, `ask-id ${caller.id} :: reader-shell notes.txt`);
 	const read = await until(
 		() => s.requests("codex").find((r) => String(r.toolOutput).includes("reader shell:")),
 		ready,
@@ -160,9 +158,9 @@ test("Codex's reader reads with its own shell under a read-only sandbox, with no
 	const offered = [...new Set(readerRequests().flatMap((r) => r.tools as string[]))];
 	s.save("reader-tools.json", JSON.stringify(offered, null, 2));
 	expect(offered).toEqual(READER_OFFERED);
-	await until(() => entry(s, caller.id).activity === "idle", ready, "the caller idle");
+	await settled(s, caller.id, "the caller idle", since);
 	const path = join(s.project, "reader-write.txt");
-	type(s, caller.id, `ask-id ${caller.id} :: reader-exec ${path}`);
+	since = type(s, caller.id, `ask-id ${caller.id} :: reader-exec ${path}`);
 	const refused = await until(
 		() => s.requests("codex").find((r) => String(r.toolOutput).includes("reader exec:")),
 		ready,
@@ -173,7 +171,7 @@ test("Codex's reader reads with its own shell under a read-only sandbox, with no
 	expect(String(refused.toolOutput)).toContain(process.platform === "darwin" ? "operation not permitted" : "Read-only file system");
 	expect(existsSync(path)).toBe(false);
 	s.save("shell.txt", pane(s, caller.id));
-	await until(() => entry(s, caller.id).activity === "idle", ready, "the caller idle");
+	await settled(s, caller.id, "the caller idle", since);
 	type(s, caller.id, `run echo caller-wrote > ${path}`);
 	await until(() => existsSync(path), ready, "the caller's control write");
 	expect(readFileSync(path, "utf8")).toBe("caller-wrote\n");
@@ -211,6 +209,7 @@ test("Esc in the caller stops its reader at once: no more model requests, no ter
 	const notes: (Notification & { at: number })[] = [];
 	client.onNotification((note) => notes.push({ at: Date.now(), ...note }));
 	try {
+		let since = Date.now();
 		const readerId = await heldReader(caller.id, client, notes);
 		// It holds well past any deadline the reader used to have.
 		await Bun.sleep(3000);
@@ -225,7 +224,7 @@ test("Esc in the caller stops its reader at once: no more model requests, no ter
 		expect(readerRequests().at(-1)?.at as number).toBeLessThan(idle);
 		const terminals = await client.request<{ data: unknown[] }>("thread/backgroundTerminals/list", { threadId: readerId });
 		expect(terminals.data).toEqual([]);
-		await until(() => entry(s, caller.id).activity === "idle", ready, "the caller stopped by Esc");
+		await settled(s, caller.id, "the caller stopped by Esc", since);
 		s.save("escape.txt", pane(s, caller.id));
 		s.save(
 			"cancellation.json",
@@ -243,9 +242,8 @@ test("Esc in the caller stops its reader at once: no more model requests, no ter
 				2,
 			),
 		);
-		type(s, caller.id, "reply SWB-after-escape");
-		await until(() => pane(s, caller.id).includes("SWB-after-escape"), ready, "the caller's next turn");
-		await until(() => entry(s, caller.id).activity === "idle", ready, "the caller idle again");
+		since = type(s, caller.id, "reply SWB-after-escape");
+		await answered(s, caller.id, "SWB-after-escape", "the caller's next turn", since);
 		expect(s.ls()).toHaveLength(1);
 	} finally {
 		s.save("notifications.json", JSON.stringify(notes, null, 2));
@@ -260,6 +258,7 @@ test("A reader whose swb mcp dies is stopped by the host once the caller's turn 
 	const notes: (Notification & { at: number })[] = [];
 	client.onNotification((note) => notes.push({ at: Date.now(), ...note }));
 	try {
+		const since = Date.now();
 		const readerId = await heldReader(caller.id, client, notes);
 		// The caller's own swb mcp: a descendant of its pane, beside other scenarios' running in parallel.
 		const procs = Bun.spawnSync(["ps", "-eo", "pid=,ppid=,args="])
@@ -282,7 +281,7 @@ test("A reader whose swb mcp dies is stopped by the host once the caller's turn 
 		const requests = readerRequests().length;
 		await Bun.sleep(3000);
 		expect(readerRequests().length).toBe(requests);
-		await until(() => entry(s, caller.id).activity === "idle", ready, "the caller idle");
+		await settled(s, caller.id, "the caller idle", since);
 		s.save("orphan.json", JSON.stringify({ readerId, killed, readerIdle: idle, stopMs: idle - killed, mcp }, null, 2));
 		s.save("orphan.txt", pane(s, caller.id));
 	} finally {

@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { config, entry, state, waitState } from "./harness/deck.ts";
+import { click, config, entry, state, waitState } from "./harness/deck.ts";
 import { budgets, git, type Scenario, scenario, until, which } from "./harness/index.ts";
 import { prefixKeys, savedView, started } from "./harness/views.ts";
 
@@ -59,17 +59,11 @@ test("M-a e swaps the Stage to nvim in the session's directory, and back", async
 	expect(editors(s).length).toBe(1);
 	s.save("pi-again.txt", s.screen());
 
-	const tab = (label: string): [string, string] => {
-		const lines = s.screen().split("\n");
-		const y = lines.findIndex((line) => /^ e editor +v split /.test(line));
-		expect(y).toBeGreaterThan(-1);
-		return [String((lines[y] as string).indexOf(` ${label} `) + 1), String(y)];
-	};
-	s.swb("drive", "click", ...tab("editor"));
+	click(s, "e editor");
 	await waitState(s, "the editor tab clicked", (x) => x.staged.view === "editor");
 	s.save("editor-tab.txt", s.screen());
 	await Bun.sleep(500);
-	s.swb("drive", "click", ...tab("editor"));
+	click(s, "e editor");
 	await waitState(s, "the pi tab clicked", (x) => x.staged.view === "agent");
 });
 

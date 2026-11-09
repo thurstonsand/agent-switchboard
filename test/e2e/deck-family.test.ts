@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState } from "../../packages/cli/src/deck/protocol.ts";
-import { config, cursorTo, entry, launched, launchTry, reply, seed, sessionRows, state, waitState } from "./harness/deck.ts";
+import { click, config, cursorTo, entry, launched, launchTry, reply, seed, sessionRows, state, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -158,10 +158,10 @@ test("a session an agent started nests under it; its Peek's Parent action and p 
 
 	// A click on the fold folds c1's family, and the next opens it.
 	const c1Line = 1 + st.rows.findIndex((r) => r.kind === "session" && r.id === c1);
-	s.swb("drive", "click", "4", String(c1Line));
+	click(s, "└─ ● c1", [4, c1Line]);
 	st = await waitState(s, "c1 folded by a click", (x) => sessionRows(x).find((r) => r.id === c1)?.folded === true);
 	expect(lineage(st)).toEqual(["op", "↳ port", "⌁ bump", "root", "  c2", "  c1 +1"]);
-	s.swb("drive", "click", "4", String(c1Line));
+	click(s, "└─ ● c1", [4, c1Line]);
 	await waitState(s, "c1 open again", (x) => sessionRows(x).length === 7);
 
 	// A fold is part of the Deck's layout, kept for the next one.

@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { claudeAutoMode, host, launched, pane, ready, recalled, type } from "./harness/agents.ts";
+import { answered, claudeAutoMode, host, launched, pane, ready, recalled, settled, type } from "./harness/agents.ts";
 import { entry } from "./harness/deck.ts";
 import { release, type Scenario, scenario, until } from "./harness/index.ts";
 
@@ -96,15 +96,15 @@ test("Claude's native reader answers about live, archived, and pi conversations 
 	// Claude flushes its transcript asynchronously.
 	await until(() => recalled(s, target.id).includes("SWB-target-secret"), 15000, "target transcript on disk");
 	const start = Date.now();
-	type(s, caller.id, `ask ${target.title} :: What markers did it mention?`);
+	let since = type(s, caller.id, `ask ${target.title} :: What markers did it mention?`);
+	// The pane alone first, for the latency, then the turn's end as answered waits for it.
 	await until(() => pane(s, caller.id).includes("recalled: reader found: SWB-target-secret"), 30000, "reader answer in caller TUI");
 	s.save("latency.json", JSON.stringify({ elapsedMs: Date.now() - start }));
-	await until(() => s.ls().find((row) => row.id === caller.id)?.activity === "idle", 10000, "live answer settled");
-	type(s, caller.id, `ask-id ${pi.id} :: What markers did the pi session mention?`);
-	await until(() => pane(s, caller.id).includes("recalled: reader found: SWB-pi-target"), 30000, "pi reader answer in caller TUI");
-	await until(() => s.ls().find((row) => row.id === caller.id)?.activity === "idle", 10000, "pi answer settled");
+	await settled(s, caller.id, "live answer settled", since);
+	since = type(s, caller.id, `ask-id ${pi.id} :: What markers did the pi session mention?`);
+	await answered(s, caller.id, "recalled: reader found: SWB-pi-target", "pi reader answer in caller TUI", since);
 	s.swb("archive", target.id);
-	type(s, caller.id, `ask-id ${target.id} :: What markers were in the archived session?`);
+	since = type(s, caller.id, `ask-id ${target.id} :: What markers were in the archived session?`);
 	await until(
 		() =>
 			s
@@ -117,7 +117,7 @@ test("Claude's native reader answers about live, archived, and pi conversations 
 		30000,
 		"archived reader result",
 	);
-	await until(() => s.ls().find((row) => row.id === caller.id)?.activity === "idle", 10000, "archived answer settled");
+	await settled(s, caller.id, "archived answer settled", since);
 	expect(
 		s
 			.ls()
@@ -152,7 +152,7 @@ test("Claude's native reader answers about live, archived, and pi conversations 
 	expect(own).toContain("reader found: SWB-pi-target");
 	expect(own).not.toContain("Question about session");
 	await screenshot(caller.id);
-	type(s, caller.id, `call mcp__plugin_swb_swb__recall_read {"ref":"1"}`);
+	since = type(s, caller.id, `call mcp__plugin_swb_swb__recall_read {"ref":"1"}`);
 	await until(
 		() =>
 			s
@@ -165,7 +165,7 @@ test("Claude's native reader answers about live, archived, and pi conversations 
 		10000,
 		"reader-only tool denied in main loop",
 	);
-	await until(() => s.ls().find((row) => row.id === caller.id)?.activity === "idle", 10000, "main-loop denial settled");
+	await settled(s, caller.id, "main-loop denial settled", since);
 	const subagent = {
 		description: "Read a session",
 		subagent_type: "general-purpose",
@@ -205,17 +205,17 @@ const readerNotified = () => s.requests("claude").some((r) => String(r.context).
 test("session_recall returns once its reader starts, and the answer reaches the caller mid-turn, once", async () => {
 	s = scenario("recall-claude", "background", { packages: [], recorder: true, harnesses: ["claude"] });
 	const [target, caller] = await Promise.all([launched(s, "pi", "reply SWB-slow-target"), launched(s, "claude", "reply caller ready")]);
-	type(s, caller.id, `ask-id ${target.id} :: reader-hold 6000 What markers?`);
+	let since = type(s, caller.id, `ask-id ${target.id} :: reader-hold 6000 What markers?`);
 	await until(() => /[●⏺] asked: The reader started/.test(pane(s, caller.id)), 10000, "the ask answered at once");
-	await until(() => entry(s, caller.id).activity === "idle", 10000, "caller idle while the reader works");
+	await settled(s, caller.id, "caller idle while the reader works", since);
 	expect(readerRequests().some((r) => r.toolResult)).toBe(false);
 	// A turn the caller starts meanwhile gets the answer on its tool's result.
-	type(s, caller.id, "hold meanwhile");
+	since = type(s, caller.id, "hold meanwhile");
 	await until(() => s.signal("meanwhile.entered"), 10000, "the caller's next turn running");
 	await until(() => readerRequests().filter((r) => r.toolResult).length >= 2, 15000, "the reader done");
 	await Bun.sleep(1000);
 	release(s, "meanwhile");
-	await until(() => pane(s, caller.id).includes("recalled: reader found: SWB-slow-target"), 15000, "the answer delivered");
+	await answered(s, caller.id, "recalled: reader found: SWB-slow-target", "the answer delivered", since);
 	const delivered = s.requests("claude").find((r) => String(r.lastText).includes("session_recall's reader (agent"));
 	expect(delivered?.prompt).toBe("hold meanwhile");
 	expect(delivered?.toolResult).toBe(true);
@@ -232,11 +232,11 @@ test("in auto mode, Claude Code's handback delivers the reader's answer, and swb
 	s = scenario("recall-claude", "auto", { packages: [], recorder: true, harnesses: ["claude"] });
 	claudeAutoMode(s);
 	const [target, caller] = await Promise.all([launched(s, "pi", "reply SWB-auto-target"), launched(s, "claude", "reply caller ready")]);
-	type(s, caller.id, `ask-id ${target.id} :: What markers?`);
-	await until(() => pane(s, caller.id).includes("recalled: reader found: SWB-auto-target"), 30000, "the answer delivered");
-	await until(() => entry(s, caller.id).activity === "idle", 10000, "caller idle");
-	type(s, caller.id, "reply after the ask");
+	let since = type(s, caller.id, `ask-id ${target.id} :: What markers?`);
+	await answered(s, caller.id, "recalled: reader found: SWB-auto-target", "the answer delivered", since);
+	since = type(s, caller.id, "reply after the ask");
 	await until(() => /[●⏺] after the ask/.test(pane(s, caller.id)), 30000, "the next turn");
+	await settled(s, caller.id, "the next turn over", since);
 	await screenshot(caller.id);
 	// Pins Claude Code: in auto mode a mod's agent, too, must report through SubagentHandback. Should this fail, the reader
 	// answers in plain text and the line delivers it, as in default mode: the SubagentHandback hook and handedBack can go,
@@ -261,16 +261,16 @@ test("an Operator's session_recall starts its reader, though its model can't sta
 	writeFileSync(claudeJson, JSON.stringify(trusted));
 	const target = await launched(s, "claude", "reply SWB-operator-target");
 	await until(() => recalled(s, target.id).includes("SWB-operator-target"), 15000, "target transcript on disk");
+	let since = Date.now();
 	const launch = Bun.spawnSync([join(s.bin, "swb"), "launch", "--harness", "claude", "--cwd", operator], {
 		env: s.env,
 		stdin: new Blob(["reply operator up"]),
 	});
 	const { id } = JSON.parse(launch.stdout.toString()).details as { id: string };
-	await until(() => entry(s, id)?.activity === "idle", ready, "the Operator's first turn");
+	await settled(s, id, "the Operator's first turn", since);
 	expect(entry(s, id).operator).toBe(true);
-	type(s, id, `ask-id ${target.id} :: What markers?`);
-	await until(() => pane(s, id).includes("recalled: reader found: SWB-operator-target"), 30000, "the reader's answer");
-	await until(() => entry(s, id).activity === "idle", 10000, "the answer settled");
+	since = type(s, id, `ask-id ${target.id} :: What markers?`);
+	await answered(s, id, "recalled: reader found: SWB-operator-target", "the reader's answer", since);
 	const subagent = { description: "Read a session", subagent_type: "Explore", prompt: "reply SWB-operator-subagent" };
 	type(s, id, `call Agent ${JSON.stringify(subagent)}`);
 	await until(
@@ -296,8 +296,9 @@ test("two session_recalls in one response run their readers at once", async () =
 		15000,
 		"target transcripts on disk",
 	);
-	type(s, caller.id, `ask-both ${a.id} ${b.id} :: reader-hold 4000 What markers?`);
+	const since = type(s, caller.id, `ask-both ${a.id} ${b.id} :: reader-hold 4000 What markers?`);
 	await until(() => /[●⏺] asked both/.test(pane(s, caller.id)), 10000, "both readers started");
+	await settled(s, caller.id, "both readers started, the ask's turn over", since);
 	await until(
 		() => ["SWB-parallel-a", "SWB-parallel-b"].every((marker) => callerContext().includes(`reader found: ${marker}`)),
 		30000,

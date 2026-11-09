@@ -11,8 +11,32 @@ export function headerRows(st: DeckState): HeaderStateRow[] {
 	return st.rows.flatMap((row) => (row.kind === "header" ? [row] : []));
 }
 
+/** The driven Deck's state, once it has caught up with everything before this call and come to rest. */
 export function state(s: Scenario): DeckState {
 	return JSON.parse(s.swb("drive", "state"));
+}
+
+/**
+ * Runs `fn` with every read of the Deck, and every key and click into it, taken as it is rather than once it has caught
+ * up: for a test that holds part of the Deck on purpose, its worker or its tmux, which it can't come to rest past.
+ */
+export async function whileHeld<T>(s: Scenario, fn: () => Promise<T>): Promise<T> {
+	s.env.SWB_DRIVE_NOW = "1";
+	try {
+		return await fn();
+	} finally {
+		delete s.env.SWB_DRIVE_NOW;
+	}
+}
+
+/**
+ * Clicks the one place on the driven screen showing `text`, as a hand aiming at it does, or the cell `at` when a test
+ * is about exactly where the pointer goes. Either way the Deck refuses a press its frame doesn't show `text` under, so
+ * a screen that moved can't take a click meant for something else. Use it for every click on the Deck's own controls
+ * and rows; a bare click by cell is for a harness's own pane.
+ */
+export function click(s: Scenario, text: string, at?: [number, number]): void {
+	s.swb("drive", "click", ...(at ? at.map(String) : []), "--on", text);
 }
 
 /**
@@ -56,14 +80,16 @@ export function config(s: Scenario, toml: string): void {
 	writeFileSync(join(dir, "config.toml"), toml);
 }
 
+/**
+ * The Deck's state once it passes `probe`. Every look is settled, as `state` is: a state that passes holds everything
+ * that happened before it was read, in the db, in tmux, and in what the Deck was asked.
+ */
 export async function waitState(s: Scenario, what: string, probe: (st: DeckState) => boolean, ms = budgets.settle): Promise<DeckState> {
-	const first = state(s);
-	if (probe(first)) return first;
 	// Polling the Deck's public socket avoids three processes per observation.
 	const socket = join(s.env.XDG_STATE_HOME as string, "agent-switchboard/deck.sock");
 	return until(
 		async () => {
-			const response = await fetch("http://deck/state", { unix: socket });
+			const response = await fetch(`http://deck/state${s.env.SWB_DRIVE_NOW === "1" ? "" : "?settled"}`, { unix: socket });
 			if (!response.ok) throw new Error(`Deck state: ${response.status} ${await response.text()}`);
 			const st = (await response.json()) as DeckState;
 			return probe(st) && st;
@@ -94,10 +120,17 @@ export async function pickNew(
 	deck.keys("Enter");
 }
 
-/** Prompts in the focused pi and waits for the scripted reply. */
+/** Prompts the pi on the Stage and waits for its scripted reply, and for the turn to be over. */
 export async function reply(s: Scenario, text: string): Promise<void> {
+	const id = state(s).staged.id as string;
+	const since = Date.now();
 	s.keys("-l", `reply ${text}`, "Enter");
 	await until(() => s.signal(`replied.${text}`) !== "", budgets.settle, `reply ${text}`);
+	await until(
+		() => s.ls().some((e) => e.id === id && e.activity === "idle" && e.activityAt >= since),
+		budgets.settle,
+		`reply ${text}, its turn over`,
+	);
 }
 
 /** Dormant, Unseen conversations, made through /new in one headless pi. No Deck needs to watch fixture setup. */

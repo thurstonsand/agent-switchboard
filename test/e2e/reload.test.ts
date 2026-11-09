@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { host, launched, pane, ready, settled, type } from "./harness/agents.ts";
+import { answered, host, launched, pane, ready, settled, type } from "./harness/agents.ts";
 import { cursorTo, entry, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 
@@ -87,6 +87,7 @@ test("Claude Code and Codex told to continue restart mid-turn and pick it back u
 	writeFileSync(join(s.project, "AGENTS.md"), "SWB-RELOAD-CODEX\n");
 
 	const claudePid = pid(claude.id) as number;
+	const claudeReload = Date.now();
 	expect(s.swb("reload", claude.id)).toContain("Restarted");
 	await until(
 		() =>
@@ -116,7 +117,7 @@ test("Claude Code and Codex told to continue restart mid-turn and pick it back u
 	await Bun.sleep(3000);
 	expect(prompted(codex.id)).toBe(turn);
 	expect(entry(s, codex.id).reload).toBeNull();
-	type(s, codex.id, "reply after reload");
+	const after = type(s, codex.id, "reply after reload");
 	await until(
 		() =>
 			s.requests("codex").some((r) => JSON.stringify(r).includes("reply after reload") && JSON.stringify(r).includes("SWB-RELOAD-CODEX")),
@@ -127,16 +128,17 @@ test("Claude Code and Codex told to continue restart mid-turn and pick it back u
 
 	// Told to continue mid-turn, Codex restarts at once and picks the cut-off turn up from its own history, with no prompt:
 	// its model reads the held tool call as aborted and answers it, though the hold was never released.
-	await settled(s, codex.id, "Codex's turn after the reload");
+	await settled(s, codex.id, "Codex's turn after the reload", after);
 	type(s, codex.id, "hold x2");
 	await until(() => s.signal("x2.entered") !== "", ready, "Codex holding");
 	const heldPid = pid(codex.id) as number;
+	const codexReload = Date.now();
 	expect(s.swb("reload", codex.id)).toContain("Restarted");
 	await restarted(codex.id, heldPid, "Codex restarted");
-	await until(() => pane(s, codex.id).includes("released x2"), ready, "the restarted Codex finishing its cut-off turn");
+	await answered(s, codex.id, "released x2", "the restarted Codex finishing its cut-off turn", codexReload);
 
 	// Claude Code reloading itself to come back idle waits for its turn to end, then starts no turn of its own.
-	await settled(s, claude.id, "Claude Code idle");
+	await settled(s, claude.id, "Claude Code idle", claudeReload);
 	const selfPid = pid(claude.id) as number;
 	type(s, claude.id, `call swb_update_session {"reload":"idle"}`);
 	await restarted(claude.id, selfPid, "Claude Code restarted after its own turn");

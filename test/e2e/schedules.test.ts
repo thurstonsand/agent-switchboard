@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { replied, settled } from "./harness/agents.ts";
 import { config, entry, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 import { host, launched, pane, ready, scheduled, snoozeOf, swbIn, type } from "./harness/schedules.ts";
@@ -30,8 +31,10 @@ function transcript(id: string): string {
 test("a session schedules itself a message and snoozes until then; the clock wakes it dormant, and it comes back Unseen", async () => {
 	s = scenario("schedules", "self");
 	const pi = await launched(s, "pi", "reply up");
+	let since = Date.now();
 	type(s, pi.id, `call session_schedule {"message":"reply fired","at":"PT8S","schedule_label":"in 8 seconds","snooze":true}`);
-	await until(() => snoozeOf(s, pi.id).snoozed && entry(s, pi.id).activity === "idle", budgets.settle, "snoozed, its turn done");
+	await settled(s, pi.id, "its turn done", since);
+	await until(() => snoozeOf(s, pi.id).snoozed, budgets.settle, "snoozed");
 	const [row] = s.query<{ next_at: number }>("select next_at from schedules where source_id = ?", pi.id);
 	expect(snoozeOf(s, pi.id)).toMatchObject({ snoozed: true, snoozedUntil: row?.next_at, unseen: false, inactive: false });
 	await until(() => pane(s, pi.id).includes("Scheduled for"), budgets.settle, "the tool's result on screen");
@@ -41,17 +44,20 @@ test("a session schedules itself a message and snoozes until then; the clock wak
 	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(host(s, pi.id)));
 	await until(() => !entry(s, pi.id).live, budgets.settle, "dormant");
 	expect(snoozeOf(s, pi.id).snoozed).toBe(true);
+	since = Date.now();
 
-	await until(() => s.signal("replied.fired") !== "", ready, "the scheduled message answered");
-	const woke = await until(() => entry(s, pi.id).activity === "idle" && snoozeOf(s, pi.id), budgets.settle, "its turn settled");
+	await replied(s, pi.id, "fired", "the scheduled message answered", since);
+	const woke = snoozeOf(s, pi.id);
 	expect(woke).toMatchObject({ live: true, snoozed: false, unseen: true, inactive: false });
 	expect(transcript(pi.id)).toMatch(/\(session: [^,]+, this session\), scheduled for \w{3} \w{3} \d+, \d\d:\d\d \(schedule: \w{8}\):/);
 	expect(s.query("select next_at, last_fired_at is not null as fired from schedules")).toEqual([{ next_at: null, fired: 1 }]);
 	expect(s.query("select count(*) as n from messages where schedule_id is not null")).toEqual([{ n: 1 }]);
 
+	since = Date.now();
 	type(s, pi.id, "call session_list_schedules {}");
 	// Collapsed, the row names the schedule; expanded, it reads as the model's listing.
 	await until(() => pane(s, pi.id).includes("Schedules in 8 seconds ("), budgets.settle, "the listing's row");
+	await settled(s, pi.id, "the listing's turn over", since);
 	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host(s, pi.id)), "C-o");
 	await until(() => pane(s, pi.id).includes("ran "), budgets.settle, "the listing");
 	expect(pane(s, pi.id)).toContain('· "in 8 seconds" · ran ');
@@ -60,6 +66,7 @@ test("a session schedules itself a message and snoozes until then; the clock wak
 test("a recurring schedule that missed runs while the machine slept fires once, saying when it was due", async () => {
 	s = scenario("schedules", "catch-up");
 	const pi = await launched(s, "pi", "reply up");
+	const since = Date.now();
 	const { details } = await scheduled(s, "reply tick", "--from", pi.id, "--cron", "*/5 * * * *", "--schedule-label", "Every 5 minutes");
 	expect(details.nextAt).toBeGreaterThan(Date.now());
 	// The machine slept through a dozen runs: the schedule was due an hour ago.
@@ -67,7 +74,7 @@ test("a recurring schedule that missed runs while the machine slept fires once, 
 	const db = s.db();
 	db.run("update schedules set next_at = ? where id = ?", [asleep - 3_600_000, details.id]);
 	db.close();
-	await until(() => s.signal("replied.tick") !== "", ready, "the missed run delivered");
+	await replied(s, pi.id, "tick", "the missed run delivered", since);
 	await Bun.sleep(2000);
 	// Only the runs missed while asleep: across a five-minute mark, the next real run fires during the wait too.
 	const missed = s.query("select count(*) as n from messages where schedule_id = ? and scheduled_for < ?", details.id, asleep);
@@ -81,6 +88,7 @@ test("a recurring schedule that missed runs while the machine slept fires once, 
 test("a schedule launches a new session, refuses what can't work, unschedules, and a retried call schedules once", async () => {
 	s = scenario("schedules", "launch");
 	const pi = await launched(s, "pi", "reply up");
+	let since = Date.now();
 	const launching = await swbIn(
 		s,
 		"reply launched",
@@ -99,7 +107,7 @@ test("a schedule launches a new session, refuses what can't work, unschedules, a
 	expect(launching.code).toBe(0);
 	const child = await until(() => s.ls().find((e) => e.parentId === pi.id), ready, "the launched session");
 	expect(child).toMatchObject({ harness: "pi", cwd: s.project });
-	await until(() => s.signal("replied.launched") !== "", ready, "the launched session working on its briefing");
+	await replied(s, child.id, "launched", "the launched session working on its briefing", since);
 	await until(() => entry(s, child.id).title === "fresh one", budgets.settle, "titled");
 
 	const operatorDir = join(s.env.XDG_CONFIG_HOME as string, "agent-switchboard/operator");
@@ -159,9 +167,11 @@ test("a schedule launches a new session, refuses what can't work, unschedules, a
 	);
 	expect(again.details.id).toBe(first.details.id);
 	expect(s.query("select count(*) as n from schedules where request_id = 'call-1'")).toEqual([{ n: 1 }]);
+	since = Date.now();
 	type(s, pi.id, `call session_unschedule {"schedule":"${first.details.id}"}`);
 	const unscheduled = `Unscheduled "in an hour" (schedule: ${first.details.id}).`;
 	await until(() => pane(s, pi.id).includes(unscheduled), budgets.settle, "unscheduled through session_unschedule");
+	await settled(s, pi.id, "session_unschedule's turn over", since);
 	expect(s.swbTry("unschedule", first.details.id, "--from", pi.id).err.trim()).toBe(
 		`swb: schedule ${first.details.id} is already cancelled`,
 	);
@@ -189,6 +199,7 @@ test("an invalid config.toml doesn't stop the clock: it says why, and wakes the 
 	const pi = await launched(s, "pi", "reply up");
 	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(host(s, pi.id)));
 	await until(() => !entry(s, pi.id).live, budgets.settle, "dormant");
+	const since = Date.now();
 	const { details } = await scheduled(s, "reply mail", "--from", pi.id, "--at", "PT3S", "--schedule-label", "in 3 seconds");
 	config(s, "bogus = 1\n");
 	await until(
@@ -202,7 +213,7 @@ test("an invalid config.toml doesn't stop the clock: it says why, and wakes the 
 	expect(s.signal("replied.mail")).toBe("");
 
 	rmSync(join(s.env.XDG_CONFIG_HOME as string, "agent-switchboard/config.toml"));
-	await until(() => s.signal("replied.mail") !== "", ready, "the mail answered once the config is fixed");
+	await replied(s, pi.id, "mail", "the mail answered once the config is fixed", since);
 });
 
 test("swb quit refuses a running turn, then stops everything, leaving sessions open; any swb restarts a dead clock, with or without a locale", async () => {
@@ -227,13 +238,14 @@ test("swb quit refuses a running turn, then stops everything, leaving sessions o
 	expect(unlocalized("wake", pi.id).exitCode).toBe(0);
 	expect(clockPid()).toBe(respawned);
 
+	const since = Date.now();
 	type(s, pi.id, "hold q1");
 	await until(() => s.signal("q1.entered") !== "", budgets.settle, "the held turn");
 	const refused = s.swbTry("quit");
 	expect(refused.code).toBe(1);
 	expect(refused.err.trim()).toBe(`swb: turn running in "${entry(s, pi.id).title ?? pi.id}": wait for it to complete, or swb quit --force`);
 	release(s, "q1");
-	await until(() => entry(s, pi.id).activity === "idle", budgets.settle, "idle");
+	await settled(s, pi.id, "idle", since);
 	const quit = unlocalized("quit");
 	expect(quit.stderr.toString()).toBe("");
 	expect(quit.stdout.toString().trim()).toBe("Stopped 1 session, the Deck, and swb's clock. swb starts them again.");

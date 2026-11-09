@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { launched, pane, ready, type } from "./harness/agents.ts";
+import { launched, pane, ready, settled, type } from "./harness/agents.ts";
 import { entry, seed, waitState } from "./harness/deck.ts";
 import { git, gitRepo, type Scenario, scenario, until } from "./harness/index.ts";
 
@@ -63,10 +63,11 @@ test("an Operator in Claude Code or Codex reads the Operator AGENTS.md, not the 
 		const st = await waitState(s, `the ${harness} Operator live`, (x) => x.staged.kind === "live" && x.focus === "stage", ready);
 		const id = st.staged.id as string;
 		await Bun.sleep(1500);
+		const since = Date.now();
 		s.keys("-l", `reply ${harness} operator up`);
 		await Bun.sleep(300);
 		s.keys("Enter");
-		await until(() => s.ls().find((e) => e.id === id && e.activity === "idle"), ready, `the ${harness} Operator's first turn`);
+		await settled(s, id, `the ${harness} Operator's first turn`, since);
 		expect(entry(s, id)).toMatchObject({ harness, operator: true, cwd: operator });
 
 		const turn = s
@@ -114,7 +115,7 @@ test("swb adopt tracks Claude Code and Codex sessions run outside swb, and wakes
 		s.keys("Enter");
 		await waitState(s, `${harness} live`, (x) => x.staged.id === id && x.staged.kind === "live", ready);
 		await until(() => pane(s, id).includes(`${harness} outside`), ready, `${harness}'s outside conversation on screen`);
-		type(s, id, `reply ${harness} inside`);
+		const since = type(s, id, `reply ${harness} inside`);
 		// The model is asked inside swb with the conversation from outside it.
 		await until(
 			() =>
@@ -128,7 +129,7 @@ test("swb adopt tracks Claude Code and Codex sessions run outside swb, and wakes
 			ready,
 			`${harness}'s turn inside swb, on its outside conversation`,
 		);
-		await until(() => entry(s, id).activity === "idle", ready, `${harness} idle`);
+		await settled(s, id, `${harness} idle`, since);
 		s.save(`adopted-${harness}.txt`, pane(s, id));
 		s.swb("drive", "stop");
 	}

@@ -83,7 +83,6 @@ test("a session woken from its card and stopped again shows the turns it took me
 	s.keys("Enter");
 	await waitState(s, "its pi up", (x) => x.staged.kind === "live" && x.focus === "stage", budgets.piReady);
 	await reply(s, "meanwhile");
-	await until(() => entry(s, id).activity === "idle", budgets.settle, "the turn settled");
 	s.keys("M-a", "x");
 	await waitState(s, "stopped, on its card", (x) => x.staged.id === id && x.staged.kind !== "live");
 	await until(() => s.screen().includes("reply meanwhile"), budgets.settle, "the new turn on its card");

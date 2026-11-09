@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { join } from "node:path";
 import type { DeckState } from "../../packages/cli/src/deck/protocol.ts";
-import { config, cursorTo, entry, pickNew, piSessions, reply, seed, sessionRows, state, waitState } from "./harness/deck.ts";
+import { click, config, cursorTo, entry, pickNew, piSessions, reply, seed, sessionRows, state, waitState } from "./harness/deck.ts";
 import { budgets, git, type Scenario, scenario, until } from "./harness/index.ts";
 import { panes, prefixKeys, started } from "./harness/views.ts";
 
@@ -240,9 +240,7 @@ test("m names a session's Group, n joins it; dragging moves it between Groups, a
 	s.keys("m");
 	await waitState(s, "picking again", (x) => x.mode === "name");
 	await until(() => s.screen().includes("(no Group)"), budgets.settle, "the Group choices drawn");
-	const choices = s.screen().split("\n");
-	const none = choices.findIndex((line) => line.includes("(no Group)"));
-	s.swb("drive", "click", String((choices[none] as string).indexOf("(no Group)")), `${none}`);
+	click(s, "(no Group)");
 	st = await waitState(
 		s,
 		"bravo clicked back under its Project",

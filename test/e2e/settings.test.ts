@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState, SettingsItem } from "../../packages/cli/src/deck/protocol.ts";
-import { config, state, waitState } from "./harness/deck.ts";
+import { config, click as deckClick, state, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -26,9 +26,10 @@ function find(text: string): [string, string] {
 	return [String((lines[y] as string).indexOf(text) + 1), String(y)];
 }
 
+/** Clicks `text` once tmux's double-click time has passed: two clicks inside it, anywhere, are a double click. */
 async function click(text: string): Promise<void> {
 	await Bun.sleep(350);
-	s.swb("drive", "click", ...find(text));
+	deckClick(s, text);
 }
 
 const COMMENTED = `# mine: every comment here outlives Settings' edits

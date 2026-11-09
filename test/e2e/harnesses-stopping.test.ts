@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
-import { claudeAutoMode, host, launched, pane, ready, type } from "./harness/agents.ts";
+import { claudeAutoMode, host, launched, pane, ready, settled, type } from "./harness/agents.ts";
 import { config, cursorTo, entry, seed, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 
@@ -23,7 +23,7 @@ test("Claude Code waiting on a permission prompt reads as blocked, and an upgrad
 	s = scenario("harnesses", "claude-blocked", { packages: [], recorder: true, harnesses: ["claude"] });
 	const claude = await launched(s, "claude", "reply claude up");
 	const note = `${s.project}/note.txt`;
-	type(s, claude.id, `call Write {"file_path":"${note}","content":"hi"}`);
+	const since = type(s, claude.id, `call Write {"file_path":"${note}","content":"hi"}`);
 	await until(() => entry(s, claude.id).activity === "blocked", budgets.settle, "Claude blocked on the prompt");
 	// Blocked is recorded before the dialog shows, and Claude Code drops a key sent the moment it does.
 	await until(() => pane(s, claude.id).includes("Do you want to create note.txt?"), budgets.settle, "the permission dialog");
@@ -31,7 +31,7 @@ test("Claude Code waiting on a permission prompt reads as blocked, and an upgrad
 	s.save("blocked.txt", pane(s, claude.id));
 	// The first choice allows it.
 	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host(s, claude.id)), "Enter");
-	await until(() => entry(s, claude.id).activity === "idle", budgets.settle, "Claude's turn done");
+	await settled(s, claude.id, "Claude's turn done", since);
 	expect(existsSync(note)).toBe(true);
 
 	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host(s, claude.id)), "-l", "half a thought");
@@ -63,14 +63,14 @@ test("Claude Code in auto mode reads working while its classifier answers an ask
 	const claude = await launched(s, "claude", "reply claude up");
 
 	// The held command writes a file, so the classifier allows it before it runs.
-	type(s, claude.id, "hold auto");
+	const since = type(s, claude.id, "hold auto");
 	await until(() => existsSync(`${s.home}/e2e-signals/auto.entered`), budgets.settle, "the held command running");
 	expect(s.requests("claude").some((r) => String(r.prompt).startsWith("<transcript>"))).toBe(true);
 	const seen = new Set<string>();
 	for (const end = Date.now() + 1500; Date.now() < end; Bun.sleepSync(50)) seen.add(entry(s, claude.id).activity);
 	expect([...seen]).toEqual(["working"]);
 	release(s, "auto");
-	await until(() => entry(s, claude.id).activity === "idle", budgets.settle, "the held turn done");
+	await settled(s, claude.id, "the held turn done", since);
 
 	type(
 		s,

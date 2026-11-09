@@ -12,8 +12,11 @@ export async function startManaged(s: Scenario): Promise<Runtime> {
 	return until(() => runtimes(s)[0], budgets.settle, "the runtime row");
 }
 
-export async function prompt(s: Scenario, text: string): Promise<void> {
+/** Types a prompt into the driven pi, and returns when it began, for `settled`. */
+export async function prompt(s: Scenario, text: string): Promise<number> {
+	const at = Date.now();
 	s.keys("-l", text, "Enter");
+	return at;
 }
 
 export async function waitFor(s: Scenario, name: string): Promise<void> {

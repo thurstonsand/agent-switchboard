@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { settled } from "./harness/agents.ts";
 import { cursorTo, entry, piSessions, reply, rowIndex, seed, sessionRows, state, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 import { liveSession } from "./harness/lifecycle.ts";
@@ -40,8 +41,9 @@ test("archive is refused mid-turn from the roster, the CLI, and pi; once idle, s
 	s.save("roster-refused.txt", s.screen());
 	expect(entry(s, id)).toMatchObject({ open: true, live: true, activity: "working" });
 
+	const since = Date.now();
 	release(s, "h1");
-	await until(() => entry(s, id).activity === "idle", budgets.settle, "idle");
+	await settled(s, id, "idle", since);
 	s.swb("archive", id);
 	expect(entry(s, id)).toMatchObject({ open: false, live: false });
 	await until(() => !piSessions(s).includes(host), budgets.settle, "pi killed");
@@ -160,7 +162,7 @@ test("M-a a archives from the Stage and hands the roster the keyboard; a wake or
 	// Unarchiving waits the same way, and leaves it open and dormant. A prompt opens it first, so M-a a archives again.
 	await waitState(s, "the keyboard on it", (x) => x.focus === "stage");
 	await reply(s, "again");
-	await until(() => entry(s, id).open && entry(s, id).activity === "idle", budgets.settle, "open and idle");
+	await until(() => entry(s, id).open, budgets.settle, "open");
 	await waitState(s, "its row open", (x) => sessionRows(x).find((r) => r.id === id)?.state !== "archived");
 	rmSync(join(signals, "shutdown.release"));
 	rmSync(join(signals, "shutdown.entered"));

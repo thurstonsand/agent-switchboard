@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CodexClient } from "../../packages/cli/src/codex/client.ts";
-import { host, launched, pane, recalled, subagentDone, type } from "./harness/agents.ts";
+import { host, launched, pane, recalled, settled, subagentDone, type } from "./harness/agents.ts";
 import { cursorTo, entry } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
@@ -30,7 +30,7 @@ function recall(op: "begin" | "search", id: string, args: Record<string, unknown
 /** What session_recall returned to a pi caller's model, from the faux provider's log. */
 async function ask(caller: string, target: string, question: string): Promise<string> {
 	const prompt = `ask-id ${target} :: ${question}`;
-	type(s, caller, prompt);
+	const since = type(s, caller, prompt);
 	const answer = await until(
 		() =>
 			s
@@ -42,16 +42,16 @@ async function ask(caller: string, target: string, question: string): Promise<st
 		budgets.piReady,
 		"the reader's answer",
 	);
-	await until(() => entry(s, caller).activity === "idle", budgets.settle, "caller idle");
+	await settled(s, caller, "caller idle", since);
 	return answer;
 }
 
 test("a reader's map marks a compaction, and it reads the turns from before it", async () => {
 	s = scenario("recall-reader", "compaction", { packages: [], recorder: true, harnesses: ["codex"] });
 	const codex = await launched(s, "codex", "reply SWB-before-compact alpha");
-	type(s, codex.id, "/compact");
+	const compacting = type(s, codex.id, "/compact");
 	await until(() => recalled(s, codex.id).includes("compaction summary"), budgets.piReady, "Codex's compaction in its rollout");
-	await until(() => entry(s, codex.id).activity === "idle", budgets.settle, "Codex idle after compacting");
+	await settled(s, codex.id, "Codex idle after compacting", compacting);
 	type(s, codex.id, "reply SWB-after-compact beta");
 	await until(() => recalled(s, codex.id).includes("SWB-after-compact beta\n"), budgets.piReady, "the turn after the compaction");
 
@@ -107,9 +107,9 @@ test("a Codex session rewound again and again, across a wake and an archive, rea
 			(line) => /^- \d+ · .* entries · "(.*)"$/.exec(line)?.[1] ?? [],
 		);
 	const turn = async (marker: string) => {
-		type(s, codex.id, `reply ${marker}`);
+		const since = type(s, codex.id, `reply ${marker}`);
 		await until(() => active().includes(`reply ${marker}`), budgets.piReady, `the turn ${marker}`);
-		await until(() => entry(s, codex.id).activity === "idle", budgets.settle, `idle after ${marker}`);
+		await settled(s, codex.id, `idle after ${marker}`, since);
 	};
 	/** Reverts to before the nth of the turns Codex holds, as the TUI's Esc-Esc does, and waits for swb to follow. */
 	const revert = async (nth: number) => {

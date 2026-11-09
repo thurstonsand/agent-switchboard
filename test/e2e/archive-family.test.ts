@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { cursorTo, entry, launched, launchTry, rowIndex, sessionRows, waitState } from "./harness/deck.ts";
+import { click, cursorTo, entry, launched, launchTry, rowIndex, sessionRows, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 import { liveSession } from "./harness/lifecycle.ts";
 import { scheduled, swbIn } from "./harness/schedules.ts";
@@ -60,9 +60,7 @@ test("a on a session that started others still open asks first: esc keeps them, 
 	await waitState(s, "root's pi focused", (x) => x.focus === "stage" && x.staged.id === root && x.staged.kind === "live", budgets.piReady);
 	s.keys("M-a", "a");
 	await waitState(s, "the prompt, with the keyboard", (x) => x.mode === "archive" && x.focus === "roster");
-	const lines = s.screen().split("\n");
-	const y = lines.findIndex((line) => line.includes("A Archive family (4)"));
-	s.swb("drive", "click", String((lines[y] as string).indexOf("A Archive family (4)") + 1), String(y));
+	click(s, "A Archive family (4)");
 	await until(() => open().every((o) => !o), budgets.settle, "the whole family archived by a click");
 	await waitState(s, "the prompt gone", (x) => x.mode === "roster");
 	s.save("archived-all.txt", s.screen());

@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { host, launched, pane, ready, recalled, type } from "./harness/agents.ts";
+import { answered, host, launched, pane, ready, recalled, replied, settled, type } from "./harness/agents.ts";
 import { entry } from "./harness/deck.ts";
-import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
+import { type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
 afterEach(async () => {
@@ -40,14 +40,13 @@ const snapshot = () => ({
 });
 
 async function ask(caller: string, prompt: string, answer: string): Promise<void> {
-	type(s, caller, prompt);
+	const since = type(s, caller, prompt);
 	await until(
 		() => requests().some((request) => request.prompt === prompt && request.role === "toolResult" && request.text === answer),
 		ready,
 		"this question's session_recall result",
 	);
-	await until(() => pane(s, caller).includes(`asked: ${answer}`), ready, `answer: ${answer}`);
-	await until(() => entry(s, caller).activity === "idle", budgets.settle, "caller idle");
+	await answered(s, caller, `asked: ${answer}`, `answer: ${answer}`, since);
 	expect(pane(s, caller)).toContain(`asked: ${answer}`);
 }
 
@@ -57,6 +56,7 @@ test("pi session_recall reads a live and archived pi conversation in an isolated
 	const target = await launched(s, "pi", "reply SWB-pi-history", undefined, ["--title", "Pi history"]);
 	const caller = await launched(s, "pi", "reply caller");
 	type(s, caller.id, "/thinking high");
+	// A pi command, not a turn: nothing to settle.
 	await until(() => pane(s, caller.id).includes("Thinking level: high"), ready, "caller thinking high");
 	const before = snapshot();
 	await ask(caller.id, "ask Pi history :: What marker did the session record?", "reader found: SWB-pi-history");
@@ -108,24 +108,20 @@ test("Esc aborts pi's in-process reader and leaves a stopped caller with no new 
 	const target = await launched(s, "pi", "reply SWB-cancel-target");
 	const caller = await launched(s, "pi", "reply caller");
 	const before = snapshot();
-	type(s, caller.id, `ask-id ${target.id} :: hold-reader`);
+	let since = type(s, caller.id, `ask-id ${target.id} :: hold-reader`);
 	await until(() => s.signal("reader.entered") !== "", ready, "nested faux provider holding");
 	expect(entry(s, caller.id).activity).toBe("working");
 	expect(snapshot()).toEqual(before);
 	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host(s, caller.id)), "Escape");
 	await until(() => s.signal("reader.aborted") !== "" && s.signal("reader.exited") !== "", ready, "reader's abort signal and exit");
-	await until(() => entry(s, caller.id).activity === "idle", budgets.settle, "caller stopped");
+	await settled(s, caller.id, "caller stopped", since);
 	expect(entry(s, caller.id)).toMatchObject({ live: true, cutOff: null, errored: false });
 	expect(recalled(s, caller.id)).toContain("[the turn was stopped]");
 	expect(snapshot()).toEqual(before);
 	console.log(
 		`Esc: entered=${s.signal("reader.entered")} aborted=${s.signal("reader.aborted")} exited=${s.signal("reader.exited")}; caller live=true idle cutOff=null errored=false; transcript: [the turn was stopped]`,
 	);
-	type(s, caller.id, "reply SWB-after-abort");
-	await until(
-		() => s.signal("replied.SWB-after-abort") !== "" && entry(s, caller.id).activity === "idle",
-		ready,
-		"caller usable after abort",
-	);
+	since = type(s, caller.id, "reply SWB-after-abort");
+	await replied(s, caller.id, "SWB-after-abort", "caller usable after abort", since);
 	expect(pane(s, caller.id)).toContain("SWB-after-abort");
 });

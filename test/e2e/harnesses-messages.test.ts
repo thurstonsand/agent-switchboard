@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { host, launched, pane, ready, send, settled, type } from "./harness/agents.ts";
+import { answered, host, launched, pane, ready, replied, send, settled, type } from "./harness/agents.ts";
 import { entry } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 
@@ -31,16 +31,19 @@ test("pi, Claude Code, and Codex message each other: idle sessions start a turn,
 	]);
 
 	// Idle: the message is the next turn, in every direction.
+	let since = Date.now();
 	expect((await send(s, claude.id, pi.id, "reply SWB-c2p")).details.delivered).toBe(true);
-	await until(() => s.signal("replied.SWB-c2p") !== "", budgets.settle, "pi's answer to Claude");
+	await replied(s, pi.id, "SWB-c2p", "pi's answer to Claude", since);
 	await until(() => pane(s, pi.id).includes("↘ from"), budgets.settle, "pi's Message drawn");
 	expect(pane(s, pi.id)).not.toContain("Message from session");
+	since = Date.now();
 	expect((await send(s, codex.id, claude.id, "SWB-x2c please ack")).details.delivered).toBe(true);
-	await until(() => pane(s, claude.id).includes("got SWB-x2c please ack"), budgets.settle, "Claude's answer to Codex");
+	await answered(s, claude.id, "got SWB-x2c please ack", "Claude's answer to Codex", since);
 	// Claude Code bypasses UserMessage hooks for plugin-submitted prompts; no duplicate receipt beside it.
 	expect(pane(s, claude.id)).not.toContain("↘ from");
+	since = Date.now();
 	expect((await send(s, pi.id, codex.id, "SWB-p2x please ack")).details.delivered).toBe(true);
-	await until(() => pane(s, codex.id).includes("got SWB-p2x please ack"), budgets.settle, "Codex's answer to pi");
+	await answered(s, codex.id, "got SWB-p2x please ack", "Codex's answer to pi", since);
 	s.save("idle.txt", [pane(s, pi.id), pane(s, claude.id), pane(s, codex.id)].join("\n=====\n"));
 
 	// Working: each is held in a tool call when the message lands.
@@ -58,24 +61,25 @@ test("pi, Claude Code, and Codex message each other: idle sessions start a turn,
 	);
 	await until(() => pane(s, claude.id).includes("  SWB-mid-claude"), budgets.settle, "Claude's visible receipt");
 
-	type(s, codex.id, "hold x1");
+	since = type(s, codex.id, "hold x1");
 	await until(() => s.signal("x1.entered") !== "", ready, "Codex holding");
 	expect((await send(s, claude.id, codex.id, "SWB-mid-codex change course")).details.delivered).toBe(true);
 	release(s, "x1");
 	await until(() => sawMarker("codex", "SWB-mid-codex"), budgets.settle, "the steer in Codex's next request");
-	await until(() => entry(s, codex.id).activity === "idle", budgets.settle, "Codex idle");
+	await settled(s, codex.id, "Codex idle", since);
 
-	type(s, pi.id, "hold p1");
+	since = type(s, pi.id, "hold p1");
 	await until(() => s.signal("p1.entered") !== "", ready, "pi holding");
 	expect((await send(s, codex.id, pi.id, "reply SWB-mid-pi")).details.delivered).toBe(true);
 	release(s, "p1");
-	await until(() => s.signal("replied.SWB-mid-pi") !== "", budgets.settle, "pi answering the steer");
+	await replied(s, pi.id, "SWB-mid-pi", "pi answering the steer", since);
 	expect(pane(s, pi.id)).not.toContain("Message from session");
 	s.save("mid-turn.txt", [pane(s, pi.id), pane(s, claude.id), pane(s, codex.id)].join("\n=====\n"));
 	s.tmux(s.servers.sessions, "kill-session", "-t", `=${host(s, pi.id)}:`);
 	await until(() => !entry(s, pi.id).live, budgets.settle, "pi dormant");
+	since = Date.now();
 	expect((await send(s, claude.id, pi.id, "reply SWB-wake-pi")).details.delivered).toBe(true);
-	await until(() => s.signal("replied.SWB-wake-pi") !== "", budgets.settle, "pi answering after wake");
+	await replied(s, pi.id, "SWB-wake-pi", "pi answering after wake", since);
 	expect(pane(s, pi.id)).toContain("↘ from");
 	expect(pane(s, pi.id)).not.toContain("Message from session");
 });
@@ -84,6 +88,7 @@ test("agent launch briefings render as Messages without losing their body or rep
 	s = scenario("harnesses", "launch-messages", { packages: [], recorder: true, harnesses: ["claude"] });
 	const parent = await launched(s, "pi", "reply parent-ready", undefined, ["--title", "Coordinator"]);
 	for (const harness of ["pi", "claude"] as const) {
+		const since = Date.now();
 		const child = await launched(s, harness, `reply SWB-child-${harness}\n\n---\n\nKeep this separator.`, parent.id);
 		await until(() => pane(s, child.id).includes("↘ from Coordinator"), ready, `${harness}'s launch Message`);
 		const screen = pane(s, child.id);
@@ -92,7 +97,7 @@ test("agent launch briefings render as Messages without losing their body or rep
 		expect(screen).not.toContain("Message from session");
 		expect(screen).not.toContain(parent.id);
 		if (harness === "claude") expect(sawMarker("claude", parent.id)).toBe(true);
-		else await until(() => s.signal("replied.SWB-child-pi") !== "", ready, "pi answered its briefing");
+		else await replied(s, child.id, "SWB-child-pi", "pi answered its briefing", since);
 	}
 });
 
@@ -104,9 +109,11 @@ test("a message Codex refuses mid-compaction is delivered once the compaction en
 	// A compact turn can't be steered, so this turn/start fails; the next poll has no new db write to wake it.
 	const sent = send(s, pi.id, codex.id, "SWB-after-compact please ack");
 	await Bun.sleep(2000);
+	// The turn that delivers it starts once the compaction ends.
+	const since = Date.now();
 	release(s, "k1");
 	expect((await sent).details.delivered).toBe(true);
-	await until(() => pane(s, codex.id).includes("got SWB-after-compact please ack"), budgets.settle, "Codex answering after the compaction");
+	await answered(s, codex.id, "got SWB-after-compact please ack", "Codex answering after the compaction", since);
 	s.save("compact.txt", pane(s, codex.id));
 });
 
@@ -149,7 +156,7 @@ test("a db busy past busy_timeout while messages are in flight delivers each onc
 	const delivered = (id: string) => s.query<{ at: number | null }>("select delivered_at as at from messages where id = ?", id)[0]?.at;
 
 	// Claude holds one message for its next tool result; the second arrives as the db stays busy.
-	type(s, claude.id, "hold c1");
+	const c1 = type(s, claude.id, "hold c1");
 	await until(() => s.signal("c1.entered") !== "", ready, "Claude holding");
 	await busyAfter(pi.id, claude.id, "SWB-busy-first change course", 0);
 	await Bun.sleep(1000);
@@ -163,10 +170,10 @@ test("a db busy past busy_timeout while messages are in flight delivers each onc
 		"Claude's request carrying both messages",
 	);
 	expect([times(toClaude.context, "SWB-busy-first"), times(toClaude.context, "SWB-busy-second")]).toEqual([1, 1]);
-	await until(() => entry(s, claude.id).activity === "idle", budgets.settle, "Claude's turn recorded as settled");
+	await settled(s, claude.id, "Claude's turn recorded as settled", c1);
 
 	// Codex is steered, and the steer is recorded, once.
-	type(s, codex.id, "hold x1");
+	const x1 = type(s, codex.id, "hold x1");
 	await until(() => s.signal("x1.entered") !== "", ready, "Codex holding");
 	const toCodex = await busyAfter(pi.id, codex.id, "SWB-busy-steer change course", 6000);
 	await until(() => delivered(toCodex), budgets.settle, "the steer marked delivered");
@@ -177,15 +184,15 @@ test("a db busy past busy_timeout while messages are in flight delivers each onc
 		"Codex's request carrying the steer",
 	);
 	expect(times(steered.context, "SWB-busy-steer")).toBe(1);
-	await until(() => entry(s, codex.id).activity === "idle", budgets.settle, "Codex's turn recorded as settled");
+	await settled(s, codex.id, "Codex's turn recorded as settled", x1);
 
 	// pi takes the steer and goes on recording: its turn settles in swb too.
-	type(s, pi.id, "hold p1");
+	const p1 = type(s, pi.id, "hold p1");
 	await until(() => s.signal("p1.entered") !== "", ready, "pi holding");
 	const toPi = await busyAfter(claude.id, pi.id, "reply SWB-busy-pi", 6000);
 	release(s, "p1");
-	await until(() => s.signal("replied.SWB-busy-pi") !== "", budgets.settle, "pi answering the steer");
-	await until(() => entry(s, pi.id).activity === "idle", budgets.settle, "pi's turn recorded as settled");
+	await replied(s, pi.id, "SWB-busy-pi", "pi answering the steer", p1);
+	await settled(s, pi.id, "pi's turn recorded as settled", p1);
 	expect(delivered(toPi)).toEqual(expect.any(Number));
 	expect(pane(s, pi.id)).not.toContain("not recording");
 	s.save("busy.txt", [pane(s, pi.id), pane(s, claude.id), pane(s, codex.id)].join("\n=====\n"));
@@ -207,12 +214,10 @@ test("a turn that starts while the db is busy past busy_timeout is recorded once
 		await until(() => pane(s, pi.id).includes("swb: db busy"), 8500, "pi saying its records wait");
 		s.save("busy-records.txt", pane(s, pi.id));
 	});
-	for (const [harness, e] of Object.entries(all))
-		await until(
-			() => (prompted(e.id) ?? 0) >= before && entry(s, e.id).activity === "idle",
-			budgets.settle,
-			`${harness}'s turn recorded, start and settle`,
-		);
+	for (const [harness, e] of Object.entries(all)) {
+		await until(() => (prompted(e.id) ?? 0) >= before, budgets.settle, `${harness}'s turn recorded, start`);
+		await settled(s, e.id, `${harness}'s turn recorded, settle`, before);
+	}
 	for (const e of Object.values(all)) expect(pane(s, e.id)).not.toContain("not recording");
 	expect(pane(s, pi.id)).not.toContain("swb: db busy");
 	// Each line logged the try that waited out busy_timeout: pi, Claude Code's hook, and Codex's host.
@@ -232,7 +237,7 @@ test("agents use swb's tools across harnesses: list, message, launch, and cancel
 		launched(s, "codex", "reply codex up"),
 	]);
 
-	type(s, claude.id, `call session_list {}`);
+	let since = type(s, claude.id, `call session_list {}`);
 	const listed = await until(
 		() => s.requests("claude").find((r) => String(r.toolOutput).includes("Open sessions")),
 		budgets.settle,
@@ -251,8 +256,9 @@ test("agents use swb's tools across harnesses: list, message, launch, and cancel
 		"Claude's listing row",
 	);
 
-	type(s, claude.id, `call session_send_message {"session":"${codex.id}","message":"SWB-claude-asks codex","report_back":false}`);
-	await until(() => pane(s, codex.id).includes("got SWB-claude-asks codex"), ready, "Codex answering Claude's tool call");
+	await settled(s, claude.id, "Claude done listing", since);
+	since = type(s, claude.id, `call session_send_message {"session":"${codex.id}","message":"SWB-claude-asks codex","report_back":false}`);
+	await answered(s, codex.id, "got SWB-claude-asks codex", "Codex answering Claude's tool call", since);
 	await until(
 		() => pane(s, claude.id).includes("  ⎿  Delivered to") && pane(s, claude.id).includes("  Message · SWB-claude-asks codex"),
 		budgets.settle,
@@ -264,8 +270,8 @@ test("agents use swb's tools across harnesses: list, message, launch, and cancel
 	expect(sent).toEqual([{ source_id: claude.id, delivered_at: expect.any(Number) }]);
 
 	// Codex runs swb's MCP server with only the variables it forwards; it must still find the others, in their states.
-	await settled(s, codex.id, "Codex done answering Claude");
-	type(s, codex.id, `call session_list {}`);
+	await settled(s, codex.id, "Codex done answering Claude", since);
+	since = type(s, codex.id, `call session_list {}`);
 	const fromCodex = await until(
 		() => s.requests("codex").find((r) => String(r.toolOutput).includes('{"sessions":')),
 		budgets.settle,
@@ -278,15 +284,18 @@ test("agents use swb's tools across harnesses: list, message, launch, and cancel
 		[pi.id, claude.id].sort().map((id) => ({ id, state: "idle" })),
 	);
 
-	await settled(s, codex.id, "Codex done listing");
-	type(s, codex.id, `call session_send_message {"session":"${pi.id}","message":"reply SWB-codex-asks-pi","report_back":false}`);
-	await until(() => s.signal("replied.SWB-codex-asks-pi") !== "", ready, "pi answering Codex's tool call");
+	await settled(s, codex.id, "Codex done listing", since);
+	const codexAsks = type(
+		s,
+		codex.id,
+		`call session_send_message {"session":"${pi.id}","message":"reply SWB-codex-asks-pi","report_back":false}`,
+	);
+	await replied(s, pi.id, "SWB-codex-asks-pi", "pi answering Codex's tool call", codexAsks);
 	expect(s.query("select source_id from messages where body = 'reply SWB-codex-asks-pi'")).toEqual([{ source_id: codex.id }]);
 
-	type(s, pi.id, `call session_send_message {"session":"${claude.id}","message":"SWB-pi-asks claude","report_back":false}`);
-	await until(() => pane(s, claude.id).includes("got SWB-pi-asks claude"), ready, "Claude answering pi's tool call");
+	since = type(s, pi.id, `call session_send_message {"session":"${claude.id}","message":"SWB-pi-asks claude","report_back":false}`);
 	// Claude draws its reply before its Stop hook records the turn idle, and the listing below reads the record.
-	await settled(s, claude.id, "Claude done answering pi");
+	await answered(s, claude.id, "got SWB-pi-asks claude", "Claude answering pi's tool call", since);
 
 	// The collapsed result counts sessions; the full list is available on demand.
 	type(s, pi.id, "call session_list {}");
@@ -301,17 +310,17 @@ test("agents use swb's tools across harnesses: list, message, launch, and cancel
 	await until(() => pane(s, pi.id).includes("Sessions · 2 found · ctrl+o details"), budgets.settle, "pi's listing collapsed again");
 
 	// A launch from Claude starts a Codex session whose parent is Claude.
-	type(
+	since = type(
 		s,
 		claude.id,
 		`call session_launch {"harness":"codex","briefing":"SWB-launched do the thing","title":"launched by claude","report_back":false}`,
 	);
 	const child = await until(() => s.ls().find((e) => e.parentId === claude.id), ready, "the launched Codex session");
 	expect(child).toMatchObject({ harness: "codex", cwd: s.project });
-	await until(() => pane(s, child.id).includes("got SWB-launched do the thing"), ready, "the launched session working on its briefing");
+	await answered(s, child.id, "got SWB-launched do the thing", "the launched session working on its briefing", since);
 
 	// A failed call says why.
-	await settled(s, claude.id, "Claude done launching");
+	await settled(s, claude.id, "Claude done launching", since);
 	type(s, claude.id, `call swb_update_session {"session":"nope","cancel":true}`);
 	await until(() => pane(s, claude.id).includes("  ⎿  Error: no session nope"), budgets.settle, "the failed cancel's row");
 	const calls = pane(s, claude.id);
@@ -325,11 +334,11 @@ test("agents use swb's tools across harnesses: list, message, launch, and cancel
 	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(host(s, claude.id)), "C-o");
 
 	// Cancel from pi stops Codex's held turn.
-	await settled(s, codex.id, "Codex done messaging pi");
-	type(s, codex.id, "hold x2");
+	await settled(s, codex.id, "Codex done messaging pi", codexAsks);
+	since = type(s, codex.id, "hold x2");
 	await until(() => s.signal("x2.entered") !== "", ready, "Codex holding");
 	type(s, pi.id, `call swb_update_session {"session":"${codex.id}","cancel":true}`);
-	await until(() => entry(s, codex.id).activity === "idle", budgets.settle, "Codex's turn stopped");
+	await settled(s, codex.id, "Codex's turn stopped", since);
 	release(s, "x2");
 	s.save("agents.txt", [pane(s, pi.id), pane(s, claude.id), pane(s, codex.id), pane(s, child.id)].join("\n=====\n"));
 });
@@ -377,10 +386,11 @@ test("a message to a dormant Claude Code or Codex session wakes it on its own co
 		expect(listed.text).toContain(`- ${target.id} · ${harness === "claude" ? "Claude Code" : "Codex"} · "`);
 		expect(listed.text.split("\n").find((line) => line.includes(target.id))).toContain(" · idle · ");
 		expect(listed.text).not.toMatch(/dormant|wake/);
+		const since = Date.now();
 		const receipt = await send(s, pi.id, target.id, `SWB-wake-${harness} are you there`);
 		expect(receipt.details).toMatchObject({ delivered: true, woke: true });
 		expect(receipt.text).toMatch(/^Delivered to "[^"]+"\.$/);
-		await until(() => pane(s, target.id).includes(`got SWB-wake-${harness} are you there`), ready, `${harness} answering`);
+		await answered(s, target.id, `got SWB-wake-${harness} are you there`, `${harness} answering`, since);
 		// The request that answered the wake still carries the session's first turn: it resumed, not started over.
 		const answering = s.requests(harness).filter((r) => JSON.stringify(r).includes(`SWB-wake-${harness}`));
 		expect(answering.length).toBeGreaterThan(0);
@@ -403,9 +413,10 @@ test("a Codex session woken after config.toml changes provider resumes on the pr
 		config,
 		`${text.replace('model_provider = "fake"', 'model_provider = "other"')}\n${fake.replace("[model_providers.fake]", "[model_providers.other]")}`,
 	);
+	const since = Date.now();
 	const receipt = await send(s, pi.id, codex.id, "SWB-provider are you there");
 	expect(receipt.details).toMatchObject({ delivered: true, woke: true });
-	await until(() => pane(s, codex.id).includes("got SWB-provider are you there"), ready, "codex answering");
+	await answered(s, codex.id, "got SWB-provider are you there", "codex answering", since);
 	const answering = s.requests("codex").filter((r) => JSON.stringify(r).includes("SWB-provider"));
 	expect(JSON.stringify(answering[0])).toContain("SWB-first-codex");
 	s.save("woken-codex.txt", pane(s, codex.id));

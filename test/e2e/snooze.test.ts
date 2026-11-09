@@ -1,7 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
+import { replied, settled } from "./harness/agents.ts";
 import { closeDeck, config, cursorTo, entry, reply, sessionRows, state, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
-import { host, launched, ready, scheduled, snoozeOf, swbIn, type } from "./harness/schedules.ts";
+import { host, launched, scheduled, snoozeOf, swbIn, type } from "./harness/schedules.ts";
 
 // Schedules and snooze: real sessions, swb's clock in the sessions server, and the Deck's Snoozed section.
 
@@ -28,17 +29,18 @@ test("a timed snooze holds through a conversation and shows while blocked or cut
 	expect((snoozeOf(s, pi.id).snoozedUntil as number) - Date.now()).toBeGreaterThan(3_500_000);
 
 	// A message and its whole turn leave a timed snooze alone, and the finished turn isn't Unseen while it holds.
+	let since = Date.now();
 	expect((await swbIn(s, "reply talked", "send", "--from", other.id, "--to", pi.id)).code).toBe(0);
-	await until(() => s.signal("replied.talked") !== "", budgets.settle, "the message answered");
-	await until(() => entry(s, pi.id).activity === "idle", budgets.settle, "idle");
+	await replied(s, pi.id, "talked", "the message answered", since);
 	expect(snoozeOf(s, pi.id)).toMatchObject({ snoozed: true, unseen: false });
 
 	// Blocked on me, it shows; released, it's back in Snoozed.
+	since = Date.now();
 	type(s, pi.id, "attention a1");
 	await until(() => entry(s, pi.id).activity === "blocked", budgets.settle, "blocked");
 	expect(snoozeOf(s, pi.id).snoozed).toBe(false);
 	release(s, "a1");
-	await until(() => entry(s, pi.id).activity === "idle", budgets.settle, "idle again");
+	await settled(s, pi.id, "idle again", since);
 	expect(snoozeOf(s, pi.id).snoozed).toBe(true);
 
 	// Unsnoozed by hand, what it did meanwhile is Unseen.
@@ -50,16 +52,18 @@ test("a timed snooze holds through a conversation and shows while blocked or cut
 	// A message scheduled for later is no message yet.
 	const later = await scheduled(s, "reply later", "--from", other.id, "--to", pi.id, "--at", "PT1H", "--schedule-label", "in an hour");
 	expect(snoozeOf(s, pi.id).snoozed).toBe(true);
+	since = Date.now();
 	expect((await swbIn(s, "reply two", "send", "--from", other.id, "--to", pi.id)).code).toBe(0);
 	expect(snoozeOf(s, pi.id).snoozed).toBe(false);
-	await until(() => s.signal("replied.two") !== "", budgets.settle, "the second message answered");
+	await replied(s, pi.id, "two", "the second message answered", since);
 	expect(s.query("select next_at from schedules where id = ?", later.details.id)).toEqual([{ next_at: later.details.nextAt }]);
 
 	// A prompt typed into it ends next_message's snooze too.
 	s.swb("snooze", pi.id, "next_message");
 	expect(snoozeOf(s, pi.id).snoozed).toBe(true);
+	since = Date.now();
 	type(s, pi.id, "reply typed");
-	await until(() => s.signal("replied.typed") !== "", budgets.settle, "the typed prompt answered");
+	await replied(s, pi.id, "typed", "the typed prompt answered", since);
 	expect(snoozeOf(s, pi.id).snoozed).toBe(false);
 
 	// Killed mid-turn, a snoozed session is Interrupted, and that shows.
@@ -185,8 +189,9 @@ test("the Deck's Snoozed section: s snoozes from the roster, the row says when i
 	await waitState(s, "Snoozed gone", (x) => !x.rows.some((r) => r.kind === "section" && r.label === "Snoozed"));
 
 	// A schedule that has run stays in the Peek, saying when.
+	const since = Date.now();
 	await scheduled(s, "reply ran", "--from", id, "--at", "PT1S", "--schedule-label", "SWB soon");
-	await until(() => s.signal("replied.ran") !== "", ready, "the schedule run");
+	await replied(s, id, "ran", "the schedule run", since);
 	s.keys("M-a", "h");
 	await waitState(s, "roster focus", (x) => x.focus === "roster");
 	s.keys("k");

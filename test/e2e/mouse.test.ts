@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, readlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pane, type as prompt } from "./harness/agents.ts";
-import { cursorTo, entry, glide, launched, rowIndex, seed, state, waitState } from "./harness/deck.ts";
+import { cursorTo, click as deckClick, entry, glide, launched, rowIndex, seed, state, waitState, whileHeld } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 import { snoozeOf } from "./harness/schedules.ts";
 
@@ -30,8 +30,17 @@ function findRight(text: string): [string, string] {
 	return [String((lines[y] as string).indexOf(text, 43) + 1), String(y)];
 }
 
+/** A cell as `find` and `findRight` give it, as numbers. */
+const cell = ([x, y]: [string, string]): [number, number] => [Number(x), Number(y)];
+
 /** Clicks `text` once tmux's double-click time has passed: two clicks inside it, anywhere, are a double click. */
 async function click(text: string, cols = 42): Promise<void> {
+	await Bun.sleep(350);
+	deckClick(s, text, cell(find(text, cols)));
+}
+
+/** As click, on what tmux draws rather than the Deck, such as its status line or the help popup: a press it can't aim. */
+async function clickTmux(text: string, cols = 42): Promise<void> {
 	await Bun.sleep(350);
 	s.swb("drive", "click", ...find(text, cols));
 }
@@ -42,7 +51,7 @@ async function peekButton(row: string, id: string, button: string): Promise<void
 	await waitState(s, `${row}'s Peek`, (x) => x.peek?.id === id && x.peek.lines.some((line) => line.includes(button)));
 	await Bun.sleep(350);
 	s.swb("drive", "move", ...findRight(button));
-	s.swb("drive", "click", ...findRight(button));
+	deckClick(s, button, cell(findRight(button)));
 }
 
 /** Whether `text` on line `y` sits on a background fill: the last background code before it isn't a reset. */
@@ -128,7 +137,7 @@ test("the mouse reaches everything the keys do: a row's Peek, the hidden or narr
 	await waitState(s, "the roster hidden", (x) => x.layout.rosterHidden);
 	await onScreen("show list", "the way back on the status line");
 	s.save("hidden.txt", s.screen());
-	await click("show list");
+	await clickTmux("show list");
 	await waitState(s, "the roster back and focused", (x) => !x.layout.rosterHidden && x.focus === "roster");
 	await until(() => !s.screen().includes("show list"), budgets.settle, "the status line gone with it");
 
@@ -141,7 +150,7 @@ test("the mouse reaches everything the keys do: a row's Peek, the hidden or narr
 	await click("? keys");
 	await onScreen("Start here", "the key help");
 	s.save("help.txt", s.screen());
-	await click("Start here", 140);
+	await clickTmux("Start here", 140);
 	await until(() => !s.screen().includes("Start here"), budgets.settle, "help closed by a click");
 
 	// A Peek's buttons are its row's prefix keys: one closes a filter being typed, as the key does, and the query stays.
@@ -179,7 +188,7 @@ test("the mouse reaches everything the keys do: a row's Peek, the hidden or narr
 	await waitState(s, "alpha's pi filling the Deck", (x) => x.staged.id === a && x.focus === "stage", budgets.piReady);
 	await onScreen("show list", "the way back on the status line");
 	s.save("narrow-pi.txt", s.screen());
-	await click("show list");
+	await clickTmux("show list");
 	await waitState(s, "the roster again", (x) => x.focus === "roster" && x.layout.rosterOnly);
 	await until(() => !s.screen().includes("show list"), budgets.settle, "the status line gone");
 	expect(state(s).cursor).toBe(a);
@@ -406,7 +415,6 @@ test("a pointer on its way into a Peek keeps it across rows, headers, and empty 
 	];
 	const titleOf = (id: string) => entry(s, id).title as string;
 
-	const cell = ([x, y]: [string, string]): [number, number] => [Number(x), Number(y)];
 	const peekOn = async (id: string) => {
 		s.swb("drive", "move", ...find(titleOf(id)));
 		await waitState(s, `${titleOf(id)}'s Peek`, (x) => x.peek?.id === id);
@@ -419,7 +427,7 @@ test("a pointer on its way into a Peek keeps it across rows, headers, and empty 
 	await glide(s, cell(find(titleOf(top.id))), cell(findRight("m Group…")), 300);
 	await Bun.sleep(600);
 	expect(state(s).peek?.id).toBe(top.id);
-	s.swb("drive", "click", ...findRight("m Group…"));
+	deckClick(s, "m Group…", cell(findRight("m Group…")));
 	await waitState(s, "the top row's Group form, from its Peek", (x) => x.mode === "name");
 	expect(menuUnder("Group")).toContain(titleOf(top.id));
 	s.keys("Escape");
@@ -472,17 +480,19 @@ esac
 		{ mode: 0o755 },
 	);
 	try {
-		s.swb("drive", "move", ...find("alpha"));
-		await until(() => existsSync(join(s.root, "waiting")), budgets.settle, "the Peek's pane created");
-		const renders = state(s).perf.render.n;
-		s.swb("drive", "focus", "out");
-		await waitState(s, "the unfocused Deck redrawn", (x) => !x.terminalFocused && x.perf.render.n > renders);
+		await whileHeld(s, async () => {
+			s.swb("drive", "move", ...find("alpha"));
+			await until(() => existsSync(join(s.root, "waiting")), budgets.settle, "the Peek's pane created");
+			const renders = state(s).perf.render.n;
+			s.swb("drive", "focus", "out");
+			await waitState(s, "the unfocused Deck redrawn", (x) => !x.terminalFocused && x.perf.render.n > renders);
+		});
 	} finally {
 		writeFileSync(join(s.root, "release"), "");
 	}
 	await waitState(s, "alpha's Peek", (x) => x.peek?.id === id);
 	await onScreen("m Group…", "the Group button drawn");
-	s.swb("drive", "click", ...findRight("m Group…"));
+	deckClick(s, "m Group…", cell(findRight("m Group…")));
 	await waitState(s, "alpha's Group form", (x) => x.mode === "name");
 	expect(menuUnder("Group")).toContain("alpha");
 });
@@ -507,7 +517,7 @@ test("Archive and Snooze open under their row at any width, and the Stage's last
 	const row = Number(find("parent")[1]);
 	const [x, y] = findRight("a Archive");
 	s.swb("drive", "move", x, y);
-	s.swb("drive", "click", x, y);
+	deckClick(s, "a Archive", cell([x, y]));
 	await waitState(s, "the Archive form", (st) => st.mode === "archive");
 	await onScreen("╭─ Archive ", "the form drawn under its row");
 	expect(Number(find("╭─ Archive ")[1])).toBe(row + 1);

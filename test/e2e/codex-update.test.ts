@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { launched, type } from "./harness/agents.ts";
+import { launched, settled, type } from "./harness/agents.ts";
 import { waitState } from "./harness/deck.ts";
 import { type Scenario, scenario, until } from "./harness/index.ts";
 
@@ -74,12 +74,9 @@ for (const resume of [false, true])
 		const id = live.staged.id as string;
 		if (previous) expect(id).toBe(previous.id);
 		await until(() => s.screen().includes("OpenAI Codex"), 30_000, "the real TUI");
-		type(s, id, "reply after the update");
-		await until(
-			() => s.ls().find((e) => e.id === id && e.activity === "idle") && s.screen().includes("• after the update"),
-			30_000,
-			"the reply in the same Stage",
-		);
+		const since = type(s, id, "reply after the update");
+		await settled(s, id, "the reply's turn over", since);
+		await until(() => s.screen().includes("• after the update"), 30_000, "the reply in the same Stage");
 		expect(s.ls()).toHaveLength(1);
 		if (previous) expect(s.screen()).toContain("before the update");
 		type(s, id, "/quit");

@@ -29,7 +29,6 @@ async function moved(command: string): Promise<{ id: string; from: string; cwd: 
 	);
 	await reply(s, "before the move");
 	const id = st.staged.id as string;
-	await until(() => entry(s, id)?.activity === "idle", budgets.settle, "idle");
 	const from = transcript(id);
 	s.save("before.txt", s.screen());
 	s.keys("-l", command, "Enter");
@@ -83,7 +82,6 @@ test("a session whose directory is gone wakes into its own transcript from its p
 	);
 	const id = st.staged.id as string;
 	await reply(s, "before the move");
-	await until(() => entry(s, id)?.activity === "idle", budgets.settle, "idle");
 	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(st.staged.host as string));
 	await waitState(s, "the exited card", (x) => x.staged.id === id && x.staged.kind === "exited");
 	git(s, s.project, "worktree", "remove", "--force", worktree);

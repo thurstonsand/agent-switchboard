@@ -15,9 +15,9 @@ const prompted = (id: string) =>
 /** Types a prompt into a session's TUI and waits for the turn it starts to end. */
 async function turn(id: string, prompt: string): Promise<void> {
 	const before = prompted(id);
-	type(s, id, prompt);
+	const since = type(s, id, prompt);
 	await until(() => prompted(id) > before, 60_000, `the turn for ${prompt}`);
-	await settled(s, id, `the turn for ${prompt} to end`);
+	await settled(s, id, `the turn for ${prompt} to end`, since);
 }
 
 function evaluate(...args: string[]): string {

@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import type { DeckState } from "../../packages/cli/src/deck/protocol.ts";
+import { replied } from "./harness/agents.ts";
 import { config, cursorTo, seed, state, terminal, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
@@ -23,8 +24,10 @@ test("a Deck started inside another tmux works as in a bare terminal, M-a passin
 		budgets.piReady,
 		"pi live in the nested Deck",
 	);
+	const id = outer.state().staged.id as string;
+	const since = Date.now();
 	outer.keys("-l", "reply nested", "Enter");
-	await until(() => s.signal("replied.nested") !== "", budgets.settle, "the nested reply");
+	await replied(s, id, "nested", "the nested reply", since);
 	outer.keys("M-a", "h");
 	await until(() => outer.state().focus === "roster", budgets.settle, "the roster focused through the outer tmux");
 	outer.keys("M-a", "z");
@@ -137,8 +140,9 @@ test("every swb attaches its terminal to the one Deck: swb open in one moves it 
 		(x) => x.staged.id === b && x.staged.kind === "live" && x.focus === "stage",
 		budgets.piReady,
 	);
+	const since = Date.now();
 	three.keys("-l", "reply typed from three", "Enter");
-	await until(() => s.signal("replied.typed from three") !== "", budgets.settle, "the turn typed from terminal three");
+	await replied(s, b, "typed from three", "the turn typed from terminal three", since);
 	await until(
 		() => {
 			const one = s.screen().trimEnd();

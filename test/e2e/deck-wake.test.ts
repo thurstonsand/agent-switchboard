@@ -141,8 +141,6 @@ test("a new session whose directory is gone before Enter fails back to the roste
 	await waitState(s, "the doomed pi up", (x) => x.staged.kind === "live" && x.focus === "stage", budgets.piReady);
 	// A first turn records it, so the picker lists its directory.
 	await reply(s, "doomed");
-	const doomedId = state(s).staged.id as string;
-	await until(() => entry(s, doomedId)?.activity === "idle", budgets.settle, "the doomed turn finished");
 	s.swb("quit");
 	await until(() => s.ls().every((e) => !e.live), budgets.settle, "every session stopped");
 	s.swb("drive", "start");

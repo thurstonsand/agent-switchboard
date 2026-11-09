@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pane, ready, settled, type } from "./harness/agents.ts";
-import { cursorTo, entry, launched, state, waitState } from "./harness/deck.ts";
+import { click, cursorTo, entry, launched, state, waitState } from "./harness/deck.ts";
 import { budgets, git, gitRepo, gitWorktree, type Scenario, scenario, until } from "./harness/index.ts";
 import { swbIn } from "./harness/schedules.ts";
 
@@ -25,6 +25,7 @@ for (const harness of ["pi", "claude", "codex"] as const) {
 		mkdirSync(subdir);
 		s.trust(tree);
 		const start = async (cwd: string, label: string, from?: string) => {
+			const since = Date.now();
 			const proc = Bun.spawn([`${s.bin}/swb`, "launch", "--harness", harness, "--cwd", cwd, ...(from ? ["--from", from] : [])], {
 				env: s.env,
 				cwd: s.project,
@@ -35,7 +36,7 @@ for (const harness of ["pi", "claude", "codex"] as const) {
 			const [out, err, code] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
 			expect({ code, err }).toEqual({ code: 0, err: "" });
 			const id = JSON.parse(out).details.id as string;
-			await settled(s, id, `${label} ready`);
+			await settled(s, id, `${label} ready`, since);
 			return id;
 		};
 		const specs = (label: string) =>
@@ -89,7 +90,8 @@ for (const harness of ["pi", "claude", "codex"] as const) {
 			s.swb("unarchive", resumed);
 			s.swb("wake", resumed);
 			await until(() => entry(s, resumed).live, ready, "resumed without a missing-directory prompt");
-			await settled(s, resumed, "ready after resume");
+			// A wake starts no turn: it's ready once it's idle.
+			await settled(s, resumed, "ready after resume", 0);
 			type(s, resumed, `reply continued-${resumed}`);
 			await until(
 				() => pane(s, resumed).split(`continued-${resumed}`).length >= 3 && entry(s, resumed).activity === "idle",
@@ -111,6 +113,42 @@ for (const harness of ["pi", "claude", "codex"] as const) {
 		expect(s.ls()).toHaveLength(4);
 	});
 }
+
+test("a click aimed at a button from a screen that has since moved is dropped, never pressing what moved under it", async () => {
+	s = scenario("archive-worktree", "stale-click");
+	gitRepo(s, s.project);
+	const tree = gitWorktree(s, s.project, "feature");
+	const id = await launched(s, "reply finished", { cwd: tree, title: "Finished feature" });
+	expect(Bun.spawnSync([`${s.bin}/swb`, "drive", "start"], { env: s.env, cwd: tree }).exitCode).toBe(0);
+	await cursorTo(s, id);
+	s.keys("a");
+	await waitState(s, "archive choice", (st) => st.mode === "archive");
+	await until(() => s.screen().includes("Archive; delete worktree"), budgets.settle, "delete button");
+	// Aimed from the screen as it was before another session in the tree lands above this one, pushing the prompt down
+	// a row: the old cell is now "Archive; keep worktree".
+	const lines = s.screen().split("\n");
+	const y = lines.findIndex((line) => line.includes("Archive; delete worktree"));
+	const x = (lines[y] as string).indexOf("Archive; delete worktree") + 4;
+	await launched(s, "reply shared", { cwd: tree, title: "Still using it" });
+	await until(
+		() =>
+			s
+				.screen()
+				.split("\n")
+				.findIndex((line) => line.includes("Archive; delete worktree")) ===
+			y + 1,
+		budgets.settle,
+		"the prompt a row lower",
+	);
+	s.swb("__deck", "aim", "Archive; delete worktree");
+	s.swb("drive", "click", String(x), String(y));
+	const dropped = await waitState(s, "the stale press judged", (st) => st.aim?.outcome != null);
+	expect(dropped).toMatchObject({ aim: { outcome: "missed" }, mode: "archive" });
+	expect(entry(s, id).open).toBe(true);
+	click(s, "Archive; delete worktree");
+	await waitState(s, "the delete refused for the sharer", (st) => st.toasts.some((t) => t.text.includes("Still using it")));
+	expect(entry(s, id).open).toBe(true);
+});
 
 test("the clickable archive choice preserves ordinary archives and refuses dirty, locked, or shared worktrees", async () => {
 	s = scenario("archive-worktree", "deck");
@@ -135,11 +173,7 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 			(st) => !st.rows.some((r) => r.kind === "session" && r.id === other && r.state !== "archived"),
 		);
 	};
-	const clickDelete = () => {
-		const lines = s.screen().split("\n");
-		const y = lines.findIndex((line) => line.includes("Archive; delete worktree"));
-		s.swb("drive", "click", String((lines[y] as string).indexOf("Archive; delete worktree") + 1), String(y));
-	};
+	const clickDelete = () => click(s, "Archive; delete worktree");
 	await ask();
 	s.keys("Escape");
 	await waitState(s, "cancelled", (st) => st.mode === "roster");
@@ -178,8 +212,6 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 	expect(entry(s, id).open).toBe(true);
 	git(s, s.project, "worktree", "unlock", tree);
 	const other = await launched(s, "reply shared", { cwd: tree, title: "Still using it" });
-	// launched() sees it in the db; its row lands on the Deck a poll later, above this one, moving the prompt under a click.
-	await waitState(s, "the sharer on the Deck", (st) => st.rows.some((r) => r.kind === "session" && r.id === other));
 	await cursorTo(s, id);
 	await ask();
 	clickDelete();
@@ -188,6 +220,7 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 	expect(existsSync(tree)).toBe(true);
 	await archive(other);
 	writeFileSync(join(s.home, "e2e-signals/start.hold"), "");
+	const startedAt = Date.now();
 	const starting = swbIn(s, "reply starting", "launch", "--harness", "pi", "--cwd", tree);
 	await until(() => s.signal("start.entered") !== "", ready, "peer starting before registration");
 	await ask();
@@ -198,7 +231,7 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 	const started = await starting;
 	expect(started.code).toBe(0);
 	const startingId = JSON.parse(started.out).details.id as string;
-	await settled(s, startingId, "starting peer idle");
+	await settled(s, startingId, "starting peer idle", startedAt);
 	await archive(startingId);
 	// A launch another session set into the worktree holds it; the one the archived session sets goes with it.
 	const planner = await launched(s, "reply planner", { cwd: s.project, title: "Planner" });
@@ -249,10 +282,7 @@ test("the clickable archive choice preserves ordinary archives and refuses dirty
 	await ask();
 	// The prompt counts the family as the Deck sees it, which can be a snapshot behind the launches.
 	await until(() => s.screen().includes("Family (3); delete worktree"), budgets.settle, "the whole family offered");
-	const lines = s.screen().split("\n");
-	const y = lines.findIndex((line) => line.includes("Family (3); delete worktree"));
-	expect(y).toBeGreaterThan(0);
-	s.swb("drive", "click", String((lines[y] as string).indexOf("Family (3)") + 1), String(y));
+	click(s, "Family (3); delete worktree");
 	// Its own scheduled launch goes with it, once it says so.
 	await waitState(s, "the schedule it cancels", (st) => st.archive?.cancels?.includes("Own follow-up") ?? false);
 	s.keys("a");

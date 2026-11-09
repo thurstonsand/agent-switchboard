@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { VERSION } from "../../packages/cli/src/version.ts";
+import { replied, settled } from "./harness/agents.ts";
 import { cursorTo, entry, piSessions, reply, seed, sessionRows, waitState } from "./harness/deck.ts";
 import { alive, budgets, release, repo, type Scenario, scenario, until } from "./harness/index.ts";
 
@@ -20,6 +21,7 @@ test("session_launch starts a managed pi Session that records its parent, and me
 	await reply(s, "parent");
 	const [parent] = s.ls().map((e) => e.id) as [string];
 
+	let since = Date.now();
 	s.keys("-l", "handoff h1", "Enter");
 	await until(() => s.signal("child.h1.entered") !== "", budgets.piReady, "the handoff child's first turn");
 	const child = await until(() => s.ls().find((e) => e.id !== parent), budgets.settle, "the child tracked");
@@ -37,23 +39,21 @@ test("session_launch starts a managed pi Session that records its parent, and me
 	);
 	expect(entry(s, child.id).activity).toBe("working");
 	release(s, "child.h1");
-	await until(() => s.signal("replied.m1") !== "", budgets.settle, "the child's answer to the steer");
-	await until(() => entry(s, child.id).activity === "idle", budgets.settle, "the child idle");
+	await replied(s, child.id, "m1", "the child's answer to the steer", since);
 	// And idle: the message starts the child's next turn.
+	since = Date.now();
 	s.keys("-l", `message ${child.id} i1`, "Enter");
-	await until(() => s.signal("replied.i1") !== "", budgets.settle, "the idle child's answer");
-	await until(() => entry(s, child.id).activity === "idle", budgets.settle, "the child idle again");
+	await replied(s, child.id, "i1", "the idle child's answer", since);
 
 	const host = s.query<{ tmux_session: string }>("select tmux_session from runtimes where session_id = ?", child.id)[0]?.tmux_session;
 	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(host as string));
 	await until(() => !entry(s, child.id).live, budgets.settle, "the child dormant");
+	since = Date.now();
 	s.keys("-l", `message ${child.id} w1`, "Enter");
-	await until(() => s.signal("replied.w1") !== "", budgets.piReady, "the woken child's reply");
+	await replied(s, child.id, "w1", "the woken child's reply", since);
 	expect(entry(s, child.id)).toMatchObject({ open: true, live: true });
 	expect(piSessions(s)).toHaveLength(2);
 	s.save("woken.txt", `${s.screen()}\n${JSON.stringify(s.ls(), null, 2)}`);
-
-	await until(() => entry(s, child.id).activity === "idle", budgets.settle, "the woken child idle");
 
 	// A clean quit closes the pane of a child no Deck started, as it does one a Deck did.
 	const woken = s.query<{ tmux_session: string }>("select tmux_session from runtimes where session_id = ?", child.id)[0]
@@ -67,10 +67,10 @@ test("session_launch starts a managed pi Session that records its parent, and me
 		"the child's pane closed",
 	);
 	s.swb("unarchive", child.id);
+	since = Date.now();
 	s.keys("-l", `message ${child.id} w2`, "Enter");
-	await until(() => s.signal("replied.w2") !== "", budgets.piReady, "the unarchived child woken");
+	await replied(s, child.id, "w2", "the unarchived child woken", since);
 	expect(entry(s, child.id)).toMatchObject({ open: true, live: true });
-	await until(() => entry(s, child.id).activity === "idle", budgets.settle, "the rewoken child idle");
 	s.swb("archive", child.id);
 	expect(s.swbTry("wake", child.id).err.trim()).toBe(`swb: wake: ${child.id} is archived; swb unarchive ${child.id}`);
 });
@@ -119,6 +119,7 @@ test("a newer swb takes over: idle pis stop, a working one keeps its turn, and e
 		budgets.settle,
 		"a's draft typed",
 	);
+	const since = Date.now();
 	s.tmux(sessions, "send-keys", "-t", s.pane(hostB), "-l", "hold u1");
 	s.tmux(sessions, "send-keys", "-t", s.pane(hostB), "Enter");
 	await until(() => s.signal("u1.entered") !== "", budgets.piReady, "b mid-turn");
@@ -138,7 +139,7 @@ test("a newer swb takes over: idle pis stop, a working one keeps its turn, and e
 	// A working harness keeps the server up, reloaded in place.
 	expect(pid(sessions)).toBe(before);
 	release(s, "u1");
-	await until(() => entry(s, b).activity === "idle", budgets.settle, "b's turn done");
+	await settled(s, b, "b's turn done", since);
 	s.save("upgraded.txt", s.screen());
 
 	s.tmux(sessions, "set", "-g", "@swb_version", "99.0.0");

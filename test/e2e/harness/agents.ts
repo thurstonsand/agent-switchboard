@@ -30,6 +30,7 @@ export async function launched(
 	from?: string,
 	flags: string[] = [],
 ): Promise<LsEntry> {
+	const since = Date.now();
 	const out = JSON.parse(
 		await Bun.spawn(
 			[
@@ -51,17 +52,19 @@ export async function launched(
 		).stdout.text(),
 	) as { details: { id: string } };
 	const id = out.details.id;
-	await settled(s, id, `the ${harness ?? "carried"} session's first turn to settle`);
+	await settled(s, id, `the ${harness ?? "carried"} session's first turn to settle`, since);
 	return entry(s, id);
 }
 
 /**
- * Waits until a session's turn is over, for swb and for the harness's own TUI. Codex's app-server settles a turn before
- * its TUI does, and until then the TUI refuses /new and /compact, and takes a prompt into the finishing turn, which can
- * end without it. The TUI puts its own status after the thread id in its pane title.
+ * Waits until a session's turn that ran at or after `since` is over, for swb and for the harness's own TUI. Idle from
+ * before `since` doesn't count, so a turn typed a moment ago and not yet recorded isn't taken for over: take it after
+ * the turn before was over, and before whatever starts this one. Codex's
+ * app-server settles a turn before its TUI does, and until then the TUI refuses /new and /compact, and takes a prompt
+ * into the finishing turn, which can end without it. The TUI puts its own status after the thread id in its pane title.
  */
-export async function settled(s: Scenario, id: string, what: string): Promise<void> {
-	const { harness } = await until(() => s.ls().find((e) => e.id === id && e.activity === "idle"), ready, what);
+export async function settled(s: Scenario, id: string, what: string, since: number): Promise<void> {
+	const { harness } = await until(() => s.ls().find((e) => e.id === id && e.activity === "idle" && e.activityAt >= since), ready, what);
 	if (harness === "codex")
 		await until(
 			() =>
@@ -72,6 +75,22 @@ export async function settled(s: Scenario, id: string, what: string): Promise<vo
 			ready,
 			`${what}, in Codex's TUI`,
 		);
+}
+
+/**
+ * Waits until a session's pane shows `text` and the turn that drew it, run at or after `since`, is over. What a session
+ * draws comes ahead of what its line records, so a step that reads swb's records, or types into the session, waits for
+ * this. A wait on the pane alone is for something drawn mid-turn, such as a dialog.
+ */
+export async function answered(s: Scenario, id: string, text: string, what: string, since: number): Promise<void> {
+	await until(() => pane(s, id).includes(text), ready, what);
+	await settled(s, id, `${what}, its turn over`, since);
+}
+
+/** As answered, for a pi turn the faux provider answers, which it signals as `replied.<marker>`. */
+export async function replied(s: Scenario, id: string, marker: string, what: string, since: number): Promise<void> {
+	await until(() => s.signal(`replied.${marker}`) !== "", ready, what);
+	await settled(s, id, `${what}, its turn over`, since);
 }
 
 /** Sends a message the way session_send_message does, from a session, and returns swb's receipt. */
@@ -107,10 +126,12 @@ export function pane(s: Scenario, id: string): string {
 }
 
 /**
- * Types a prompt into a session's own TUI, as a person would. Pasted, so a TUI that reads it late still sees the Enter
- * as its own key: Codex takes keys arriving with a burst of typing as part of a paste, and leaves the prompt unsent.
+ * Types a prompt into a session's own TUI, as a person would, and returns when it began, for `settled` and `answered`.
+ * Pasted, so a TUI that reads it late still sees the Enter as its own key: Codex takes keys arriving with a burst of
+ * typing as part of a paste, and leaves the prompt unsent.
  */
-export function type(s: Scenario, id: string, text: string): void {
+export function type(s: Scenario, id: string, text: string): number {
+	const at = Date.now();
 	const [runtime] = s.query<{ tmux_session: string; harness: string }>(
 		"select tmux_session, harness from runtimes where session_id = ?",
 		id,
@@ -121,6 +142,7 @@ export function type(s: Scenario, id: string, text: string): void {
 	s.tmux(s.servers.sessions, "paste-buffer", "-p", "-d", "-b", "e2e-type", "-t", target);
 	if (runtime.harness === "codex") Bun.sleepSync(300);
 	s.tmux(s.servers.sessions, "send-keys", "-t", target, "Enter");
+	return at;
 }
 
 export async function cardEndings(s: Scenario, harness: "pi" | "claude" | "codex"): Promise<void> {

@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { cursorTo, entry, piSessions, seed, state, waitState } from "./harness/deck.ts";
+import { cursorTo, entry, piSessions, seed, state, waitState, whileHeld } from "./harness/deck.ts";
 import { alive, budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -75,9 +75,11 @@ test("a roster killed while its wake waits on the launch lock doesn't wedge late
 		const { value } = await holder.stdout.getReader().read();
 		expect(new TextDecoder().decode(value)).toContain("held");
 		s.swb("drive", "start");
-		await cursorTo(s, a);
-		s.keys("w");
-		await waitState(s, "loading", (x) => x.staged.kind === "loading", 2000);
+		await whileHeld(s, async () => {
+			await cursorTo(s, a);
+			s.keys("w");
+			await waitState(s, "loading", (x) => x.staged.kind === "loading", 2000);
+		});
 		const rosterPid = Number(s.tmux(s.servers.sessions, "display", "-p", "-t", "=deck:.0", "#{pane_pid}"));
 		process.kill(rosterPid, "SIGKILL");
 		await until(() => !alive(rosterPid), budgets.settle, "the roster gone");

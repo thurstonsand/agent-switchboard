@@ -1,9 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { settled } from "./harness/agents.ts";
 import { closeDeck, waitState } from "./harness/deck.ts";
 import { budgets, repo, type Scenario, scenario, until } from "./harness/index.ts";
-import { entry, prompt, runtimes, startManaged, waitFor } from "./harness/recorder.ts";
+import { prompt, runtimes, startManaged, waitFor } from "./harness/recorder.ts";
 
 let s: Scenario;
 afterEach(async () => {
@@ -94,8 +95,7 @@ test("a session live in one managed pi cannot be opened in another", async () =>
 	s = scenario("phase1", "single-host");
 	const first = await startManaged(s);
 	await prompt(s, "/name Only here");
-	await prompt(s, "reply once");
-	await until(() => entry(s, first.session_id)?.activity === "idle", budgets.settle, "the first turn");
+	await settled(s, first.session_id, "the first turn", await prompt(s, "reply once"));
 
 	const second = launchBeside("second", "");
 	await until(() => second().includes("faux-1"), budgets.piReady, "the second pi");

@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { commands, host, launched, pane, ready, send, type } from "./harness/agents.ts";
-import { config, cursorTo, entry, seed, state, waitState } from "./harness/deck.ts";
+import { answered, commands, host, launched, ready, send, settled, type } from "./harness/agents.ts";
+import { click, config, cursorTo, entry, seed, state, waitState } from "./harness/deck.ts";
 import { budgets, git, gitRepo, gitWorktree, release, type Scenario, scenario, until } from "./harness/index.ts";
 
 // Claude Code and Codex, as swb hosts them: the real TUIs in the sessions server, scripted by fake model servers.
@@ -22,19 +22,22 @@ afterEach(async () => {
 
 test("Codex's /new moves its host to the new thread: that one is recorded, and the old one goes dormant", async () => {
 	s = scenario("harnesses", "codex-new", { packages: [], recorder: true, harnesses: ["codex"] });
+	const launchedAt = Date.now();
 	const first = await launched(s, "codex", "reply first thread");
 	const hostName = host(s, first.id);
 	expect(first).toMatchObject({ harness: "codex", open: true, live: true, cwd: s.project, activity: "idle" });
 	expect(s.tmux(s.servers.sessions, "display", "-p", "-t", s.pane(hostName), "#{pane_title}")).toStartWith(first.id.slice(0, 29));
-	await until(() => pane(s, first.id).includes("first thread"), budgets.settle, "the reply on screen");
+	await answered(s, first.id, "first thread", "the reply on screen", launchedAt);
 	await until(() => entry(s, first.id).title === "First thread", budgets.settle, "titled by Codex's own title generator");
 	type(s, first.id, "/new");
 	await Bun.sleep(1000);
+	const since = Date.now();
 	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(hostName), "-l", "reply second thread");
 	await Bun.sleep(300);
 	s.tmux(s.servers.sessions, "send-keys", "-t", s.pane(hostName), "Enter");
 	const second = await until(
-		() => s.ls().find((e) => e.harness === "codex" && e.id !== first.id && e.activity === "idle" && e.title !== null),
+		() =>
+			s.ls().find((e) => e.harness === "codex" && e.id !== first.id && e.activity === "idle" && e.activityAt >= since && e.title !== null),
 		ready,
 		"the new thread's first turn recorded and titled",
 	);
@@ -42,22 +45,20 @@ test("Codex's /new moves its host to the new thread: that one is recorded, and t
 	expect(entry(s, first.id)).toMatchObject({ live: false, open: true });
 	expect(s.tmux(s.servers.sessions, "display", "-p", "-t", s.pane(hostName), "#{pane_title}")).toStartWith(second.id.slice(0, 29));
 	// Messages follow the thread the pane shows now.
+	const sent = Date.now();
 	expect((await send(s, first.id, second.id, "SWB-after-new please ack")).details.delivered).toBe(true);
-	await until(
-		() => s.tmux(s.servers.sessions, "capture-pane", "-p", "-t", s.pane(hostName)).includes("got SWB-after-new"),
-		ready,
-		"the new thread answering",
-	);
+	await answered(s, second.id, "got SWB-after-new", "the new thread answering", sent);
 });
 
 test("Claude Code's /clear moves its host to the new session before its first prompt, and the old one goes dormant", async () => {
 	s = scenario("harnesses", "claude-clear", { packages: [], recorder: true, harnesses: ["claude"] });
+	const launchedAt = Date.now();
 	const first = await launched(s, "claude", "reply first session");
 	const hostName = host(s, first.id);
 	expect(first).toMatchObject({ harness: "claude", open: true, live: true, cwd: s.project, parentId: null, activity: "idle" });
 	const [row] = s.query<{ transcript: string }>("select transcript from sessions where session_id = ?", first.id);
 	expect(existsSync(row?.transcript as string)).toBe(true);
-	await until(() => pane(s, first.id).includes("first session"), budgets.settle, "the reply on screen");
+	await answered(s, first.id, "first session", "the reply on screen", launchedAt);
 	type(s, first.id, "/clear");
 	await until(
 		() =>
@@ -116,16 +117,8 @@ test("the Deck's n opens on the default preset, puts its real TUI on the Stage, 
 	await waitState(s, "Codex chosen", (x) => x.picker?.harness === "codex" && x.picker.menu === null);
 	s.keys("Tab");
 	await waitState(s, "the menu again", (x) => x.picker?.menu !== null);
-	const keep = await until(
-		() => {
-			const lines = s.screen().split("\n");
-			const y = lines.findIndex((line) => /╭─ Preset.* esc ─╮/.test(line));
-			return y >= 0 && { y, x: (lines[y] as string).indexOf(" esc ─╮") + 2 };
-		},
-		budgets.settle,
-		"the preset card's esc",
-	);
-	s.swb("drive", "click", String(keep.x), String(keep.y));
+	await until(() => /╭─ Preset.* esc ─╮/.test(s.screen()), budgets.settle, "the preset card's esc");
+	click(s, "esc ─╮");
 	const kept = await waitState(s, "the menu closed", (x) => x.picker?.menu === null && x.launch?.card?.[1]?.includes("codex") === true);
 	expect(kept.picker?.harness).toBe("codex");
 	s.keys("Tab");
@@ -141,10 +134,12 @@ test("the Deck's n opens on the default preset, puts its real TUI on the Stage, 
 	const st = await waitState(s, "Claude on the Stage", (x) => x.staged.kind === "live" && x.focus === "stage", ready);
 	const id = st.staged.id as string;
 	await until(() => s.screen().includes("Claude Code"), budgets.settle, "Claude's TUI in the Stage");
+	const since = Date.now();
 	s.keys("-l", "reply SWB-from-the-deck");
 	await Bun.sleep(300);
 	s.keys("Enter");
-	await until(() => s.ls().find((e) => e.id === id && e.harness === "claude" && e.activity === "idle"), ready, "Claude's turn recorded");
+	await settled(s, id, "Claude's turn recorded", since);
+	expect(entry(s, id).harness).toBe("claude");
 	await until(() => s.screen().includes("SWB-from-the-deck"), budgets.settle, "the reply in the Stage");
 	s.save("claude-stage.txt", s.screen());
 
@@ -260,15 +255,21 @@ test("session_launch with no preset carries the caller's harness and model forwa
 	const call = (title: string) => `call session_launch {"briefing":"reply ${title}","title":"${title}","report_back":false}`;
 	/** The model of a Claude Code session's latest request, as its line saw it go out. */
 	const claudeModel = (id: string) => s.query<{ model: string }>("select model from sessions where session_id = ?", id)[0]?.model;
-	const child = (parent: string, title: string) =>
-		until(() => s.ls().find((e) => e.parentId === parent && e.title === title && e.activity === "idle"), ready, `${title} launched`);
+	const child = (parent: string, title: string, since: number) =>
+		until(
+			() => s.ls().find((e) => e.parentId === parent && e.title === title && e.activity === "idle" && e.activityAt >= since),
+			ready,
+			`${title} launched`,
+		);
 
+	let since = Date.now();
 	const pi = await launched(s, "pi", call("from pi"));
-	expect(await child(pi.id, "from pi")).toMatchObject({ harness: "pi" });
+	expect(await child(pi.id, "from pi", since)).toMatchObject({ harness: "pi" });
 
+	since = Date.now();
 	const opus = await launched(s, "claude", call("from opus"), undefined, ["--model", "opus"]);
 	expect(claudeModel(opus.id)).toContain("opus");
-	const carried = await child(opus.id, "from opus");
+	const carried = await child(opus.id, "from opus", since);
 	expect(carried.harness).toBe("claude");
 	expect(claudeModel(carried.id)).toContain("opus");
 });
@@ -288,28 +289,33 @@ test("session_launch and a scheduled launch, from pi, Claude Code, or Codex, sta
 		for (const [name, group, expected] of cases) {
 			const title = `${parent.harness} ${name}`;
 			const asked = group === undefined ? "" : `,"group":${JSON.stringify(group)}`;
-			type(s, parent.id, `call session_launch {"harness":"pi","briefing":"reply ${title}","title":"${title}"${asked},"report_back":false}`);
+			const since = type(
+				s,
+				parent.id,
+				`call session_launch {"harness":"pi","briefing":"reply ${title}","title":"${title}"${asked},"report_back":false}`,
+			);
 			const child = await until(
-				() => s.ls().find((e) => e.parentId === parent.id && e.title === title && e.activity === "idle"),
+				() => s.ls().find((e) => e.parentId === parent.id && e.title === title && e.activity === "idle" && e.activityAt >= since),
 				ready,
 				`${title} launched`,
 			);
 			expect(child.group).toBe(expected);
-			await until(() => entry(s, parent.id).activity === "idle", ready, `${parent.harness} done launching ${name}`);
+			await settled(s, parent.id, `${parent.harness} done launching ${name}`, since);
 			s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(host(s, child.id)));
 		}
+	const scheduling = Date.now();
 	for (const parent of parents) {
 		const title = `${parent.harness} scheduled`;
-		type(
+		const since = type(
 			s,
 			parent.id,
 			`call session_launch {"harness":"pi","briefing":"reply ${title}","title":"${title}","group":"night shift","report_back":false,"at":"PT1S","schedule_label":"now"}`,
 		);
-		await until(() => entry(s, parent.id).activity === "idle", ready, `${parent.harness} done scheduling`);
+		await settled(s, parent.id, `${parent.harness} done scheduling`, since);
 	}
 	const fired = await until(
 		() => {
-			const children = s.ls().filter((e) => e.title?.endsWith(" scheduled") && e.activity === "idle");
+			const children = s.ls().filter((e) => e.title?.endsWith(" scheduled") && e.activity === "idle" && e.activityAt >= scheduling);
 			return children.length === 3 && children;
 		},
 		ready,
@@ -339,13 +345,14 @@ test("sessions an agent starts in a worktree no harness has trusted start, and a
 			mkdirSync(join(dir, ".pi"));
 			writeFileSync(join(dir, ".pi/settings.json"), "{}\n");
 		}
+		const since = Date.now();
 		const launch = Bun.spawnSync([join(s.bin, "swb"), "launch", "--harness", harness, "--cwd", dir, "--from", parent.id], {
 			env: s.env,
 			stdin: new Blob([`reply SWB-unseen-${harness}`]),
 		});
 		expect(launch.stderr.toString()).toBe("");
 		ids[harness] = (JSON.parse(launch.stdout.toString()).details as { id: string }).id;
-		await until(() => entry(s, ids[harness])?.activity === "idle", ready, `${harness}'s first turn`);
+		await settled(s, ids[harness], `${harness}'s first turn`, since);
 	}
 	expect(String(s.requests("codex").find((r) => String(r.context).includes("SWB-unseen-codex"))?.context)).toContain("SWB-trusted-codex");
 	// Claude Code's own key for a worktree: its main checkout, which covers the worktree and the checkout alike.
@@ -374,9 +381,13 @@ test("on a code-mode-only model, Codex offers swb's tools directly, beside its o
 	const [first] = s.requests("codex") as { model: string; tools: string[] }[];
 	expect(first?.model).toBe("gpt-6-sol");
 	expect(first?.tools).toEqual(expect.arrayContaining(["exec", "spawn_agent", "session_launch", "session_send_message"]));
-	type(s, parent.id, `call session_launch {"harness":"pi","briefing":"reply from code mode","title":"from code mode","report_back":false}`);
+	const since = type(
+		s,
+		parent.id,
+		`call session_launch {"harness":"pi","briefing":"reply from code mode","title":"from code mode","report_back":false}`,
+	);
 	const child = await until(
-		() => s.ls().find((e) => e.parentId === parent.id && e.title === "from code mode" && e.activity === "idle"),
+		() => s.ls().find((e) => e.parentId === parent.id && e.title === "from code mode" && e.activity === "idle" && e.activityAt >= since),
 		ready,
 		"the child launched",
 	);
@@ -434,10 +445,11 @@ test("a Claude Code session's effort carries into what it launches, live or dorm
 	const runs = (id: string) => s.query<{ model: string; effort: string }>("select model, effort from sessions where session_id = ?", id)[0];
 	const call = (title: string) => `call session_launch {"briefing":"reply ${title}","title":"${title}","report_back":false}`;
 
+	const launchedAt = Date.now();
 	const opus = await launched(s, "claude", call("live"), undefined, ["--model", "opus", "--effort", "high"]);
 	expect(runs(opus.id)).toEqual({ model: expect.stringContaining("opus"), effort: "high" });
 	const live = await until(
-		() => s.ls().find((e) => e.parentId === opus.id && e.title === "live" && e.activity === "idle"),
+		() => s.ls().find((e) => e.parentId === opus.id && e.title === "live" && e.activity === "idle" && e.activityAt >= launchedAt),
 		ready,
 		"the live caller's launch",
 	);
@@ -448,11 +460,12 @@ test("a Claude Code session's effort carries into what it launches, live or dorm
 	const dormant = await launched(s, null, "reply dormant", opus.id);
 	expect(runs(dormant.id)).toEqual({ model: expect.stringContaining("opus"), effort: "high" });
 
+	const sent = Date.now();
 	expect((await send(s, dormant.id, opus.id, "reply woken")).text).toBeTruthy();
 	await until(
 		() =>
 			s.requests("claude").some((r) => String(r.prompt).includes("reply woken")) &&
-			s.ls().find((e) => e.id === opus.id && e.live && e.activity === "idle"),
+			s.ls().find((e) => e.id === opus.id && e.live && e.activity === "idle" && e.activityAt >= sent),
 		ready,
 		"the woken caller's turn",
 	);

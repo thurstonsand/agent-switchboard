@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState, HeaderStateRow } from "../../packages/cli/src/deck/protocol.ts";
-import { cursorTo, entry, headerRows, pickNew, reply, seed, sessionRows, state, waitState } from "./harness/deck.ts";
+import { click, cursorTo, entry, headerRows, pickNew, reply, seed, sessionRows, state, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -70,10 +70,10 @@ test("roster navigation: h l space and a header click fold projects; g G jump; M
 		.split("\n")
 		.findIndex((line) => line.includes("▾ other"));
 	expect(otherLine).toBeGreaterThan(-1);
-	s.swb("drive", "click", "3", String(otherLine));
+	click(s, "other", [3, otherLine]);
 	await waitState(s, "other folded by a click", (x) => header("other")(x)?.expanded === false);
 	s.save("folded.txt", s.screen());
-	s.swb("drive", "click", "3", String(otherLine));
+	click(s, "other", [3, otherLine]);
 	await waitState(s, "other open by a click", (x) => header("other")(x)?.expanded === true);
 	// Two clicks on one cell are a double click, which tmux holds back to rule out a triple; firing late, it resets a
 	// prefix pressed in the meantime.
@@ -81,7 +81,7 @@ test("roster navigation: h l space and a header click fold projects; g G jump; M
 
 	await cursorTo(s, b);
 	await waitState(s, "b live on the Stage", (x) => x.staged.id === b && x.staged.kind === "live");
-	s.swb("drive", "click", "6", String(otherLine + 1));
+	click(s, b.slice(0, 8), [6, otherLine + 1]);
 	await waitState(s, "one click on b focuses its pi", (x) => x.focus === "stage" && x.staged.id === b);
 	await Bun.sleep(500);
 	s.keys("M-a", "h");
@@ -114,7 +114,7 @@ test("roster navigation: h l space and a header click fold projects; g G jump; M
 	const lines = s.screen().split("\n");
 	const hint = lines.findIndex((line) => line.includes("hide"));
 	expect(hint).toBeGreaterThan(-1);
-	s.swb("drive", "click", String((lines[hint] as string).indexOf("hide")), String(hint));
+	click(s, "hide", [(lines[hint] as string).indexOf("hide"), hint]);
 	await waitState(s, "the legend's hide list clicked", (x) => x.layout.rosterHidden);
 	s.keys("M-a", "z");
 	await waitState(s, "the roster back", (x) => !x.layout.rosterHidden);
@@ -248,7 +248,7 @@ test("[ and ] step back and forward through the sessions I visited, from the ros
 	const screen = s.screen().split("\n");
 	const legendY = screen.findLastIndex((line) => line.includes("] forward"));
 	s.save("history-legend.txt", screen[legendY] as string);
-	s.swb("drive", "click", String((screen[legendY] as string).indexOf("]")), String(legendY));
+	click(s, "]", [(screen[legendY] as string).indexOf("]"), legendY]);
 	await waitState(s, "the legend's › forward to c", (x) => x.staged.id === c && x.cursor === c);
 
 	// A snoozed session is still somewhere I've been.

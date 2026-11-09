@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { appendFileSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState } from "../../packages/cli/src/deck/protocol.ts";
-import { cursorTo, entry, seed, state, waitState } from "./harness/deck.ts";
+import { cursorTo, entry, seed, state, waitState, whileHeld } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -81,17 +81,19 @@ test("with the db writer lock held and a 50 MB transcript being parsed, the curs
 		const { value } = await holder.stdout.getReader().read();
 		expect(new TextDecoder().decode(value)).toContain("held");
 		s.swb("drive", "start");
-		await cursorTo(s, a);
-		// Its wake blocks the worker on the held write lock for the whole busy timeout.
-		s.keys("w");
-		await waitState(s, "loading", (x) => x.staged.kind === "loading", 2000);
-		const t0 = performance.now();
-		await cursorTo(s, b);
-		const during = await latencies(8);
-		const measuredMs = performance.now() - t0;
-		await cursorTo(s, b);
-		await until(() => s.screen().includes("after-the-bulk"), 30_000, "the huge card");
-		const cardMs = performance.now() - t0;
+		const { during, measuredMs, cardMs } = await whileHeld(s, async () => {
+			await cursorTo(s, a);
+			// Its wake blocks the worker on the held write lock for the whole busy timeout.
+			s.keys("w");
+			await waitState(s, "loading", (x) => x.staged.kind === "loading", 2000);
+			const t0 = performance.now();
+			await cursorTo(s, b);
+			const during = await latencies(8);
+			const measuredMs = performance.now() - t0;
+			await cursorTo(s, b);
+			await until(() => s.screen().includes("after-the-bulk"), 30_000, "the huge card");
+			return { during, measuredMs, cardMs: performance.now() - t0 };
+		});
 		s.save("latencies.json", JSON.stringify({ during, measuredMs, cardMs }, null, 2));
 		expect(Math.max(...during)).toBeLessThan(100);
 		expect(cardMs).toBeGreaterThan(measuredMs);

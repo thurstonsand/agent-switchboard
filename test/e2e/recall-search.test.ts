@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { launched, pane, subagentDone, type } from "./harness/agents.ts";
+import { answered, launched, pane, settled, subagentDone, type } from "./harness/agents.ts";
 import { entry } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
@@ -38,7 +38,7 @@ async function searched(caller: { id: string; harness: Harness }, query: string)
 			| undefined;
 	};
 	const before = seen();
-	type(s, caller.id, prompt);
+	const since = type(s, caller.id, prompt);
 	const output = await until(
 		() => {
 			const now = seen();
@@ -47,7 +47,7 @@ async function searched(caller: { id: string; harness: Harness }, query: string)
 		budgets.piReady,
 		`${caller.harness}'s session_search for ${query}`,
 	);
-	await until(() => entry(s, caller.id).activity === "idle", budgets.settle, `${caller.harness} caller idle`);
+	await settled(s, caller.id, `${caller.harness} caller idle`, since);
 	s.save(`search-${caller.harness}-${query.replace(/[^\w-]+/g, "_")}.txt`, output);
 	return output;
 }
@@ -110,8 +110,8 @@ test("each harness's session_search finds the others' conversations, filters the
 	}
 
 	// A turn that just landed, before anything else could have indexed it.
-	type(s, codex.id, "reply SWB-fresh-codex");
-	await until(() => entry(s, codex.id).activity === "idle", budgets.settle, "Codex's fresh turn");
+	const fresh = type(s, codex.id, "reply SWB-fresh-codex");
+	await settled(s, codex.id, "Codex's fresh turn", fresh);
 	expect(await searched(pi, "SWB-fresh-codex")).toContain(codex.id);
 
 	s.swb("archive", claude.id);
@@ -133,11 +133,11 @@ test("a Claude Code subagent's transcript is its parent's evidence, and session_
 	const parent = { ...(await launched(s, "claude", "reply parent ready")), harness: "claude" as const };
 	const searcher = { ...(await launched(s, "pi", "reply searcher ready")), harness: "pi" as const };
 	const subagent = { description: "Find the beacon", subagent_type: "general-purpose", prompt: "reply SWB-subagent-beacon" };
-	type(s, parent.id, `call Agent ${JSON.stringify(subagent)}`);
+	let since = type(s, parent.id, `call Agent ${JSON.stringify(subagent)}`);
 	await subagentDone(s, parent.id, subagent.description);
-	type(s, parent.id, `ask-id ${target.id} :: Which marker?`);
-	await until(() => pane(s, parent.id).includes("recalled: reader found: SWB-subagent-target"), budgets.piReady, "the reader's answer");
-	await until(() => entry(s, parent.id).activity === "idle", budgets.settle, "parent idle");
+	await settled(s, parent.id, "the subagent's handback turn over", since);
+	since = type(s, parent.id, `ask-id ${target.id} :: Which marker?`);
+	await answered(s, parent.id, "recalled: reader found: SWB-subagent-target", "the reader's answer", since);
 
 	const found = await searched(searcher, "SWB-subagent-beacon");
 	expect(found).toContain(parent.id);
