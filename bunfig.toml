@@ -1,0 +1,31 @@
+[install]
+# Resolve only package versions at least 3 days old, like Renovate's minimumReleaseAge. Renovate's
+# own lock refreshes run bun install too, and it passes no release age to bun itself.
+minimumReleaseAge = 259200
+# The same packages renovate.json exempts: the harnesses swb runs and Thurston's own packages take
+# each release the day it ships. Bun matches exact names, so each Pi package and each platform build
+# Claude Code installs is listed.
+minimumReleaseAgeExcludes = [
+	"@earendil-works/pi-agent-core",
+	"@earendil-works/pi-ai",
+	"@earendil-works/pi-codemode",
+	"@earendil-works/pi-coding-agent",
+	"@earendil-works/pi-mcp",
+	"@earendil-works/pi-schema",
+	"@earendil-works/pi-telemetry",
+	"@earendil-works/pi-tui",
+	"@anthropic-ai/claude-code",
+	"@anthropic-ai/claude-code-darwin-arm64",
+	"@anthropic-ai/claude-code-darwin-x64",
+	"@anthropic-ai/claude-code-linux-arm64",
+	"@anthropic-ai/claude-code-linux-arm64-musl",
+	"@anthropic-ai/claude-code-linux-x64",
+	"@anthropic-ai/claude-code-linux-x64-musl",
+	"@anthropic-ai/claude-code-win32-arm64",
+	"@anthropic-ai/claude-code-win32-x64",
+	"@anthropic-ai/claude-agent-sdk",
+	"@openai/codex",
+	"@openai/codex-sdk",
+	"pi-sessions",
+	"@thurstonsand/pi-wt",
+]
