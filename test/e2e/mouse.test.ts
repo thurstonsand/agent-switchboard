@@ -1,4 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
+import { existsSync, readlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { pane, type as prompt } from "./harness/agents.ts";
 import { cursorTo, entry, glide, launched, rowIndex, seed, state, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
@@ -442,6 +444,47 @@ test("a pointer on its way into a Peek keeps it across rows, headers, and empty 
 	await peekOn(second);
 	await glide(s, [sx, sy], [sx + 1, sy + 1], 20);
 	expect(state(s).hover).toBe(third);
+});
+
+test("a Peek created across a redraw still opens its row's Group form", async () => {
+	s = scenario("phase6", "peek-redraw");
+	const [id] = await seed(s, { turns: ["alpha"], title: "alpha" });
+	s.swb("drive", "start", "--size", "175x48");
+	await waitState(s, "the Deck up", (x) => x.ready);
+
+	// Hold the real tmux client's reply so a redraw lands while the Peek's pane is being created.
+	const tmux = join(s.bin, "tmux");
+	const real = readlinkSync(tmux);
+	unlinkSync(tmux);
+	writeFileSync(
+		tmux,
+		`#!/bin/sh
+case " $* " in
+*" new-pane "*)
+  '${real}' "$@" > '${s.root}/made' || exit $?
+  touch '${s.root}/waiting'
+  while [ ! -e '${s.root}/release' ]; do sleep 0.01; done
+  cat '${s.root}/made'
+  ;;
+*) exec '${real}' "$@" ;;
+esac
+`,
+		{ mode: 0o755 },
+	);
+	try {
+		s.swb("drive", "move", ...find("alpha"));
+		await until(() => existsSync(join(s.root, "waiting")), budgets.settle, "the Peek's pane created");
+		const renders = state(s).perf.render.n;
+		s.swb("drive", "focus", "out");
+		await waitState(s, "the unfocused Deck redrawn", (x) => !x.terminalFocused && x.perf.render.n > renders);
+	} finally {
+		writeFileSync(join(s.root, "release"), "");
+	}
+	await waitState(s, "alpha's Peek", (x) => x.peek?.id === id);
+	await onScreen("m Group…", "the Group button drawn");
+	s.swb("drive", "click", ...findRight("m Group…"));
+	await waitState(s, "alpha's Group form", (x) => x.mode === "name");
+	expect(menuUnder("Group")).toContain("alpha");
 });
 
 test("Archive and Snooze open under their row at any width, and the Stage's last message is not repeated", async () => {

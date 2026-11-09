@@ -287,6 +287,8 @@ export class Overlays {
 			this.shown.delete(o.id);
 			this.shown.set(o.id, s);
 		}
+		// A redraw during placement could not update floats that didn't exist yet.
+		this.sync(this.want);
 		await this.syncLeave();
 	}
 
