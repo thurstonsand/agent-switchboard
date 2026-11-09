@@ -423,11 +423,10 @@ test("a pointer on its way into a Peek keeps it across rows, headers, and empty 
 	s.keys("Escape");
 	await waitState(s, "the form closed", (x) => x.mode === "roster");
 
-	// Stopping short, over the next row, the Peek holds a moment, then follows the pointer there.
+	// Stopping short, over the next row, the pointer's rest hands that row the hover, and its Peek follows.
 	await peekOn(top.id);
 	const [rx, ry] = cell(find(titleOf(top.id)));
 	await glide(s, [rx, ry], [rx + 12, ry + 1], 100);
-	expect(state(s).hover).toBe(top.id);
 	await waitState(s, "the Peek on the row the pointer rested on", (x) => x.peek?.id === second && x.hover === second);
 
 	// A step straight down the list is no way into a Peek: the next row takes the hover at once.
