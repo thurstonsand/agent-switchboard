@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-11-09
+
 ### Changed
 
 - The footer's `⏎` stays put while a Peek shows, so moving with `j`/`k` no longer flickers it. The Peek drops its own `⏎` button; its title, which is its row, focuses on a click as the row does.
