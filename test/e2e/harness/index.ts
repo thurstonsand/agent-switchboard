@@ -385,6 +385,9 @@ function startFakes(root: string, home: string, harnesses: ("claude" | "codex")[
 			env.DISABLE_AUTOUPDATER = "1";
 			// Offline: no plugin marketplace download.
 			env.CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL = "1";
+			// Auto mode's built-in classifier, which the fake answers. Without this, whether Claude Code falls back to it
+			// behind a gateway depends on feature flags it fetches at runtime.
+			env.CLAUDE_CODE_AUTO_MODE_SERVER = "0";
 			mkdirSync(join(home, ".claude"), { recursive: true });
 			writeFileSync(
 				join(home, ".claude/settings.json"),
