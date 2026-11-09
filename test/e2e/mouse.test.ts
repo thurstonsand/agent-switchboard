@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { pane, type as prompt } from "./harness/agents.ts";
-import { cursorTo, entry, launched, rowIndex, seed, state, waitState } from "./harness/deck.ts";
+import { cursorTo, entry, glide, launched, rowIndex, seed, state, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 import { snoozeOf } from "./harness/schedules.ts";
 
@@ -82,8 +82,10 @@ test("cut-off Peek actions stay whole at wide and minimum detail widths", async 
 			.join(" ")
 			.replaceAll("│", " ")
 			.replace(/\s+/g, " ");
-		expect(actions).toContain("⏎ Resume unfinished turn");
 		expect(actions).toContain("w Wake in background");
+		expect(actions).not.toContain("Resume unfinished turn");
+		// The legend names what ⏎ does there, where it fits.
+		if (size === "175x48") expect(s.screen().trimEnd().split("\n").at(-1)).toContain("⏎ resume");
 		if (state(s).layout.rosterOnly) s.keys("i");
 	}
 });
@@ -279,8 +281,12 @@ test("a blocked Peek focuses its own session to respond, even while another row 
 		"the next-message snooze displayed",
 		(x) => x.peek?.lines.some((l) => l.includes("Snoozed until next message")) ?? false,
 	);
-	await peekButton("alpha", a, "⏎ Focus to respond");
-	await waitState(s, "alpha, not bravo, focused", (x) => x.staged.id === a && x.focus === "stage");
+	// The Peek's title is its row, run on across the divider: a click on it focuses, as one on the row does.
+	s.swb("drive", "move", ...find("alpha"));
+	await waitState(s, "alpha's Peek", (x) => x.peek?.id === a);
+	await Bun.sleep(350);
+	s.swb("drive", "click", "50", find("alpha")[1]);
+	await waitState(s, "alpha, not bravo, focused", (x) => x.staged.id === a && x.focus === "stage" && x.cursor === a);
 	await onScreen("Confirm deploy?", "the dialog ready for an answer");
 	s.keys("Enter");
 	await until(() => entry(s, a).activity === "idle", budgets.settle, "alpha answered");
@@ -311,6 +317,9 @@ test("a Peek follows the pointer and the cursor keys, leaves with the pointer, a
 	const footer = () => s.screen().trimEnd().split("\n").at(-1) as string;
 	expect(footer()).toContain("? keys");
 	expect(footer()).not.toContain("archive");
+	// ⏎ is the legend's alone, and names what it does on the Peek's row, which it acts on while the Peek shows.
+	expect(footer()).toContain("⏎ wake");
+	expect(hovered.peek?.lines.join("\n")).not.toContain("⏎");
 	expect(hovered.peek?.lines.join("\n")).not.toContain("All keys");
 	expect(s.swb("drive", "capture", "--ansi")).toMatch(/\[[\d;]*4mbravo/);
 	s.save("peek-hover.txt", s.screen());
@@ -349,9 +358,11 @@ test("a Peek follows the pointer and the cursor keys, leaves with the pointer, a
 	s.swb("drive", "move", "100", "35");
 	await until(() => !filled(Number(tabY), " editor"), budgets.settle, "the editor tab out once the pointer is on pi");
 
-	// The cursor's keys bring its Peek.
+	// The cursor's keys bring its Peek, and the legend keeps its ⏎ beside it.
 	s.keys(toB);
 	await waitState(s, "the cursor's Peek", (x) => x.cursor === b && x.peek?.id === b && x.peek.source === "cursor");
+	await onScreen("a Archive", "the cursor's Peek drawn");
+	expect(footer()).toContain("⏎ wake");
 	s.keys(toA);
 	await waitState(s, "the Peek following the cursor", (x) => x.cursor === a && x.peek?.id === a);
 	s.keys("Escape");
@@ -373,6 +384,65 @@ test("a Peek follows the pointer and the cursor keys, leaves with the pointer, a
 	s.keys("-l", "typed past the peek");
 	await waitState(s, "the Peek closed by the first key", (x) => x.peek === null);
 	await onScreen("typed past the peek", "every key in pi");
+});
+
+test("a pointer on its way into a Peek keeps it across rows, headers, and empty roster; one that rests, turns away, or steps to a row moves it", async () => {
+	s = scenario("phase6", "peek-aim");
+	const ids = (await seed(
+		s,
+		{ turns: ["alpha"], title: "alpha" },
+		{ turns: ["bravo"], title: "bravo" },
+		{ turns: ["charlie"], title: "charlie" },
+	)) as string[];
+	s.swb("drive", "start", "--size", "175x48");
+	await waitState(s, "the Deck up", (x) => x.ready);
+	const top = state(s).rows.find((r) => r.kind === "session");
+	if (top?.kind !== "session") throw new Error("no session row");
+	const [second, third] = ids.filter((id) => id !== top.id).sort((a, b) => rowIndex(state(s), a) - rowIndex(state(s), b)) as [
+		string,
+		string,
+	];
+	const titleOf = (id: string) => entry(s, id).title as string;
+
+	const cell = ([x, y]: [string, string]): [number, number] => [Number(x), Number(y)];
+	const peekOn = async (id: string) => {
+		s.swb("drive", "move", ...find(titleOf(id)));
+		await waitState(s, `${titleOf(id)}'s Peek`, (x) => x.peek?.id === id);
+		await onScreen("a Archive", "the Peek drawn");
+	};
+
+	// The top row's Peek hangs down past the other rows, the Archived section, and the empty roster under it: the
+	// straight line to its last button crosses all of them, and none takes the Peek away.
+	await peekOn(top.id);
+	await glide(s, cell(find(titleOf(top.id))), cell(findRight("m Group…")), 300);
+	await Bun.sleep(600);
+	expect(state(s).peek?.id).toBe(top.id);
+	s.swb("drive", "click", ...findRight("m Group…"));
+	await waitState(s, "the top row's Group form, from its Peek", (x) => x.mode === "name");
+	expect(menuUnder("Group")).toContain(titleOf(top.id));
+	s.keys("Escape");
+	await waitState(s, "the form closed", (x) => x.mode === "roster");
+
+	// Stopping short, over the next row, the Peek holds a moment, then follows the pointer there.
+	await peekOn(top.id);
+	const [rx, ry] = cell(find(titleOf(top.id)));
+	await glide(s, [rx, ry], [rx + 12, ry + 1], 100);
+	expect(state(s).hover).toBe(top.id);
+	await waitState(s, "the Peek on the row the pointer rested on", (x) => x.peek?.id === second && x.hover === second);
+
+	// A step straight down the list is no way into a Peek: the next row takes the hover at once.
+	await peekOn(top.id);
+	await glide(s, [rx, ry], [rx, ry + 1], 20);
+	expect(state(s).hover).toBe(second);
+	await waitState(s, "the Peek on the row below", (x) => x.peek?.id === second);
+
+	// Nor is a step to the next row up or down, drifting toward the Peek's side: the row stays easy to reach.
+	const [sx, sy] = cell(find(titleOf(second)));
+	await glide(s, [sx, sy], [sx + 3, sy - 1], 20);
+	expect(state(s).hover).toBe(top.id);
+	await peekOn(second);
+	await glide(s, [sx, sy], [sx + 1, sy + 1], 20);
+	expect(state(s).hover).toBe(third);
 });
 
 test("Archive and Snooze open under their row at any width, and the Stage's last message is not repeated", async () => {

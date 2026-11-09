@@ -15,6 +15,27 @@ export function state(s: Scenario): DeckState {
 	return JSON.parse(s.swb("drive", "state"));
 }
 
+/**
+ * Moves the driven terminal's pointer from one cell to another as a hand does, fast off the mark and slowing into the
+ * target, one report per cell it enters, as a terminal sends them; `swb drive move` takes too long for each to keep pace.
+ * Cells are as `swb drive move` takes them.
+ */
+export async function glide(s: Scenario, from: [number, number], to: [number, number], ms: number): Promise<void> {
+	const [[x0, y0], [x1, y1]] = [from, to];
+	// From where the pointer already is: a terminal reports only the cells it enters.
+	let last = `${x0 + 1};${y0 + 1}`;
+	for (const begin = performance.now(); ; await Bun.sleep(4)) {
+		const f = Math.min(1, (performance.now() - begin) / ms);
+		const ease = 1 - (1 - f) ** 3;
+		const at = `${Math.round(x0 + (x1 - x0) * ease) + 1};${Math.round(y0 + (y1 - y0) * ease) + 1}`;
+		// As hex bytes, as `swb drive` sends them: as keys, the ESC could be re-encoded.
+		if (at !== last)
+			s.tmux(s.servers.drive, "send-keys", "-t", "=drive:", "-H", ...[...Buffer.from(`\x1b[<35;${at}M`)].map((b) => b.toString(16)));
+		last = at;
+		if (f === 1) return;
+	}
+}
+
 /** The title the Deck's tmux gives its terminal. */
 export function title(s: Scenario): string {
 	return s.tmux(s.servers.sessions, "display", "-p", "-t", "=deck:", "#{T:set-titles-string}");

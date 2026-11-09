@@ -124,6 +124,8 @@ const m: Model = {
 		dismissed: null,
 		byKeys: false,
 		watching: false,
+		aim: null,
+		aimRest: null,
 		info: new Map(),
 		asked: new Set(),
 	},
@@ -1725,6 +1727,7 @@ function clicked(): ClickTarget | null {
 }
 
 function mouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+	const last = m.pointer;
 	// A control under the pointer lights up, wherever it is.
 	let relit = false;
 	// tmux selects the pane before it hands over a press, ahead of the focus hook saying so.
@@ -1739,6 +1742,8 @@ function mouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
 		if (m.peek.settled) expirePeek();
 		relit = targetAt(m.pointer) !== before;
 	}
+	// Anything but motion, a press among them, is on the row under the pointer, whatever it was on its way to.
+	else if (m.peek.aimRest) endAim();
 	// A prompt answers to its own buttons, never the rows underneath it.
 	if (archiving() !== null || nameMode() || snoozeMode()) {
 		if (event.type === "move") return { handled: true, render: relit };
@@ -1782,8 +1787,14 @@ function mouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
 		}
 		const row = rowAt(event.y);
 		const hover = row?.kind === "session" ? row.key : null;
+		aimFrom(last);
 		if (hover === m.hover) return { handled: true, render: relit };
+		if (aimingAtPeek(event)) {
+			m.peek.aimRest = setTimeout(() => dispatch(endAim), PEEK_AIM_REST_MS);
+			return { handled: true, render: relit };
+		}
 		m.hover = hover;
+		m.peek.aim = null;
 		return { handled: true, render: true };
 	}
 	if (event.type === "wheel") {
@@ -1851,6 +1862,44 @@ export function peekSpot(rows: Row[], index: number): PeekSpot | null {
 			"pointer",
 		);
 	return m.peek.byKeys && m.focus === "roster" ? spot(index, "cursor") : null;
+}
+
+/** Notes where the pointer last was on the Peek's row, and ends a rest on its way into the Peek: it's moving again. */
+function aimFrom(last: { x: number; y: number } | null): void {
+	cancelAimRest();
+	const spot = m.peek.settled;
+	if (!spot || m.hover !== spot.id || last?.y !== spot.y) return;
+	const before = m.peek.aim;
+	m.peek.aim = { id: spot.id, ...last, across: before?.id === spot.id && last.x > before.x };
+}
+
+/**
+ * Whether the pointer is on its way from the Peek's row into the Peek, as a submenu's safe triangle sees it: inside the
+ * triangle from where it left the row to the Peek's far corner at the divider, on the side of the row the Peek hangs
+ * on. Off the row it crosses other rows, headers, and empty roster, none of which take the hover while it's in there.
+ * A cell counts when the triangle's edge passes through it. Straight down from the row is on the way only for a pointer
+ * that was moving across it: one whose last cell on the row and first off it share a column.
+ */
+function aimingAtPeek(p: { x: number; y: number }): boolean {
+	const spot = m.peek.settled;
+	const aim = m.peek.aim;
+	const peek = frame.wanted.floats.find((o) => o.id === "peek" && o.about === spot?.id);
+	if (!spot || !peek || aim?.id !== spot.id || m.hover !== spot.id || p.x < aim.x || p.x >= peek.x) return false;
+	const bottom = peek.y + peek.view.lines.length - 1;
+	// Rows from the row to the Peek's far corner: down for one that opens below its row, up for one above it.
+	const depth = bottom - aim.y > aim.y - peek.y ? bottom - aim.y : peek.y - aim.y;
+	const off = (p.y - aim.y) * Math.sign(depth);
+	if (off <= 0) return false;
+	if (p.x === aim.x) return off === 1 && aim.across;
+	return off <= (Math.abs(depth) * (p.x - aim.x)) / (peek.x - aim.x) + 0.5;
+}
+
+/** The pointer rested on its way into the Peek, or clicked: the row under it, if any, takes the hover. */
+function endAim(): void {
+	cancelAimRest();
+	m.peek.aim = null;
+	const row = m.pointer && rowAt(m.pointer.y);
+	m.hover = row?.kind === "session" ? row.key : null;
 }
 
 function rowAt(y: number): Row | undefined {
@@ -2473,8 +2522,8 @@ export function scanBase(): string {
 /** The pointer rests this long on a row before its Peek opens. */
 const PEEK_OPEN_MS = 80;
 
-/** ...and this long before an open Peek follows it to another row, so a diagonal path into the Peek doesn't drag it along. */
-const PEEK_SWITCH_MS = 150;
+/** How long the pointer can rest on its way into a Peek, over another row or none, before the Peek follows it there. */
+const PEEK_AIM_REST_MS = 150;
 
 /** How long a Peek waits for its last turn and diff before opening without them. */
 const PEEK_INFO_WAIT_MS = 200;
@@ -2483,6 +2532,11 @@ const PEEK_INFO_WAIT_MS = 200;
 const PEEK_INFO_MS = 2000;
 
 const spotKey = (spot: PeekSpot | null | undefined) => (spot ? `${spot.id}@${spot.y}` : null);
+
+function cancelAimRest(): void {
+	if (m.peek.aimRest) clearTimeout(m.peek.aimRest);
+	m.peek.aimRest = null;
+}
 
 function cancelPendingPeek(): void {
 	if (m.peek.pending) clearTimeout(m.peek.pending.timer);
@@ -2516,10 +2570,10 @@ function syncPeek(spot: PeekSpot | null): void {
 		m.peek.settled = null;
 		return;
 	}
-	// A visible Peek owns its session's keys, so once the cursor leaves that session its Peek goes at once; only the
-	// pointer, which crosses rows on its way somewhere, gets the smoother switch.
+	// A visible Peek owns its session's keys, so once the cursor leaves that session its Peek goes at once; the
+	// pointer's stays until the next one opens, so it doesn't blink between rows.
 	if (spot.source === "cursor" && m.peek.settled && m.peek.settled.id !== spot.id) m.peek.settled = null;
-	m.peek.pending = { spot, waiting: false, timer: setTimeout(() => dispatch(peekRested), m.peek.settled ? PEEK_SWITCH_MS : PEEK_OPEN_MS) };
+	m.peek.pending = { spot, waiting: false, timer: setTimeout(() => dispatch(peekRested), PEEK_OPEN_MS) };
 }
 
 /** The pointer rested: the Peek opens once what it shows comes in, or once it's waited long enough for it. */
@@ -2716,7 +2770,6 @@ function rosterKeys(row: Row | undefined): Binding<Command>[] {
 						: session.activity === "blocked"
 							? "respond"
 							: "focus";
-	if (session && m.peek.settled?.id === session.id) enter = null;
 	if (
 		!panes.narrow &&
 		session?.open &&
@@ -2875,18 +2928,7 @@ export function peekButtons(row: Row): [label: string, key: string, act: RowAct]
 		return items;
 	}
 	const e = row.entry;
-	const primary = !e.open
-		? "Open"
-		: e.cutOff
-			? "Resume unfinished turn"
-			: !e.live
-				? "Wake & focus"
-				: e.errored
-					? "Inspect error"
-					: e.activity === "blocked"
-						? "Focus to respond"
-						: "Focus";
-	const items: [string, string, RowAct][] = [[primary, "⏎", "focus"]];
+	const items: [string, string, RowAct][] = [];
 	if (!e.open) items.push(["Unarchive", "a", "archive"]);
 	else {
 		items.push(e.live ? ["Shut down", "x", "stop"] : ["Wake in background", "w", "wake"]);
@@ -3379,6 +3421,8 @@ export function onOverlayPress(command: Command, at: { x: number; y: number }): 
 
 /** The pointer on an overlay that belongs to a row, as a Peek does: the row stays hovered. */
 export function onOverlayHover(row: string): void {
+	cancelAimRest();
+	m.peek.aim = null;
 	if (m.peek.settled) expirePeek();
 	if (m.hover === row && !m.peek.pending) return;
 	dispatch(() => {

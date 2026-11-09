@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The footer's `⏎` stays put while a Peek shows, so moving with `j`/`k` no longer flickers it. The Peek drops its own `⏎` button; its title, which is its row, focuses on a click as the row does.
+
+### Fixed
+
+- The pointer on its way from a row into its Peek keeps the Peek, as a submenu's safe triangle does: crossing a header, a section, or the empty roster no longer closes it, and crossing other rows no longer moves it unless the pointer rests there. Moving down the list, the Peek follows each row sooner.
+
 ## [0.14.1] - 2026-11-08
 
 ### Changed

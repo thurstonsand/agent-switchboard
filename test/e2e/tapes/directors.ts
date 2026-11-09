@@ -1,10 +1,10 @@
 import { expect } from "bun:test";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { DeckState } from "../../../packages/cli/src/deck/protocol.ts";
+import type { DeckState, SessionStateRow } from "../../../packages/cli/src/deck/protocol.ts";
 import { SCHEMA_VERSION } from "../../../packages/shared/src/index.ts";
 import { claudeAutoMode, recalled, subagentDone } from "../harness/agents.ts";
-import { config, cursorTo, launched, launchTry, seed } from "../harness/deck.ts";
+import { config, cursorTo, glide, launched, launchTry, seed, sessionRows } from "../harness/deck.ts";
 import { git, gitRepo, gitWorktree, type LsEntry, type PiPackage, release, repo, type Scenario, until, which } from "../harness/index.ts";
 import { scheduled, swbIn } from "../harness/schedules.ts";
 
@@ -2028,6 +2028,43 @@ export const directors: Record<string, Director> = {
 			await Bun.sleep(3000);
 			s.swb("drive", "move", "150", "10");
 			await waitDrive(s, "gone", (st) => st.peek === null);
+		},
+	},
+
+	"peek-aim": {
+		setup: async (s) => {
+			const infra = join(s.root, "infra");
+			mkdirSync(infra);
+			await launched(s, "reply certs rotated", { cwd: infra, title: "Rotate the staging certs" });
+			await launched(s, "reply bisected", { cwd: s.project, title: "Bisect the flaky login test" });
+			await launched(s, "reply drafted", { cwd: s.project, title: "Draft the v3 changelog" });
+		},
+		run: async (s) => {
+			const ready = await waitDrive(s, "the Deck up", (x) => x.ready);
+			const [top, , last] = sessionRows(ready) as [SessionStateRow, SessionStateRow, SessionStateRow];
+			// j and k between the last two rows, which share a Project: the footer's ⏎ holds as each Peek comes.
+			await cursorTo(s, last.id);
+			for (const k of ["k", "j", "k", "j"]) {
+				await Bun.sleep(900);
+				s.keys(k);
+			}
+			await cursorTo(s, top.id);
+			await waitDrive(s, "the cursor's Peek on the top row", (x) => x.peek?.id === top.id && x.peek.source === "cursor");
+			await Bun.sleep(3000);
+			const row = await onScreen(s, top.title, 42);
+			s.swb("drive", "move", ...row.map(String));
+			await waitDrive(s, "the pointer's Peek on the top row", (x) => x.peek?.id === top.id && x.peek.source === "pointer");
+			await Bun.sleep(1500);
+			// Down across the next row, the infra header and its row, Archived, and the empty roster, to the Peek's last button.
+			const button = await onScreen(s, "m Group…", 1000, 43);
+			await glide(s, row, button, 1500);
+			await Bun.sleep(2000);
+			if (drive(s).peek?.id !== top.id) throw new Error("the Peek didn't hold on the way into it");
+			s.swb("drive", "click", ...button.map(String));
+			await waitDrive(s, "the top row's Group form", (x) => x.mode === "name");
+			await Bun.sleep(3000);
+			s.keys("Escape");
+			await waitDrive(s, "the form closed", (x) => x.mode === "roster");
 		},
 	},
 

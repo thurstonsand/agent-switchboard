@@ -174,6 +174,13 @@ type PeekState = {
 	byKeys: boolean;
 	/** Whether tmux reports the pointer leaving; it stops by itself when it reports. */
 	watching: boolean;
+	/**
+	 * Where the pointer last was on the Peek's row, the tip of the triangle it crosses into the Peek by, and whether it
+	 * was moving across the row to get there.
+	 */
+	aim: { id: string; x: number; y: number; across: boolean } | null;
+	/** Ends a rest inside that triangle, when the row under the pointer takes the hover after all. */
+	aimRest: Timer | null;
 	info: Map<string, { info: PeekInfo; at: number }>;
 	asked: Set<string>;
 };

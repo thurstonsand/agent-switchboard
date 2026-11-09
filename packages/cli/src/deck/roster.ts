@@ -800,15 +800,7 @@ function legendKeys(cols: number): { cells: Part[]; lead: Binding<Command>[]; ri
 		bindings.splice(1, 0, ...history);
 		return { cells: bindings.filter((b) => b.label !== null).map(cell), lead: [], right: false };
 	}
-	let bindings = keymap();
-	if (model.peek.settled || frame.details) {
-		const row = rosterRows().find((r) => r.key === (model.peek.settled?.id ?? cursorEntry()?.id));
-		const actions = row ? peekButtons(row).map(([, , act]) => act) : [];
-		bindings = bindings.filter((b) => {
-			const c = b.command;
-			return !(c?.kind === "activate" && c.enter) && !(c?.kind === "row" && actions.includes(c.act));
-		});
-	}
+	const bindings = keymap();
 	const fixed = ["n", "?", ","];
 	const shown = cols < 38 ? fixed.slice(0, 2) : fixed;
 	// Pinned keys keep their columns: one that doesn't apply leaves its cell blank rather than shifting the rest.
@@ -1074,6 +1066,8 @@ function peekOverlays(rows: Row[], width: number, height: number): Overlay[] {
 		? [gray(`╭${"─".repeat(w - 2)}╮`), ...body, rule, title, border(false)]
 		: [border(false), title, rule, ...body, gray(`╰${"─".repeat(w - 2)}╯`)];
 	const buttons = [
+		// The title is its row, run on across the divider, and a click on it is one on the row.
+		{ y: up ? lines.length - 2 : 1, from: 0, to: w - 1, command: { kind: "select", key: spot.id, index } as Command, hot: title },
 		...view.buttons.filter((b) => b.command.kind !== "dismissPeek").map((b) => ({ ...b, y: b.y + (up ? 0 : 2) })),
 		{ y: up ? lines.length - 1 : 0, from: w - 7, to: w - 2, command: { kind: "dismissPeek" } as Command, hot: border(true) },
 	];
@@ -1361,12 +1355,13 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	const buttons: { y: number; from: number; to: number; command: Command; text: string }[] = [];
 	const buttonLines: string[] = [];
 	const actions = peekButtons(row);
-	const session = actions.filter(([, , act]) => ["focus", "stop", "wake", "reload", "new", "parent"].includes(act));
+	const session = actions.filter(([, , act]) => ["stop", "wake", "reload", "new", "parent"].includes(act));
 	const organize = actions.filter(([, , act]) => ["snooze", "archive", "group", "unseen"].includes(act));
 	for (const [heading, group] of [
 		["Session", session],
 		["Organize", organize],
 	] as const) {
+		if (group.length === 0) continue;
 		const gutter = 10;
 		let line = heading.padEnd(gutter);
 		const column = Math.max(...group.filter((_, i) => i % 2 === 0).map(([label, k]) => visibleWidth(`${k} ${label}`))) + 2;
@@ -1374,7 +1369,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 			heading === "Organize" &&
 			gutter + column + Math.max(...group.filter((_, i) => i % 2 === 1).map(([label, k]) => visibleWidth(`${k} ${label}`))) <= inner - 2;
 		for (const [i, [label, k, act]] of group.entries()) {
-			const text = act === "focus" ? bold(`${k} ${label}`) : key(k, label);
+			const text = key(k, label);
 			if ((heading === "Organize" && i > 0 && i % 2 === 0) || visibleWidth(line) + visibleWidth(text) > inner - 2) {
 				buttonLines.push(line.trimEnd());
 				line = visibleWidth(text) + gutter <= inner - 2 ? " ".repeat(gutter) : visibleWidth(text) <= inner - 2 ? "  " : "";
