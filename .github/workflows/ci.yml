@@ -17,18 +17,18 @@ jobs:
     env:
       SWB_E2E_SHARD: ${{ matrix.shard }}/6
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # mise builds tmux 3.8 from source.
       - run: sudo apt-get install -y --no-install-recommends libevent-dev libncurses-dev bison
       # Codex's sandbox runs commands in bwrap, which Ubuntu's AppArmor leaves no capabilities in a new user namespace.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - uses: jdx/mise-action@v5
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
       - run: bun install --frozen-lockfile
       - if: matrix.shard == 1
         run: mise run check
       - run: mise run e2e
       - if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-artifacts-${{ matrix.shard }}
           path: test/e2e/artifacts
