@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A pi session continued with pi's Continue after its directory was gone no longer stops its next wake at pi's prompt for that directory.
+
 ## [0.16.1] - 2026-11-10
 
 ### Fixed

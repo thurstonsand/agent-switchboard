@@ -705,7 +705,8 @@ export function wake(db: Db, id: string, then: Wake): string {
 			cwd === session.cwd
 				? null
 				: `swb: This conversation moved from ${session.cwd} to ${cwd} because its directory no longer exists. The files and branch here may differ; check them before continuing.`;
-		if (notice && session.harness === "pi") relocatePi(session.transcript as string, cwd);
+		// Not only when swb moves it: a session continued from pi's own prompt in another directory keeps its gone one.
+		if (session.harness === "pi") relocatePi(session.transcript as string, cwd);
 		// Not live, so a phase other than idle means its process died mid-turn.
 		const cutOff = session.phase !== "idle" && !isArchived(db, id);
 		const harness = session.harness as Harness;

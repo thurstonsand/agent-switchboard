@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { entry, reply, state, waitState } from "./harness/deck.ts";
 import { budgets, git, gitRepo, gitWorktree, type Scenario, scenario, until } from "./harness/index.ts";
@@ -92,6 +92,48 @@ test("a session whose directory is gone wakes into its own transcript from its p
 	s.save("woken.txt", s.screen());
 	expect(s.query<{ cwd: string }>("select cwd from runtimes where session_id = ?", id)).toEqual([{ cwd: realpathSync(s.project) }]);
 	expect(s.ls().map((e) => e.id)).toEqual([id]);
+});
+
+test("a session resumed with Continue at pi's prompt for its gone directory wakes there, past the prompt", async () => {
+	s = scenario("phase6", "continued-cwd", { packages: [], recorder: true });
+	gitRepo(s, s.project);
+	const worktree = gitWorktree(s, s.project, "feature");
+	s.swb("drive", "start", "--", "new", "--cwd", worktree);
+	const gone = await waitState(s, "pi live in the worktree", (x) => x.staged.kind === "live" && x.focus === "stage", budgets.piReady);
+	const id = gone.staged.id as string;
+	await reply(s, "SWB-in-the-worktree");
+	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(gone.staged.host as string));
+	await until(() => !entry(s, id).live, budgets.settle, "dormant");
+	git(s, s.project, "worktree", "remove", "--force", worktree);
+
+	s.swb("drive", "stop");
+	s.swb("drive", "start", "--", "new");
+	const other = await waitState(
+		s,
+		"another pi live in the project",
+		(x) => x.staged.kind === "live" && x.focus === "stage" && x.staged.id !== id,
+		budgets.piReady,
+	);
+	await reply(s, "SWB-in-the-project");
+	s.keys("-l", "/resume");
+	s.keys("Enter");
+	await until(() => s.screen().includes("Resume Session (Current Folder)"), budgets.settle, "pi's session selector");
+	s.keys("Tab");
+	s.keys("-l", "SWB-in-the-worktree");
+	await until(() => s.screen().includes("› reply SWB-in-the-worktree"), budgets.settle, "the worktree's session selected");
+	s.keys("Enter");
+	await until(() => s.screen().includes(`Session cwd does not exist: ${worktree}`), budgets.settle, "pi's prompt");
+	s.keys("Enter");
+	await until(() => entry(s, id).live, budgets.settle, "continued in the project");
+	const project = realpathSync(s.project);
+	expect(entry(s, id).cwd).toBe(project);
+
+	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(other.staged.host as string));
+	await until(() => !entry(s, id).live, budgets.settle, "dormant again");
+	s.swb("wake", id);
+	await until(() => entry(s, id).live, budgets.piReady, "woken past pi's prompt");
+	expect(JSON.parse(readFileSync(transcript(id), "utf8").split("\n")[0] as string).cwd).toBe(project);
+	expect(s.query<{ cwd: string }>("select cwd from runtimes where session_id = ?", id)).toEqual([{ cwd: project }]);
 });
 
 test("/wt fork: swb follows the session into the new worktree, in the same project, and it wakes there", async () => {
