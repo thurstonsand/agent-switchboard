@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, readlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { config, cursorTo, entry, reply, seed, state, waitState } from "./harness/deck.ts";
 import { budgets, type Scenario, scenario, until } from "./harness/index.ts";
 
@@ -25,8 +26,32 @@ test("swb open selects an Inactive session, opening its section", async () => {
 	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(up.staged.host as string));
 	await until(() => !entry(s, a).live, budgets.settle, "a dormant");
 	s.swb("drive", "stop");
+	// The worker's listing waits while `hold` exists, so the Deck's last snapshot, with a still in its project, is the
+	// one it has when a goes Inactive and the open arrives.
+	const hold = join(s.root, "hold");
+	const parked = join(s.root, "parked");
+	const tmux = join(s.bin, "tmux");
+	const real = readlinkSync(tmux);
+	unlinkSync(tmux);
+	writeFileSync(
+		tmux,
+		`#!/bin/sh
+case "$*" in
+*"#{@swb_reaped}"*) [ -e '${hold}' ] && : > '${parked}'; while [ -e '${hold}' ]; do sleep 0.02; done ;;
+esac
+exec '${real}' "$@"
+`,
+		{ mode: 0o755 },
+	);
+	writeFileSync(hold, "");
+	await until(() => existsSync(parked), budgets.settle, "the worker held");
 	await until(() => entry(s, a).inactive, budgets.settle, "a inactive");
-	s.swb("drive", "start", "--", "open", a);
+	const opening = Bun.spawn([`${s.bin}/swb`, "drive", "start", "--", "open", a], { cwd: s.project, env: s.env });
+	// Long enough for the open to reach the Deck, which attaches its terminal at once unless it waits for a snapshot.
+	const deadline = Date.now() + 1000;
+	while (Date.now() < deadline && s.tmux(s.servers.sessions, "list-clients", "-t", "deck") === "") await Bun.sleep(20);
+	unlinkSync(hold);
+	expect(await opening.exited).toBe(0);
 	const st = await waitState(s, "a selected", (x) => x.cursor === a && x.staged.id === a);
 	expect(st.rows).toContainEqual({ kind: "section", label: "Inactive", count: 1, expanded: true });
 	s.save("open-inactive.txt", s.screen());

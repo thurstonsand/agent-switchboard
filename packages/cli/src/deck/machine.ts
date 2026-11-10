@@ -3186,11 +3186,11 @@ export async function handleCommand(cmd: string, argv: string[]): Promise<void> 
 				afterCommit(() => void panes.showRoster(true));
 			});
 			break;
-		// The session on view taking me to another. One it launched a moment ago reaches this Deck with a later snapshot.
+		// The session on view taking me to another, as the db has it now: one it launched a moment ago, in the section it
+		// sits in now.
 		case "show": {
 			const [id = "", from, view] = argv;
-			const deadline = Date.now() + 2000;
-			while (!m.entries.has(id) && Date.now() < deadline) await Bun.sleep(50);
+			await caughtUp();
 			dispatch(() => {
 				const e = m.entries.get(id);
 				if (!e) throw new Error(`no session ${id} on this Deck`);
@@ -3203,13 +3203,11 @@ export async function handleCommand(cmd: string, argv: string[]): Promise<void> 
 			});
 			break;
 		}
-		// What a swb attaching to the Deck asks of it. A session it just adopted reaches the Deck with a later snapshot.
+		// What a swb attaching to the Deck asks of it, against the db as that swb left it: a session it just adopted is
+		// there, and one that went Inactive meanwhile opens its section.
 		case "intent": {
 			const intent = JSON.parse(argv[0] ?? "") as DeckIntent;
-			if (intent.kind === "open") {
-				const deadline = Date.now() + 2000;
-				while (!m.entries.has(intent.id) && Date.now() < deadline) await Bun.sleep(50);
-			}
+			await caughtUp();
 			dispatch(() => {
 				if (!m.started && intent.kind !== "new") m.intent = intent;
 				else applyIntent(intent);
