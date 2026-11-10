@@ -169,8 +169,8 @@ test("? fits every key in a tall Deck, and in a short one scrolls them by wheel 
 	await until(() => s.screen().includes("↑ 2 ↓"), budgets.settle, "one back up");
 	s.keys(" ", " ");
 	await until(() => s.screen().includes(last) && /↑ \d+ ·/.test(s.screen()), budgets.settle, "space pages to the end");
-	s.keys("k", "k", "Up");
-	await until(() => s.screen().includes("↑ 15 ↓ 4"), budgets.settle, "k and ↑ back up, keeping the next heading with its entry");
+	s.keys("k", "k", "k", "Up");
+	await until(() => s.screen().includes("↑ 15 ↓ 5"), budgets.settle, "k and ↑ back up, keeping the next heading with its entry");
 	expect(s.screen()).not.toContain("Copy & settings");
 	s.keys("j");
 	await until(() => s.screen().includes("Copy & settings"), budgets.settle, "the heading with its first entry");

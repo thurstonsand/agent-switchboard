@@ -99,6 +99,7 @@ The Harnesses section holds the shortlist: the presets, each a harness, a model 
 ```toml
 wake_on_highlight = false # true starts a dormant session after the cursor rests 500 ms on its row
 roster_width = 42         # columns, or a share of the Deck like "25%"; never more than half
+agent_width = 100         # columns, or a share of the split like "35%"; never more than half
 shell_position = "auto"   # "below" or "beside" fixes it, except where only the other fits; with room for neither, it replaces the agent
 inactive_after = "72h"    # open sessions idle this long, with all they started, move to Inactive
 reap_after = "1h"         # an idle live session nobody is viewing is stopped after this long

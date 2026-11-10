@@ -37,6 +37,9 @@ const LEAVE = `set -u @swb_watch ; if -F '#{@swb_leave}' { run-shell -C '#{@swb_
 
 const IN_ROSTER = "#{==:#{pane_id},#{@swb_roster}}";
 
+/** What a mouse event no binding of the Deck's takes does: the pane under the pointer has it. */
+const MOUSE_ON = `if -F '${POINTER_AWAY}' { ${LEAVE} } ; send-keys -M`;
+
 /**
  * A session that switched the Deck to another leaves word on the other's agent pane, the one pane that carries
  * @swb_host, in the Deck's @swb_arrival. It holds for ARRIVAL_HOLD_MS, a key or press meanwhile marks it touched, and
@@ -65,13 +68,30 @@ const PANE_KEY = keyOf("h", keyOf("j", keyOf("k", keyOf("l", `#{?${IN_ROSTER},Ta
  * Each pane names itself on its top edge, and the focused one's name is lit: a divider shared by two panes can't say
  * which of them has the keyboard. While the prefix is down, the others show the key that reaches them.
  */
-const PANE_LABEL = [
+const NAME_LABEL = [
 	"#{?#{@swb_label},#{?pane_active,",
 	"#[fg=black bg=cyan bold] #{@swb_label} #[default],",
 	`#{?#{&&:#{client_prefix},${PANE_KEY}},#[fg=black bg=yellow bold] ${PANE_KEY} #[default],}`,
 	"#[fg=brightblack] #{@swb_label} #[default]},}",
 	ARRIVAL_LABEL,
 ].join("");
+
+/**
+ * While split's divider is dragged, a notch marks the column agent_width puts it at, in the Deck's top edge, over
+ * whichever pane that column falls in, in place of its label: a release near it snaps back. The Stage keeps the column in @swb_notch
+ * while it's split, and the drag binding names the slot whose border is dragged in @swb_dragging; the divider is the
+ * Editor's, in the main slot. tmux has no format that repeats a character, so the rule after the notch is @swb_rule cut
+ * to length, and that length is its own option because a comma in a trim's width ends it early.
+ */
+const NOTCH_AT = "#{e|-|:#{@swb_notch},#{pane_left}}";
+const NOTCH_TRAIL = `#{e|-|:#{e|-|:#{pane_width},${NOTCH_AT}},1}`;
+const DRAGGING_SPLIT = "#{&&:#{@swb_notch},#{==:#{@swb_dragging},main}}";
+const NOTCH_HERE = `#{&&:#{&&:${DRAGGING_SPLIT},#{pane_at_top}},#{&&:#{e|>=|:${NOTCH_AT},0},#{e|<|:${NOTCH_AT},#{pane_width}}}}`;
+const NOTCH = "#[align=right]#[fg=default]┰#[fg=brightblack]#{?#{e|>|:#{E:@swb_notch_trail},0},#{=/#{E:@swb_notch_trail}/:@swb_rule},}";
+const ON_SPLIT_DIVIDER = "#{&&:#{@swb_notch},#{==:#{@swb_slot},main}}";
+const DRAG_ENDED = `if -F '${DRAGGING_SPLIT}' { ${deckCmd("split-dragged")} } ; set -gu @swb_dragging`;
+
+const PANE_LABEL = `#{?${NOTCH_HERE},${NOTCH},${NAME_LABEL}}`;
 
 /** A mouse binding that hands an overlay its event, never selecting it, and otherwise puts away what leaves first. */
 function overlayAware(key: string, otherwise: string): string {
@@ -111,7 +131,7 @@ export function deckConf(): string[] {
 		`set -g status-format[0] "#[range=user|roster] #[bold]◂ #{s/C-/Ctrl+/:#{s/M-/Alt+/:prefix}} z#[nobold] show list #[norange]"`,
 		`bind -n MouseDown1Status { ${ARRIVAL_SEEN} ; if -F '#{==:#{mouse_status_range},roster}' { if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { ${roster("focus")} } } }`,
 		// The mouse events left to Any are mostly the pointer's motion, which passes over an arrival without taking it away.
-		`bind -n Any if -F '#{mouse_pane}' { if -F '${POINTER_AWAY}' { ${LEAVE} } ; send-keys -M } { ${ARRIVAL_SEEN} ; if -F '${KEY_AWAY}' { ${LEAVE} } ; send-keys }`,
+		`bind -n Any if -F '#{mouse_pane}' { ${MOUSE_ON} } { ${ARRIVAL_SEEN} ; if -F '${KEY_AWAY}' { ${LEAVE} } ; send-keys }`,
 		// A card's own process hears Esc, but a harness starting on the Stage would take it as typeahead; its pane is tagged until it registers.
 		`bind -n Escape { ${ARRIVAL_SEEN} ; if -F '${KEY_AWAY}' { ${LEAVE} } ; if -F '#{@swb_starting}' { ${deckCmd("esc")} } { send-keys Escape } }`,
 		// tmux's own defaults, but for overlays; a right click on a pane that takes no mouse no longer opens tmux's menu.
@@ -134,6 +154,14 @@ export function deckConf(): string[] {
 		"set -g pane-active-border-style fg=brightblack",
 		"set -g pane-border-indicators off",
 		`set -g pane-border-format "${PANE_LABEL}"`,
+		`set -g @swb_rule '${"─".repeat(400)}'`,
+		`set -g @swb_notch_trail '${NOTCH_TRAIL}'`,
+		// tmux's own drag, which carries on without these bindings once it starts; swb hears where split's divider was let go.
+		`bind -n MouseDrag1Border { resize-pane -M ; set -gF @swb_dragging '#{@swb_slot}' }`,
+		// A drag let go past where the divider could follow ends over a pane, not the border.
+		`bind -n MouseDragEnd1Border { ${DRAG_ENDED} }`,
+		`bind -n MouseDragEnd1Pane { ${DRAG_ENDED} ; ${MOUSE_ON} }`,
+		`bind -n DoubleClick1Border { if -F '${ON_SPLIT_DIVIDER}' { ${deckCmd("split-reset")} } }`,
 		// tmux 3.8 paints popups dark grey by default, whatever the terminal's theme; help wears the terminal's own.
 		"set -g popup-border-style default",
 		"set -g set-titles on",
@@ -154,6 +182,7 @@ export function deckConf(): string[] {
 		...[..."nNawxRyY/JKmdSpu,[]"].map((k) => `bind ${k} ${notify(`__deck key ${k}`)}`),
 		`bind e ${notify("__deck view-swap")}`,
 		`bind v ${notify("__deck view-split")}`,
+		`bind = ${notify("__deck split-reset")}`,
 		`bind s ${notify("__deck shell")}`,
 		"bind q detach-client",
 		`bind ? ${notify("__deck help")}`,

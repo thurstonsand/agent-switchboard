@@ -1,7 +1,7 @@
 import { basename, join } from "node:path";
 import { type Harness, stateDir } from "@swb/shared";
 import { now, since, span } from "@swb/shared/trace";
-import { type Config, loadConfig, type RosterWidth } from "../config.ts";
+import { type Config, loadConfig, type Width } from "../config.ts";
 import { SwbError } from "../errors.ts";
 import { ensureOperatorDir } from "../operator.ts";
 import { buildStamp, ensureSessionsServer, newer } from "../sessions.ts";
@@ -14,9 +14,20 @@ import type { DeckState } from "./protocol.ts";
 export const HELP_POPUP = ["-T", " swb keys ", `${SWB} __help`];
 
 /** At least 20 columns, and never more than half the Deck. */
-export function rosterCols(width: RosterWidth, deckWidth: number): number {
+export function rosterCols(width: Width, deckWidth: number): number {
 	const cols = "cols" in width ? width.cols : Math.round((deckWidth * width.percent) / 100);
 	return Math.max(20, Math.min(cols, Math.floor(deckWidth / 2)));
+}
+
+/**
+ * The agent's side of split's divider in a Stage this wide: agent_width, at least 20 columns and never more than half, or
+ * the width dragged for the session, leaving the Editor its 20.
+ */
+export function agentCols(width: Width, dragged: number | null, stageCols: number): number {
+	const room = stageCols - 1;
+	if (dragged !== null) return Math.max(20, Math.min(dragged, room - 20));
+	const cols = "cols" in width ? width.cols : Math.round((room * width.percent) / 100);
+	return Math.max(20, Math.min(cols, Math.floor(room / 2)));
 }
 
 export const NARROW_BELOW = 100;

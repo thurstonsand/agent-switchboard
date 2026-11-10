@@ -77,6 +77,7 @@ function lines(prefix: string, columns = Infinity): string[] {
 		`  ${prefix}, then key · hold to reveal pane keys`,
 		row(`${prefix} e`, "Swap agent / editor"),
 		row(`${prefix} v`, "Split editor beside agent"),
+		row(`${prefix} =`, "Reset split divider; or double-click it"),
 		row(`${prefix} s`, "Shell beside / below / instead; ctrl-d closes"),
 		row(`${prefix} z`, "Hide / show roster; click ◂ to show"),
 		"",

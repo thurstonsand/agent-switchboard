@@ -22,7 +22,7 @@ import {
 	unarchive,
 	wake,
 } from "../sessions.ts";
-import { loadLayout, markUnseen, markVisited, openStore, saveLayout, setGroup, setView } from "../store.ts";
+import { loadLayout, markUnseen, markVisited, openStore, saveLayout, setAgentCols, setGroup, setView } from "../store.ts";
 import { hostPane, killHome, listPanes, SESSIONS, tmux, tmuxTry } from "../tmux.ts";
 import type { Ending } from "../transcripts/conversation.ts";
 import { locateTranscript } from "../transcripts/read.ts";
@@ -160,6 +160,8 @@ async function startNew(message: NewSession): Promise<void> {
 const pendingViews = new Map<string, View>();
 /** Likewise for Groups. */
 const pendingGroups = new Map<string, string | null>();
+/** Likewise for dragged split widths. */
+const pendingAgentCols = new Map<string, number | null>();
 
 function post(message: FromWorker): void {
 	self.postMessage(message);
@@ -182,6 +184,12 @@ function readDb(): void {
 		if (!rows.some((row) => row.session_id === id)) continue;
 		pendingViews.delete(id);
 		setView(db, id, view);
+		rows = sessionRows(db);
+	}
+	for (const [id, cols] of pendingAgentCols) {
+		if (!rows.some((row) => row.session_id === id)) continue;
+		pendingAgentCols.delete(id);
+		setAgentCols(db, id, cols);
 		rows = sessionRows(db);
 	}
 	for (const [id, name] of pendingGroups) {
@@ -281,6 +289,7 @@ function snapshot(): Polled {
 		return {
 			...state,
 			view: row.view ?? "agent",
+			agentCols: row.agent_cols,
 			transcript: row.transcript,
 			host: state.live ? (row.runtime?.tmux_session ?? null) : null,
 			provisional: false,
@@ -319,6 +328,7 @@ function snapshot(): Polled {
 			visitedAt: null,
 			archivedAt: null,
 			view: "agent",
+			agentCols: null,
 			transcript: null,
 			host: runtime.tmux_session,
 			provisional: true,
@@ -669,6 +679,16 @@ async function handle(message: ToWorker): Promise<void> {
 				done(message.req, null);
 			} catch (error) {
 				done(message.req, `view: ${(error as Error).message}`);
+			}
+			break;
+		case "agentCols":
+			try {
+				readDb();
+				if (rows.some((row) => row.session_id === message.id)) setAgentCols(db, message.id, message.cols);
+				else pendingAgentCols.set(message.id, message.cols);
+				done(message.req, null);
+			} catch (error) {
+				done(message.req, `split: ${(error as Error).message}`);
 			}
 			break;
 		case "group":

@@ -18,6 +18,8 @@ export type Applied = {
 	target: string;
 	/** The session whose pane its second slot shows, which only split has. */
 	side: string | null;
+	/** Split's columns right of its divider, and agent_width's, which a drag let go near snaps back to. */
+	split: { cols: number; defaultCols: number } | null;
 	/** The directory's shell, and where it sits against pi's pane; replacing pi, the shell is that pane's target. */
 	shell: { target: string; at: ShellAt } | null;
 };
@@ -95,6 +97,8 @@ export class StagePanes {
 	private shellKeys = false;
 	/** The labels the Stage's panes wear on their top edges, as last set. */
 	private labels = "";
+	/** The split and Stage width the divider was last put in place for. */
+	private splitSized = "";
 	/** What each slot was last asked to show, until a placing fails; undefined asks again. */
 	private asked: { main?: string; side?: string | null } = {};
 
@@ -105,6 +109,11 @@ export class StagePanes {
 	) {
 		this.applied = applied;
 		this.main = { name: "main", ...stage };
+	}
+
+	/** The columns beside the roster, or the whole Deck's while it's hidden. */
+	stageCols(): number {
+		return this.rosterHidden ? this.width : this.width - this.rosterWidth() - 1;
 	}
 
 	rosterWidth(): number {
@@ -123,6 +132,11 @@ export class StagePanes {
 		if (d.side !== this.asked.side) this.syncSide();
 		const shellMoved = d.shell?.target !== prev.shell?.target || d.shell?.at !== prev.shell?.at;
 		if (shellMoved || d.side !== prev.side) this.syncShell(prev.shell?.at === "replace" && d.shell?.target === prev.shell.target);
+		const split = JSON.stringify([d.split, this.stageCols()]);
+		if (split !== this.splitSized) {
+			this.splitSized = split;
+			this.sizeSplit();
+		}
 		if (d.target !== this.asked.main) {
 			this.asked.main = d.target;
 			const keyAt = this.keyAt;
@@ -196,7 +210,10 @@ export class StagePanes {
 				if (on && !zoomed) await this.host.closeOverlays();
 				if (on !== zoomed) await tmuxAsync(SESSIONS, "resize-pane", "-Z", "-t", rosterPane);
 				// Back beside the Stage, at whatever width Settings left it.
-				if (!on) await tmuxAsync(SESSIONS, "resize-pane", "-t", rosterPane, "-x", String(this.rosterWidth()));
+				if (!on) {
+					await tmuxAsync(SESSIONS, "resize-pane", "-t", rosterPane, "-x", String(this.rosterWidth()));
+					this.sizeSplit();
+				}
 				// Bun's stdout keeps the size from before a zoom until a SIGWINCH reads it again; tmux's own one can land first.
 				process.kill(process.pid, "SIGWINCH");
 			}).catch((error: Error) => this.host.toast(`settings: ${error.message}`, "error")),
@@ -283,6 +300,8 @@ export class StagePanes {
 			}
 			this.shownNarrow = this.narrow;
 			this.host.rosterPlaced();
+			// tmux scaled the divider with the window, and the roster's width just moved its other side.
+			this.sizeSplit();
 		});
 	}
 
@@ -516,6 +535,50 @@ export class StagePanes {
 			if (this.asked.main === target) this.asked.main = undefined;
 			this.host.toast(`stage: ${(error as Error).message}`, "error");
 		}
+	}
+
+	/**
+	 * Puts split's divider where what's applied says, the Editor's pane taking the rest, and tells the pane labels where
+	 * agent_width would put it, for the notch a drag shows. Outside split there's no divider to drag.
+	 */
+	sizeSplit(): void {
+		this.queue(async () => {
+			const split = this.applied.split;
+			try {
+				if (!split || !this.side) {
+					await tmuxAsync(SESSIONS, "set", "-gu", "@swb_notch");
+					return;
+				}
+				await this.read();
+				const sizes = await tmuxAsync(
+					SESSIONS,
+					"display",
+					"-p",
+					"-t",
+					this.main.pane,
+					"#{pane_left}\t#{window_width}\t#{window_zoomed_flag}",
+				);
+				const [left, window, zoomed] = sizes.split("\t").map(Number) as [number, number, number];
+				// A resize unzooms; Settings, which zooms the roster, sizes the split again when it gives the window back.
+				if (zoomed === 1) return;
+				const editor = (cols: number) => window - left - 1 - cols;
+				await tmuxAsync(
+					SESSIONS,
+					...["resize-pane", "-t", this.main.pane, "-x", String(editor(split.cols)), ";"],
+					...["set", "-g", "@swb_notch", String(left + editor(split.defaultCols))],
+				);
+			} catch (error) {
+				this.host.toast(`split: ${(error as Error).message}`, "error");
+			}
+		});
+	}
+
+	/** Split's columns right of its divider, as tmux shows them now. */
+	async splitCols(): Promise<number> {
+		await this.ops;
+		const sizes = await tmuxAsync(SESSIONS, "display", "-p", "-t", this.main.pane, "#{pane_left}\t#{pane_width}\t#{window_width}");
+		const [left, width, window] = sizes.split("\t").map(Number) as [number, number, number];
+		return window - left - width - 1;
 	}
 
 	/** Creates, refills, or closes the Stage's second slot to match what is applied. Leaving it keeps the keyboard on the Stage. */

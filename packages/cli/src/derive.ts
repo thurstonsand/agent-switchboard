@@ -82,6 +82,7 @@ export type SessionRow = {
 	unseen_at: number | null;
 	read_at: number | null;
 	view: View | null;
+	agent_cols: number | null;
 	group_name: string | null;
 	snoozed_at: number | null;
 	snoozed_until: number | null;
@@ -95,7 +96,7 @@ export function sessionRows(db: Db): SessionRow[] {
 	return db
 		.all(
 			`SELECT s.session_id, s.harness, s.parent_id, coalesce(m.title, s.title) AS title, s.project_root, s.cwd, s.branch, s.transcript, s.phase, s.created_at, s.last_prompt_at, s.last_settled_at, s.errored_at,
-		        m.archived_at, m.visited_at, m.unseen_at, m.read_at, m.view, m.group_name, m.snoozed_at, m.snoozed_until, m.reload, r.tmux_session, r.boot_id, r.pid,
+		        m.archived_at, m.visited_at, m.unseen_at, m.read_at, m.view, m.agent_cols, m.group_name, m.snoozed_at, m.snoozed_until, m.reload, r.tmux_session, r.boot_id, r.pid,
 		        ${OPEN} AS open, (SELECT max(created_at) FROM messages WHERE target_id = s.session_id AND kind = 'message') AS last_message_at
 		 FROM sessions s LEFT JOIN marks m USING (session_id) LEFT JOIN runtimes r USING (session_id)`,
 		)
@@ -119,6 +120,7 @@ export function sessionRows(db: Db): SessionRow[] {
 			unseen_at: r.unseen_at as number | null,
 			read_at: r.read_at as number | null,
 			view: r.view as View | null,
+			agent_cols: r.agent_cols as number | null,
 			group_name: r.group_name as string | null,
 			snoozed_at: r.snoozed_at as number | null,
 			snoozed_until: r.snoozed_until as number | null,

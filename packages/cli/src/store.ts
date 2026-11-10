@@ -144,6 +144,8 @@ const MIGRATIONS: string[] = [
 	DROP TABLE deck_layouts;`,
 	// The last Visit that ended its Unseen: reading it starts inactive_after over.
 	"ALTER TABLE marks ADD COLUMN read_at INTEGER",
+	// The agent's side of split's divider, as I dragged it for the session; null follows agent_width.
+	"ALTER TABLE marks ADD COLUMN agent_cols INTEGER",
 ];
 
 if (MIGRATIONS.length !== SCHEMA_VERSION) throw new Error(`${MIGRATIONS.length} migrations for schema v${SCHEMA_VERSION}`);
@@ -171,6 +173,15 @@ export function markUnseen(db: Db, id: string, marked: boolean): void {
 
 export function setView(db: Db, id: string, view: View): void {
 	db.run("INSERT INTO marks (session_id, view) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET view = excluded.view", id, view);
+}
+
+/** The agent's side of split's divider for the session, or (null) agent_width's. */
+export function setAgentCols(db: Db, id: string, cols: number | null): void {
+	db.run(
+		"INSERT INTO marks (session_id, agent_cols) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET agent_cols = excluded.agent_cols",
+		id,
+		cols,
+	);
 }
 
 /** A title for the session's harness to take, or (null) none pending. */

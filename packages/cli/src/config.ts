@@ -38,7 +38,9 @@ export type Config = {
 	reapAfterMs: number;
 	clipboard: string;
 	prefix: string;
-	rosterWidth: RosterWidth;
+	rosterWidth: Width;
+	/** In split, the agent's side of the divider; never more than half. */
+	agentWidth: Width;
 	shellPosition: ShellPosition;
 	/** Where the directory picker looks for places to start sessions, beyond the ones sessions have used. */
 	dirs: DirsConfig;
@@ -51,8 +53,8 @@ export type Config = {
 	operatorInstructions: string;
 };
 
-/** The roster's width: columns, or a share of the Deck. */
-export type RosterWidth = { cols: number } | { percent: number };
+/** A pane's width: columns, or a share of what it sits in. */
+export type Width = { cols: number } | { percent: number };
 
 /** Where the shell opens against the agent's pane: along its longer side, or one way while there's room. */
 export type ShellPosition = "auto" | "below" | "beside";
@@ -65,7 +67,8 @@ export type Control =
 	| { kind: "enum"; choices: { value: string; about: string }[] }
 	| { kind: "duration" }
 	| { kind: "int"; min: number; max: number }
-	| { kind: "width" }
+	/** Columns, or a share of `of`. */
+	| { kind: "width"; of: string }
 	| { kind: "command" }
 	| { kind: "chord" }
 	| { kind: "paths" }
@@ -126,6 +129,13 @@ function paths(value: unknown): string[] {
 	return value as string[];
 }
 
+function width(value: unknown): Width {
+	const percent = typeof value === "string" ? /^(\d+)%$/.exec(value) : null;
+	if (Number.isInteger(value) && (value as number) >= 20) return { cols: value as number };
+	if (percent && Number(percent[1]) >= 5 && Number(percent[1]) <= 80) return { percent: Number(percent[1]) };
+	throw new Error(`must be columns (20 or more) or a share like "25%", got ${JSON.stringify(value)}`);
+}
+
 function oneOf<T extends string>(choices: readonly T[], value: unknown): T {
 	if (!(choices as readonly unknown[]).includes(value))
 		throw new Error(
@@ -166,16 +176,28 @@ export const SETTINGS: Setting[] = [
 		label: "Roster width",
 		description: "Columns, or a share of the Deck like 25%. Never more than half the Deck; a width you drag wins.",
 		synonyms: ["sidebar", "list", "columns", "size"],
-		control: { kind: "width" },
+		control: { kind: "width", of: "Deck" },
 		fallback: fixed(42),
 		apply: (config, value) => {
-			const percent = typeof value === "string" ? /^(\d+)%$/.exec(value) : null;
-			if (Number.isInteger(value) && (value as number) >= 20) config.rosterWidth = { cols: value as number };
-			else if (percent && Number(percent[1]) >= 5 && Number(percent[1]) <= 80) config.rosterWidth = { percent: Number(percent[1]) };
-			else throw new Error(`must be columns (20 or more) or a share like "25%", got ${JSON.stringify(value)}`);
+			config.rosterWidth = width(value);
 		},
 		example: 42,
 		note: 'columns, or a share of the Deck like "25%"; never more than half',
+	},
+	{
+		key: ["agent_width"],
+		section: "General",
+		label: "Agent width in split",
+		description:
+			"Columns, or a share of the split like 35%, for the agent beside its Editor; never more than half. A divider you drag wins for that session, until you double-click it or press M-a =.",
+		synonyms: ["split", "editor", "ratio", "columns", "size", "divider"],
+		control: { kind: "width", of: "split" },
+		fallback: fixed(100),
+		apply: (config, value) => {
+			config.agentWidth = width(value);
+		},
+		example: 100,
+		note: 'columns, or a share of the split like "35%"; never more than half',
 	},
 	{
 		key: ["shell_position"],

@@ -1165,6 +1165,92 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"split-width": {
+		setup: async (s) => {
+			files(s);
+			config(s, `editor = "${NVIM} --clean ."\nagent_width = 70\n`);
+			await seed(
+				s,
+				{ title: "Draft release notes", turns: ["notes drafted"] },
+				{ title: "Refactor the parser", turns: ["parser refactored"] },
+			);
+		},
+		run: async (s) => {
+			// The tape only watches; the mouse is the director's, through the drive harness the tape attached to.
+			const press = (x: number, y: number, code: number, release = false) =>
+				s.tmux(
+					s.servers.drive,
+					"send-keys",
+					"-t",
+					"=drive:",
+					"-H",
+					...[...Buffer.from(`\x1b[<${code};${x + 1};${y + 1}${release ? "m" : "M"}`)].map((b) => b.toString(16)),
+				);
+			const divider = () => {
+				const main = s
+					.tmux(s.servers.sessions, "list-panes", "-t", "=deck:", "-F", "#{@swb_slot} #{pane_left} #{pane_width}")
+					.split("\n")
+					.find((line) => line.startsWith("main ")) as string;
+				const [, left, width] = main.split(" ").map(Number) as [number, number, number];
+				return left + width;
+			};
+			/** The divider dragged to column `to` at a hand's pace, held there a moment before it's let go. */
+			const drag = async (to: number, hold: number) => {
+				let x = divider();
+				press(x, 20, 0);
+				while (x !== to) {
+					x += Math.sign(to - x) * Math.min(2, Math.abs(to - x));
+					press(x, 20, 32);
+					await Bun.sleep(70);
+				}
+				await Bun.sleep(hold);
+				press(x, 20, 0, true);
+			};
+			const pick = async (title: string) => {
+				await Bun.sleep(1000);
+				const [x, y] = await onScreen(s, title, 42);
+				s.swb("drive", "click", String(x), String(y));
+			};
+			const dragged = (title: string) =>
+				s.query<{ agent_cols: number | null }>(
+					"SELECT m.agent_cols FROM marks m JOIN sessions s USING (session_id) WHERE s.title = ?",
+					title,
+				)[0]?.agent_cols ?? null;
+
+			await waitDrive(s, "the Deck up", (x) => x.ready);
+			await pick("Refactor");
+			await waitDrive(s, "its pi focused by a click", (x) => x.focus === "stage" && x.staged.kind === "live");
+			s.keys("M-a", "v");
+			await waitDrive(s, "split", (x) => x.layout.split);
+			await Bun.sleep(3000);
+			const home = divider();
+			await drag(home - 40, 2500);
+			await until(() => dragged("Refactor the parser") !== null, TAPE, "Refactor keeps its own");
+			await Bun.sleep(2500);
+			await pick("Draft");
+			await waitDrive(s, "Draft on the Stage", (x) => x.staged.kind === "live" && x.focus === "stage");
+			s.keys("M-a", "v");
+			await waitDrive(s, "Draft split at agent_width", (x) => x.layout.split && x.staged.view === "split");
+			await Bun.sleep(2500);
+			await pick("Refactor");
+			await waitDrive(s, "Refactor split again", (x) => x.layout.split && x.focus === "stage");
+			await Bun.sleep(2500);
+			await drag(home + 1, 2500);
+			await until(() => dragged("Refactor the parser") === null, TAPE, "snapped back");
+			await Bun.sleep(2500);
+			await drag(home - 25, 600);
+			await until(() => dragged("Refactor the parser") !== null, TAPE, "kept again");
+			await Bun.sleep(1500);
+			s.swb("drive", "click", String(home - 25), "20");
+			s.swb("drive", "click", String(home - 25), "20");
+			await until(() => dragged("Refactor the parser") === null, TAPE, "reset by a double-click");
+			await Bun.sleep(2500);
+			s.keys("M-a", "?");
+			await Bun.sleep(3500);
+			s.keys("q");
+		},
+	},
+
 	"stage-death": {
 		run: async (s) => {
 			const live = await waitDeck(s, "pi live", (x) => x.staged.kind === "live");
@@ -1937,15 +2023,15 @@ export const directors: Record<string, Director> = {
 			await until(() => shows("j k ↑ ↓") && shows("Send literal Alt+a"), TAPE, "every key on a tall Deck");
 			await until(() => !shows("any key to close"), TAPE, "the help closed");
 			s.swb("drive", "resize", "140x24");
-			await until(() => shows("↓ 18 more lines · j/k ↑/↓ scroll"), TAPE, "the short Deck's help, its end below");
+			await until(() => shows("↓ 19 more lines · j/k ↑/↓ scroll"), TAPE, "the short Deck's help, its end below");
 			await Bun.sleep(1500);
 			for (const direction of ["down", "down", "down", "down", "up"]) {
 				s.swb("drive", "wheel", direction, "70", "12");
 				await Bun.sleep(700);
 			}
-			await until(() => shows("↑ 3 ↓ 16"), TAPE, "four turns of the wheel down, one up");
-			await until(() => shows("+N folded family") && shows("↑ 18 ·"), TAPE, "j j and space to the end");
-			await until(() => shows("↑ 15 ↓ 4"), TAPE, "k k and ↑ back up");
+			await until(() => shows("↑ 3 ↓ 17"), TAPE, "four turns of the wheel down, one up");
+			await until(() => shows("+N folded family") && shows("↑ 19 ·"), TAPE, "j j and space to the end");
+			await until(() => shows("↑ 15 ↓ 5"), TAPE, "k k k and ↑ back up");
 			await until(() => !shows("PgUp/PgDn page"), TAPE, "q closes it");
 		},
 	},

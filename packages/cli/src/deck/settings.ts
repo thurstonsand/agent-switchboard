@@ -199,7 +199,7 @@ function show(s: Setting, value: unknown): string {
 		case "bool":
 			return value ? "on" : "off";
 		case "width":
-			return typeof value === "number" ? `${value} columns` : `${value} of the Deck`;
+			return typeof value === "number" ? `${value} columns` : `${value} of the ${s.control.of}`;
 		case "paths": {
 			const list = value as string[];
 			return list.length === 0 ? "none" : `${list.length} path${list.length === 1 ? "" : "s"}`;

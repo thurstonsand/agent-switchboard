@@ -215,6 +215,8 @@ export type Model = {
 	localViews: Map<string, { view: View; req: number }>;
 	/** Groups set here and not yet back in a snapshot, each with the request that writes it; null is ungrouped. */
 	localGroups: Map<string, { name: string | null; req: number }>;
+	/** Split widths dragged here and not yet back in a snapshot, each with the request that writes it; null follows agent_width. */
+	localAgentCols: Map<string, { cols: number | null; req: number }>;
 	stage: StageState;
 	/** Directories whose shell this Deck shows; a shell that exits leaves the set. */
 	shellsShown: Set<string>;

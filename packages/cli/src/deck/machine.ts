@@ -28,7 +28,7 @@ import { quote, SESSIONS, tmuxAsync } from "../tmux.ts";
 import { writeConfig } from "../write-config.ts";
 import { ARRIVAL_HOLD_MS, DECK, PLACEHOLDER } from "./conf.ts";
 import { Control } from "./control.ts";
-import { type DeckIntent, HELP_POPUP, rosterCols, SPLIT_FROM } from "./deck.ts";
+import { agentCols, type DeckIntent, HELP_POPUP, rosterCols, SPLIT_FROM } from "./deck.ts";
 import { rosterPane, stagePane, stageShows, startIntent } from "./env.ts";
 import { helpSize } from "./help.ts";
 import {
@@ -96,6 +96,7 @@ const m: Model = {
 	transcriptsAsked: new Map<string, number>(),
 	localViews: new Map<string, { view: View; req: number }>(),
 	localGroups: new Map<string, { name: string | null; req: number }>(),
+	localAgentCols: new Map<string, { cols: number | null; req: number }>(),
 	stage: {
 		staged: null,
 		stagedAt: 0,
@@ -235,6 +236,18 @@ export function groupOf(e: Entry): string | null {
 	return local ? local.name : e.group;
 }
 
+/** The agent's side of split's divider as dragged for the session, here or in the db; null follows agent_width. */
+function draggedCols(e: Entry): number | null {
+	const local = m.localAgentCols.get(e.id);
+	return local ? local.cols : e.agentCols;
+}
+
+function setAgentCols(e: Entry, cols: number | null): void {
+	const req = nextReq();
+	m.localAgentCols.set(e.id, { cols, req });
+	post({ type: "agentCols", req, id: e.id, cols });
+}
+
 function setGroup(ids: string[], name: string | null): void {
 	const req = nextReq();
 	for (const id of ids) m.localGroups.set(id, { name, req });
@@ -317,12 +330,12 @@ export function launchElapsed(e: Entry, now: number): string {
 const EMPTY: Card = { head: [], lines: ["Nothing selected."], turns: [], tail: [], ending: null, agent: "" };
 
 function onCard(kind: Applied["kind"], id: string | null, card: Card): Applied {
-	return { kind, id, host: null, card, view: "agent", target: PLACEHOLDER, side: null, shell: null };
+	return { kind, id, host: null, card, view: "agent", target: PLACEHOLDER, side: null, split: null, shell: null };
 }
 
 /** A pi still starting, on view so whatever it asks before it registers (a missing cwd, project trust) can be answered. */
 function starting(id: string | null, host: string): Applied {
-	return { kind: "loading", id, host: null, card: null, view: "agent", target: host, side: null, shell: null };
+	return { kind: "loading", id, host: null, card: null, view: "agent", target: host, side: null, split: null, shell: null };
 }
 
 function piShown(a: Applied): boolean {
@@ -447,7 +460,8 @@ function piStage(): Applied {
 			card(e, failed ? [`${harnessName(e.harness)} quit before it was ready:`, ...m.stage.ended.lines] : []),
 		);
 	}
-	if (e.live && e.host) return { kind: "live", id: e.id, host: e.host, card: null, view: "agent", target: e.host, side: null, shell: null };
+	if (e.live && e.host)
+		return { kind: "live", id: e.id, host: e.host, card: null, view: "agent", target: e.host, side: null, split: null, shell: null };
 	const launch = launchFor(e.id);
 	if (launch?.host) return starting(e.id, launch.host);
 	if (launch) return onCard("loading", e.id, card(e, launch.keyboard && rosterOffScreen() ? [ESC_LINE] : []));
@@ -476,8 +490,7 @@ const SHELL_MIN_ROWS = 10;
  * while it fits, so it doesn't jump; another directory's shell, or entering or leaving split, chooses again.
  */
 function shellAt(d: Applied, target: string): ShellAt {
-	const stageCols = panes.rosterHidden ? panes.width : panes.width - panes.rosterWidth() - 1;
-	const cols = d.side ? Math.round(stageCols * 0.35) : stageCols;
+	const cols = d.split ? d.split.cols : panes.stageCols();
 	const fits = { beside: cols >= 2 * SHELL_MIN_COLS + 1, below: panes.height >= 2 * SHELL_MIN_ROWS + 1 };
 	// A narrow Deck zooms whichever pane has the keyboard, so a second one would never show beside the first.
 	if (panes.narrow) return "replace";
@@ -497,7 +510,11 @@ function viewed(): Applied {
 	if (!e || !editor) return d;
 	const view = viewOf(e);
 	if (view === "editor") return { ...d, view, target: editor };
-	if (view === "split" && d.host && panes.width >= SPLIT_FROM) return { ...d, view, target: editor, side: d.host };
+	if (view === "split" && d.host && panes.width >= SPLIT_FROM) {
+		const stage = panes.stageCols();
+		const split = { cols: agentCols(m.config.agentWidth, draggedCols(e), stage), defaultCols: agentCols(m.config.agentWidth, null, stage) };
+		return { ...d, view, target: editor, side: d.host, split };
+	}
 	return d;
 }
 
@@ -994,6 +1011,7 @@ function onSnapshot(next: Snapshot): void {
 	m.snapshot = next;
 	m.entries = new Map(next.entries.map((e) => [e.id, e]));
 	for (const [id, { view }] of m.localViews) if (m.entries.get(id)?.view === view) m.localViews.delete(id);
+	for (const [id, { cols }] of m.localAgentCols) if (m.entries.get(id)?.agentCols === cols) m.localAgentCols.delete(id);
 	for (const [id, { name }] of m.localGroups) {
 		const e = m.entries.get(id);
 		if (!e || e.group === name) m.localGroups.delete(id);
@@ -1109,6 +1127,7 @@ function onWorker(message: FromWorker): void {
 			if (error === null) break;
 			for (const [id, local] of m.localViews) if (local.req === req) m.localViews.delete(id);
 			for (const [id, local] of m.localGroups) if (local.req === req) m.localGroups.delete(id);
+			for (const [id, local] of m.localAgentCols) if (local.req === req) m.localAgentCols.delete(id);
 			toast(error, "error");
 			break;
 		}
@@ -3119,6 +3138,14 @@ export async function handleCommand(cmd: string, argv: string[]): Promise<void> 
 				if (!settingsPane()) changeView(cmd === "view-swap");
 			});
 			break;
+		case "split-dragged": {
+			const cols = await panes.splitCols();
+			dispatch(() => splitDragged(cols));
+			break;
+		}
+		case "split-reset":
+			dispatch(resetSplit);
+			break;
 		case "roster":
 			// Settings holds the roster beside the Stage; showing it, and with it the keyboard, still goes.
 			if (argv[0] === "focus") await panes.showRoster(true);
@@ -3276,6 +3303,28 @@ function changeView(swap: boolean): void {
 	else if (saved !== "split") next = "split";
 	else next = showing === "split" && m.focus === "stage" && m.focusedPane === panes.main.pane ? "editor" : "agent";
 	showView(e, next);
+}
+
+/** A drag on split's divider let go this near agent_width's column snaps back to it. */
+const SNAP_COLS = 2;
+
+/** Split's divider let go with `cols` right of it: near agent_width's column it snaps back, and elsewhere the session keeps it. */
+function splitDragged(cols: number): void {
+	const e = panes.applied.id === null ? undefined : m.entries.get(panes.applied.id);
+	const split = panes.applied.split;
+	if (!e || !split) return;
+	const kept = Math.abs(cols - split.defaultCols) <= SNAP_COLS ? null : cols;
+	if (kept !== draggedCols(e)) setAgentCols(e, kept);
+	// What's applied may not change, with nothing dragged before, but the divider still has to go back.
+	afterCommit(() => panes.sizeSplit());
+}
+
+/** Split's divider back where agent_width puts it, for this session from now on. */
+function resetSplit(): void {
+	const e = panes.applied.id === null ? undefined : m.entries.get(panes.applied.id);
+	if (!e || !panes.applied.split) return;
+	if (draggedCols(e) !== null) setAgentCols(e, null);
+	afterCommit(() => panes.sizeSplit());
 }
 
 /** A view with the Editor in it waits for the Editor to run; asking for one that died brings it back. */

@@ -2,8 +2,11 @@
 
 ## [Unreleased]
 
+Schema v14: update swb and the pi line together.
+
 ### Added
 
+- `agent_width` sets the agent's side of split's divider, in columns or a share of the split like `"35%"`, never more than half; the Editor takes the rest. Dragging the divider keeps that width for the session alone, through resizes and new Decks. While you drag, a `┰` in the top edge marks where `agent_width` puts it, and letting go within 2 columns of it snaps back. A double-click on the divider or `Alt+a =` puts it back too.
 - `swb drive click --on TEXT` clicks the one place on the Deck showing TEXT, and `click X Y --on TEXT` that cell. The Deck drops the press if its frame has since moved something else there, and `--on TEXT` alone aims again.
 
 ### Changed

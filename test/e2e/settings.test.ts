@@ -70,7 +70,7 @@ test("Settings edits config.toml by keyboard and mouse, keeps its comments, and 
 	expect(s.screen()).not.toContain("• Wake on highlight");
 
 	// A duration typed in, read back as it's typed.
-	s.keys("j", "j", "j", "Enter", "C-u", "-l", "3d");
+	s.keys("j", "j", "j", "j", "Enter", "C-u", "-l", "3d");
 	await until(() => s.screen().includes("= 3 days"), budgets.settle, "the duration read back");
 	s.keys("Enter");
 	await waitState(s, "3d saved", (x) => item(x, "inactive_after")?.value === "3d");
@@ -244,7 +244,7 @@ test("an edit stays on its setting while the wheel scrolls the list, and a click
 	await waitState(s, "ready", (x) => x.ready);
 	s.keys(",");
 	await waitState(s, "Settings", (x) => x.mode === "settings" && x.settings?.section === "General");
-	s.keys("j", "j", "j", "Enter");
+	s.keys("j", "j", "j", "j", "Enter");
 	const editing = await waitState(
 		s,
 		"inactive_after in edit",

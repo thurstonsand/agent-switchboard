@@ -124,6 +124,101 @@ test("M-a v splits the Stage equally between editor and pi; M-a h and l walk all
 	s.save("left-for-pi.txt", s.screen());
 });
 
+test("split's divider sits at agent_width; a drag shows a notch at its column and keeps the session's own, a release near it snaps back, and a double-click or M-a = resets it", async () => {
+	s = scenario("phase4", "split-width");
+	config(s, 'editor = "cat -v"\nagent_width = 60');
+	const [other] = (await seed(s, { turns: ["other"] })) as [string];
+	const live = await started(s, "--size", "240x50", "--", "new");
+	const id = live.staged.id as string;
+	await prefixKeys(s, "M-a", "v", "split", (x) => x.layout.split && x.staged.view === "split");
+	/** The columns right of the divider, and the divider's own column. */
+	const split = () => {
+		const [, editor] = boxes(s) as [Box, Box];
+		const window = Number(s.tmux(s.servers.sessions, "display", "-p", "-t", "=deck:", "#{window_width}"));
+		return { agent: window - editor.left - editor.width - 1, divider: editor.left + editor.width };
+	};
+	const dragged = () => s.query<{ agent_cols: number | null }>("SELECT agent_cols FROM marks WHERE session_id = ?", id)[0]?.agent_cols;
+	const top = () => s.screen().split("\n")[0] as string;
+	await until(() => split().agent === 60, budgets.settle, `a 60-column agent, not ${split().agent}`);
+	const home = split().divider;
+	expect(home).toBe(240 - 60 - 1);
+	expect(top()).not.toContain("┰");
+
+	// Held mid-drag, the notch marks agent_width's column in the Deck's top edge, in place of the agent's label, and not
+	// over the shell below it.
+	await prefixKeys(s, "M-a", "s", "the shell below pi", (x) => x.layout.shell === "below");
+	s.swb("drive", "drag", String(home), "20", String(home - 30), "20", "--hold");
+	await until(() => top()[home] === "┰", budgets.settle, `the notch at column ${home}:\n${top()}`);
+	expect(top()).not.toMatch(/ pi /);
+	expect(top()).toMatch(/ editor /);
+	expect(s.screen().split("\n").slice(1).join("\n")).not.toContain("┰");
+	s.save("dragging.txt", s.screen());
+	// Let go a few columns past where the divider stopped, over pi rather than the border.
+	s.swb("drive", "release", String(home - 25), "20");
+	await until(() => dragged() === 90, budgets.settle, `the session keeps 90 columns, not ${dragged()}`);
+	expect(split().agent).toBe(90);
+	await until(() => !top().includes("┰") && / pi /.test(top()), budgets.settle, `the notch gone, the label back:\n${top()}`);
+	s.save("dragged.txt", s.screen());
+	await prefixKeys(s, "M-a", "s", "the shell closed", (x) => x.layout.shell === null);
+
+	// Another session follows agent_width; this one keeps its own through resizes.
+	s.keys("M-a", "h", "M-a", "h");
+	await waitState(s, "the roster", (x) => x.focus === "roster");
+	await cursorTo(s, other);
+	s.keys("M-a", "v");
+	await waitState(s, "the other split", (x) => x.staged.id === other && x.staged.kind === "live" && x.layout.split, budgets.piReady);
+	await until(() => split().agent === 60, budgets.settle, `the other at agent_width, not ${split().agent}`);
+	s.keys("M-a", "h", "M-a", "h");
+	await waitState(s, "the roster", (x) => x.focus === "roster");
+	await cursorTo(s, id);
+	await waitState(s, "back, split", (x) => x.staged.id === id && x.layout.split);
+	await until(() => split().agent === 90, budgets.settle, `its own 90 columns again, not ${split().agent}`);
+	s.swb("drive", "resize", "300x50");
+	await waitState(s, "300 columns", (x) => x.layout.width === 300);
+	await until(() => split().agent === 90, budgets.settle, `90 columns kept through a resize, not ${split().agent}`);
+	s.swb("drive", "resize", "240x50");
+	await waitState(s, "240 columns", (x) => x.layout.width === 240);
+	await until(() => split().agent === 90 && split().divider === home - 30, budgets.settle, `90 columns again, not ${split().agent}`);
+	closeDeck(s);
+	s.swb("drive", "start", "--size", "240x50");
+	await cursorTo(s, id);
+	await waitState(s, "split in a new Deck", (x) => x.staged.id === id && x.layout.split);
+	await until(() => split().agent === 90, budgets.settle, `90 columns in a new Deck, not ${split().agent}`);
+
+	// Let go 2 columns from agent_width's, it snaps back and forgets; 3 away, it keeps it. Each press waits out tmux's
+	// double-click time, so it doesn't pair with the one before.
+	await Bun.sleep(500);
+	s.swb("drive", "drag", String(home - 30), "20", String(home + 2), "20");
+	await until(() => dragged() === null && split().agent === 60, budgets.settle, `snapped back, not ${dragged()}, ${split().agent}`);
+	await Bun.sleep(500);
+	s.swb("drive", "drag", String(home), "20", String(home + 3), "20");
+	await until(() => dragged() === 57 && split().agent === 57, budgets.settle, `kept 3 away, not ${dragged()}, ${split().agent}`);
+
+	// A double-click on the divider resets it, and so does M-a =.
+	await Bun.sleep(500);
+	s.swb("drive", "click", String(home + 3), "20");
+	s.swb("drive", "click", String(home + 3), "20");
+	await until(
+		() => dragged() === null && split().agent === 60,
+		budgets.settle,
+		`a double-click resets, not ${dragged()}, ${split().agent}`,
+	);
+	await Bun.sleep(500);
+	s.swb("drive", "drag", String(home), "20", String(home - 20), "20");
+	await until(() => dragged() === 80, budgets.settle, `80 kept, not ${dragged()}`);
+	// A new agent_width leaves the session's own alone, until M-a = puts it back to the new one.
+	config(s, 'editor = "cat -v"\nagent_width = 50');
+	await until(
+		() => s.tmux(s.servers.sessions, "show", "-gv", "@swb_notch") === String(240 - 50 - 1),
+		budgets.settle,
+		"agent_width 50 applied",
+	);
+	expect(split().agent).toBe(80);
+	s.keys("M-a", "=");
+	await until(() => dragged() === null && split().agent === 50, budgets.settle, `M-a = resets, not ${dragged()}, ${split().agent}`);
+	s.save("reset.txt", s.screen());
+});
+
 test("split shows pi below 160 columns and returns on widening, survives reopening the Deck, and waits for pi to be live", async () => {
 	s = scenario("phase4", "split-layout");
 	config(s, 'editor = "cat -v"');

@@ -10,6 +10,8 @@ import type { Ending } from "../transcripts/conversation.ts";
 /** One roster entry: a Session, or a live pi that has had no prompt yet (provisional, titled by its id). */
 export type Entry = SessionState & {
 	view: View;
+	/** The agent's side of split's divider, as dragged for it; null follows agent_width. */
+	agentCols: number | null;
 	transcript: string | null;
 	/** The tmux session hosting it, when live. */
 	host: string | null;
@@ -215,6 +217,7 @@ export type ToWorker =
 	| { type: "dirty"; id: string; worktree: string }
 	| { type: "colors"; colors: TerminalProfile }
 	| { type: "view"; req: number; id: string; view: View }
+	| { type: "agentCols"; req: number; id: string; cols: number | null }
 	| { type: "group"; req: number; ids: string[]; name: string | null }
 	| { type: "editor"; dir: string }
 	| { type: "shell"; req: number; dir: string }
