@@ -347,6 +347,14 @@ export function randomHex(bytes: number): string {
 	return [...crypto.getRandomValues(new Uint8Array(bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** A tmux session name under `prefix` that no session has. Its caller holds the db's write lock, as every swb that names one does. */
+function unusedName(prefix: string): string {
+	const base = prefix.replaceAll(/[.:]/g, "_");
+	let name = `${base}-${randomHex(2)}`;
+	while (tmuxTry(SESSIONS, "has-session", "-t", `=${name}`).ok) name = `${base}-${randomHex(2)}`;
+	return name;
+}
+
 export type LaunchSpec = {
 	harness: Harness;
 	cwd: string;
@@ -439,7 +447,7 @@ export function launch(db: Db, spec: LaunchSpec): string {
 	const at = now();
 	const { cwd, resume } = spec;
 	if (!statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) throw new SwbError(`no directory ${cwd}`);
-	const name = `${basename(projectRoot(cwd)).replaceAll(/[.:]/g, "_")}-${randomHex(2)}`;
+	const name = unusedName(basename(projectRoot(cwd)));
 	db.run(
 		"INSERT OR REPLACE INTO launches (tmux_session, resume_id, parent_id, group_name, created_at) VALUES (?, ?, ?, ?, ?)",
 		name,
@@ -550,7 +558,7 @@ function ensureDirSession(db: Db, kind: "editor" | "shell", dir: string, command
 	return db.tx(() => {
 		const existing = listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_dir}").find(([, k, d]) => k === kind && d === dir);
 		if (existing) return existing[0] as string;
-		const name = `${basename(dir).replaceAll(/[.:]/g, "_")}-${kind === "editor" ? "edit" : "sh"}-${randomHex(2)}`;
+		const name = unusedName(`${basename(dir)}-${kind === "editor" ? "edit" : "sh"}`);
 		const shell = loginShell();
 		const run = command
 			? `SWB_EDITOR=${quote(name)} SHELL=${shell} ${shell} -lic ${quote(`exec ${command}`)}`

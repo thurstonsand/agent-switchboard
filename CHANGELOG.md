@@ -6,6 +6,7 @@
 
 - A pi session continued with pi's Continue after its directory was gone no longer stops its next wake at pi's prompt for that directory.
 - `swb open` on a session that had just gone Inactive or Snoozed no longer sometimes leaves the cursor off it.
+- Starting or waking a session, or a directory's editor or shell, no longer now and then fails with tmux's "duplicate session".
 
 ## [0.16.1] - 2026-11-10
 
