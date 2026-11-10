@@ -4,7 +4,7 @@
 	"type": "module",
 	"dependencies": {
 		"@decimalturn/toml-patch": "3.3.2",
-		"@earendil-works/pi-tui": "^1.5.0",
+		"@earendil-works/pi-tui": "^1.5.2",
 		"@modelcontextprotocol/sdk": "1.32.2",
 		"@swb/shared": "workspace:*",
 		"croner": "11.0.0",
