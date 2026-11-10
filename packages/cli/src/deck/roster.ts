@@ -1,4 +1,4 @@
-import { rmSync, statSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { basename } from "node:path";
 import {
 	type Component,
@@ -1455,16 +1455,10 @@ function stopDiscovery(): void {
 	}
 }
 
-/** The socket file this roster listens on, by inode: a roster that replaced this one may have its own there by now. */
-let listening: number | null = null;
-
 function cleanup(): never {
 	settingsPane()?.saveProse();
 	overlays.closeAllNow();
 	stopDiscovery();
-	// The roster that replaces this one may already listen there.
-	// biome-ignore lint/plugin: at exit, when nothing waits on the roster's keys any more.
-	if (statSync(sock, { throwIfNoEntry: false })?.ino === listening) rmSync(sock, { force: true });
 	ctl.close();
 	process.exit(0);
 }
@@ -1684,6 +1678,8 @@ void queryColors(null);
 // biome-ignore-start lint/plugin: before the roster's first frame, when nothing waits on its keys yet.
 tmux(SESSIONS, "set", "-p", "-t", rosterPane, "@swb_label", "swb");
 
+// Only a roster starting removes the socket, and only one starts in the Deck's pane at a time. One that exits leaves it,
+// refusing connections as no socket would: the roster replacing it may already listen there.
 rmSync(sock, { force: true });
 
 // biome-ignore-end lint/plugin: startup
@@ -1721,9 +1717,6 @@ Bun.serve({
 		return new Response("not found", { status: 404 });
 	},
 });
-
-// biome-ignore lint/plugin: startup
-listening = statSync(sock).ino;
 
 boot({
 	requestRender: () => tui.requestRender(),
