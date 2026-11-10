@@ -1420,6 +1420,34 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"bare-submodule-projects": {
+		setup: async (s) => {
+			const code = join(s.root, "code");
+			const src = gitRepo(s, join(code, "src"));
+			git(s, code, "clone", "-q", "--bare", src, "proj.git");
+			const superproject = gitRepo(s, join(code, "super"));
+			git(s, superproject, "-c", "protocol.file.allow=always", "submodule", "add", "-q", src, "sub");
+			const sub = join(superproject, "sub");
+			const dirs = {
+				"Feature in a bare clone": gitWorktree(s, join(code, "proj.git"), "a", join(code, "proj-a")),
+				"Fix in the same bare clone": gitWorktree(s, join(code, "proj.git"), "b", join(code, "proj-b")),
+				"Submodule checkout": sub,
+				"Submodule worktree": gitWorktree(s, sub, "side", join(code, "sub-side")),
+			};
+			for (const [title, cwd] of Object.entries(dirs)) await launched(s, `reply ${title}`, { cwd, title });
+		},
+		run: async (s) => {
+			await waitDrive(s, "Deck ready", (st) => st.ready);
+			await Bun.sleep(3000);
+			const id = s.ls().find((e) => e.title === "Feature in a bare clone")?.id as string;
+			await cursorTo(s, id);
+			s.keys("a");
+			await waitDrive(s, "worktree archive choice", (st) => st.mode === "archive");
+			await Bun.sleep(3000);
+			s.keys("Escape");
+		},
+	},
+
 	"theme-flip": {
 		run: async (s) => {
 			await waitDeck(s, "the pi live", (x) => x.staged.kind === "live" && x.colors.background === "#f9f5d7");

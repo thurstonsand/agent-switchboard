@@ -58,9 +58,11 @@ const CLAUDE_LOCK_STALE_MS = 10_000;
 
 /**
  * Marks a folder trusted in Claude Code's config, as answering its trust dialog does, under the key Claude Code uses:
- * the folder's Project root, the main checkout of a linked worktree, which also covers every worktree of it. Claude Code has no flag that skips the dialog, and an agent's launch has no one to answer
- * it. The write holds Claude Code's own lock, the directory beside the file, so a running Claude Code, which reads the
- * file again under that lock before each of its writes, keeps it.
+ * the folder's Project root, the main checkout of a linked worktree, which also covers every worktree of it, and the
+ * folders beneath it. A submodule's linked worktree it keys by the submodule's git dir, which this misses, so an
+ * agent's launch there stops at the dialog. Claude Code has no flag that skips the dialog, and an agent's launch has no
+ * one to answer it. The write holds Claude Code's own lock, the directory beside the file, so a running Claude Code,
+ * which reads the file again under that lock before each of its writes, keeps it.
  */
 export async function trustClaudeFolder(dir: string): Promise<void> {
 	const path = claudeConfig();

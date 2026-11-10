@@ -88,7 +88,7 @@ A box the Deck shows over its panes without moving them or taking the keyboard: 
 What the **Stage** shows for a session: its **agent**, its **Editor**, or a **split** of both. Each session remembers its own.
 
 **Project**:
-A git repository together with all of its worktrees; sessions outside any repository group by directory.
+A git repository together with all of its worktrees, rooted at its main checkout; a bare clone has none, so each of its worktrees is a Project of its own. Sessions outside any repository group by directory.
 
 **Operator**:
 A session whose working directory is swb's Operator folder. It coordinates the other sessions instead of working in a **Project**, belongs to none, and never goes **Inactive**.

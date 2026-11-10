@@ -1,7 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import { entry, reply, state, waitState } from "./harness/deck.ts";
+import { host } from "./harness/agents.ts";
+import { cursorTo, entry, launched, reply, state, waitState } from "./harness/deck.ts";
 import { budgets, git, gitRepo, gitWorktree, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
@@ -148,4 +149,54 @@ test("/wt fork: swb follows the session into the new worktree, in the same proje
 	expect(worktrees).toEqual([realpathSync(s.project), worktree]);
 	expect(entry(s, id)).toMatchObject({ cwd: worktree, branch: "feature", project: realpathSync(s.project), live: true });
 	await wakesWhereItWent(id, worktree);
+});
+
+test("a bare clone's worktrees are Projects of their own, and a submodule's are its: -c and a wake's fallback stay inside them", async () => {
+	s = scenario("phase6", "bare-submodule", { packages: [], recorder: true });
+	mkdirSync(join(s.root, "code"));
+	const code = realpathSync(join(s.root, "code"));
+	const src = gitRepo(s, join(code, "src"));
+	git(s, code, "clone", "-q", "--bare", src, "proj.git");
+	const a = gitWorktree(s, join(code, "proj.git"), "a", join(code, "proj-a"));
+	const b = gitWorktree(s, join(code, "proj.git"), "b", join(code, "proj-b"));
+	const superproject = gitRepo(s, join(code, "super"));
+	git(s, superproject, "-c", "protocol.file.allow=always", "submodule", "add", "-q", src, "sub");
+	const sub = join(superproject, "sub");
+	const side = gitWorktree(s, sub, "side", join(code, "sub-side"));
+	const inA = await launched(s, "reply in-a", { cwd: a });
+	const inB = await launched(s, "reply in-b", { cwd: b });
+	const inSub = await launched(s, "reply in-sub", { cwd: sub });
+	const inSide = await launched(s, "reply in-side", { cwd: side });
+	expect([inA, inB, inSub, inSide].map((id) => entry(s, id).project)).toEqual([a, b, sub, sub]);
+
+	// -c from inside one of the bare clone's worktrees finds its session, not the other's, which ran last.
+	Bun.spawnSync([join(s.bin, "swb"), "drive", "start", "--", "-c"], { env: s.env, cwd: a });
+	await waitState(s, "-c on a's session", (x) => x.staged.id === inA, budgets.piReady);
+	s.save("continued.txt", s.screen());
+	// Its own Project, and still a linked worktree, whose archive can delete it.
+	s.keys("M-a", "h");
+	await waitState(s, "the roster's keyboard", (x) => x.focus === "roster");
+	await cursorTo(s, inA);
+	s.keys("a");
+	await waitState(s, "archive choice", (x) => x.mode === "archive");
+	await until(() => s.screen().includes("Archive; delete worktree"), budgets.settle, "the delete button");
+	s.save("archive-prompt.txt", s.screen());
+	s.keys("Escape");
+	s.swb("drive", "stop");
+
+	for (const id of [inB, inSide]) {
+		s.tmux(s.servers.sessions, "kill-session", "-t", `=${host(s, id)}`);
+		await until(() => !entry(s, id).live, budgets.settle, "dormant");
+	}
+	git(s, join(code, "proj.git"), "worktree", "remove", "--force", b);
+	git(s, sub, "worktree", "remove", "--force", side);
+	// A bare clone has no checkout to fall back to, never the directory that holds it.
+	const refused = s.swbTry("wake", inB);
+	expect(refused.code).not.toBe(0);
+	expect(refused.err).toContain(`session directory ${b} and Project root ${b} are unavailable`);
+	expect(entry(s, inB).live).toBe(false);
+	// A submodule's worktree falls back to the submodule's checkout, never its git directory under the superproject's.
+	s.swb("wake", inSide);
+	await until(() => entry(s, inSide).live, budgets.piReady, "woken in the submodule");
+	expect(s.query<{ cwd: string }>("select cwd from runtimes where session_id = ?", inSide)).toEqual([{ cwd: sub }]);
 });

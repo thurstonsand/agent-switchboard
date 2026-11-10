@@ -3,7 +3,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState, PickerState } from "../../packages/cli/src/deck/protocol.ts";
 import { config, reply, seed, waitState } from "./harness/deck.ts";
-import { budgets, gitRepo, gitWorktree, type Scenario, scenario, until } from "./harness/index.ts";
+import { budgets, git, gitRepo, gitWorktree, type Scenario, scenario, until } from "./harness/index.ts";
 
 let s: Scenario;
 afterEach(async () => {
@@ -59,6 +59,27 @@ test("swb dirs: checkouts down to dirs.depth with their worktrees, include, and 
 	// Most recently used first; the rest stay alphabetical.
 	config(s, '[dirs]\nscan = ["~/code"]\ndepth = 3\ninclude = ["~/code/notes"]\nexclude = ["dotfiles", "org/*/legacy"]\nsort = "recent"\n');
 	expect(dirs(s).map((d) => d.path)).toEqual([s.project, ...expected.slice(0, 5).map((d) => d.path)]);
+});
+
+test("swb dirs: a bare clone's worktrees each stand alone, and a submodule is its own checkout with its worktrees beneath it", () => {
+	s = scenario("dirs", "bare-submodule");
+	const { code, repo, worktree } = codeTree(s);
+	const src = repo("src");
+	git(s, code, "clone", "-q", "--bare", src, "proj.git");
+	worktree(join(code, "proj.git"), "a", join(code, "proj-a"));
+	const superproject = repo("super");
+	git(s, superproject, "-c", "protocol.file.allow=always", "submodule", "add", "-q", src, "sub");
+	const sub = join(superproject, "sub");
+	worktree(sub, "side", join(code, "sub-side"));
+	// The scan never enters a checkout, so only a directory named by hand finds the submodule.
+	config(s, '[dirs]\nscan = ["~/code"]\ndepth = 2\ninclude = ["~/code/super/sub"]\n');
+	expect(dirs(s)).toEqual([
+		{ path: join(code, "proj-a"), repo: null, branch: null },
+		{ path: src, repo: null, branch: "main" },
+		{ path: sub, repo: null, branch: "main" },
+		{ path: join(code, "sub-side"), repo: sub, branch: "side" },
+		{ path: superproject, repo: null, branch: "main" },
+	]);
 });
 
 test("n picks a directory, ranked as typed; M-a d removes a repository with its worktrees; N adds one; a deleted one is forgotten", async () => {

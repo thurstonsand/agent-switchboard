@@ -375,6 +375,32 @@ test("sessions an agent starts in a worktree no harness has trusted start, and a
 	}
 });
 
+test("Claude Code sessions an agent starts in a bare clone's worktree or a submodule are trusted at that Project's root, never above it", async () => {
+	s = scenario("harnesses", "trust-roots", { packages: [], recorder: true, harnesses: ["claude"] });
+	const parent = await launched(s, "pi", "reply parent up");
+	const code = join(s.root, "code");
+	const src = gitRepo(s, join(code, "src"));
+	git(s, code, "clone", "-q", "--bare", src, "proj.git");
+	const bareWorktree = gitWorktree(s, join(code, "proj.git"), "a", join(code, "proj-a"));
+	const superproject = gitRepo(s, join(code, "super"));
+	git(s, superproject, "-c", "protocol.file.allow=always", "submodule", "add", "-q", src, "sub");
+	const sub = join(superproject, "sub");
+	for (const dir of [bareWorktree, sub]) {
+		const since = Date.now();
+		const launch = Bun.spawnSync([join(s.bin, "swb"), "launch", "--harness", "claude", "--cwd", dir, "--from", parent.id], {
+			env: s.env,
+			stdin: new Blob([`reply SWB-in-${dir}`]),
+		});
+		expect(launch.stderr.toString()).toBe("");
+		await settled(s, (JSON.parse(launch.stdout.toString()).details as { id: string }).id, `Claude Code's first turn in ${dir}`, since);
+	}
+	const { projects } = JSON.parse(readFileSync(join(s.home, ".claude.json"), "utf8")) as {
+		projects: Record<string, { hasTrustDialogAccepted?: boolean }>;
+	};
+	const trusted = Object.keys(projects).filter((path) => path.startsWith(code) && projects[path]?.hasTrustDialogAccepted);
+	expect(trusted.sort()).toEqual([bareWorktree, sub]);
+});
+
 test("on a code-mode-only model, Codex offers swb's tools directly, beside its own subagents, and session_launch starts a session", async () => {
 	s = scenario("harnesses", "code-mode", { packages: [], recorder: true, harnesses: ["codex"] });
 	const parent = await launched(s, "codex", "reply up", undefined, ["--model", "gpt-6-sol"]);

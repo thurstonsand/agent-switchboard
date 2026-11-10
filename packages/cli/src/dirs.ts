@@ -70,10 +70,10 @@ function scan(dir: string, depth: number, out: string[]): void {
 type Worktree = { path: string; branch: string | null; bare: boolean };
 
 /**
- * `git worktree list`, less bare entries and worktrees deleted without `git worktree remove`; null when git can't
- * read the checkout, such as a worktree whose main checkout was deleted.
+ * `git worktree list`: its first entry, the repository's own, then its linked worktrees, less those deleted without
+ * `git worktree remove`; null when git can't read the checkout, such as a worktree whose main checkout was deleted.
  */
-function worktrees(repo: string): Worktree[] | null {
+function worktrees(repo: string): { main: Worktree; linked: Worktree[] } | null {
 	let porcelain: string;
 	try {
 		porcelain = execFileSync("git", ["-C", repo, "worktree", "list", "--porcelain"], {
@@ -92,7 +92,8 @@ function worktrees(repo: string): Worktree[] | null {
 		} else if (line.startsWith("branch refs/heads/") && current) current.branch = line.slice("branch refs/heads/".length);
 		else if (line === "bare" && current) current.bare = true;
 	}
-	return out.filter((w) => !w.bare && isDir(w.path));
+	const [main, ...linked] = out;
+	return main ? { main, linked: linked.filter((w) => isDir(w.path)) } : null;
 }
 
 /**
@@ -131,20 +132,19 @@ export function targets(db: Db, config: DirsConfig): TargetTree[] {
 		const repo = projectRoot(path);
 		if (repos.has(repo)) continue;
 		repos.add(repo);
-		const all = worktrees(repo);
-		if (all === null) {
+		const listed = worktrees(repo);
+		if (listed === null) {
 			plain(path);
 			continue;
 		}
-		const main = all.find((w) => w.path === repo);
 		// A bare clone has no checkout of its own to start in, so each of its worktrees stands alone.
-		if (!main) {
-			for (const w of all) plain(w.path);
+		if (listed.main.bare) {
+			for (const w of listed.linked) plain(w.path);
 			continue;
 		}
 		if (hidden(repo)) continue;
-		const tree: TargetTree = { root: { path: repo, repo: null, branch: main.branch }, worktrees: [] };
-		for (const w of all) if (w.path !== repo && !hidden(w.path)) tree.worktrees.push({ path: w.path, repo, branch: w.branch });
+		const tree: TargetTree = { root: { path: repo, repo: null, branch: listed.main.branch }, worktrees: [] };
+		for (const w of listed.linked) if (!hidden(w.path)) tree.worktrees.push({ path: w.path, repo, branch: w.branch });
 		trees.set(repo, tree);
 	}
 

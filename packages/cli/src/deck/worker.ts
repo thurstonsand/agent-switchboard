@@ -200,10 +200,10 @@ function readDb(): void {
 	}
 }
 
-/** At its Project's root, an open session is in the main checkout or no repository at all; only one below it asks git. */
+/** The linked worktree an open session is in, asked of git once per directory. A bare clone's are their own Projects. */
 function worktreeOf(row: SessionRow): string | null {
 	const { cwd } = row;
-	if (!row.open || cwd === row.project_root) return null;
+	if (!row.open) return null;
 	if (!worktrees.has(cwd) && !asking.has(cwd)) {
 		asking.add(cwd);
 		void linkedWorktreeAsync(cwd).then((tree) => {

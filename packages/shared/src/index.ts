@@ -1,7 +1,7 @@
 import { execFile, execFileSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 export { Db, isBusy, type Param, type Row } from "./db.ts";
@@ -127,10 +127,31 @@ async function gitAsync(cwd: string, ...args: string[]): Promise<string | null> 
 	}
 }
 
-/** The parent of the git common dir, so every worktree of a repository shares one project; else the cwd. */
+/**
+ * The repository's main checkout, so every worktree of it shares one project; a bare clone has none, so each of its
+ * worktrees is its own. Outside git, the cwd.
+ */
 export function projectRoot(cwd: string): string {
-	const common = git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir");
-	return common ? dirname(common) : cwd;
+	const found = git(cwd, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir");
+	if (!found) return cwd;
+	const [checkout, common] = found.split("\n") as [string, string];
+	return mainCheckout(common) ?? checkout;
+}
+
+/**
+ * The checkout a repository keeps as its own, from its git dir: beside it, or where core.worktree says, as a
+ * submodule's does; null for a bare clone. `git worktree list` names a submodule's git dir instead.
+ */
+function mainCheckout(common: string): string | null {
+	const config = git(common, "config", "--type=bool-or-str", "--get-regexp", "^core\\.(bare|worktree)$") ?? "";
+	const value = (key: string) =>
+		config
+			.split("\n")
+			.find((line) => line.startsWith(`${key} `))
+			?.slice(key.length + 1);
+	if (value("core.bare") === "true") return null;
+	const worktree = value("core.worktree");
+	return worktree ? resolve(common, worktree) : dirname(common);
 }
 
 /** The top of the checkout cwd is in, a linked worktree's own; else the cwd. */
