@@ -684,11 +684,11 @@ export class StagePanes {
 			if (this.shellPane) want.push([this.shellPane.pane, "shell"]);
 			const key = JSON.stringify(want);
 			if (key === this.labels) return;
-			// One command per pane: a pane can close ahead of the apply that forgets it.
+			// A pane can close ahead of the apply that forgets it, which -q lets tmux skip without an error.
 			const results = await Promise.allSettled(
-				want.map(([pane, label]) => tmuxAsync(SESSIONS, "set", "-p", "-t", pane, "@swb_label", label)),
+				want.map(([pane, label]) => tmuxAsync(SESSIONS, "set", "-q", "-p", "-t", pane, "@swb_label", label)),
 			);
-			const failed = results.flatMap((r) => (r.status === "rejected" && !String(r.reason).includes("no such pane") ? [r.reason] : []));
+			const failed = results.flatMap((r) => (r.status === "rejected" ? [r.reason] : []));
 			// Only labels that took are remembered, so the next apply tries the rest again.
 			this.labels = failed.length === 0 ? key : "";
 			for (const error of failed) this.host.toast(`label: ${(error as Error).message}`, "error");
