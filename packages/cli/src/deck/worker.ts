@@ -445,8 +445,9 @@ function tick(): Set<string> {
 		if (!launched.has(runtime.tmux_session) || !runtimeLive(runtime, boot, new Set(snap.hosts))) continue;
 		launched.delete(runtime.tmux_session);
 	}
-	// A Deck without its placeholder shows a blank Stage, so a killed sessions server comes straight back.
-	if (!snap.serverUp) ensureSessionsServer();
+	// This Deck is the sessions server's `deck` session, so with the server gone it's on its way out. Anything that
+	// starts a tmux session now brings the server back, clock and all, to outlive it.
+	if (!snap.serverUp) return names;
 	if (!names.has(PLACEHOLDER)) ensurePlaceholder(false);
 	if (profile) {
 		const key = colorKey(profile);

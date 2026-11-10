@@ -12,6 +12,7 @@
 
 ### Fixed
 
+- `swb quit`, or swb's tmux server killed under an open Deck, no longer sometimes leaves a new server and swb's clock running behind it.
 - `swb deck state` no longer drops text from a Peek, menu, or launch card line after a text field's cursor.
 
 ## [0.15.0] - 2026-11-09
