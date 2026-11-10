@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A Deck restarted on a newer swb, or after its roster died, no longer sometimes stays on "loading…" forever when the Stage shows a live session.
+
 ## [0.16.0] - 2026-11-10
 
 Schema v14: update swb and the pi line together.

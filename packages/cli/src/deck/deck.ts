@@ -63,13 +63,14 @@ export function editorNav(k: string, editor: string): void {
 
 /**
  * The Deck's placeholder session, which renders the cards its roster streams. `fresh` restarts one already running, on
- * this swb and this roster's stream, wherever the Stage has put its pane.
+ * this swb and this roster's stream, wherever the Stage has put its pane. A placeholder exits when its roster's stream
+ * ends, as the next roster restarts it, so its pane is kept after it exits: only swb takes the pane away.
  */
 export function ensurePlaceholder(fresh: boolean): void {
 	const command = `exec ${[SWB, "__placeholder", "--sock", deckSocket()].map(quote).join(" ")}`;
 	if (tmuxTry(SESSIONS, "has-session", "-t", `=${PLACEHOLDER}`).ok) {
 		const pane = listPanes(SESSIONS, "#{pane_id}", "#{@swb_home}").find(([, owner]) => owner === PLACEHOLDER)?.[0];
-		if (fresh && pane) tmux(SESSIONS, "respawn-pane", "-k", "-t", pane, command);
+		if (fresh && pane) tmux(SESSIONS, "respawn-pane", "-k", "-t", pane, command, ";", "set", "-p", "-t", pane, "remain-on-exit", "on");
 		return;
 	}
 	tmux(
@@ -103,6 +104,13 @@ export function ensurePlaceholder(fresh: boolean): void {
 		`=${PLACEHOLDER}:`,
 		"@swb_card",
 		"1",
+		";",
+		"set",
+		"-p",
+		"-t",
+		`=${PLACEHOLDER}:`,
+		"remain-on-exit",
+		"on",
 	);
 }
 

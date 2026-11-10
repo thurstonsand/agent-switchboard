@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, readlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cursorTo, entry, piSessions, seed, state, waitState, whileHeld } from "./harness/deck.ts";
 import { alive, budgets, type Scenario, scenario, until } from "./harness/index.ts";
@@ -55,6 +55,47 @@ test("closing the Deck's terminal leaves the Deck and its roster for the next sw
 	await until(() => !alive(second), budgets.settle, "the outdated roster gone");
 	expect(existsSync(sock)).toBe(true);
 	expect(state(s).ready).toBe(true);
+});
+
+test("a placeholder that exits between the next roster finding it and restarting it leaves that roster's Deck whole", async () => {
+	s = scenario("phase2", "placeholder-exits");
+	// A live session on the Stage leaves the placeholder in a session of its own, outside the Deck's window.
+	s.swb("drive", "start", "--", "new");
+	await waitState(s, "pi on the Stage", (x) => x.staged.kind === "live", budgets.piReady);
+	s.swb("drive", "stop");
+	const [version] = s.tmux(s.servers.sessions, "show", "-qv", "-t", "deck", "@swb_roster_build").split(":");
+	s.tmux(s.servers.sessions, "set", "-t", "deck", "@swb_roster_build", `${version}:0`);
+	// A placeholder exits once its roster's card stream ends, at no set moment. This one waits, then exits just after
+	// the next roster's worker has found its pane, before it restarts it.
+	const pane = s
+		.tmux(s.servers.sessions, "list-panes", "-a", "-F", "#{pane_id} #{@swb_home}")
+		.split("\n")
+		.find((line) => line.endsWith(" placeholder"))
+		?.split(" ")[0] as string;
+	s.tmux(s.servers.sessions, "respawn-pane", "-k", "-t", pane, "sleep 600");
+	const tmux = join(s.bin, "tmux");
+	const real = readlinkSync(tmux);
+	unlinkSync(tmux);
+	writeFileSync(
+		tmux,
+		`#!/bin/sh
+case " $* " in
+*" list-panes -a -F #{pane_id}"?"#{@swb_home} "*)
+  found=$('${real}' "$@")
+  pid=$('${real}' -L '${s.servers.sessions}' display -p -t '${pane}' '#{pane_pid}')
+  kill "$pid"
+  while kill -0 "$pid" 2>/dev/null; do sleep 0.01; done
+  sleep 0.3
+  printf '%s\\n' "$found"
+  exit 0
+  ;;
+esac
+exec '${real}' "$@"
+`,
+		{ mode: 0o755 },
+	);
+	s.swb("drive", "start");
+	expect(state(s)).toMatchObject({ ready: true, toasts: [] });
 });
 
 test("a roster killed while its wake waits on the launch lock doesn't wedge later wakes", async () => {
