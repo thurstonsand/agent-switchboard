@@ -13,6 +13,7 @@
 ### Fixed
 
 - `swb quit`, or swb's tmux server killed under an open Deck, no longer sometimes leaves a new server and swb's clock running behind it.
+- A pane that closes as the Deck labels it no longer shows a "label: … no such pane" error.
 - `swb deck state` no longer drops text from a Peek, menu, or launch card line after a text field's cursor.
 
 ## [0.15.0] - 2026-11-09

@@ -625,7 +625,7 @@ export class StagePanes {
 			const results = await Promise.allSettled(
 				want.map(([pane, label]) => tmuxAsync(SESSIONS, "set", "-p", "-t", pane, "@swb_label", label)),
 			);
-			const failed = results.flatMap((r) => (r.status === "rejected" && !String(r.reason).includes("can't find pane") ? [r.reason] : []));
+			const failed = results.flatMap((r) => (r.status === "rejected" && !String(r.reason).includes("no such pane") ? [r.reason] : []));
 			// Only labels that took are remembered, so the next apply tries the rest again.
 			this.labels = failed.length === 0 ? key : "";
 			for (const error of failed) this.host.toast(`label: ${(error as Error).message}`, "error");
