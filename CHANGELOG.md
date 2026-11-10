@@ -15,6 +15,7 @@
 - `swb quit`, or swb's tmux server killed under an open Deck, no longer sometimes leaves a new server and swb's clock running behind it.
 - A pane that closes as the Deck labels it no longer shows a "label: … no such pane" error.
 - `swb deck state` no longer drops text from a Peek, menu, or launch card line after a text field's cursor.
+- On pi 1.5.1 and newer, a pi session that `swb quit --force`, `R`, or a closed pane stops mid-turn is cut off again, and waking it picks that turn back up, instead of reading as stopped.
 
 ## [0.15.0] - 2026-11-09
 

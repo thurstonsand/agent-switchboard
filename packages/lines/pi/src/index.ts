@@ -33,6 +33,8 @@ type Process = {
 	failure?: string;
 	db?: Db;
 	attention: Set<string>;
+	/** A SIGTERM or SIGHUP is stopping pi. */
+	dying: boolean;
 	inbox?: NodeJS.Timeout;
 	doorbell?: FSWatcher;
 };
@@ -46,12 +48,20 @@ const LINEAGE = "pi-sessions.lineage";
 function claim(): Process | undefined {
 	const env = process.env;
 	if (env.SWB_MANAGED === "1" && env.SWB_DB && env.SWB_TMUX_SESSION) {
-		store[KEY] = {
+		const proc: Process = {
 			launch: Object.freeze({ db: env.SWB_DB, tmuxSession: env.SWB_TMUX_SESSION, bin: env.SWB_BIN ?? "" }),
 			recoveryNotice: env.SWB_RECOVERY_NOTICE ?? null,
 			attention: new Set(),
+			dying: false,
 			...(env.SWB_BIN ? {} : { failure: "started by an swb older than this line; upgrade swb" }),
 		};
+		store[KEY] = proc;
+		// Interactive pi's own handlers for these shut it down; this one only notes why. Pi aborts a running turn on the
+		// way out, after this runs in the same dispatch, and the abort settles exactly as an Esc's does.
+		for (const signal of ["SIGTERM", "SIGHUP"] as const)
+			process.on(signal, () => {
+				proc.dying = true;
+			});
 	}
 	// Consumed so no child process (subagents, handoffs, bash) inherits management.
 	delete env.SWB_MANAGED;
@@ -303,6 +313,8 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("agent_settled", (event, ctx) => {
 		proc.attention.clear();
+		// A turn a signal ends was cut off, not stopped: it stays unsettled, so swb wakes it to pick that turn back up.
+		if (event.aborted && proc.dying) return;
 		writeFor(ctx, (db, id) => {
 			if (stopReason === "error" && !event.aborted) turnErrored(db, id);
 			const { quit } = settle(db, {
