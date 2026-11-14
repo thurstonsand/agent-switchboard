@@ -1,0 +1,29 @@
+{
+	"name": "@thurstonsand/pi-agent-switchboard",
+	"version": "0.16.3",
+	"type": "module",
+	"description": "Records managed pi sessions for Agent Switchboard (swb)",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/thurstonsand/agent-switchboard.git"
+	},
+	"keywords": [
+		"pi-package"
+	],
+	"files": [
+		"index.js",
+		"CHANGELOG.md",
+		"LICENSE"
+	],
+	"pi": {
+		"extensions": [
+			"./index.js"
+		]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*",
+		"typebox": "*"
+	}
+}
