@@ -5,7 +5,7 @@ import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { displayName, type SessionState, states } from "../../packages/cli/src/derive.ts";
 import { parseQuery, type Query } from "../../packages/cli/src/recall/query.ts";
-import { passes, rank, SEARCH_LIMIT, sessionsToIndex } from "../../packages/cli/src/recall/search.ts";
+import { passes, rank, SEARCH_LIMIT, sessionsToIndex, titled } from "../../packages/cli/src/recall/search.ts";
 import { openRecall } from "../../packages/cli/src/recall/store.ts";
 import { prune, syncSessions } from "../../packages/cli/src/recall/sync.ts";
 import { openStore } from "../../packages/cli/src/store.ts";
@@ -239,7 +239,7 @@ function evaluate(): Results {
 				const candidates = all
 					.filter((c) => c.id !== search.from && passes(c, query.filters))
 					.map((c) => ({ ...c, activityAt: asOf(c, at) }));
-				const ranked = rank(index, query, candidates, search.limit, at).map((r) => r.s.id);
+				const ranked = rank(index, query, candidates, search.limit, at, (s) => titled(s, query)).map((r) => r.s.id);
 				const position = ranked.indexOf(subject.id);
 				const shown = all
 					.filter((c) => search.shown.includes(c.id))

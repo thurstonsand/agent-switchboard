@@ -16,7 +16,7 @@ import { configDir, type Harness, operatorDir, type SnoozePreset, type View } fr
 import { harnessName } from "@swb/shared/mailbox";
 import { mark, span } from "@swb/shared/trace";
 import { ConfigError, configPath, type Loaded, readConfig } from "../config.ts";
-import { type CutOff, displayName, openDescendants, projectName } from "../derive.ts";
+import { type CutOff, displayName, filterText, openDescendants, projectName } from "../derive.ts";
 import { completions, expandHome, type TargetTree, targetName } from "../dirs.ts";
 import { SwbError } from "../errors.ts";
 import { unnameable } from "../groups.ts";
@@ -60,7 +60,20 @@ import {
 	type SnoozeMode,
 	type Toast,
 } from "./model.ts";
-import type { Card, Entry, FromWorker, PeekInfo, ShellAt, Snapshot, State, StatSummary, ToWorker, Transcript } from "./protocol.ts";
+import type {
+	Card,
+	Entry,
+	FromSearcher,
+	FromWorker,
+	PeekInfo,
+	ShellAt,
+	Snapshot,
+	State,
+	StatSummary,
+	ToSearcher,
+	ToWorker,
+	Transcript,
+} from "./protocol.ts";
 import { SettingsPane } from "./settings.ts";
 import { type Applied, StagePanes } from "./stage.ts";
 import { attention, bold, cyan, dimColors, gray, green, hex, keyName, mix, red, sgrBg, shortPath } from "./style.ts";
@@ -146,6 +159,7 @@ const m: Model = {
 	collapsed: new Set<string>(),
 	expanded: new Set<SectionKey>(["operators"]),
 	filter: new Input({ prompt: "/ " }),
+	found: { query: "", ids: [], total: 0, error: null },
 	mode: { kind: "roster" },
 	search: new Input({ prompt: "/ " }),
 	completed: null,
@@ -1049,6 +1063,23 @@ worker.onerror = (event: ErrorEvent) => {
 
 worker.onmessage = (event: MessageEvent<FromWorker>) => dispatch(() => onWorker(event.data));
 
+const searcher = new Worker("./deck/searcher.ts");
+
+searcher.onerror = (event: ErrorEvent) => {
+	m.toasts.push({ text: `search died: ${event.message}`, level: "error", until: Number.POSITIVE_INFINITY });
+	screen.requestRender();
+};
+
+searcher.onmessage = (event: MessageEvent<FromSearcher>) =>
+	dispatch(() => {
+		const found = event.data;
+		if (found.query !== asked) return;
+		const fresh = found.query !== m.found.query;
+		m.found = found;
+		// A new query's best match takes the cursor, so ⏎ opens it; the same one answered again leaves it be.
+		if (fresh && filtering()) selectFirst();
+	});
+
 /** Syncs posted to the worker, by req, each settling once its reply is committed. */
 const syncs = new Map<number, () => void>();
 
@@ -1188,7 +1219,10 @@ function reveal(id: string): void {
 		toast(`no open or archived session ${id}`, "error");
 		return;
 	}
-	if (!matches(e)) m.filter.setValue("");
+	if (!matches(e)) {
+		m.filter.setValue("");
+		searchFilter();
+	}
 	const section = sectionOf(e);
 	if (section === "archived" || section === "operators" || section === "snoozed") m.expanded.add(section);
 	else {
@@ -1332,31 +1366,57 @@ export function query(): string {
 	return m.filter.getValue().trim().toLowerCase();
 }
 
+/** The query the searcher was last asked to search for. */
+let asked = "";
+
+/** Has the searcher search for the filter's query, once it changes. */
+function searchFilter(): void {
+	const q = m.filter.getValue().trim();
+	if (q === asked) return;
+	asked = q;
+	// What an earlier query found stays until this one's answer replaces it, so the rows don't flicker as keys go in.
+	if (q === "") m.found = { query: "", ids: [], total: 0, error: null };
+	searcher.postMessage({ query: q } satisfies ToSearcher);
+}
+
+/** Why the searcher couldn't search for the filter's query as it stands. */
+export function filterError(): string | null {
+	return m.found.query === asked ? m.found.error : null;
+}
+
+/** How many sessions match the query as it stands, once the searcher has answered it. */
+export function filterTotal(): number | null {
+	return m.found.query === asked && m.found.error === null ? m.found.total : null;
+}
+
+/**
+ * A session the search shows: among the searcher's best for the last query it answered, which a key typed since leaves
+ * up until its own answer lands; before any, one whose title, Project, branch, or Group holds what's typed.
+ */
 export function matches(e: Entry): boolean {
 	const q = query();
-	const label = groupOf(e) ?? "";
-	return q === "" || `${displayName(e)} ${projectName(e.project)} ${e.branch ?? ""} ${label}`.toLowerCase().includes(q);
+	if (q === "") return true;
+	return m.found.query === "" ? filterText(e, groupOf(e)).includes(q) : m.found.ids.includes(e.id);
+}
+
+/** A search's rows: the searcher's best first, or, before its first answer, what matches as typed, newest first. */
+function searchRows(): Row[] {
+	const entries =
+		m.found.query === ""
+			? [...m.entries.values()].filter(matches).sort((a, b) => b.activityAt - a.activityAt)
+			: m.found.ids.flatMap((id) => m.entries.get(id) ?? []);
+	return entries.map((e) => flat(e, 0, "search"));
+}
+
+function selectFirst(): void {
+	const first = rosterRows()[0];
+	if (first) m.selectedKey = first.key;
 }
 
 export function rosterRows(): Row[] {
+	if (query() !== "") return searchRows();
 	const rows: Row[] = [];
-	const all = [...m.entries.values()].filter((e) => matches(e));
-	// Keep a match's ancestors as context, so filtering doesn't turn a child into a new root.
-	const included = new Set(all.map((e) => e.id));
-	for (const e of all) {
-		const parent = parentOf(e);
-		if (
-			parent &&
-			!included.has(parent.id) &&
-			!parent.operator &&
-			parent.project === e.project &&
-			groupOf(parent) === groupOf(e) &&
-			sectionOf(parent) === sectionOf(e)
-		) {
-			included.add(parent.id);
-			all.push(parent);
-		}
-	}
+	const all = [...m.entries.values()];
 	const lingers = (e: Entry) => !e.open && e.id === m.lingering && e.id === m.selectedKey;
 	const open = all.filter((e) => e.open || lingers(e));
 	const sectionHere = (e: Entry) => (lingers(e) ? (e.operator ? "operators" : "open") : sectionOf(e));
@@ -1401,8 +1461,7 @@ export function rosterRows(): Row[] {
 					const at = p.nest as Nest;
 					return { entry: p.entry, nest: { continues: at.continues.slice(level), last: at.last } };
 				});
-				// A filter shows every match, folded or not.
-				const folded = family.length > 0 && m.collapsed.has(foldKey(entry.id)) && query() === "";
+				const folded = family.length > 0 && m.collapsed.has(foldKey(entry.id));
 				rows.push({ kind: "session", key: entry.id, entry, depth, header, nest, family, folded });
 				i = folded ? end : i + 1;
 			}
@@ -1411,7 +1470,7 @@ export function rosterRows(): Row[] {
 	const pushGroups = (list: Entry[], depth: number, parent: string) => {
 		for (const [project, members] of groupByProject(list)) {
 			const key = `${parent}:${project}`;
-			const collapsed = query() === "" && m.collapsed.has(key);
+			const collapsed = m.collapsed.has(key);
 			rows.push({ kind: "header", key, projectKey: key, project, group: null, cwd: project, count: members.length, depth, collapsed });
 			if (collapsed) continue;
 			// Groups sit beneath the Project, ahead of its sessions in none.
@@ -1425,7 +1484,7 @@ export function rosterRows(): Row[] {
 			const sorted = [...buckets.entries()].sort(([a], [b]) => a.localeCompare(b));
 			for (const [group, inside] of sorted) {
 				const subKey = `${key}:${groupKey(group)}`;
-				const subCollapsed = query() === "" && m.collapsed.has(subKey);
+				const subCollapsed = m.collapsed.has(subKey);
 				const cwd = (inside[0] as Entry).cwd;
 				rows.push({
 					kind: "header",
@@ -1443,10 +1502,8 @@ export function rosterRows(): Row[] {
 			pushFamilies(loose, depth, key);
 		}
 	};
-	// A filter opens every section it has matches in, so a match is never hidden behind a caret.
 	const section = (key: SectionKey, label: string, count: number) => {
-		if (query() !== "" && count === 0) return false;
-		const expanded = m.expanded.has(key) || (query() !== "" && count > 0);
+		const expanded = m.expanded.has(key);
 		rows.push({ kind: "section", key, label, count, expanded });
 		return expanded;
 	};
@@ -1615,6 +1672,7 @@ function run(c: Command): void {
 		case "clearFilter":
 			if (filtering()) leave();
 			m.filter.setValue("");
+			searchFilter();
 			break;
 		case "addDir":
 			openPicker("add", null, null);
@@ -1760,6 +1818,7 @@ function cancel(): void {
 	const mode = m.mode;
 	if (mode.kind === "filter") {
 		m.filter.setValue("");
+		searchFilter();
 		leave();
 	} else if (mode.kind === "name" || mode.kind === "snooze") leave();
 	else if (mode.kind === "archive") finishArchiving(null);
@@ -1780,9 +1839,8 @@ function typeInto(data: string): void {
 	const choosing = pickerMode();
 	if (filtering()) {
 		m.filter.handleInput(data);
-		const rows = rosterRows();
-		const first = rows.find((r) => r.kind === "session" && matches(r.entry));
-		if (first && !rows.some((r) => r.kind === "session" && r.key === m.selectedKey && matches(r.entry))) m.selectedKey = first.key;
+		searchFilter();
+		selectFirst();
 	} else if (naming) {
 		const before = naming.input.getValue();
 		naming.input.handleInput(data);

@@ -155,6 +155,8 @@ export type DeckState = {
 	/** Mid-drag, the header a release would drop into: its Project, and its Group, if any. */
 	drop: { project: string; group: string | null } | null;
 	filter: string;
+	/** The query the searcher last answered, as typed, how many sessions match it, and why it couldn't, if it couldn't. */
+	found: { query: string; total: number; error: string | null };
 	/** The session row under the pointer, or null once the pointer has left the roster. */
 	hover: string | null;
 	/** The Peek beside a row: whose, why, and what it says, its lines stripped of color. */
@@ -249,3 +251,9 @@ export type FromWorker =
 	/** Every snapshot the worker could take since its sync came in has gone out ahead of this. */
 	| { type: "synced"; req: number }
 	| { type: "error"; text: string };
+
+/** The roster's search, "" once it clears. The searcher answers it, and again whenever what it finds may have changed. */
+export type ToSearcher = { query: string };
+
+/** The best sessions for a query as session_search ranks them, best first, of `total` that match; or why it can't. */
+export type FromSearcher = { query: string; ids: string[]; total: number; error: string | null };

@@ -264,3 +264,8 @@ export function displayName(state: { id: string; title: string | null }): string
 export function projectName(root: string): string {
 	return basename(root);
 }
+
+/** What the roster's filter matches as it's typed, lowercased: a session's title, Project, branch, and Group. */
+export function filterText(s: SessionState, group: string | null): string {
+	return `${displayName(s)} ${projectName(s.project)} ${s.branch ?? ""} ${group ?? ""}`.toLowerCase();
+}

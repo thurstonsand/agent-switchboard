@@ -10,6 +10,7 @@
 			"includes": [
 				"packages/cli/src/deck/**",
 				"!packages/cli/src/deck/worker.ts",
+				"!packages/cli/src/deck/searcher.ts",
 				"!packages/cli/src/deck/deck.ts",
 				"!packages/cli/src/deck/placeholder.ts"
 			],

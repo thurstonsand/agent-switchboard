@@ -193,17 +193,51 @@ function terms(node: Node): string[] {
 	return node.children.flatMap(terms);
 }
 
-export function parseQuery(input: string): Query {
+/** `typed`: a query as a search box has it so far, which may say only what to leave out, and whose every word must hold a letter or digit. */
+function parse(input: string, typed: boolean): Query {
 	const filters: Filters = { harness: null, project: null, file: null, after: null, before: null, archived: null };
 	const tokens = lex(input, filters);
-	if (tokens.length === 0) return { match: null, relaxed: null, excludes: [], terms: [], filters };
+	const none: Query = { match: null, relaxed: null, excludes: [], terms: [], filters };
+	if (tokens.length === 0) return none;
 	const root = new Parser(tokens).parse();
 	const top = root.kind === "and" ? root.children : [root];
 	const positive = top.filter((n) => n.kind !== "not");
 	const excludes = top.flatMap((n) => (n.kind === "not" ? [fts(n.child, "AND")] : []));
-	if (positive.length === 0) throw new SwbError("query: say what to find, not only what to leave out");
+	if (positive.length === 0) {
+		if (typed) return { ...none, excludes };
+		throw new SwbError("query: say what to find, not only what to leave out");
+	}
 	const node: Node = positive.length === 1 ? (positive[0] as Node) : { kind: "and", children: positive };
+	// FTS5 finds no word in a term like "-" or ".", so it would match nothing at all.
+	if (typed && terms(node).some((t) => !/[\p{L}\p{N}_]/u.test(t))) throw new SwbError("query: a word needs a letter or digit");
 	const match = fts(node, "AND");
 	const relaxed = fts(node, "OR");
 	return { match, relaxed: relaxed === match ? null : relaxed, excludes, terms: terms(node), filters };
+}
+
+export function parseQuery(input: string): Query {
+	return parse(input, false);
+}
+
+/**
+ * A query as it's typed into a search box. As a web search box does, syntax that doesn't parse yet reads as plain
+ * words: quotes and parentheses drop out, and a word that still won't parse, like `harness:p` or a trailing OR, is
+ * left out until it does.
+ */
+export function parseTyped(input: string): Query {
+	try {
+		return parse(input, true);
+	} catch (error) {
+		if (!(error instanceof SwbError)) throw error;
+	}
+	let kept = "";
+	for (const word of input.replace(/["()]/g, " ").split(/\s+/).filter(Boolean)) {
+		try {
+			parse(`${kept} ${word}`, true);
+			kept = `${kept} ${word}`;
+		} catch (error) {
+			if (!(error instanceof SwbError)) throw error;
+		}
+	}
+	return parse(kept, true);
 }

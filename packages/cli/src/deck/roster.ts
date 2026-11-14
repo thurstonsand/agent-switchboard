@@ -39,7 +39,9 @@ import {
 	cursorLine,
 	dragging,
 	editorShown,
+	filterError,
 	filtering,
+	filterTotal,
 	frame,
 	groupOf,
 	handleCommand,
@@ -122,6 +124,7 @@ import {
 	spinnerFrame,
 	underline,
 	wakeAt,
+	yellow,
 } from "./style.ts";
 import { DeckTerminal } from "./terminal.ts";
 
@@ -517,10 +520,17 @@ function renderPicker(width: number, height: number): string[] {
 function filterTag(width: number): string | null {
 	if (filtering()) {
 		const hint = ` · ${filterCount()}  ${key("esc", "clears")}`;
-		return clickable(0, [
-			[` ${model.filter.render(Math.max(1, width - visibleWidth(hint) - 2))[0] ?? ""}`, null],
-			[hint, { kind: "clearFilter" }],
-		]);
+		// What's typed keeps its room; a long hint, such as why the query can't be read, gives way.
+		const typed = visibleWidth(model.filter.getValue()) + visibleWidth("/ ") + 1;
+		const field = Math.max(Math.min(typed, width - 2), width - visibleWidth(hint) - 2, 1);
+		return truncateToWidth(
+			clickable(0, [
+				[` ${model.filter.render(field)[0] ?? ""}`, null],
+				[hint, { kind: "clearFilter" }],
+			]),
+			width - 1,
+			"…",
+		);
 	}
 	if (query() === "") return null;
 	const parts: Part[] = [
@@ -531,9 +541,14 @@ function filterTag(width: number): string | null {
 	return truncateToWidth(clickable(0, parts), width - 1, "…");
 }
 
+/** How many sessions the search shows, and of how many that match when it can't show them all; or why it failed. */
 function filterCount(): string {
-	const entries = [...model.entries.values()];
-	return gray(`${entries.filter(matches).length} of ${entries.length}`);
+	const error = filterError();
+	if (error) return yellow(error);
+	if (query() === "") return gray(`${model.entries.size} sessions`);
+	const shown = rosterRows().length;
+	const total = filterTotal() ?? shown;
+	return gray(total > shown ? `best ${shown} of ${total}` : `${shown} found`);
 }
 
 function matchedText(text: string): string {
@@ -1546,6 +1561,7 @@ function viewState(): DeckState {
 		configError: model.configError?.message ?? null,
 		drop: drop ? { project: projectName(drop.header.project), group: drop.header.group } : null,
 		filter: query(),
+		found: { query: model.found.query, total: model.found.total, error: model.found.error },
 		hover: model.hover,
 		peek: (() => {
 			const shown = overlayShown("peek");

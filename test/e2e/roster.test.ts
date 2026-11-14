@@ -153,6 +153,43 @@ test("M-a / from the Group picker leaves it for the filter: what's typed filters
 	expect(entry(s, a).group).toBeNull();
 });
 
+test("/ ranks sessions by their conversations and titles as session_search does, reading what's typed leniently", async () => {
+	s = scenario("phase4", "filter-search");
+	// Oldest first: the keeper's title says lighthouse, and only beta's conversation does.
+	const [keeper, harbor, lighthouse] = (await seed(
+		s,
+		{ turns: ["gamma"], title: "lighthouse keeper" },
+		{ turns: ["harbor"], title: "alpha" },
+		{ turns: ["lighthouse"], title: "beta" },
+	)) as [string, string, string];
+	s.swb("drive", "start");
+	await waitState(s, "the Deck up", (x) => x.ready);
+	const shown = (st: DeckState) => sessionRows(st).map((row) => row.id);
+	const search = async (text: string, what: string, probe: (ids: string[]) => boolean) => {
+		s.keys("/");
+		await waitState(s, "the search", (x) => x.mode === "filter");
+		s.keys("-l", text);
+		const st = await waitState(s, what, (x) => x.found.query === text && probe(shown(x)));
+		s.save(`search-${text.replace(/[^\w-]+/g, "_")}.txt`, s.screen());
+		s.keys("Escape");
+		await waitState(s, "the search cleared", (x) => x.mode === "roster" && x.filter === "");
+		return st;
+	};
+
+	// A match by title outranks a newer one by conversation, and the best takes the cursor.
+	const best = await search("lighthouse", "the keeper, then beta", (ids) => ids.join() === [keeper, lighthouse].join());
+	expect(best.cursor).toBe(keeper);
+	expect(best.found).toEqual({ query: "lighthouse", total: 2, error: null });
+	await search("alpha", "alpha by its title", (ids) => ids.join() === harbor);
+	// No session has both words, so the search falls back to either, as session_search does.
+	await search("harbor lighthouse", "either word", (ids) => ids.toSorted().join() === [harbor, lighthouse].toSorted().join());
+	// Only what to leave out: everything else, newest first.
+	await search("-lighthouse", "all but beta", (ids) => ids.join() === [harbor, keeper].join());
+	// A quote not yet closed reads as a plain word, which matches as a prefix.
+	const unclosed = await search('"light', "as light*", (ids) => ids.join() === [keeper, lighthouse].join());
+	expect(unclosed.found.error).toBeNull();
+});
+
 test("m names a session's Group, n joins it; dragging moves it between Groups, and a Group lives only as long as its sessions", async () => {
 	s = scenario("phase4", "groups");
 	const worktree = join(s.root, "project-wt");

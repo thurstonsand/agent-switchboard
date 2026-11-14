@@ -265,6 +265,8 @@ export type Model = {
 	expanded: Set<SectionKey>;
 	/** The filter's query, which stays applied after the filter mode ends. */
 	filter: Input;
+	/** The best sessions for `query` as the searcher last ranked them, best first, of `total` that match; or why it couldn't. */
+	found: { query: string; ids: string[]; total: number; error: string | null };
 	/** What the keyboard and pointer are doing. One mode at a time, so entering one leaves the last. */
 	mode: Mode;
 	search: Input;

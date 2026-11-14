@@ -32,7 +32,7 @@ function lines(prefix: string, columns = Infinity): string[] {
 		bold("  Find & relationships"),
 		row("p", "Session that started this one"),
 		row("[ ]", "Back / forward through viewed sessions"),
-		row("/", "Filter; esc clears"),
+		row("/", "Search, best first; esc clears"),
 		row("hover", "Peek; its actions use these keys"),
 		row("i", "Expand / collapse narrow details"),
 		row("PgUp PgDn", "Scroll expanded details"),

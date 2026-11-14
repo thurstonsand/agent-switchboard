@@ -1131,6 +1131,30 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"filter-search": {
+		setup: async (s) => {
+			await seed(
+				s,
+				{ title: "Audit the mutex usage", turns: ["audited"] },
+				{ title: "Port the CLI to Bun", turns: ["ported"] },
+				{ title: "Fix the flaky test", turns: ["mutex"] },
+				{ title: "Write the README", turns: ["written"] },
+				{ title: "Tune the db locks", turns: ["mutexes"] },
+				{ title: "Ship the release", turns: ["shipped"] },
+			);
+		},
+		run: async (s) => {
+			const shown = (x: DeckState) => sessionRows(x).map((r) => r.title);
+			const answered = (x: DeckState, query: string, titles: string[]) => x.found.query === query && shown(x).join() === titles.join();
+			// The oldest, by its title, ahead of the two that said it, the exact word ahead of the longer one.
+			const mutex = ["Audit the mutex usage", "Fix the flaky test", "Tune the db locks"];
+			await waitDeck(s, "mutex: the title first, then the conversations", (x) => answered(x, "mutex", mutex));
+			await waitDeck(s, "readme: the README, by its title", (x) => answered(x, "readme", ["Write the README"]));
+			await waitDeck(s, "an unclosed quote reads as a plain word", (x) => answered(x, '"mutex', mutex));
+			await waitDeck(s, "quoted, it matches exactly", (x) => answered(x, '"mutex"', ["Audit the mutex usage", "Fix the flaky test"]));
+		},
+	},
+
 	"mark-unseen": {
 		setup: async (s) => {
 			await seed(s, { title: "Port the CLI to Bun", turns: ["ported"] }, { title: "Fix the flaky test", turns: ["fixed the race"] });

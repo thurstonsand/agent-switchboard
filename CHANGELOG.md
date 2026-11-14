@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The roster's `/` searches every session, open or archived, the way `session_search` does, and ranks them the same way: by how well its conversation (its subagents' included) matches, by title, and by how recently it was active. A session whose title, Project, branch, or Group holds what's typed counts as a title match. The roster becomes a flat list of the best 15, best first, with the cursor on the first, and comes back as it was once the search clears. It reads `session_search`'s query (`"phrases"`, `OR`, `-word`, `harness:`, `project:`, `file:`, `after:`, `before:`, `archived:`), leniently as it's typed: syntax that doesn't parse yet, like an unclosed quote or a half-typed `harness:`, reads as plain words or waits until it does, and `-word` alone shows every session but those. A search left on the roster takes in newly indexed turns every 5 seconds.
+
 ### Fixed
 
 - `swb drive keys -l TEXT` types TEXT that starts with `-` instead of failing on it as a tmux flag.

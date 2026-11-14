@@ -44,7 +44,7 @@ run = "bun x tsc -p tsconfig.json --noEmit"
 [tasks.build]
 description = "Compile swb into dist/swb"
 depends = ["bootstrap"]
-run = "bun build --compile --minify --splitting --sourcemap --bytecode --format=esm packages/cli/src/main.ts packages/cli/src/deck/worker.ts --outfile dist/swb"
+run = "bun build --compile --minify --splitting --sourcemap --bytecode --format=esm packages/cli/src/main.ts packages/cli/src/deck/worker.ts packages/cli/src/deck/searcher.ts --outfile dist/swb"
 
 [tasks."dist:pi"]
 description = "Bundle the pi line exactly as the release publishes it"
@@ -66,7 +66,7 @@ out="$usage_out"
 version="$(bun -p 'JSON.stringify(require("./packages/lines/pi/package.json").version)')"
 mkdir -p "$out"
 for target in linux-x64 darwin-arm64; do
-  bun build --compile --minify --splitting --sourcemap --bytecode --format=esm --target="bun-$target" --define SWB_VERSION="$version" packages/cli/src/main.ts packages/cli/src/deck/worker.ts --outfile "$out/swb-$target"
+  bun build --compile --minify --splitting --sourcemap --bytecode --format=esm --target="bun-$target" --define SWB_VERSION="$version" packages/cli/src/main.ts packages/cli/src/deck/worker.ts packages/cli/src/deck/searcher.ts --outfile "$out/swb-$target"
 done
 cp -R dist/pi "$out/pi"
 npm pack ./dist/pi --pack-destination "$out"
@@ -112,7 +112,7 @@ depends = ["lint", "typecheck", "build", "dist:pi", "readme:check", "changelog:c
 [tasks.install]
 description = "Build swb from this checkout into ~/.local/bin"
 run = [
-  "bun build --compile --minify --splitting --sourcemap --bytecode --format=esm --define SWB_VERSION=\\\"$(git describe --tags --match 'v*' | sed 's/^v//')\\\" packages/cli/src/main.ts packages/cli/src/deck/worker.ts --outfile dist/swb",
+  "bun build --compile --minify --splitting --sourcemap --bytecode --format=esm --define SWB_VERSION=\\\"$(git describe --tags --match 'v*' | sed 's/^v//')\\\" packages/cli/src/main.ts packages/cli/src/deck/worker.ts packages/cli/src/deck/searcher.ts --outfile dist/swb",
   "install -m 0755 dist/swb ~/.local/bin/swb",
 ]
 

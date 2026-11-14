@@ -155,12 +155,23 @@ const WHO: Record<string, string> = { user: "user", agent: "agent", call: "tool 
 
 export type Ranked = { s: SessionState; own: Hit[] };
 
+/** Whether a session's title holds every word the query looks for. */
+export const titled = (s: SessionState, query: Query) =>
+	query.terms.length > 0 && query.terms.every((t) => (s.title ?? "").toLowerCase().includes(t.toLowerCase()));
+
 /**
  * The candidates that match the query, best first, each with its matches, as they rank at `now`; the index is the
  * caller's to bring up to date. `want` is how many the caller will show, which decides when the strict match falls
- * back to the relaxed one.
+ * back to the relaxed one. A session `byTitle` picks out matches, and ranks higher, whatever its conversation says.
  */
-export function rank(index: Db, query: Query, candidates: SessionState[], want: number, now: number): Ranked[] {
+export function rank(
+	index: Db,
+	query: Query,
+	candidates: SessionState[],
+	want: number,
+	now: number,
+	byTitle: (s: SessionState) => boolean,
+): Ranked[] {
 	if (query.filters.file) {
 		const touched = touching(index, query.filters.file, query.filters);
 		candidates = candidates.filter((s) => touched.has(s.id));
@@ -175,18 +186,18 @@ export function rank(index: Db, query: Query, candidates: SessionState[], want: 
 	);
 	const found = candidates.flatMap((s) => {
 		const own = hits.filter((h) => h.sessionId === s.id);
-		const titled = query.terms.length > 0 && query.terms.every((t) => (s.title ?? "").toLowerCase().includes(t.toLowerCase()));
-		if (query.match && own.length === 0 && !titled) return [];
-		return [{ s, own, titled }];
+		const named = byTitle(s);
+		if (query.match && own.length === 0 && !named) return [];
+		return [{ s, own, named }];
 	});
 	// A session ranks by where its best match falls among all of them, then by how many more it has.
 	const firsts = new Map<string, number>();
 	for (const h of hits) if (!firsts.has(h.sessionId)) firsts.set(h.sessionId, firsts.size);
-	const score = ({ s, own, titled }: (typeof found)[number]) => {
+	const score = ({ s, own, named }: (typeof found)[number]) => {
 		const rank = firsts.get(s.id) ?? firsts.size;
 		const text = own.slice(0, 5).reduce((sum, h, i) => sum + (WEIGHTS[h.kind] ?? 100) / (rank + 1) / (i + 1), 0);
 		const ageDays = Math.max(0, (now - s.activityAt) / 86_400_000);
-		return text + (titled ? TITLE_WEIGHT : 0) + RECENCY_MAX * 0.5 ** (ageDays / RECENCY_HALF_LIFE_DAYS);
+		return text + (named ? TITLE_WEIGHT : 0) + RECENCY_MAX * 0.5 ** (ageDays / RECENCY_HALF_LIFE_DAYS);
 	};
 	return query.match ? found.sort((a, b) => score(b) - score(a)) : found.sort((a, b) => b.s.activityAt - a.s.activityAt);
 }
@@ -203,7 +214,7 @@ export function search(db: Db, from: string | null, input: string, limit = SEARC
 			all.map((s) => s.id),
 		);
 		syncSessions(index, sessionsToIndex(db, candidates));
-		const sorted = rank(index, query, candidates, limit, Date.now());
+		const sorted = rank(index, query, candidates, limit, Date.now(), (s) => titled(s, query));
 		const shown = sorted.slice(0, limit);
 		const describe = ({ s, own }: Ranked) =>
 			[
