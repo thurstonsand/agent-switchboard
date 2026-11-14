@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- `swb drive keys -l TEXT` types TEXT that starts with `-` instead of failing on it as a tmux flag.
 - A bare clone's worktrees are each a Project of their own, and a submodule is one rooted at its own checkout, not the folder holding the bare clone or the superproject's `.git/modules`. A wake whose directory is gone no longer falls back there, `swb -c` finds the session for that worktree, the picker lists a submodule with its worktrees, and Claude Code sessions an agent starts in a bare clone's worktree are trusted there instead of stopping at Claude Code's trust prompt. A session takes its new Project the next time it starts or finishes a turn.
 
 ## [0.16.2] - 2026-11-10

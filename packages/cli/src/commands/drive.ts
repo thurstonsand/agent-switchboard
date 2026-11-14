@@ -194,7 +194,7 @@ export async function drive(args: string[]): Promise<void> {
 			for (let i = 0; i < rest.length; i++) {
 				const arg = rest[i] as string;
 				if (arg === "--delay") delay = Number(rest[++i]);
-				else if (arg === "-l") harness("send-keys", "-t", PANE, "-l", rest[++i] as string);
+				else if (arg === "-l") harness("send-keys", "-t", PANE, "-l", "--", rest[++i] as string);
 				else harness("send-keys", "-t", PANE, arg);
 				await Bun.sleep(delay);
 			}
