@@ -1,6 +1,6 @@
 {
 	"name": "@thurstonsand/pi-agent-switchboard",
-	"version": "0.16.2",
+	"version": "0.16.3",
 	"type": "module",
 	"description": "Records managed pi sessions for Agent Switchboard (swb)",
 	"license": "MIT",
