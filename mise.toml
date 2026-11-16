@@ -122,8 +122,6 @@ depends = ["build", "dist:pi"]
 run = """
 if [ -n "${SWB_E2E_SHARD:-}" ]; then
   bun test --timeout 180000 --max-concurrency 1 --shard="$SWB_E2E_SHARD" --timings=test/e2e/timings.json test/e2e
-elif [ -n "${CI:-}" ]; then
-  bun test --timeout 180000 --max-concurrency 1 test/e2e
 else
   # deck-latency times keystrokes in milliseconds, so it runs alone, after the rest; a failure in either still fails the run.
   status=0
