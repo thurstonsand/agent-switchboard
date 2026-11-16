@@ -138,7 +138,7 @@ depends = ["build", "dist:pi"]
 run = "bun test/e2e/soak.ts"
 
 [tasks.evidence]
-description = "Render every VHS tape"
+description = "Render every VHS tape to MP4, or the ones named: `mise run evidence -- archive groups`"
 depends = ["build", "dist:pi"]
 run = "bun test/e2e/tapes/render.ts"
 

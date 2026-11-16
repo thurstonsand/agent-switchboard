@@ -1,7 +1,7 @@
 // Renders every tape in this directory (or the ones named on the command line) against a disposable scenario.
 // The tape is the human at the keyboard; its director, run alongside, plays the rest of the world (held turns
 // released, processes killed, the clock moved) and asserts on `swb deck state`. Either failing fails the render.
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { repo, type Scenario, scenario, which } from "../harness/index.ts";
@@ -72,6 +72,9 @@ const all = readdirSync(tapes)
 const wanted = process.argv.slice(2);
 const unknown = wanted.filter((name) => !all.includes(name));
 if (unknown.length > 0) throw new Error(`no such tape: ${unknown.join(", ")}`);
+// render() asks vhs for the MP4 alone: a tape's own Output adds a pass, and a GIF's runs ffmpeg out of memory.
+const outputs = all.filter((name) => /^\s*Output\b/m.test(readFileSync(join(tapes, `${name}.tape`), "utf8")));
+if (outputs.length > 0) throw new Error(`render.ts names each recording; remove Output from: ${outputs.join(", ")}`);
 
 let failed = 0;
 for (const name of wanted.length > 0 ? wanted : all) {
