@@ -4,100 +4,47 @@
 
 ### Lifecycle
 
-**Session**:
-One agent conversation, identified by its harness session id, tracked from its first turn.
-
-**Archived**:
-A session that has been completed; it leaves the roster but stays listable and reversible.
-
-**Inactive**:
-An open session whose whole **Family**, leaving out its **Snoozed** members, has had no activity within `inactive_after` (72 hours).
-
-**Snoozed**:
-An open session put out of the way until a time or its next message. A timed snooze holds through any conversation; a next-message one ends with the next message or prompt. A blocked, cut-off, or errored session shows anyway, and one whose time runs out comes back Unseen.
+- **Session**: One agent conversation, identified by its harness session id, tracked from its first turn.
+- **Archived**: A session that has been completed; it leaves the roster but stays listable and reversible.
+- **Inactive**: An open session whose whole **Family** has had no activity within `inactive_after`.
+- **Snoozed**: An open session put out of the way until a time or its next message.
 
 ### Runtime
 
-**Live**:
-A session whose agent process is running in this boot.
-
-**Dormant**:
-An open session with no running process.
-
-**Cut off**:
-A dormant session whose process ended mid-turn rather than while idle: its harness shut down, it was killed, or the machine restarted. When I wake it, it picks that turn back up; a wake to deliver a Message doesn't.
-
-**Stopped**:
-A turn ended early on purpose, by Esc or another session's cancel. The session is idle, and stays so.
-
-**Errored**:
-A session whose last turn its provider ended with an error. It stays idle, marked like a cut-off one, until its next turn starts.
-
-**Managed**:
-A session hosted by a harness process that `swb` started in its tmux server. Once a process is managed, every session it hosts counts, including after `/new`, `/resume`, `/clear`, or `/fork`. Processes it spawns, such as subagents, do not; only managed sessions can be reattached.
-
-**Harness**:
-The agent program a Session runs in: pi, Claude Code, or Codex.
-
-**Line**:
-A harness's integration with swb, shipped by swb: it records the harness's sessions, gives its agent swb's tools, and delivers its messages. Internal term (not in UI).
+- **Live**: A session whose agent process is running in this boot.
+- **Dormant**: An open session with no running process.
+- **Cut off**: A dormant session whose process ended mid-turn rather than while idle: its harness shut down, it was killed, or the machine restarted. When I wake it, it picks that turn back up.
+- **Stopped**: A turn ended early on purpose, by Esc or another session's cancel. The session is idle, and stays so.
+- **Errored**: A session whose last turn its provider ended with an error.
+- **Managed**: A session hosted by a harness process that `swb` started in its tmux server. Once a process is managed, every session it hosts counts, including after `/new`, `/resume`, `/clear`, or `/fork`. Only managed sessions can be reattached.
+- **Harness**: The agent program a Session runs in: pi, Claude Code, or Codex.
+- **Line**: A harness's integration with swb, shipped by swb: it records the harness's sessions, gives its agent swb's tools, and delivers its messages. Internal term (not in UI).
 
 ### Messages
 
-**Message**:
-Text one Session sends another through swb. It waits in swb's db until the recipient's line delivers it: mid-turn when the recipient is working and its harness allows, as a new turn when it's idle, and after waking it when it's dormant.
+- **Message**: Text one Session sends another through swb.
+- **Schedule**: A Message one Session sets up for later, once or on a cron, to itself, another Session, or a new Session it launches each time.
+- **Clock**: The process in swb's tmux server that fires Schedules and starts dormant sessions with Messages waiting. Internal term (not in UI).
 
-#**Schedule**:
-A Message one Session sets up for later, once or on a cron, to itself, another Session, or a new Session it launches each time. A run missed while the machine slept fires once when it wakes, saying when it was due.
+### Attention
 
-**Clock**:
-The process in swb's tmux server that fires Schedules and starts dormant sessions with Messages waiting. Internal term (not in UI).
-
-## Attention
-
-**Activity**:
-What a live session's agent is doing right now: **working**, **blocked** on me (e.g. permission prompt), or **idle**, its turn finished and waiting for my next prompt.
-
-**Visit**:
-The moment I last looked at a session, by focusing its agent on the **Stage** for a second; a timestamp watermark.
-
-**Unseen**:
-A session whose agent finished a turn after my last **Visit**, or one I marked Unseen. A mark made on the **Stage** holds until the Stage leaves the session and a later Visit comes back to it.
+- **Activity**: What a live session's agent is doing right now: **working**, **blocked** on me (e.g. permission prompt), or **idle**.
+- **Visit**: The moment I last looked at a session.
+- **Unseen**: A session whose agent finished a turn and I have not yet **visited**.
 
 ### Organization
 
-**Deck**:
-What `swb` opens: the **Roster** beside a **Stage**. There is one, shared by every terminal that opens it, and it outlives them.
-
-**Roster**:
-The Deck's list of sessions, in sections: **Operators**, open sessions by **Project**, **Inactive**, **Snoozed**, then **Archived**.
-
-**Stage**:
-Internal term for the Deck's live, interactive view of the selected session; moving the Roster cursor changes which session it shows. Internal term (not in UI).
-
-**Editor**:
-The text editor for one directory, shared by every session whose working directory it is.
-
-**Peek**:
-A session's particulars and keys, shown beside its Roster row over the **Stage** while the pointer rests on the row or the cursor has just moved onto it. It never covers the Roster.
-
-**Overlay**:
-A box the Deck shows over its panes without moving them or taking the keyboard: a **Peek**, the picker's launch card, its menu. Internal term (not in UI).
-
-**View**:
-What the **Stage** shows for a session: its **agent**, its **Editor**, or a **split** of both. Each session remembers its own.
-
-**Project**:
-A git repository together with all of its worktrees, rooted at its main checkout; a bare clone has none, so each of its worktrees is a Project of its own. Sessions outside any repository group by directory.
-
-**Operator**:
-A session whose working directory is swb's Operator folder. It coordinates the other sessions instead of working in a **Project**, belongs to none, and never goes **Inactive**.
-
-**Group**:
-A name I give a session, scoping it within its **Project**. A Group exists only while some session carries its name: the last one archived takes it away, and unarchiving one brings it back. A session another starts begins in its parent's Group, when both are in one **Project**, unless its launch names another Group or none; from then on, each one's Group is its own, and a session with none sits directly under its **Project**.
-
-**Family**:
-A session together with every session it started, and those they started, short of an **Operator**. The **Roster** nests a session under its parent while both sit in one Group or Project.
+- **Deck**: What `swb` opens: the **Roster** beside a **Stage**. There is one persistent instance, shared by every terminal that opens it.
+- **Roster**: The Deck's list of sessions, in sections: **Operators**, open sessions by **Project**, **Inactive**, **Snoozed**, then **Archived**.
+- **Stage**: The Deck's live, interactive view of the selected session. Internal term (not in UI).
+- **Editor**: The text editor for one directory, shared by every session whose working directory it is.
+- **Peek**: A session's particulars and keys, shown beside its Roster row on focus.
+- **Overlay**: A box the Deck shows over its panes without moving them or taking the keyboard: a **Peek**, the picker's launch card, its menu. Internal term (not in UI).
+- **View**: What the **Stage** shows for a session: some combination of the **agent**, **Editor**, and a shell.
+- **Project**: A git repository together with all of its worktrees. Sessions outside a repository use the directory.
+- **Operator**: A special session that coordinates other sessions, not associated with any particular **Project**.
+- **Group**: A name I associate with alike sessions in a project, as a way to organize the **Roster**.
+- **Family**: A session together with every session it started, and those they started, except for **Operators**.
 
 ## Relationships
 

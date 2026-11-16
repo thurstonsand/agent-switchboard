@@ -4,7 +4,7 @@ Agent Switchboard (`swb`) keeps track of every coding-agent session I start, fro
 
 ## Motivation
 
-I run a lot of agent sessions in parallel, all on the command line. It gets hard to keep track of them all, ESPECIALLY when the machine reboots, closes a tab, or crashes, I lose track of which sessions were mid-flight and which were done. T3 Code and Amp Code get the workflow right: a sidebar of threads grouped by project, live status, and an explicit act that marks a thread finished. But it's a GUI app that I can't use on all my machines, so I must go afield. Herdr and agent-deck are the terminal-native answers. Herdr isn't available to me iether, and agent-deck is hacky and unreliable. So this is the session-management functionality I need, built for the terminal and for Pi.
+I run a lot of agent sessions in parallel, all on the command line. It gets hard to keep track of them all, ESPECIALLY when the machine reboots, closes a tab, or crashes, I lose track of which sessions were mid-flight and which were done. T3 Code and Amp Code get the workflow right: a sidebar of threads grouped by project, live status, and an explicit act that marks a thread finished. But it's a GUI app that I can't use on all my machines, so I must go afield. Herdr and agent-deck are the terminal-native answers. Herdr isn't available to me either, and agent-deck is hacky and unreliable. So this is the session-management functionality I need.
 
 ## Project context
 
@@ -18,18 +18,6 @@ See @CONTEXT.md for project vocabulary.
 - The TUI must be snappy: move processing to the background as much as possible, keeping the TUI fast to navigate, with loaders in place as needed
 - Say it once: each piece of state appears in exactly one place on screen. A second badge, line, or header saying the same thing costs space and splits attention
 - Fail loudly: a line that can't record says so in its harness instead of silently drifting
-
-## Features
-
-- `swb`: opens the Deck as it was left, the same one in every terminal. The roster lists Operators, then open sessions grouped by project, then Inactive, Snoozed, then Archived. Beside it, the Stage shows the selected session's agent, its directory's editor, or a split of both, with an optional shell beside, below, or in place of the agent
-- `swb -c`: moves the Deck to this Project's most recent session, or a new one
-- Operators: sessions in swb's Operator folder that coordinate the rest, reading only that folder's AGENTS.md
-- Settings: every key in config.toml, browsable and editable in the Deck, including the shortlist of presets that `n` and `session_launch` start new sessions on
-- `swb new`, `open`, `adopt`, `archive`, `unarchive`, `snooze`, `reload`, `quit`, `models`, `ls --json`, `dirs --json`: the scriptable surface
-- Recall: `session_search` and `session_recall` search and question any session's conversation, open or archived, its subagents' included, from any harness, each harness asking through a reader of its own
-- Schedules: a session messages itself or another later, once or on a cron, or launches a new one, and can snooze until then. swb's clock fires them from its tmux server, which outlives the Deck
-- `swb drive` and `swb deck state`: an agent drives a Deck exactly as a human does, and captures its screen as text
-- Lines for pi, Claude Code, and Codex: lifecycle, activity, and attention written to the shared db, the same coordination tools in every harness, and delivery of messages between sessions. In pi, swb claims peer coordination from pi-sessions, which keeps its subagents
 
 ## Developer notes
 
