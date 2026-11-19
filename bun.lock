@@ -19,7 +19,7 @@
     "packages/cli": {
       "name": "@swb/cli",
       "dependencies": {
-        "@decimalturn/toml-patch": "3.3.2",
+        "@decimalturn/toml-patch": "3.3.3",
         "@earendil-works/pi-tui": "^1.5.2",
         "@modelcontextprotocol/sdk": "1.32.2",
         "@swb/shared": "workspace:*",
@@ -113,7 +113,7 @@
 
     "@babel/runtime": ["@babel/runtime@7.29.13", "", {}, "sha512-v+oN26xP4YIlQsbQ/CbTH1WG5m/l/DjKKZNy/Kp3f/AFvbgt7Em/D0FeMM3O2hX0YzeN2M16W8lOpyhIkfCBcQ=="],
 
-    "@decimalturn/toml-patch": ["@decimalturn/toml-patch@3.3.2", "", {}, "sha512-UUsjKkIJWC4JwhAK7IUMZeN4TjjtCWapAkdIuvllT3/fYcNooDQ0HtwgGDV77ew+arh/15hazN9M9/oSNV+PDg=="],
+    "@decimalturn/toml-patch": ["@decimalturn/toml-patch@3.3.3", "", {}, "sha512-x3+jj/r8uEEnnVs0vgdSYxn4YXcnklZPmbQ105DI/e4mng+9z/eDUuc8PMwASab51CWt15DTVHLYiEbDBUzHJA=="],
 
     "@earendil-works/pi-agent-core": ["@earendil-works/pi-agent-core@1.5.2", "", { "dependencies": { "@earendil-works/pi-ai": "1.5.2", "@earendil-works/pi-schema": "1.5.2" } }, "sha512-ie5mejS7mGfXt//9As7i3LfxVXdktZvF1JP4EQsUXTp4mU437h23MNGx7wXZ5VYs3YiG/Qnj3e7OZ2HC069OMw=="],
 
