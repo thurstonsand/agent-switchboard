@@ -39,7 +39,8 @@
 			"minimumReleaseAge": null
 		},
 		{
-			"description": "A Pi update raises the package.json floors, not only bun.lock, so the declared range always names the Pi swb is tested against.",
+			"description": "Track the current Pi in the root harness fixtures and bundled Deck without raising the Pi extension's compatibility floor.",
+			"matchFileNames": ["package.json", "packages/cli/package.json"],
 			"matchPackageNames": ["@earendil-works/**"],
 			"rangeStrategy": "bump"
 		},
