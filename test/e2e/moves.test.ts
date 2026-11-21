@@ -32,7 +32,8 @@ async function moved(command: string): Promise<{ id: string; from: string; cwd: 
 	const id = st.staged.id as string;
 	const from = transcript(id);
 	s.save("before.txt", s.screen());
-	s.keys("-l", command, "Enter");
+	// Paste the complete command so Enter submits it instead of confirming argument completion.
+	s.keys("-l", `\x1b[200~${command}\x1b[201~`, "Enter");
 	const { cwd } = await until(
 		() => entry(s, id).cwd !== s.project && entry(s, id),
 		budgets.settle,
