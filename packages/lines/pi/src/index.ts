@@ -3,7 +3,7 @@ import type { FSWatcher } from "node:fs";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ToolNamespace } from "@earendil-works/pi-coding-agent";
 import { Text, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { Db, describeTool, launchGuide, linkedWorktree, operatorDir } from "@swb/shared";
 import { frame, listen, markDelivered, pendingFor, sender, unmarkDelivered } from "@swb/shared/mailbox";
@@ -347,6 +347,10 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	const guide = launchGuide();
+	const namespace: ToolNamespace = {
+		name: "switchboard",
+		description: "Find, coordinate, launch, and schedule agent sessions across projects and harnesses.",
+	};
 	const tool = (
 		name: ToolName,
 		target: (args: Record<string, unknown>) => string,
@@ -355,6 +359,7 @@ export default function (pi: ExtensionAPI) {
 		const register = (cwd: string) =>
 			pi.registerTool({
 				name,
+				namespace,
 				label: TOOLS[name].label,
 				description: describeTool(name, TOOLS[name].description, guide),
 				promptGuidelines: TOOLS[name].guidelines,

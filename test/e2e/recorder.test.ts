@@ -73,6 +73,40 @@ test("the dist:pi bundle, packed and installed with pi install as npm publishes 
 	await firstTurn();
 });
 
+test("Pi discovers ten tools in the switchboard namespace and calls session_list by its original name", async () => {
+	s = scenario("phase1", "tool-namespace");
+	const file = join(s.home, ".pi/agent/settings.json");
+	const settings = JSON.parse(readFileSync(file, "utf8"));
+	writeFileSync(file, JSON.stringify({ ...settings, defaultTools: ["+codemode"] }));
+	const runtime = await startManaged(s);
+	const code = `
+const group = await describeNamespace("switchboard");
+const members = ${JSON.stringify([
+		"session_launch",
+		"session_list",
+		"session_list_schedules",
+		"session_recall",
+		"session_schedule",
+		"session_search",
+		"session_send_message",
+		"session_unschedule",
+		"swb_show_session",
+		"swb_update_session",
+	])};
+if (group?.name !== "switchboard" || JSON.stringify(group.tools.slice().sort()) !== JSON.stringify(members)) throw Error("Wrong namespace membership: " + JSON.stringify(group));
+if (await describeNamespace("swb")) throw Error("Unexpected swb namespace alias");
+if (!(await searchTools("recall a session", { namespace: "switchboard" })).some(tool => tool.name === "session_recall")) throw Error("Namespace search missed recall");
+text("switchboard: " + group.tools.length + " tools; search found session_recall");
+text(await tools.session_list({}));`;
+	const since = await prompt(s, `call codemode ${JSON.stringify({ code })}`);
+	await settled(s, runtime.session_id, "namespace discovery turn complete", since);
+	await until(() => s.screen().includes("switchboard: 10 tools; search found session_recall"), budgets.settle, "namespace discovery");
+	const list = await prompt(s, "call session_list {}");
+	await settled(s, runtime.session_id, "direct session_list turn complete", list);
+	await until(() => s.screen().includes("Sessions · 0 found"), budgets.settle, "the unchanged list receipt");
+	s.save("namespace-and-call.ansi", s.swb("drive", "capture", "--ansi"));
+});
+
 test("blocked during an attention span, working after it, idle only once the turn settles", async () => {
 	s = scenario("phase1", "attention");
 	const runtime = await startManaged(s);
