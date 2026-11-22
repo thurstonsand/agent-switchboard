@@ -364,8 +364,8 @@ export type Fired = {
 };
 
 /**
- * Fires every schedule due by now, in one transaction: a message for each recipient, each recurring one moved past now,
- * so a cron that missed several runs while the machine slept runs once. Launches happen after, outside the lock.
+ * Fires due schedules in one transaction. Recurrences move past now; invalid ones are cancelled with a message to
+ * their source. Launches happen after, outside the lock.
  */
 export function fire(db: Db, now: number): Fired {
 	return recordTx(db, () => {
@@ -375,9 +375,17 @@ export function fire(db: Db, now: number): Fired {
 		) as ScheduleRow[];
 		const fired: Fired = { targets: [], launches: [] };
 		for (const row of due) {
-			const next = row.cron ? nextRun(row.cron, now) : null;
-			db.run("UPDATE schedules SET next_at = ?, last_fired_at = ? WHERE id = ?", next, now, row.id);
-			if (row.launch) {
+			let next: number | null = null;
+			let invalid: SwbError | null = null;
+			try {
+				if (row.cron !== null) next = nextRun(row.cron, now);
+			} catch (error) {
+				if (!(error instanceof SwbError)) throw error;
+				invalid = error;
+			}
+			if (invalid) db.run("UPDATE schedules SET cancelled_at = ? WHERE id = ?", now, row.id);
+			else db.run("UPDATE schedules SET next_at = ?, last_fired_at = ? WHERE id = ?", next, now, row.id);
+			if (!invalid && row.launch) {
 				fired.launches.push({
 					scheduleId: row.id,
 					scheduledFor: row.next_at as number,
@@ -388,19 +396,23 @@ export function fire(db: Db, now: number): Fired {
 				});
 				continue;
 			}
+			const target = invalid ? row.source_id : (row.target_id as string);
+			const body = invalid
+				? `swb cancelled schedule "${row.schedule_label}" (${row.id}): invalid recurrence. ${invalid.message}`
+				: row.body;
 			db.run(
 				`INSERT INTO messages (id, kind, source_id, target_id, body, report_back, created_at, schedule_id, scheduled_for)
 				 VALUES (?, 'message', ?, ?, ?, ?, ?, ?, ?)`,
 				crypto.randomUUID(),
 				row.source_id,
-				row.target_id,
-				row.body,
-				row.report_back,
+				target,
+				body,
+				invalid ? 0 : row.report_back,
 				now,
 				row.id,
 				row.next_at,
 			);
-			fired.targets.push(row.target_id as string);
+			fired.targets.push(target);
 		}
 		return fired;
 	});

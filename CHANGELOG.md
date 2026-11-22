@@ -6,6 +6,10 @@
 
 - Pi's code mode can discover all ten Switchboard tools in the `switchboard` namespace. Their callable names and direct availability are unchanged.
 
+### Fixed
+
+- If a saved recurrence is invalid when it comes due, swb cancels that schedule and tells the session that set it why. Other schedules due at the same time still run.
+
 ## [0.16.3] - 2026-11-14
 
 ### Changed

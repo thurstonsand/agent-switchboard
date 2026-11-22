@@ -85,6 +85,37 @@ test("a recurring schedule that missed runs while the machine slept fires once, 
 	expect(transcript(pi.id)).toMatch(/scheduled for \w{3} \w{3} \d+, \d\d:\d\d, delivered \w{3} \w{3} \d+, \d\d:\d\d \(schedule: /);
 });
 
+test("an invalid saved recurrence is cancelled and reported without blocking another due schedule", async () => {
+	s = scenario("schedules", "invalid-recurrence");
+	const pi = await launched(s, "pi", "reply up");
+	const recipient = await launched(s, "pi", "reply recipient");
+	const add = (body: string, label: string, target: string) =>
+		scheduled(s, body, "--from", pi.id, "--to", target, "--cron", "0 9 * * *", "--schedule-label", label);
+	const broken = await add("reply broken_payload", "Morning digest", recipient.id);
+	const valid = await add("reply valid_payload", "Daily check", pi.id);
+	const since = Date.now();
+	// Croner 11.0.0 accepted the malformed pattern. Make both rows due in one tick, with the malformed one first.
+	const db = s.db();
+	db.run("UPDATE schedules SET next_at = ? + (id = ?), cron = CASE WHEN id = ? THEN '3* 9 * * *' ELSE cron END WHERE id IN (?, ?)", [
+		since - 10_000,
+		valid.details.id,
+		broken.details.id,
+		broken.details.id,
+		valid.details.id,
+	]);
+	db.close();
+	const warning = `swb cancelled schedule "Morning digest" (${broken.details.id}): invalid recurrence. cron: "3* 9 * * *"`;
+	await until(() => pane(s, pi.id).includes(warning), budgets.settle, "the invalid recurrence warning visible in Pi");
+	await replied(s, pi.id, "valid_payload", "the other due recurrence delivered", since);
+	expect(transcript(recipient.id)).not.toContain("reply broken_payload");
+	const stopped = s.swbTry("unschedule", broken.details.id, "--from", pi.id);
+	expect(stopped.err).toContain(`schedule ${broken.details.id} is already cancelled`);
+	const listed = JSON.parse(s.swb("list-schedules", "--from", pi.id));
+	expect(listed.details.schedules).toEqual([expect.objectContaining({ id: valid.details.id, nextAt: expect.any(Number) })]);
+	expect(listed.details.schedules[0].nextAt).toBeGreaterThan(Date.now());
+	s.save("result.ansi", s.tmux(s.servers.sessions, "capture-pane", "-p", "-e", "-t", s.pane(host(s, pi.id))));
+});
+
 test("a schedule launches a new session, refuses what can't work, unschedules, and a retried call schedules once", async () => {
 	s = scenario("schedules", "launch");
 	const pi = await launched(s, "pi", "reply up");
