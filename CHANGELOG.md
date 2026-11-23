@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-11-23
+
 ### Changed
 
 - Focusing a session from a `/` search (`Enter`, clicking its row, or `l`) now resets the search and reveals that session in the full roster (or active lens).
