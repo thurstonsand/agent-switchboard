@@ -31,5 +31,12 @@ Type@400ms '"'
 Wait+Screen /2 found/
 Sleep 2.5s
 Screenshot ../artifacts/phase6/videos/filter-search-exact.png
-Escape
+Enter
+Sleep 800ms
+Down
+Sleep 800ms
+Enter
+Wait+Screen /▾ \S+ \(6\)/
+Sleep 2s
+Screenshot ../artifacts/phase6/videos/filter-search-focused.png
 Sleep 1.5s

@@ -1152,6 +1152,15 @@ export const directors: Record<string, Director> = {
 			await waitDeck(s, "readme: the README, by its title", (x) => answered(x, "readme", ["Write the README"]));
 			await waitDeck(s, "an unclosed quote reads as a plain word", (x) => answered(x, '"mutex', mutex));
 			await waitDeck(s, "quoted, it matches exactly", (x) => answered(x, '"mutex"', ["Audit the mutex usage", "Fix the flaky test"]));
+			await waitDeck(
+				s,
+				"Enter on a search result focuses it and clears the search",
+				(x) =>
+					x.filter === "" &&
+					x.focus === "stage" &&
+					sessionRows(x).find((r) => r.id === x.staged.id)?.title === "Fix the flaky test" &&
+					shown(x).length === 6,
+			);
 		},
 	},
 

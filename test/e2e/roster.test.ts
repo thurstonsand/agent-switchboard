@@ -204,6 +204,24 @@ test("/ ranks sessions by their conversations and titles as session_search does,
 	// A quote not yet closed reads as a plain word, which matches as a prefix.
 	const unclosed = await search('"light', "as light*", (ids) => ids.join() === [keeper, lighthouse].join());
 	expect(unclosed.found.error).toBeNull();
+
+	// Keeping a search, picking a session from it, and pressing Enter focuses it and clears the search.
+	s.keys("/");
+	await waitState(s, "the search again", (x) => x.mode === "filter");
+	s.keys("-l", "lighthouse");
+	await waitState(s, "lighthouse results", (x) => x.found.query === "lighthouse" && shown(x).join() === [keeper, lighthouse].join());
+	s.keys("Enter");
+	await waitState(s, "filter kept in roster", (x) => x.mode === "roster" && x.filter === "lighthouse");
+	s.keys("j");
+	await waitState(s, "beta highlighted in search", (x) => x.cursor === lighthouse);
+	s.keys("Enter");
+	const focused = await waitState(
+		s,
+		"beta focused and search cleared",
+		(x) => x.filter === "" && x.mode === "roster" && x.focus === "stage" && x.cursor === lighthouse && x.staged.id === lighthouse,
+		budgets.piReady,
+	);
+	expect(shown(focused).toSorted()).toEqual([keeper, harbor, lighthouse].toSorted());
 });
 
 test("f picks one lens, a Group across Projects or what needs me, by key or mouse; ! is needs me; a new Deck keeps it", async () => {

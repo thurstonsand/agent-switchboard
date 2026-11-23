@@ -1998,7 +1998,7 @@ function typeInto(data: string): void {
 	}
 }
 
-/** A click on a row: the cursor goes there, and it acts as ⏎ does. Picking a row is done filtering, and the filter stays. */
+/** A click on a row: the cursor goes there, and it acts as ⏎ does. Picking a session clears any search. */
 function select(key: string, index: number): void {
 	if (filtering()) leave();
 	const row = rosterRows().find((r) => r.key === key);
@@ -2260,8 +2260,14 @@ function activate(enter: boolean): void {
 	else setFolded(row, !row.folded);
 }
 
-/** ⏎: wake it if needed and focus it at once; a session still starting holds the keyboard on its loading card. */
+/** ⏎: wake it if needed and focus it at once, clearing any search; a session still starting holds the keyboard on its loading card. */
 function focusEntry(e: Entry): void {
+	if (m.filter.getValue() !== "") {
+		if (filtering()) leave();
+		m.filter.setValue("");
+		searchFilter();
+		reveal(e.id);
+	}
 	stageSession(e.id);
 	if (!e.live) wake(e.id, true);
 	afterCommit(() => void panes.focusStage());
