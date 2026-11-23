@@ -419,6 +419,7 @@ function startFakes(root: string, home: string, harnesses: ("claude" | "codex")[
 					"[tui.model_availability_nux]",
 					'"gpt-6-sol" = 1',
 					'"gpt-6.1-sol" = 1',
+					'"gpt-6.2-sol" = 1',
 					"",
 				].join("\n"),
 			);

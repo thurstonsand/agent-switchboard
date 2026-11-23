@@ -1,6 +1,6 @@
 {
 	"$schema": "https://biomejs.dev/schemas/2.6.8/schema.json",
-	"files": { "includes": ["**", "!docs/wayfinding", "!dist", "!test/e2e/artifacts", "!test/perf/results"] },
+	"files": { "includes": ["**", "!.mise/locks", "!docs/wayfinding", "!dist", "!test/e2e/artifacts", "!test/perf/results"] },
 	"formatter": { "indentStyle": "tab", "lineWidth": 140 },
 	"markdown": { "parser": { "frontmatter": true } },
 	"linter": { "rules": { "preset": "recommended" } },

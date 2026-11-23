@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The tested Claude Code and Codex versions are now 2.1.330 and 0.171.0, respectively. The end-to-end fixtures also use pi-sessions 0.24.0 and pi-wt 1.17.0.
+
 ## [0.18.0] - 2026-11-23
 
 ### Added

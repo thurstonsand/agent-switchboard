@@ -26,16 +26,17 @@
 			"matchPackageNames": [
 				"@earendil-works/*",
 				"@anthropic-ai/claude-code",
+				"@anthropic-ai/claude-code-*",
 				"@anthropic-ai/claude-agent-sdk",
 				"@openai/codex",
-				"@openai/codex-sdk"
+				"@openai/codex-*"
 			],
 			"minimumReleaseAge": null
 		},
 		{
 			"description": "Thurston's own packages, which swb moves in lockstep with: each takes its latest release as soon as it ships, like the harnesses.",
-			"matchDatasources": ["npm"],
-			"matchPackageNames": ["pi-sessions", "@thurstonsand/pi-wt"],
+			"matchDatasources": ["npm", "github-releases", "github-tags"],
+			"matchPackageNames": ["pi-sessions", "@thurstonsand/pi-wt", "thurstonsand/wt"],
 			"minimumReleaseAge": null
 		},
 		{

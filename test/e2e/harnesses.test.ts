@@ -403,10 +403,12 @@ test("Claude Code sessions an agent starts in a bare clone's worktree or a submo
 
 test("on a code-mode-only model, Codex offers swb's tools directly, beside its own subagents, and session_launch starts a session", async () => {
 	s = scenario("harnesses", "code-mode", { packages: [], recorder: true, harnesses: ["codex"] });
-	const parent = await launched(s, "codex", "reply up", undefined, ["--model", "gpt-6-sol"]);
-	const [first] = s.requests("codex") as { model: string; tools: string[] }[];
-	expect(first?.model).toBe("gpt-6-sol");
-	expect(first?.tools).toEqual(expect.arrayContaining(["exec", "spawn_agent", "session_launch", "session_send_message"]));
+	config(s, '[[presets]]\nharness = "codex"\nmodel = "gpt-6.2-sol"\n[[presets]]\nharness = "pi"\nprovider = "faux"\nmodel = "faux-1"\n');
+	const parent = await launched(s, "codex", "reply up", undefined, ["--model", "gpt-6.2-sol"]);
+	const requests = s.requests("codex") as { model: string; texts: string[]; tools: string[] }[];
+	const turn = requests.find((request) => request.texts.at(-1) === "reply up");
+	expect(turn?.model).toBe("gpt-6.2-sol");
+	expect(turn?.tools).toEqual(expect.arrayContaining(["exec", "spawn_agent", "session_launch", "session_send_message"]));
 	const since = type(
 		s,
 		parent.id,

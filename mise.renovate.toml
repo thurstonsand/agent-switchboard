@@ -1,0 +1,9 @@
+# Renovate runs under Node 26 without adding it to the default toolset.
+[tools]
+node = "26"
+# mise safe mode ignores the root [settings] when Renovate updates this lock.
+"npm:renovate" = { version = "44.257.0", minimum_release_age = "3d", allow_builds = [
+  "re2",
+], trust_policy_excludes = [
+  "@yarnpkg/libzip@3.2.2",
+] }
