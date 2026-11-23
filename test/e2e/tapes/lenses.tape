@@ -38,3 +38,7 @@ Enter
 Wait+Screen /Quarantine the flaky suite/
 Sleep 2.5s
 Screenshot ../artifacts/phase6/videos/lenses-long.png
+Escape
+Wait+Screen /f lens/
+Sleep 1.5s
+Screenshot ../artifacts/phase6/videos/lenses-cleared.png

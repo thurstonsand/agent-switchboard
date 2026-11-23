@@ -1897,6 +1897,7 @@ export const directors: Record<string, Director> = {
 			await waitDeck(s, "! again: every session", (x) => !x.lens.needs && sessionRows(x).length === 7);
 			const long = await waitDeck(s, "a long Group's lens", (x) => x.lens.group === "triage-the-flaky-integration-suite");
 			expect(titles(long)).toEqual(["Quarantine the flaky suite"]);
+			await waitDeck(s, "esc clears the lens", (x) => x.lens.group === null && !x.lens.needs && sessionRows(x).length === 7);
 		},
 	},
 

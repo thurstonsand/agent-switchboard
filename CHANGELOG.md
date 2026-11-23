@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- `Esc` in the roster now clears an active lens once any Peek and `/` search are closed, matching the top bar's `✕` on the keyboard.
 - A Codex preset whose model Codex's catalog doesn't list stays launchable, as a Claude Code one already did. Codex starts on unlisted ids, and a managed `model_catalog_json` can trail the models its provider serves.
 
 ## [0.18.0] - 2026-11-23

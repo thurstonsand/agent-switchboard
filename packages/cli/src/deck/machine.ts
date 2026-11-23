@@ -3130,8 +3130,13 @@ function rosterKeys(row: Row | undefined): Binding<Command>[] {
 		bind([" "], "space", null, { kind: "activate", enter: false }),
 		bind(["right", "l"], "l", null, { kind: "unfold", open: true }),
 		bind(["left", "h"], "h", null, { kind: "unfold", open: false }),
-		// A Peek on view goes first, as its esc says; then the filter.
-		bind(["escape"], "esc", null, m.peek.settled ? { kind: "dismissPeek" } : { kind: "clearFilter" }),
+		// A Peek on view goes first, as its esc says; then the filter, then the lens.
+		bind(
+			["escape"],
+			"esc",
+			null,
+			m.peek.settled ? { kind: "dismissPeek" } : query() !== "" ? { kind: "clearFilter" } : lensOn() ? { kind: "clearLens" } : null,
+		),
 		bind(["w"], "w", null, onRow("wake")),
 		bind(["x"], "x", null, onRow("stop")),
 		bind(["R"], "R", null, onRow("reload")),

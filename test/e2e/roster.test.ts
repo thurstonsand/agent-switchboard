@@ -284,17 +284,35 @@ test("f picks one lens, a Group across Projects or what needs me, by key or mous
 	s.keys("!");
 	await waitState(s, "needs me again", (x) => x.lens.needs && ids(x).join() === broken);
 
-	// / searches everything, whatever the lens, and esc comes back to it.
+	// / searches everything, whatever the lens, and esc comes back to it; another esc clears the lens.
 	s.keys("/");
 	s.keys("-l", "loose");
 	await waitState(s, "a search past the lens", (x) => x.found.query === "loose" && x.cursor === loose);
-	// The session the search picked keeps its row while the cursor's on it, and goes when the cursor leaves.
+	// Kept search: first esc clears the search and returns to the lens, second esc clears the lens.
+	s.keys("Enter");
+	await waitState(s, "search kept", (x) => x.mode === "roster" && x.filter === "loose");
 	s.keys("Escape");
 	st = await waitState(s, "the lens back", (x) => x.filter === "" && x.lens.needs && ids(x).includes(broken));
 	expect(st.cursor).toBe(loose);
 	expect(ids(st)).toEqual([broken, loose].sort());
 	await cursorTo(s, broken);
 	await waitState(s, "the search's pick gone with the cursor", (x) => ids(x).join() === broken);
+	// Cursor movement opens a Peek: esc closes the Peek first, then clears the lens.
+	await waitState(s, "peek open on broken", (x) => x.peek?.id === broken);
+	s.keys("Escape");
+	await waitState(s, "esc closes peek, lens stays", (x) => x.peek === null && x.lens.needs && ids(x).join() === broken);
+	s.keys("Escape");
+	await waitState(s, "esc clears the lens", (x) => x.lens.group === null && !x.lens.needs && ids(x).length === 4);
+	// Esc also clears a Group lens directly when no Peek or search is open.
+	await cursorTo(s, here);
+	s.keys("f");
+	await waitState(s, "the picker on review again", (x) => x.mode === "lens" && highlighted(x) === "review");
+	s.keys("Enter");
+	await waitState(s, "review lens back", (x) => x.lens.group === "review" && ids(x).join() === [here, there].sort().join());
+	s.keys("Escape");
+	await waitState(s, "esc clears the Group lens", (x) => x.lens.group === null && !x.lens.needs && ids(x).length === 4);
+	s.keys("!");
+	await waitState(s, "needs me restored for restart check", (x) => x.lens.needs && ids(x).join() === broken);
 
 	// A new Deck opens on the lens it was left with.
 	await Bun.sleep(1000);
