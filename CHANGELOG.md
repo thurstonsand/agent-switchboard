@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-23
+
 ### Added
 
 - Pi's code mode can discover every Switchboard tool in the `switchboard` namespace. Their callable names and direct availability are unchanged.
