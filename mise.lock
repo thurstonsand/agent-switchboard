@@ -3034,6 +3034,7 @@ url_api = "https://api.github.com/repos/neovim/neovim/releases/assets/625399221"
 version = "3.8"
 backend = "aqua:tmux/tmux-builds"
 specifiers = ["3.8"]
+unsupported_platforms = ["windows-x64"]
 
 [tools."aqua:tmux/tmux-builds"."platforms.linux-arm64"]
 checksum = "sha256:f399311b1159705e69839eaf4f6f68c8b8540dc3a8538b87c30dedb9c3c7fc23"
