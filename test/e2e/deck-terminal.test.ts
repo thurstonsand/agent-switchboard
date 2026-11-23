@@ -81,7 +81,7 @@ test("a pi follows theme changes even in copy mode, and dims only on the Deck wh
 	s.keys("M-a", "s");
 	await waitState(s, "the shell, with the keyboard", (x) => x.layout.shell !== null && x.focus === "shell");
 	await until(() => renderedMessageBg() === "186;194;194", budgets.settle, "inactive pi dimmed 15% in light mode");
-	expect(s.swb("drive", "capture", "--ansi")).toMatch(/\[(?:39|49)m ▾ Operators /);
+	expect(s.swb("drive", "capture", "--ansi")).toMatch(/\[49m ▾ Operators /);
 
 	// tmux 3.8 tells pi before the sessions server mirrors the terminal, so pi's own query would see the old colors.
 	s.swb("drive", "theme", "dark");
@@ -89,7 +89,7 @@ test("a pi follows theme changes even in copy mode, and dims only on the Deck wh
 	await until(() => renderedMessageBg() === "22;35;35", budgets.settle, "inactive pi dimmed 35% in dark mode");
 	await waitState(s, "the roster's dark background", (x) => x.colors.background === "#1d2021");
 	await until(async () => (await piColor(host, "11")) === DARK_BG, budgets.settle, "pi's dark background");
-	expect(s.swb("drive", "capture", "--ansi")).toMatch(/\[(?:39|49)m ▾ Operators /);
+	expect(s.swb("drive", "capture", "--ansi")).toMatch(/\[49m ▾ Operators /);
 	s.save("dark.ansi", s.swb("drive", "capture", "--ansi"));
 
 	// tmux 3.7c tells pi only once copy mode ends; swb, on 3.8, while it's still up.
