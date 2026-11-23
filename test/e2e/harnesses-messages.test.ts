@@ -246,7 +246,7 @@ test("an agent that ends its turn on swb_ask_user stays Asking in every harness,
 	}
 	// What the user reads for the call in each harness: the result's first line.
 	expect(pane(s, pi.id)).toContain("Asking: this session is waiting on you");
-	expect(pane(s, claude.id)).toMatch(/Ask\n\s+⎿ {2}Asking: this session is waiting on you/);
+	expect(pane(s, claude.id)).toMatch(/Ask *\n\s+⎿ {2}Asking: this session is waiting on you/);
 	expect(pane(s, codex.id)).toContain("Asking: this session is waiting on you");
 	const listed = JSON.parse(s.swb("list", "--from", pi.id)) as { text: string };
 	expect(listed.text).toMatch(new RegExp(`${claude.id} · Claude Code · .*asking`));
