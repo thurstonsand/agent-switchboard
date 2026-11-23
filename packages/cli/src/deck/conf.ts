@@ -181,7 +181,7 @@ export function deckConf(): string[] {
 		),
 		// z says which it means as it's pressed, so it lands the same whichever order it and an h just after reach the roster.
 		`bind z if -F '#{@swb_narrow}' { select-pane -Z -t :.0 } { if -F '#{@swb_hidden}' { ${roster("show")} } { ${roster("hide")} } }`,
-		...[..."nNawxRyY/JKmdSpu,[]"].map((k) => `bind ${k} ${notify(`__deck key ${k}`)}`),
+		...[..."nNawxRyY/JKmdSpu,[]f!"].map((k) => `bind ${k} ${notify(`__deck key ${k}`)}`),
 		`bind e ${notify("__deck view-swap")}`,
 		`bind v ${notify("__deck view-split")}`,
 		`bind = ${notify("__deck split-reset")}`,

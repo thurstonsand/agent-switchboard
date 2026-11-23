@@ -157,7 +157,7 @@ test("a session an agent started nests under it; its Peek's Parent action and p 
 	expect(lineage(st)).toEqual(["op", "↳ port", "⌁ bump", "root", "  c2", "  c1", "    g1"]);
 
 	// A click on the fold folds c1's family, and the next opens it.
-	const c1Line = 1 + st.rows.findIndex((r) => r.kind === "session" && r.id === c1);
+	const c1Line = 1 + st.listTop + st.rows.findIndex((r) => r.kind === "session" && r.id === c1);
 	click(s, "└─ ● c1", [4, c1Line]);
 	st = await waitState(s, "c1 folded by a click", (x) => sessionRows(x).find((r) => r.id === c1)?.folded === true);
 	expect(lineage(st)).toEqual(["op", "↳ port", "⌁ bump", "root", "  c2", "  c1 +1"]);
@@ -201,8 +201,8 @@ test("a session an agent started nests under it; its Peek's Parent action and p 
 			.filter((r) => r.group === "lab")
 			.map((r) => r.title),
 	).toEqual(["root"]);
-	const c2Line = 1 + st.rows.findIndex((r) => r.kind === "session" && r.title === "c2");
-	const lab = 1 + st.rows.findIndex((r) => r.kind === "header" && r.group === "lab");
+	const c2Line = 1 + st.listTop + st.rows.findIndex((r) => r.kind === "session" && r.title === "c2");
+	const lab = 1 + st.listTop + st.rows.findIndex((r) => r.kind === "header" && r.group === "lab");
 	s.swb("drive", "drag", "8", `${c2Line}`, "8", `${lab}`);
 	st = await waitState(s, "c2 back under root, in lab", (x) =>
 		Bun.deepEquals(lineage(x), ["op", "↳ port", "root", "  c2", "↳ c1", "  g1", "⌁ bump"]),

@@ -33,6 +33,8 @@ function lines(prefix: string, columns = Infinity): string[] {
 		row("p", "Session that started this one"),
 		row("[ ]", "Back / forward through viewed sessions"),
 		row("/", "Search, best first; esc clears"),
+		row("f", "Lens: all, needs me, or a Group in every Project"),
+		row("!", "Lens: needs me; again shows all"),
 		row("hover", "Peek; its actions use these keys"),
 		row("i", "Expand / collapse narrow details"),
 		row("PgUp PgDn", "Scroll expanded details"),

@@ -48,8 +48,11 @@ import {
 	historyStep,
 	hoverLine,
 	keymap,
+	type LensChoice,
 	launchElapsed,
 	launchOnStage,
+	lensChoices,
+	lensMode,
 	levelOf,
 	listedDirs,
 	marked,
@@ -94,6 +97,7 @@ import {
 	type ClickTarget,
 	type Command,
 	LAUNCH_COLS,
+	type LensMode,
 	legendParts,
 	type Menu,
 	type Part,
@@ -200,6 +204,8 @@ class Roster implements Component, Focusable {
 		for (const input of [model.filter, model.search, model.path]) input.focused = on;
 		const naming = nameMode();
 		if (naming) naming.input.focused = on;
+		const picking = lensMode();
+		if (picking) picking.input.focused = on;
 	}
 
 	handleInput(data: string): void {
@@ -241,20 +247,22 @@ class Roster implements Component, Focusable {
 		frame.targets = [];
 		frame.promptGap = null;
 		frame.details = null;
+		const bar = topBar(width);
+		frame.listTop = bar.length;
 		const prompt = promptOverlay(width, height)[0];
 		const reserved = prompt?.x === 0 ? prompt.view.lines.length : 0;
 		const detail = detailView(rows[index], width, Math.max(1, height - reserved - 8));
-		const tag = filterTag(width);
-		frame.listTop = tag === null ? 0 : 1;
 		const detailLines = 1 + (detail?.lines.length ?? 0);
 		const message = messageLine(now, height - 2);
 		const messageRows = message ? 1 : 0;
 		const bodyHeight = Math.max(1, height - frame.listTop - 2 - messageRows - detailLines - reserved);
-		const lines = tag === null ? [] : [tag];
+		const lines = [...bar];
 		const beforeScroll = frame.scrollTop;
 		lines.push(...list(rows, index, width, bodyHeight, now));
 		if (prompt && reserved) {
-			prompt.y = Math.max(frame.listTop, Math.min(frame.listTop + frame.listHeight, prompt.y + beforeScroll - frame.scrollTop));
+			// The lens picker sits under the top bar; the rest follow their row as the list scrolls.
+			if (prompt.about !== "lens")
+				prompt.y = Math.max(frame.listTop, Math.min(frame.listTop + frame.listHeight, prompt.y + beforeScroll - frame.scrollTop));
 			frame.promptGap = { at: prompt.y, rows: reserved };
 			for (const target of frame.targets) if (target.y >= prompt.y) target.y += reserved;
 			lines.splice(prompt.y, 0, ...Array<string>(reserved).fill(""));
@@ -356,6 +364,7 @@ function pickerParts(width: number, height: number): Part[] {
 			...(dirty ? [[` ${attention("Uncommitted changes")}`, null] as Part] : []),
 		];
 	}
+	if (lensMode()) return lensParts(width, height);
 	const naming = nameMode();
 	if (!naming) return [];
 	const choices = nameChoices();
@@ -391,11 +400,12 @@ function closeButton(title: string, width: number, command: Command): OverlayBut
 
 function promptOverlay(width: number, height: number): Overlay[] {
 	const mode = model.mode;
-	if (mode.kind !== "archive" && mode.kind !== "name" && mode.kind !== "snooze") return [];
+	if (mode.kind !== "archive" && mode.kind !== "name" && mode.kind !== "snooze" && mode.kind !== "lens") return [];
+	const at = mode.kind === "lens" ? null : mode.at;
 	const rosterWidth = width;
-	const insert = menuRow(width) !== null;
+	const insert = at === null || menuRow(width) !== null;
 	width = insert ? width : Math.min(Math.max(width, 54), panes.width - rosterWidth - 1);
-	if (width < PEEK_MIN_COLS) return [];
+	if (width < PEEK_MIN_COLS && at !== null) return [];
 	const parts = pickerParts(width - 2, height - 2);
 	const row = (line: string) => `${gray("│")}${truncateToWidth(line, width - 2, "…", true)}${gray("│")}`;
 	const title = parts[0]?.[0] ?? "";
@@ -405,7 +415,7 @@ function promptOverlay(width: number, height: number): Overlay[] {
 	);
 	buttons.push(closeButton(title, width, { kind: "cancel" }));
 	// Under its row, the menu carries the rest of the row's title above it, so the row reads whole.
-	const subject = insert ? rosterRows().find((r) => r.key === mode.at.row) : undefined;
+	const subject = insert && at !== null ? rosterRows().find((r) => r.key === at.row) : undefined;
 	if (subject?.kind === "session") {
 		const rest = sessionLine(subject, rosterWidth, Date.now()).rest;
 		const rows = rosterRows();
@@ -413,10 +423,13 @@ function promptOverlay(width: number, height: number): Overlay[] {
 		lines.unshift(...rest.map((line) => (cursor ? cursorLine(line, model.focus === "roster") : line)));
 		for (const b of buttons) b.y += rest.length;
 	}
-	const x = insert ? 0 : Math.max(rosterWidth + 1, Math.min(mode.at.x, panes.width - width));
-	const y = insert
-		? frame.listTop + rosterRows().findIndex((r) => r.key === mode.at.row) - frame.scrollTop + 1
-		: Math.max(0, Math.min(mode.at.y + lines.length <= height ? mode.at.y : mode.at.y - lines.length, height - lines.length));
+	const x = insert || at === null ? 0 : Math.max(rosterWidth + 1, Math.min(at.x, panes.width - width));
+	const y =
+		at === null
+			? frame.listTop
+			: insert
+				? frame.listTop + rosterRows().findIndex((r) => r.key === at.row) - frame.scrollTop + 1
+				: Math.max(0, Math.min(at.y + lines.length <= height ? at.y : at.y - lines.length, height - lines.length));
 	return [{ id: "prompt", about: mode.kind, x, y, width, view: { lines, buttons }, leaves: false, hovers: null }];
 }
 
@@ -516,8 +529,16 @@ function renderPicker(width: number, height: number): string[] {
 	return lines.map((line) => truncateToWidth(line, width, "…", true));
 }
 
-/** The filter's tag, atop the list while one applies, is a button that clears it. */
-function filterTag(width: number): string | null {
+/**
+ * The roster's top bar, about the roster as a whole rather than the cursor's row: the search being typed or kept, or else
+ * the keys that change what the roster shows, the lens among them.
+ */
+function topBar(width: number): string[] {
+	return [searchLine(width) ?? verbsLine(width)];
+}
+
+/** The search: its field while it's typed, then what it kept, a button that clears it. */
+function searchLine(width: number): string | null {
 	if (filtering()) {
 		const hint = ` · ${filterCount()}  ${key("esc", "clears")}`;
 		// What's typed keeps its room; a long hint, such as why the query can't be read, gives way.
@@ -539,6 +560,78 @@ function filterTag(width: number): string | null {
 		[` · ${filterCount()}  ${key("esc", "clears")}`, { kind: "clearFilter" }],
 	];
 	return truncateToWidth(clickable(0, parts), width - 1, "…");
+}
+
+/** The fewest columns a lens's name keeps before help and Settings give it theirs. */
+const LENS_NAME_MIN = 8;
+
+/**
+ * The roster's own keys, each a button, named for what they do: search and lens at the left, help and Settings at the
+ * right. While a lens applies, its name takes `f lens`'s place, a button that reopens the picker, with a ✕ that shows
+ * every session; a long name is cut short, and help and Settings give way before it's cut below LENS_NAME_MIN. Keys are
+ * gray while the Stage has the keyboard, where they need the prefix.
+ */
+function verbsLine(width: number): string {
+	const focused = model.focus === "roster";
+	const verb = (name: string, label: string, command: Command): Part => [focused ? key(name, label) : gray(`${name} ${label}`), command];
+	const span = (parts: Part[]) => parts.reduce((n, [text]) => n + visibleWidth(text), 0);
+	const left: Part[] = [[" ", null], verb("/", "search", { kind: "filter" }), ["  ", null]];
+	const right: Part[] = [verb("?", "keys", { kind: "help" }), ["  ", null], verb(",", "settings", { kind: "settings" })];
+	const lens = model.lens;
+	if (lens === null) {
+		left.push(verb("f", "lens", { kind: "openLens" }));
+		while (right.length > 0 && span(left) + span(right) + 2 > width - 1) right.splice(-2, 2);
+	} else {
+		const name = lens.kind === "needs" ? "needs me" : lens.name;
+		const close: Part[] = [
+			[" ", null],
+			[magenta("✕"), { kind: "clearLens" }],
+		];
+		const room = () => width - 1 - span(left) - span(close) - (right.length > 0 ? span(right) + 2 : 0);
+		while (right.length > 0 && room() < Math.min(LENS_NAME_MIN, visibleWidth(name))) right.splice(-2, 2);
+		left.push([bold(magenta(truncateToWidth(name, Math.max(1, room()), "…"))), { kind: "openLens" }], ...close);
+	}
+	// Every gap on the bar is two columns, the one before help and Settings too.
+	return clickable(0, [...left, [" ".repeat(Math.max(2, width - 1 - span(left) - span(right))), null], ...right]);
+}
+
+/** States that ask for me, in the order the roster ranks them. */
+const ATTENTION: State[] = ["blocked", "cut-off", "errored", "unseen"];
+
+/** Each attention mark among `entries`, with how many carry it. */
+function attentionTally(entries: Entry[]): string {
+	const states = entries.map(stateOf);
+	return ATTENTION.flatMap((state) => {
+		const n = states.filter((s) => s === state).length;
+		return n > 0 ? [`${glyph(state, 0)}${n}`] : [];
+	}).join(" ");
+}
+
+/** `f`'s picker: what's typed, then each lens it offers with how many it shows, where, and their attention marks. */
+function lensParts(width: number, height: number): Part[] {
+	const picking = lensMode() as LensMode;
+	const choices = lensChoices();
+	const shown = Math.min(choices.length, Math.max(1, height - 4));
+	const from = Math.max(0, Math.min(picking.choice - shown + 1, choices.length - shown));
+	const input = picking.input.render(Math.max(10, width - 2))[0] ?? "";
+	const out: Part[] = [
+		["Lens", null],
+		[` ${input}`, null],
+	];
+	if (choices.length === 0) out.push([gray("   no Group by that name"), null]);
+	for (let i = from; i < from + shown; i++) {
+		const c = choices[i] as LensChoice;
+		const where =
+			c.lens?.kind !== "group" ? "" : c.projects === 1 ? projectName((c.members[0] as Entry).project) : `${c.projects} Projects`;
+		const tally = attentionTally(c.members);
+		const right = `${gray(where)}${where ? "  " : ""}${gray(String(c.members.length))}${tally ? ` ${tally}` : ""} `;
+		const digit = picking.input.getValue() === "" && i < 9 ? bold(String(i + 1)) : " ";
+		const label = c.lens === null ? dim(c.label) : c.label;
+		const left = truncateToWidth(` ${digit} ${label}`, Math.max(4, width - visibleWidth(right) - 1), "…");
+		const line = `${left}${" ".repeat(Math.max(1, width - visibleWidth(left) - visibleWidth(right)))}${right}`;
+		out.push([i === picking.choice ? cursorLine(line, true) : line, { kind: "choose", index: i }]);
+	}
+	return out;
 }
 
 /** How many sessions the search shows, and of how many that match when it can't show them all; or why it failed. */
@@ -806,7 +899,7 @@ function messageLine(now: number, y: number | null = null, withConfigError = tru
 
 /** The legend line: a field being typed into, where a drag would land, or the keys the mode takes. */
 function hints(y: number, cols: number, keys: FooterKeys): string {
-	if (archiving() !== null || nameMode() || snoozeMode()) return "";
+	if (archiving() !== null || nameMode() || snoozeMode() || lensMode()) return "";
 	if (filtering()) {
 		return legend(y, [{ keys: ["enter"], name: "⏎", label: "keep filter", command: { kind: "choose", index: null } }], cols);
 	}
@@ -834,15 +927,18 @@ function legendKeys(cols: number): { cells: Part[]; lead: Binding<Command>[]; ri
 		return { cells: bindings.filter((b) => b.label !== null).map(cell), lead: [], right: false };
 	}
 	const bindings = keymap();
-	const fixed = ["n", "?", ","];
+	const fixed: [name: string, label: string][] = [
+		["n", "new"],
+		["m", "group"],
+		["a", "archive"],
+	];
 	const shown = cols < 38 ? fixed.slice(0, 2) : fixed;
 	// Pinned keys keep their columns: one that doesn't apply leaves its cell blank rather than shifting the rest.
-	const cells = shown.map((name): Part => {
+	const cells = shown.map(([name, label]): Part => {
 		const b = bindings.find((b) => b.name === name);
-		const text = key(name, name === "n" ? "new" : name === "?" ? "keys" : "settings");
-		return b?.label ? [text, b.command] : [" ".repeat(visibleWidth(text)), null];
+		return b?.label ? [key(name, b.label), b.command] : [" ".repeat(visibleWidth(key(name, label))), null];
 	});
-	return { cells, lead: bindings.filter((b) => !fixed.includes(b.name)), right: true };
+	return { cells, lead: bindings.filter((b) => !fixed.some(([name]) => name === b.name)), right: true };
 }
 
 /** A keymap's labelled bindings as buttons, in its order. What doesn't fit goes whole, from the end. */
@@ -1561,6 +1657,15 @@ function viewState(): DeckState {
 		configError: model.configError?.message ?? null,
 		drop: drop ? { project: projectName(drop.header.project), group: drop.header.group } : null,
 		filter: query(),
+		lens: {
+			group: model.lens?.kind === "group" ? model.lens.name : null,
+			needs: model.lens?.kind === "needs",
+		},
+		lensPicker: (() => {
+			const picking = lensMode();
+			return picking && { choices: lensChoices().map((c) => c.label), choice: picking.choice };
+		})(),
+		listTop: frame.listTop,
 		found: { query: model.found.query, total: model.found.total, error: model.found.error },
 		hover: model.hover,
 		peek: (() => {

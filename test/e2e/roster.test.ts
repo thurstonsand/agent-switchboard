@@ -1,7 +1,23 @@
 import { afterEach, expect, test } from "bun:test";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState } from "../../packages/cli/src/deck/protocol.ts";
-import { click, config, cursorTo, entry, pickNew, piSessions, reply, seed, sessionRows, state, waitState } from "./harness/deck.ts";
+import {
+	click,
+	config,
+	cursorTo,
+	entry,
+	headerRows,
+	launched,
+	launchTry,
+	pickNew,
+	piSessions,
+	reply,
+	seed,
+	sessionRows,
+	state,
+	waitState,
+} from "./harness/deck.ts";
 import { budgets, git, type Scenario, scenario, until } from "./harness/index.ts";
 import { panes, prefixKeys, started } from "./harness/views.ts";
 
@@ -130,9 +146,9 @@ function groups(st: DeckState): Record<string, string[]> {
 	return out;
 }
 
-/** The screen line a row of the open roster renders on: the list starts under the roster's label. */
+/** The screen line a row of the open roster renders on: the list starts under the roster's label and top bar. */
 function lineOf(st: DeckState, probe: (row: DeckState["rows"][number]) => boolean): number {
-	return 1 + st.rows.findIndex(probe);
+	return 1 + st.listTop + st.rows.findIndex(probe);
 }
 
 test("M-a / from the Group picker leaves it for the filter: what's typed filters, and the Group stays as it was", async () => {
@@ -188,6 +204,87 @@ test("/ ranks sessions by their conversations and titles as session_search does,
 	// A quote not yet closed reads as a plain word, which matches as a prefix.
 	const unclosed = await search('"light', "as light*", (ids) => ids.join() === [keeper, lighthouse].join());
 	expect(unclosed.found.error).toBeNull();
+});
+
+test("f picks one lens, a Group across Projects or what needs me, by key or mouse; ! is needs me; a new Deck keeps it", async () => {
+	s = scenario("phase4", "lenses");
+	const other = join(s.root, "other");
+	mkdirSync(other);
+	const here = await launched(s, "reply here review", { cwd: s.project, title: "here review", group: "review" });
+	const loose = await launched(s, "reply here loose", { cwd: s.project, title: "here loose" });
+	const there = await launched(s, "reply there review", { cwd: other, title: "there review", group: "Review" });
+	const { out } = await launchTry(s, "fail boom", { cwd: other, title: "there broken", group: "triage-the-flaky-integration-suite" });
+	const broken = (JSON.parse(out) as { details: { id: string } }).details.id;
+	await until(() => entry(s, broken)?.errored && entry(s, broken).activity === "idle", budgets.piReady, "the broken turn errored");
+	s.swb("drive", "start");
+	await waitState(s, "every session", (x) => x.ready && x.focus === "roster" && sessionRows(x).length === 4);
+	const ids = (x: DeckState) =>
+		sessionRows(x)
+			.map((r) => r.id)
+			.sort();
+	const projects = (x: DeckState) => [...new Set(headerRows(x).map((r) => r.project))].sort();
+	const highlighted = (x: DeckState) => x.lensPicker?.choices[x.lensPicker.choice];
+
+	// The picker opens on the cursor's Group, so f ⏎ shows it. A Group is named per Project, so "Review" in the other
+	// Project is the same one.
+	await cursorTo(s, here);
+	s.keys("f");
+	let st = await waitState(s, "the picker on review", (x) => x.mode === "lens" && highlighted(x) === "review");
+	expect(st.lensPicker?.choices).toEqual(["all sessions", "needs me", "review", "triage-the-flaky-integration-suite"]);
+	s.save("lens-picker.txt", s.screen());
+	s.keys("Enter");
+	st = await waitState(s, "review, in both Projects", (x) => x.lens.group === "review" && ids(x).join() === [here, there].sort().join());
+	expect(projects(st)).toEqual(["other", "project"]);
+	expect(st.rows.some((r) => r.kind === "section" && r.label === "Operators")).toBe(false);
+	s.save("group-lens.txt", s.screen());
+
+	// One lens at a time: ! takes review's place.
+	s.keys("!");
+	st = await waitState(s, "needs me alone", (x) => x.lens.group === null && x.lens.needs && ids(x).join() === broken);
+	expect(st.cursor).toBe(broken);
+
+	// By mouse: the lens's name reopens the picker on it, what's typed narrows it, its ✕ shows every session, and the
+	// top bar's f lens opens it too.
+	click(s, "needs me");
+	await waitState(s, "the picker on needs me", (x) => x.mode === "lens" && highlighted(x) === "needs me");
+	s.keys("-l", "tri");
+	await waitState(s, "narrowed to triage", (x) => x.lensPicker?.choices.join() === "triage-the-flaky-integration-suite");
+	s.keys("Enter");
+	await waitState(s, "triage", (x) => x.lens.group === "triage-the-flaky-integration-suite" && ids(x).join() === broken);
+	// A long name takes the lens's place in the top bar cut short, beside help and Settings, on the bar's one row.
+	const bar = s.screen().split("\n")[1] as string;
+	expect(bar).toContain("/ search  triage-");
+	expect(bar).toContain("…");
+	expect(bar).toContain(", settings");
+	expect(state(s).listTop).toBe(1);
+	click(s, "✕");
+	await waitState(s, "every session", (x) => x.lens.group === null && !x.lens.needs && ids(x).length === 4);
+	click(s, "f lens");
+	await waitState(s, "the picker by mouse", (x) => x.mode === "lens");
+	s.keys("Escape");
+	await waitState(s, "closed, still every session", (x) => x.mode === "roster" && ids(x).length === 4);
+	s.keys("!");
+	await waitState(s, "needs me again", (x) => x.lens.needs && ids(x).join() === broken);
+
+	// / searches everything, whatever the lens, and esc comes back to it.
+	s.keys("/");
+	s.keys("-l", "loose");
+	await waitState(s, "a search past the lens", (x) => x.found.query === "loose" && x.cursor === loose);
+	// The session the search picked keeps its row while the cursor's on it, and goes when the cursor leaves.
+	s.keys("Escape");
+	st = await waitState(s, "the lens back", (x) => x.filter === "" && x.lens.needs && ids(x).includes(broken));
+	expect(st.cursor).toBe(loose);
+	expect(ids(st)).toEqual([broken, loose].sort());
+	await cursorTo(s, broken);
+	await waitState(s, "the search's pick gone with the cursor", (x) => ids(x).join() === broken);
+
+	// A new Deck opens on the lens it was left with.
+	await Bun.sleep(1000);
+	s.swb("drive", "stop");
+	s.swb("drive", "start");
+	await waitState(s, "the lens kept", (x) => x.ready && x.lens.needs && ids(x).join() === broken);
+	s.keys("M-a", "!");
+	await waitState(s, "M-a ! shows every session again", (x) => !x.lens.needs && ids(x).length === 4);
 });
 
 test("m names a session's Group, n joins it; dragging moves it between Groups, and a Group lives only as long as its sessions", async () => {

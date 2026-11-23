@@ -326,7 +326,7 @@ test("a Peek follows the pointer and the cursor keys, leaves with the pointer, a
 	await onScreen("a Archive", "bravo's Peek drawn");
 	expect(hovered.peek?.lines.some((line) => line.trim() === "bravo")).toBe(false);
 	const footer = () => s.screen().trimEnd().split("\n").at(-1) as string;
-	expect(footer()).toContain("? keys");
+	expect(footer()).toContain("n new");
 	expect(footer()).not.toContain("archive");
 	// ⏎ is the legend's alone, and names what it does on the Peek's row, which it acts on while the Peek shows.
 	expect(footer()).toContain("⏎ wake");
@@ -607,20 +607,22 @@ test("narrow details expand by key and click, scroll, follow the selection, and 
 	await cursorTo(s, child);
 	await onScreen("i ▸ details", "collapsed details");
 	expect(s.screen().match(/child/g)).toHaveLength(1);
+	// The views' keys sit over the roster's own, column for column.
+	const footer = s.screen().split("\n");
+	const views = footer.find((line) => /^ Alt\+a → +e editor/.test(line)) as string;
+	const below = footer.find((line) => line.includes("a archive")) as string;
+	expect([views.indexOf("e editor"), views.indexOf("v split"), views.indexOf("s shell")]).toEqual([
+		below.indexOf("n new"),
+		below.indexOf("m group"),
+		below.indexOf("a archive"),
+	]);
 	s.keys("i");
 	await onScreen("got descendant", "the last turn in expanded details");
 	expect(s.screen()).toContain("started by ↳ parent");
 	expect(s.screen()).toContain("created");
 	expect(s.screen()).toContain("a Archive");
-	// The views' keys sit over the roster's own, column for column.
-	const footer = s.screen().split("\n");
-	const views = footer.find((line) => /^ Alt\+a → +e editor/.test(line)) as string;
-	const below = footer.find((line) => line.includes(", settings")) as string;
-	expect([views.indexOf("e editor"), views.indexOf("v split"), views.indexOf("s shell")]).toEqual([
-		below.indexOf("n new"),
-		below.indexOf("? keys"),
-		below.indexOf(", settings"),
-	]);
+	// Expanded details carry the row's actions, so the legend doesn't say them again.
+	expect(s.screen()).not.toContain("a archive");
 	s.keys("s");
 	await onScreen("Until a message", "Snooze replaces expanded details");
 	expect(s.screen()).not.toContain("got descendant");

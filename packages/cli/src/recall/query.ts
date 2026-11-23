@@ -8,6 +8,7 @@ import { SwbError } from "../errors.ts";
 export type Filters = {
 	harness: Harness | null;
 	project: string | null;
+	group: string | null;
 	file: string | null;
 	after: number | null;
 	before: number | null;
@@ -30,7 +31,7 @@ type Term = { kind: "term"; value: string; quoted: boolean };
 type Node = Term | { kind: "and" | "or"; children: Node[] } | { kind: "adjacent"; children: Term[] } | { kind: "not"; child: Node };
 type Token = Term | { kind: "and" | "or" | "not" | "(" | ")" };
 
-const FILTER = /^(harness|project|file|after|before|archived):/;
+const FILTER = /^(harness|project|group|file|after|before|archived):/;
 
 function lex(input: string, filters: Filters): Token[] {
 	const tokens: Token[] = [];
@@ -108,6 +109,7 @@ function filter(filters: Filters, key: keyof Filters, value: string): void {
 			filters[key] = instant(key, value);
 			return;
 		case "project":
+		case "group":
 		case "file":
 			filters[key] = value;
 	}
@@ -195,7 +197,7 @@ function terms(node: Node): string[] {
 
 /** `typed`: a query as a search box has it so far, which may say only what to leave out, and whose every word must hold a letter or digit. */
 function parse(input: string, typed: boolean): Query {
-	const filters: Filters = { harness: null, project: null, file: null, after: null, before: null, archived: null };
+	const filters: Filters = { harness: null, project: null, group: null, file: null, after: null, before: null, archived: null };
 	const tokens = lex(input, filters);
 	const none: Query = { match: null, relaxed: null, excludes: [], terms: [], filters };
 	if (tokens.length === 0) return none;

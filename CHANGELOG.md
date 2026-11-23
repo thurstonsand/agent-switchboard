@@ -6,6 +6,9 @@
 
 - Pi's code mode can discover every Switchboard tool in the `switchboard` namespace. Their callable names and direct availability are unchanged.
 - `swb_show_file`: an agent opens a file at a line in its nvim Editor while you're watching it, starting the Editor if it isn't running, splitting onto it where there's room and putting the keyboard there, with a yellow word on the Editor's border saying it did. It keeps your tabs and splits as they were, opening the file where it's already shown or in a new tab, and leaves Diffview alone.
+- Lenses narrow the roster and keep its sections, Projects, and Groups. `f` picks one: every session, the sessions that need me (blocked, cut off, or errored), or a Group, in every Project that has one by that name. The picker opens on the cursor's Group, filters as you type, and shows each lens's count and attention marks. `!` is the needs-me lens, and again shows every session. While a lens applies, its name takes `f lens`'s place in the roster's top bar, cut short if it's long, and clicking it reopens the picker; its `✕` shows every session. A new Deck opens on the lens the last one was left with. `/` searches past the lens, and `esc` comes back to it.
+- The roster has a top bar of its own keys, each a button: `/ search`, `f lens`, `? keys`, and `, settings`. `?` and `,` leave the legend under the roster, which labels `m group` and `a archive` in their place.
+- `/` and `session_search` read `group:NAME`, a Group in any Project.
 
 ### Changed
 

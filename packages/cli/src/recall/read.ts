@@ -164,8 +164,8 @@ export function recallSearch(db: Db, id: string, args: ToolArgs<"recall_search">
 	const t = target(db, id);
 	const query = parseQuery(args.query);
 	const f = query.filters;
-	if (f.harness || f.project || f.archived !== null)
-		throw new SwbError("recall_search: harness:, project:, and archived: filter sessions; this is one");
+	if (f.harness || f.project || f.group || f.archived !== null)
+		throw new SwbError("recall_search: harness:, project:, group:, and archived: filter sessions; this is one");
 	const limit = args.limit ?? HITS;
 	const index = openRecall();
 	try {

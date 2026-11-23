@@ -207,7 +207,17 @@ export function setGroup(db: Db, ids: string[], name: string | null): void {
 }
 
 /** The Deck's layout as last left, which the next Deck starts from. */
-export type DeckLayout = { selectedKey: string; rosterCols: number | null; collapsed: string[]; expanded: string[] };
+/** What the roster narrows itself to: the sessions that need me, or one Group across Projects; null shows every session. */
+export type Lens = { kind: "needs" } | { kind: "group"; name: string } | null;
+
+export type DeckLayout = {
+	selectedKey: string;
+	rosterCols: number | null;
+	collapsed: string[];
+	expanded: string[];
+	/** Absent from a layout saved before lenses. */
+	lens?: Lens;
+};
 
 export function loadLayout(db: Db): DeckLayout | null {
 	const row = db.get("SELECT state FROM deck_layout");

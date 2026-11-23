@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { DeckState, SessionStateRow } from "../../../packages/cli/src/deck/protocol.ts";
 import { SCHEMA_VERSION } from "../../../packages/shared/src/index.ts";
 import { claudeAutoMode, recalled, subagentDone } from "../harness/agents.ts";
-import { config, cursorTo, glide, launched, launchTry, seed, sessionRows } from "../harness/deck.ts";
+import { config, cursorTo, glide, headerRows, launched, launchTry, seed, sessionRows } from "../harness/deck.ts";
 import { git, gitRepo, gitWorktree, type LsEntry, type PiPackage, release, repo, type Scenario, until, which } from "../harness/index.ts";
 import { scheduled, swbIn } from "../harness/schedules.ts";
 
@@ -1851,6 +1851,46 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	lenses: {
+		setup: async (s) => {
+			const api = join(s.root, "api");
+			mkdirSync(api);
+			await launched(s, "reply docs for the CLI", { cwd: s.project, title: "Document the CLI flags", group: "docs" });
+			await launched(s, "reply fixed the build", { cwd: s.project, title: "Fix the release build" });
+			await launched(s, "reply docs for the API", { cwd: api, title: "Write the API reference", group: "docs" });
+			await launched(s, "reply token refresh", { cwd: api, title: "Refresh tokens on 401", group: "auth" });
+			await launched(s, "reply login page", { cwd: s.project, title: "Add the login screen", group: "auth" });
+			await launched(s, "reply quarantined", {
+				cwd: api,
+				title: "Quarantine the flaky suite",
+				group: "triage-the-flaky-integration-suite",
+			});
+			const { out } = await launchTry(s, "fail boom", { cwd: api, title: "Migrate the sessions table" });
+			const broken = (JSON.parse(out) as { details: { id: string } }).details.id;
+			await waitLs(s, "the migration errored", (ls) => ls.some((e) => e.id === broken && e.errored && e.activity === "idle"));
+			s.query("DELETE FROM deck_layout");
+		},
+		run: async (s) => {
+			const titles = (x: DeckState) =>
+				sessionRows(x)
+					.map((r) => r.title)
+					.sort();
+			const projects = (x: DeckState) => [...new Set(headerRows(x).map((r) => r.project))].sort();
+			await waitDeck(s, "every session", (x) => sessionRows(x).length === 7);
+			const picker = await waitDeck(s, "f: the picker on the cursor's Group", (x) => x.mode === "lens" && x.lensPicker?.choice === 2);
+			expect(picker.lensPicker?.choices).toEqual(["all sessions", "needs me", "auth", "docs", "triage-the-flaky-integration-suite"]);
+			const auth = await waitDeck(s, "⏎: auth alone, in both Projects", (x) => x.lens.group === "auth");
+			expect(titles(auth)).toEqual(["Add the login screen", "Refresh tokens on 401"]);
+			expect(projects(auth)).toEqual(["api", "project"]);
+			const needs = await waitDeck(s, "!: needs me alone", (x) => x.lens.needs && x.lens.group === null);
+			expect(titles(needs)).toEqual(["Migrate the sessions table"]);
+			await waitDeck(s, "a new Deck keeps it", (x) => x.ready && x.lens.needs && sessionRows(x).length === 1);
+			await waitDeck(s, "! again: every session", (x) => !x.lens.needs && sessionRows(x).length === 7);
+			const long = await waitDeck(s, "a long Group's lens", (x) => x.lens.group === "triage-the-flaky-integration-suite");
+			expect(titles(long)).toEqual(["Quarantine the flaky suite"]);
+		},
+	},
+
 	groups: {
 		setup: async (s) => {
 			const worktree = join(s.root, "project-wt");
@@ -1883,8 +1923,8 @@ export const directors: Record<string, Director> = {
 					await Bun.sleep(120);
 				}
 			};
-			// The roster pane's own rows: its list is the first of them.
-			const line = (probe: (row: DeckState["rows"][number]) => boolean) => st.rows.findIndex(probe);
+			// The roster pane's own rows: its list starts under its top bar.
+			const line = (probe: (row: DeckState["rows"][number]) => boolean) => st.listTop + st.rows.findIndex(probe);
 			const drag = (from: number, to: number) =>
 				mouse([0, 8, from], ...[1, 2, 3, 4].map((i): [number, number, number] => [32, 8, Math.round(from + ((to - from) * i) / 4)]));
 

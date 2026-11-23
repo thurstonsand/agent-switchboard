@@ -144,7 +144,7 @@ export const TOOLS = {
 		label: "Search sessions",
 		description: "Search other sessions' conversations, open or archived, subagents included. Lists matches best first, with passages.",
 		guidelines: [
-			'In session_search, plain words must all appear, as words or their starts; "phrases" match exactly; OR, -word, and parentheses narrow. Filters: harness:pi|claude|codex, project:NAME, file:PATH (read or changed), after: and before: (a date, an ISO 8601 time, or a duration ago like P7D), archived:yes|no. Filters alone list recent sessions.',
+			'In session_search, plain words must all appear, as words or their starts; "phrases" match exactly; OR, -word, and parentheses narrow. Filters: harness:pi|claude|codex, project:NAME, group:NAME (in any Project), file:PATH (read or changed), after: and before: (a date, an ISO 8601 time, or a duration ago like P7D), archived:yes|no. Filters alone list recent sessions.',
 			"Question a session_search hit with session_recall.",
 		],
 		parameters: Type.Object({

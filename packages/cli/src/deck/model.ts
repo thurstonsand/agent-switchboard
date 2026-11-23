@@ -3,6 +3,7 @@ import type { View } from "@swb/shared";
 import type { Config, ConfigError, Loaded } from "../config.ts";
 import type { Target, TargetTree } from "../dirs.ts";
 import type { Catalog } from "../harnesses.ts";
+import type { Lens } from "../store.ts";
 import type { DeckIntent } from "./deck.ts";
 import type { Overlay } from "./overlay.ts";
 import type { Aim, Entry, PeekInfo, Snapshot, TerminalProfile, Transcript } from "./protocol.ts";
@@ -90,6 +91,12 @@ export type Command =
 	| { kind: "reveal"; id: string }
 	| { kind: "filter" }
 	| { kind: "clearFilter" }
+	/** f and !: the cursor's Group, or the sessions that need me, in or out of the lens. */
+	/** f, or the lens's name: the lens picker. */
+	| { kind: "openLens" }
+	/** !: the sessions that need me, or back to every session. */
+	| { kind: "needsLens" }
+	| { kind: "clearLens" }
 	/** The directory picker, straight into adding one. */
 	| { kind: "addDir" }
 	/** The picker: its launch card's menu, opened or closed. */
@@ -263,6 +270,8 @@ export type Model = {
 	lingering: string | null;
 	collapsed: Set<string>;
 	expanded: Set<SectionKey>;
+	/** What the roster shows of itself, kept with the layout. */
+	lens: Lens;
 	/** The filter's query, which stays applied after the filter mode ends. */
 	filter: Input;
 	/** The best sessions for `query` as the searcher last ranked them, best first, of `total` that match; or why it couldn't. */
@@ -357,6 +366,9 @@ export type NameMode = {
 	input: Input;
 };
 
+/** `f`'s picker, under the roster's top bar: every session, the sessions that need me, or one Group, narrowed by what's typed. */
+export type LensMode = { kind: "lens"; choice: number; input: Input };
+
 /** `s`'s menu for a session: how long to snooze it. */
 export type SnoozeMode = { kind: "snooze"; at: { x: number; y: number; row: string }; id: string; title: string; choice: number };
 
@@ -365,6 +377,7 @@ export type Mode =
 	| { kind: "roster" }
 	| { kind: "filter" }
 	| NameMode
+	| LensMode
 	| SnoozeMode
 	/**
 	 * `a`'s prompt: first whether its family or worktree goes too, then, once `chosen` holds that answer, the

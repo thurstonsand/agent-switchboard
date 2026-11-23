@@ -23,7 +23,7 @@ import { unnameable } from "../groups.ts";
 import { type Choice, defaultLaunch, fromDefault, type LaunchTarget, presetLabels, shortlist } from "../harnesses.ts";
 import { ensureOperatorDir } from "../operator.ts";
 import { loginShell } from "../sessions.ts";
-import type { DeckLayout } from "../store.ts";
+import type { DeckLayout, Lens } from "../store.ts";
 import { quote, SESSIONS, tmuxAsync } from "../tmux.ts";
 import { writeConfig } from "../write-config.ts";
 import { ARRIVAL_HOLD_MS, DECK, PLACEHOLDER } from "./conf.ts";
@@ -45,6 +45,7 @@ import {
 	type HeaderRow,
 	LAUNCH_COLS,
 	type Launch,
+	type LensMode,
 	type Mode,
 	type Model,
 	type NameMode,
@@ -158,6 +159,7 @@ const m: Model = {
 	lingering: null,
 	collapsed: new Set<string>(),
 	expanded: new Set<SectionKey>(["operators"]),
+	lens: null,
 	filter: new Input({ prompt: "/ " }),
 	found: { query: "", ids: [], total: 0, error: null },
 	mode: { kind: "roster" },
@@ -1014,6 +1016,7 @@ function keepLayout(now: number): void {
 		rosterCols: panes.dragged,
 		collapsed: [...m.collapsed],
 		expanded: [...m.expanded],
+		lens: m.lens,
 	};
 	const json = JSON.stringify(kept);
 	if (json !== draftLayout) {
@@ -1126,6 +1129,7 @@ function onWorker(message: FromWorker): void {
 			if (message.layout) {
 				m.collapsed = new Set(message.layout.collapsed);
 				m.expanded = new Set(message.layout.expanded.flatMap((saved) => SECTION_KEYS.filter((key) => key === saved)));
+				if (message.layout.lens !== undefined) m.lens = message.layout.lens;
 				panes.dragged = message.layout.rosterCols;
 				m.restoredKey = message.layout.selectedKey;
 				afterCommit(() => void panes.layout());
@@ -1419,10 +1423,98 @@ function selectFirst(): void {
 	if (first) m.selectedKey = first.key;
 }
 
+/** A blocked, cut-off, or errored session: one waiting on a decision or a rescue from me. */
+export function needsMe(e: Entry): boolean {
+	return ["blocked", "cut-off", "errored"].includes(stateOf(e));
+}
+
+export function lensOn(): boolean {
+	return m.lens !== null;
+}
+
+/** A session `lens` is for: one that needs me, or one in its Group, matched by name across Projects. */
+function lensFor(lens: Lens, e: Entry): boolean {
+	if (lens === null) return true;
+	return lens.kind === "needs" ? needsMe(e) : groupOf(e)?.toLowerCase() === lens.name.toLowerCase();
+}
+
+/** A session the lens is for. */
+export function lensMatches(e: Entry): boolean {
+	return lensFor(m.lens, e);
+}
+
+/** A session the lens shows: those it's for, and the cursor's own row while the cursor is on it, as an archived one lingers. */
+function inLens(e: Entry): boolean {
+	return e.id === m.selectedKey || lensMatches(e);
+}
+
+export function lensMode(): LensMode | null {
+	return m.mode.kind === "lens" ? m.mode : null;
+}
+
+export type LensChoice = { label: string; lens: Lens; members: Entry[]; projects: number };
+
+/**
+ * What the lens picker offers: every session, the sessions that need me, then each Group, one per name across Projects,
+ * with the open sessions each shows. What's typed narrows them by name.
+ */
+export function lensChoices(): LensChoice[] {
+	const open = [...m.entries.values()].filter((e) => e.open);
+	const of = (lens: Lens) => open.filter((e) => lensFor(lens, e));
+	const groups = new Map<string, string>();
+	for (const e of open) {
+		const group = groupOf(e);
+		if (group !== null && !groups.has(group.toLowerCase())) groups.set(group.toLowerCase(), group);
+	}
+	const choices: LensChoice[] = [
+		{ label: "all sessions", lens: null, members: open, projects: 0 },
+		{ label: "needs me", lens: { kind: "needs" }, members: of({ kind: "needs" }), projects: 0 },
+		...[...groups.values()]
+			.sort((a, b) => a.localeCompare(b))
+			.map((name): LensChoice => {
+				const members = of({ kind: "group", name });
+				return { label: name, lens: { kind: "group", name }, members, projects: new Set(members.map((e) => e.project)).size };
+			}),
+	];
+	const typed = lensMode()?.input.getValue().trim().toLowerCase() ?? "";
+	return typed === "" ? choices : choices.filter((c) => c.label.toLowerCase().includes(typed));
+}
+
+const sameLens = (a: Lens, b: Lens) =>
+	a === null || b === null
+		? a === b
+		: a.kind === "needs"
+			? b.kind === "needs"
+			: b.kind === "group" && a.name.toLowerCase() === b.name.toLowerCase();
+
+/** f: the picker opens on the lens in effect, or, with none, on the cursor's Group, so f ⏎ shows it. */
+function openLens(): void {
+	const input = new Input({ prompt: "/ ", placeholder: "filter", placeholderStyle: gray });
+	input.focused = m.filter.focused;
+	const row = selected();
+	const group = row?.kind === "header" ? row.group : row?.kind === "session" ? groupOf(row.entry) : null;
+	const want: Lens = m.lens ?? (group === null ? null : { kind: "group", name: group });
+	enter({ kind: "lens", choice: 0, input });
+	(lensMode() as LensMode).choice = Math.max(
+		0,
+		lensChoices().findIndex((c) => sameLens(c.lens, want)),
+	);
+}
+
+/** The roster narrows to `lens`; a cursor it leaves outside goes to its first session. */
+function setLens(lens: Lens): void {
+	m.lens = lens;
+	const on = m.entries.get(m.selectedKey);
+	if (on && lensOn() && !lensMatches(on)) {
+		const first = rosterRows().find((row) => row.kind === "session" && row.key !== on.id);
+		m.selectedKey = first?.key ?? "";
+	}
+}
+
 export function rosterRows(): Row[] {
 	if (query() !== "") return searchRows();
 	const rows: Row[] = [];
-	const all = [...m.entries.values()];
+	const all = [...m.entries.values()].filter(inLens);
 	const lingers = (e: Entry) => !e.open && e.id === m.lingering && e.id === m.selectedKey;
 	const open = all.filter((e) => e.open || lingers(e));
 	const sectionHere = (e: Entry) => (lingers(e) ? (e.operator ? "operators" : "open") : sectionOf(e));
@@ -1508,7 +1600,10 @@ export function rosterRows(): Row[] {
 			pushFamilies(loose, depth, key);
 		}
 	};
+	const narrowed = lensOn();
 	const section = (key: SectionKey, label: string, count: number) => {
+		// A lens leaves out the sections it empties.
+		if (narrowed && count === 0) return false;
 		const expanded = m.expanded.has(key);
 		rows.push({ kind: "section", key, label, count, expanded });
 		return expanded;
@@ -1624,7 +1719,7 @@ function input(data: string): void {
 /** Whether the mode has a field that takes the keys its keymap doesn't. */
 function typing(): boolean {
 	const choosing = pickerMode();
-	return filtering() || nameMode() !== null || (choosing !== null && !choosing.confirm);
+	return filtering() || nameMode() !== null || lensMode() !== null || (choosing !== null && !choosing.confirm);
 }
 
 /** Every key, click, prefix key, and button ends here. */
@@ -1679,6 +1774,15 @@ function run(c: Command): void {
 			if (filtering()) leave();
 			m.filter.setValue("");
 			searchFilter();
+			break;
+		case "openLens":
+			openLens();
+			break;
+		case "needsLens":
+			setLens(m.lens?.kind === "needs" ? null : { kind: "needs" });
+			break;
+		case "clearLens":
+			setLens(null);
 			break;
 		case "addDir":
 			openPicker("add", null, null);
@@ -1783,6 +1887,7 @@ function stepMode(by: number): void {
 	if (mode.kind === "roster" || mode.kind === "filter") move(by);
 	else if (mode.kind === "snooze") mode.choice = Math.max(0, Math.min(SNOOZE_CHOICES.length - 1, mode.choice + by));
 	else if (mode.kind === "name") mode.choice = Math.max(0, Math.min(nameChoices().length - 1, mode.choice + by));
+	else if (mode.kind === "lens") mode.choice = Math.max(0, Math.min(lensChoices().length - 1, mode.choice + by));
 	else if (mode.kind === "picker") {
 		const choosing = mode.picker;
 		if (choosing.confirm) return;
@@ -1806,6 +1911,11 @@ function choose(index: number | null): void {
 	} else if (mode.kind === "name") {
 		const choice = nameChoices()[index ?? mode.choice];
 		if (choice) finishNaming(choice.name);
+	} else if (mode.kind === "lens") {
+		const choice = lensChoices()[index ?? mode.choice];
+		if (!choice) return;
+		leave();
+		setLens(choice.lens);
 	} else if (mode.kind === "picker") {
 		const choosing = mode.picker;
 		if (choosing.confirm) finishRemove(true);
@@ -1826,7 +1936,7 @@ function cancel(): void {
 		m.filter.setValue("");
 		searchFilter();
 		leave();
-	} else if (mode.kind === "name" || mode.kind === "snooze") leave();
+	} else if (mode.kind === "name" || mode.kind === "snooze" || mode.kind === "lens") leave();
 	else if (mode.kind === "archive") finishArchiving(null);
 	else if (mode.kind === "picker") {
 		const choosing = mode.picker;
@@ -1843,7 +1953,11 @@ function cancel(): void {
 function typeInto(data: string): void {
 	const naming = nameMode();
 	const choosing = pickerMode();
-	if (filtering()) {
+	const picking = lensMode();
+	if (picking) {
+		picking.input.handleInput(data);
+		picking.choice = 0;
+	} else if (filtering()) {
 		m.filter.handleInput(data);
 		searchFilter();
 		selectFirst();
@@ -1930,7 +2044,7 @@ function mouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
 	// Anything but motion, a press among them, is on the row under the pointer, whatever it was on its way to.
 	else if (m.peek.aimRest) endAim();
 	// A prompt answers to its own buttons, never the rows underneath it.
-	if (archiving() !== null || nameMode() || snoozeMode()) {
+	if (archiving() !== null || nameMode() || snoozeMode() || lensMode()) {
 		if (event.type === "move") return { handled: true, render: relit };
 		if (event.type === "wheel" && archiving() === null) run({ kind: "step", by: Math.sign(event.wheelDelta ?? 0) });
 		else if (event.button === "left" && event.type === "press") press(event);
@@ -2030,6 +2144,7 @@ export function peekSpot(rows: Row[], index: number): PeekSpot | null {
 		pickerMode() ||
 		nameMode() ||
 		snoozeMode() ||
+		lensMode() ||
 		dragging() ||
 		archiving() !== null ||
 		settingsPane()
@@ -2868,6 +2983,17 @@ export function keymap(): Binding<Command>[] {
 				bind(["enter"], "⏎", "choose", CHOOSE),
 				bind(["escape"], "esc", "cancel", CANCEL),
 			];
+		case "lens":
+			return [
+				...ARROWS,
+				...(mode.input.getValue() === ""
+					? lensChoices()
+							.slice(0, 9)
+							.map((_, i) => bind([String(i + 1)], String(i + 1), null, { kind: "choose", index: i }))
+					: []),
+				bind(["enter"], "⏎", "choose", CHOOSE),
+				bind(["escape"], "esc", "cancel", CANCEL),
+			];
 		case "snooze":
 			return [
 				bind(["up", "k"], "↑", null, step(-1)),
@@ -2963,14 +3089,18 @@ function rosterKeys(row: Row | undefined): Binding<Command>[] {
 		panes.applied.card?.ending
 	)
 		enter = null;
+	// Help and Settings are the roster's own, so its top bar offers them, not the cursor's legend. Group and Archive are
+	// the row's, said here only while no Peek or expanded details already say them.
+	const elsewhere = m.peek.settled !== null || (panes.narrow && m.details.expanded);
+	const groups = !elsewhere && ((session !== null && session.open && !session.operator) || (row?.kind === "header" && row.group !== null));
 	return [
 		bind(["enter"], "⏎", enter, { kind: "activate", enter: true }),
-		bind(["m"], "m", null, onRow("group")),
+		bind(["m"], "m", groups ? "group" : null, onRow("group")),
 		bind(["s"], "s", null, onRow("snooze")),
-		bind(["a"], "a", null, onRow("archive")),
+		bind(["a"], "a", session && !elsewhere ? (session.open ? "archive" : "unarchive") : null, onRow("archive")),
 		bind(["n"], "n", "new", onRow("new")),
-		bind(["?"], "?", "keys", { kind: "help" }),
-		bind([","], ",", "settings", { kind: "settings" }),
+		bind(["?"], "?", null, { kind: "help" }),
+		bind([","], ",", null, { kind: "settings" }),
 		...(panes.narrow && session
 			? [
 					bind(["i"], "i", m.details.expanded ? "▾ details" : "▸ details", { kind: "details" }),
@@ -3002,6 +3132,8 @@ function rosterKeys(row: Row | undefined): Binding<Command>[] {
 		bind(["Y"], "Y", null, onRow("copyMention")),
 		bind(["N"], "N", null, { kind: "addDir" }),
 		bind(["/"], "/", null, { kind: "filter" }),
+		bind(["f"], "f", null, { kind: "openLens" }),
+		bind(["!"], "!", null, { kind: "needsLens" }),
 		...(m.configError ? [bind(["O"], "O", null, { kind: "config", line: m.configError.line })] : []),
 		bind(["q", "ctrl+c"], "q", null, { kind: "quit" }),
 	];
@@ -3032,6 +3164,8 @@ function prefixKeymap(row: string | null): Binding<Command>[] {
 	return [
 		bind([","], ",", null, { kind: "settings" }),
 		bind(["/"], "/", null, { kind: "filter" }),
+		bind(["f"], "f", null, { kind: "openLens" }),
+		bind(["!"], "!", null, { kind: "needsLens" }),
 		bind(["m"], "m", null, onRow("group")),
 		bind(["J"], "J", null, { kind: "moveSession", by: 1 }),
 		bind(["K"], "K", null, { kind: "moveSession", by: -1 }),

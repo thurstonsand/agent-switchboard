@@ -144,7 +144,7 @@ export type DeckState = {
 	cursor: string | null;
 	/** The cursor's index in `rows`, headers included. */
 	cursorRow: number;
-	mode: "filter" | "name" | "picker" | "snooze" | "archive" | "roster" | "settings";
+	mode: "filter" | "name" | "lens" | "picker" | "snooze" | "archive" | "roster" | "settings";
 	picker: PickerState | null;
 	/** The archive prompt: whose, its counts line, and how many `all` would archive. */
 	/** `cancels`: on the prompt's second step, the labels of the schedules archiving cancels. */
@@ -155,6 +155,12 @@ export type DeckState = {
 	/** Mid-drag, the header a release would drop into: its Project, and its Group, if any. */
 	drop: { project: string; group: string | null } | null;
 	filter: string;
+	/** The roster's lens: the Group it shows, or whether it shows the sessions that need me. */
+	lens: { group: string | null; needs: boolean };
+	/** The lens picker's choices as it shows them, and which is highlighted; null while it's closed. */
+	lensPicker: { choices: string[]; choice: number } | null;
+	/** The roster's first list row, under its top bar: where `rows[0]` is drawn in the roster's pane. */
+	listTop: number;
 	/** The query the searcher last answered, as typed, how many sessions match it, and why it couldn't, if it couldn't. */
 	found: { query: string; total: number; error: string | null };
 	/** The session row under the pointer, or null once the pointer has left the roster. */

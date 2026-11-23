@@ -42,6 +42,7 @@ export function passes(s: SessionState, f: Filters): boolean {
 	if (f.harness && s.harness !== f.harness) return false;
 	if (f.archived !== null && s.open === f.archived) return false;
 	if (f.project && !inProject(s, f.project)) return false;
+	if (f.group && s.group?.toLowerCase() !== f.group.toLowerCase()) return false;
 	if (f.after !== null && s.activityAt < f.after) return false;
 	if (f.before !== null && s.createdAt > f.before) return false;
 	return true;

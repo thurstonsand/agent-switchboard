@@ -37,6 +37,7 @@
 - **Deck**: What `swb` opens: the **Roster** beside a **Stage**. There is one persistent instance, shared by every terminal that opens it.
 - **Roster**: The Deck's list of sessions, in sections: **Operators**, open sessions by **Project**, **Inactive**, **Snoozed**, then **Archived**.
 - **Stage**: The Deck's live, interactive view of the selected session. Internal term (not in UI).
+- **Lens**: What the **Roster** narrows itself to until I clear it: one **Group** across Projects, or the sessions that need me (blocked, cut off, or errored).
 - **Editor**: The text editor for one directory, shared by every session whose working directory it is.
 - **Peek**: A session's particulars and keys, shown beside its Roster row on focus.
 - **Overlay**: A box the Deck shows over its panes without moving them or taking the keyboard: a **Peek**, the picker's launch card, its menu. Internal term (not in UI).
