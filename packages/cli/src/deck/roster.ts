@@ -143,7 +143,7 @@ function glyph(state: State, now: number): string {
 		case "dormant":
 			return "–";
 		case "cut-off":
-			return bold(red("!"));
+			return bold(red("↯"));
 		case "errored":
 			return bold(red("×"));
 		case "archived":
@@ -1023,7 +1023,7 @@ function familyTally(family: Entry[]): string {
 	const tally: [State[], string][] = [
 		[["working", "loading"], "◐"],
 		[["blocked"], "◆"],
-		[["cut-off"], "!"],
+		[["cut-off"], "↯"],
 		[["errored"], "×"],
 		[["unseen"], "●"],
 		[["idle"], "○"],

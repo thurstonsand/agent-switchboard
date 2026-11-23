@@ -55,7 +55,7 @@ function lines(prefix: string, columns = Infinity): string[] {
 		bold("  State marks"),
 		`  ${cyan("▌")} on the Stage`,
 		`  ${blockedMark("◆")} blocked · waiting for you`,
-		`  ${bold(red("!"))} cut off · resume unfinished turn`,
+		`  ${bold(red("↯"))} cut off · resume unfinished turn`,
 		`  ${bold(red("×"))} errored · inspect error`,
 		`  ${green("●")} Unseen · finished since last viewed`,
 		`  ${bold(cyan("◐"))} working`,

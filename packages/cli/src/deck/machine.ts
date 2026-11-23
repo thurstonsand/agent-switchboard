@@ -425,7 +425,7 @@ function syncTitle(): void {
 /** Where a conversation stopped short of a reply, when no Peek already explains it. */
 function ending(e: Entry, read: Transcript | null): string | null {
 	const wake = e.open && m.mode.kind === "roster" ? ` · ${bold("⏎")} ${e.cutOff ? "Resume unfinished turn" : "Wake & focus"}` : "";
-	if (e.cutOff) return `${bold(red("! cut off"))} · ${CAUSES[e.cutOff]}${wake}`;
+	if (e.cutOff) return `${bold(red("↯ cut off"))} · ${CAUSES[e.cutOff]}${wake}`;
 	if (read?.ending?.kind === "stopped") return `– dormant · stopped${wake}`;
 	if (read?.ending?.kind === "error") return `${bold(red("errored"))}${wake}`;
 	return null;

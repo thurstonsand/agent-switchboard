@@ -7,6 +7,10 @@
 - Pi's code mode can discover every Switchboard tool in the `switchboard` namespace. Their callable names and direct availability are unchanged.
 - `swb_show_file`: an agent opens a file at a line in its nvim Editor while you're watching it, starting the Editor if it isn't running, splitting onto it where there's room and putting the keyboard there, with a yellow word on the Editor's border saying it did. It keeps your tabs and splits as they were, opening the file where it's already shown or in a new tab, and leaves Diffview alone.
 
+### Changed
+
+- A cut-off session's mark is `↯`, in its row, its Peek, and `?`, instead of `!`.
+
 ### Fixed
 
 - If a saved recurrence is invalid when it comes due, swb cancels that schedule and tells the session that set it why. Other schedules due at the same time still run.

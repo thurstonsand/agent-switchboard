@@ -196,7 +196,7 @@ export async function cardEndings(s: Scenario, harness: "pi" | "claude" | "codex
 	s.swb("drive", "start");
 	const glyphs = await waitState(s, "every row", (x) => x.rows.filter((r) => r.kind === "session").length === 4);
 	const glyphOf = (id: string) => glyphs.rows.flatMap((r) => (r.kind === "session" && r.id === id ? [r.glyph] : []))[0];
-	expect([cut, quit, stopped, failed].map(({ id }) => glyphOf(id))).toEqual(["!", "!", "●", "×"]);
+	expect([cut, quit, stopped, failed].map(({ id }) => glyphOf(id))).toEqual(["↯", "↯", "●", "×"]);
 	const card = async (id: string, ending: string, transcript: string, peek?: string) => {
 		await cursorTo(s, id);
 		if (peek) await until(() => s.screen().includes(peek), budgets.settle, peek);
@@ -204,9 +204,9 @@ export async function cardEndings(s: Scenario, harness: "pi" | "claude" | "codex
 		await until(() => [ending, transcript].every((text) => s.screen().includes(text)), budgets.settle, `${ending}, ${transcript}`);
 		return s.screen();
 	};
-	const cutCard = await card(cut.id, "! cut off · killed · ⏎ Resume unfinished turn", "$ echo entered", "cut off · killed");
+	const cutCard = await card(cut.id, "↯ cut off · killed · ⏎ Resume unfinished turn", "$ echo entered", "cut off · killed");
 	s.save("cut.txt", cutCard);
-	s.save("quit.txt", await card(quit.id, "! cut off · shut down · ⏎ Resume unfinished turn", "$ echo entered", "cut off · shut down"));
+	s.save("quit.txt", await card(quit.id, "↯ cut off · shut down · ⏎ Resume unfinished turn", "$ echo entered", "cut off · shut down"));
 	const stoppedCard = await card(stopped.id, "stopped · ⏎ Wake & focus", "$ echo entered");
 	s.save("stopped.txt", stoppedCard);
 	await cursorTo(s, failed.id);
