@@ -29,5 +29,5 @@ export function quit(args: string[]): void {
 	tmuxTry(SESSIONS, "kill-session", "-t", "=swb-ctl");
 	stopPis(live);
 	killServer(SESSIONS);
-	console.log(`Stopped ${live.length} session${live.length === 1 ? "" : "s"}, the Deck, and swb's clock. swb starts them again.`);
+	console.log(`Stopped ${live.length} session${live.length === 1 ? "" : "s"}, the Deck, and swb's clock.`);
 }
