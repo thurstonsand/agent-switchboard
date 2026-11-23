@@ -541,9 +541,12 @@ export function shortlist(config: Config, catalog: Catalog | null): Choice[] | n
 	return out;
 }
 
-/** A written preset whose model its harness no longer lists. Claude Code takes full ids it doesn't list, so its are never missing. */
+/**
+ * A written pi preset whose model pi no longer lists. Claude Code and Codex start on ids they don't list, and a managed
+ * Codex catalog can lag the models its provider serves, so theirs are never missing.
+ */
 function missing(catalog: Catalog | null, preset: Preset): string | null {
-	if (!catalog || preset.harness === "claude" || catalog.errors[preset.harness] !== null) return null;
+	if (!catalog || preset.harness !== "pi" || catalog.errors[preset.harness] !== null) return null;
 	const listed = catalog.models[preset.harness];
 	if (listed.length === 0) return null;
 	if (listed.some((m) => m.model === preset.model && m.provider === preset.provider)) return null;

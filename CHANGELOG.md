@@ -7,6 +7,10 @@
 - Focusing a session from a `/` search (`Enter`, clicking its row, or `l`) now resets the search and reveals that session in the full roster (or active lens).
 - The tested Claude Code and Codex versions are now 2.1.330 and 0.171.0, respectively. The end-to-end fixtures also use pi-sessions 0.24.0 and pi-wt 1.17.0.
 
+### Fixed
+
+- A Codex preset whose model Codex's catalog doesn't list stays launchable, as a Claude Code one already did. Codex starts on unlisted ids, and a managed `model_catalog_json` can trail the models its provider serves.
+
 ## [0.18.0] - 2026-11-23
 
 ### Added
