@@ -411,7 +411,8 @@ export const SETTINGS: Setting[] = [
 		key: ["editor"],
 		section: "Keys & commands",
 		label: "Editor",
-		description: "The command each directory's Editor runs. An nvim Editor also gets ctrl-hjkl across the Deck's panes.",
+		description:
+			"The command each directory's Editor runs. An nvim Editor also gets ctrl-hjkl across the Deck's panes, and agents can open files in it.",
 		synonyms: ["vim", "nvim", "helix", "code"],
 		control: { kind: "command" },
 		fallback: () =>

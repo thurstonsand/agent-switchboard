@@ -168,6 +168,16 @@ export const TOOLS = {
 		parameters: Type.Object({ session, view: Type.Optional(Type.Enum(VIEWS, { description: "Omit unless the user asks for one." })) }),
 		readOnly: false,
 	},
+	swb_show_file: {
+		label: "Show file",
+		description: "Open a file in the user's Editor at a line, switching their view to it, when they ask to see it.",
+		guidelines: [],
+		parameters: Type.Object({
+			path: Type.String({ description: "Absolute, or relative to your working directory." }),
+			line: Type.Optional(Type.Integer({ minimum: 1, description: "1 by default." })),
+		}),
+		readOnly: false,
+	},
 } satisfies Record<string, ToolSpec>;
 
 /**
@@ -228,6 +238,11 @@ export type ToolName = keyof typeof TOOLS;
 export type ReaderToolName = keyof typeof READER_TOOLS;
 const ALL = { ...TOOLS, ...READER_TOOLS };
 export type ToolArgs<N extends ToolName | ReaderToolName> = Static<(typeof ALL)[N]["parameters"]>;
+
+/** swb sets SWB_SHOW_FILE=1 at launch when the Editor can open files; without it, no line offers swb_show_file. */
+export function offered(name: ToolName, env: Record<string, string | undefined>): boolean {
+	return name !== "swb_show_file" || env.SWB_SHOW_FILE === "1";
+}
 
 /** Main checkouts and plain directories never advertise worktree deletion. */
 export function toolParameters(name: ToolName, worktree: boolean): TSchema {

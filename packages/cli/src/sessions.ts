@@ -1,10 +1,10 @@
-import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, sep } from "node:path";
 import { bootId, type Db, dbPath, type Harness, linkedWorktree, operatorDir, projectRoot, stateDir } from "@swb/shared";
 import { isArchived, markArchived, recordTx, titleOf } from "@swb/shared/record";
 import { OPEN, PENDING_SCHEDULE } from "@swb/shared/states";
 import { now, since } from "@swb/shared/trace";
-import { type Effort, HARNESS_EFFORTS } from "./config.ts";
+import { type Effort, HARNESS_EFFORTS, loadConfig } from "./config.ts";
 import { DECK, deckConf } from "./deck/conf.ts";
 import { displayName, type RuntimeRow, runtimeLive, states } from "./derive.ts";
 import { SwbError } from "./errors.ts";
@@ -19,6 +19,7 @@ import {
 	killHome,
 	killServer,
 	listHosts,
+	listPanes,
 	listSessions,
 	quote,
 	SESSIONS,
@@ -486,6 +487,8 @@ export function launch(db: Db, spec: LaunchSpec): string {
 		// Claude Code's own scheduler dies with its process; swb's schedules are the ones that last.
 		...(spec.harness === "claude" ? ["-e", "CLAUDE_CODE_DISABLE_CRON=1"] : []),
 		...(spec.harness === "claude" && spec.cwd === operatorDir() ? ["-e", "SWB_OPERATOR=1"] : []),
+		// Every line offers swb_show_file only when the Editor can open a file.
+		...(nvimEditor(loadConfig().editor) ? ["-e", "SWB_SHOW_FILE=1"] : []),
 		`exec env -u TMUX -u TMUX_PANE SHELL=${shell} ${shell} -lic ${quote(command)}`,
 		";",
 		"set",
@@ -539,12 +542,67 @@ export function launch(db: Db, spec: LaunchSpec): string {
 /** The Editor for a directory, started if missing. Two Decks asking at once serialize on the db's write lock. */
 export function ensureEditor(db: Db, dir: string, editor: string): string {
 	const nvim = nvimEditor(editor);
-	return ensureDirSession(db, "editor", dir, nvim ? `${editor} -c ${quote(`lua dofile(${JSON.stringify(nvimNav())})`)}` : editor, nvim);
+	const command = (name: string) => {
+		if (!nvim) return editor;
+		const socket = editorSocket(name);
+		mkdirSync(dirname(socket), { recursive: true, mode: 0o700 });
+		// Left by an Editor of the same name that died, it would keep this one from listening.
+		rmSync(socket, { force: true });
+		return `${editor} --listen ${quote(socket)} -c ${quote(`lua dofile(${JSON.stringify(nvimLua())})`)}`;
+	};
+	return ensureDirSession(db, "editor", dir, command, nvim);
 }
 
-/** Only nvim gets swb's ctrl-hjkl; any other Editor keeps those keys to itself. */
+/** Only nvim gets swb's ctrl-hjkl and swb_show_file; any other Editor keeps those keys to itself. */
 export function nvimEditor(editor: string): boolean {
 	return basename(editor.trim().split(/\s+/)[0] ?? "") === "nvim";
+}
+
+/** Hashed: a unix socket's path can't pass 104 bytes on macOS, and an Editor's name grows with its directory's. */
+function editorSocket(name: string): string {
+	return join(stateDir(), "editors", `${Bun.hash(name).toString(36)}.sock`);
+}
+
+/**
+ * The socket of the directory's nvim Editor, started if missing, once it listens. An Editor already running keeps
+ * running whatever `editor` says now, so one started as another program, or by an swb from before swb_show_file, has no
+ * socket to name. Its pane may be on the Deck, so it's found by its home.
+ */
+export async function listeningEditor(db: Db, dir: string, editor: string): Promise<string> {
+	if (!nvimEditor(editor)) throw new SwbError(`swb opens files only in nvim, and the Editor is ${editor}`);
+	const name = ensureEditor(db, dir, editor);
+	const socket = listPanes(SESSIONS, "#{@swb_home}", "#{@swb_socket}").find(([home]) => home === name)?.[1];
+	if (!socket)
+		throw new SwbError(
+			`the Editor running for ${dir} isn't one swb can open files in; ask the user to quit it, so the next call starts a new one`,
+		);
+	// nvim listens before it reads any config, so only one that dies at once never does.
+	while (!existsSync(socket)) {
+		if (!tmuxTry(SESSIONS, "has-session", "-t", `=${name}`).ok) throw new SwbError(`${editor} exited as it started in ${dir}`);
+		await Bun.sleep(20);
+	}
+	return socket;
+}
+
+/**
+ * How long an open waits on nvim. It answers only once its startup, swb's Lua among it, has run, and a config that
+ * says something at startup holds that at "Press ENTER" until I do, which I can, since the Deck shows it already.
+ */
+const OPEN_TIMEOUT_MS = 60_000;
+
+/** A file at a line in the Editor listening on `socket`, which `listeningEditor` gave. */
+export async function openInEditor(socket: string, editor: string, file: string, line: number): Promise<void> {
+	const bin = editor.trim().split(/\s+/)[0] as string;
+	const expr = `v:lua.swb_show_file('${file.replaceAll("'", "''")}', ${line})`;
+	const run = Bun.spawn([bin, "--server", socket, "--remote-expr", expr], {
+		stdout: "pipe",
+		stderr: "pipe",
+		timeout: OPEN_TIMEOUT_MS,
+	});
+	const [code, out, err] = await Promise.all([run.exited, new Response(run.stdout).text(), new Response(run.stderr).text()]);
+	if (run.signalCode)
+		throw new SwbError(`nvim didn't finish starting within ${OPEN_TIMEOUT_MS / 1000} s; it may be waiting on the user at a prompt`);
+	if (code !== 0) throw new SwbError(`nvim couldn't open ${file}: ${(err || out).trim() || `exited ${code}`}`);
 }
 
 /** The directory's shell for the Stage; it ends with its shell, which hides it. */
@@ -552,8 +610,17 @@ export function ensureShell(db: Db, dir: string): string {
 	return ensureDirSession(db, "shell", dir, null, false);
 }
 
-/** nav: the Deck's ctrl-hjkl reach the program, which hands moves off its own edge back through `swb __nav`. */
-function ensureDirSession(db: Db, kind: "editor" | "shell", dir: string, command: string | null, nav: boolean): string {
+/**
+ * command: the program, by the tmux session it gets; none runs a shell. nvim: the Deck's ctrl-hjkl reach it, which hands
+ * moves off its own edge back through `swb __nav`, and it listens on the socket its pane names.
+ */
+function ensureDirSession(
+	db: Db,
+	kind: "editor" | "shell",
+	dir: string,
+	command: ((name: string) => string) | null,
+	nvim: boolean,
+): string {
 	ensureSessionsServer();
 	return db.tx(() => {
 		const existing = listSessions(SESSIONS, "#{@swb_kind}", "#{@swb_dir}").find(([, k, d]) => k === kind && d === dir);
@@ -561,7 +628,7 @@ function ensureDirSession(db: Db, kind: "editor" | "shell", dir: string, command
 		const name = unusedName(`${basename(dir)}-${kind === "editor" ? "edit" : "sh"}`);
 		const shell = loginShell();
 		const run = command
-			? `SWB_EDITOR=${quote(name)} SHELL=${shell} ${shell} -lic ${quote(`exec ${command}`)}`
+			? `SWB_EDITOR=${quote(name)} SHELL=${shell} ${shell} -lic ${quote(`exec ${command(name)}`)}`
 			: `SHELL=${shell} ${shell} -l`;
 		tmux(
 			SESSIONS,
@@ -591,7 +658,16 @@ function ensureDirSession(db: Db, kind: "editor" | "shell", dir: string, command
 			`=${name}:`,
 			"@swb_home",
 			name,
-			...(nav ? [";", "set", "-p", "-t", `=${name}:`, "@swb_editor", "1"] : []),
+			";",
+			"set",
+			"-p",
+			"-t",
+			`=${name}:`,
+			"@swb_role",
+			kind,
+			...(nvim
+				? [";", "set", "-p", "-t", `=${name}:`, "@swb_editor", "1", ";", "set", "-p", "-t", `=${name}:`, "@swb_socket", editorSocket(name)]
+				: []),
 			...seedPalette(name),
 		);
 		return name;
@@ -599,11 +675,12 @@ function ensureDirSession(db: Db, kind: "editor" | "shell", dir: string, command
 }
 
 /**
- * ctrl-hjkl in an nvim Editor: between its own windows, and at an edge on into the Deck's panes, which the Deck's
- * bindings hand ctrl-hjkl to whenever the Editor has the keyboard.
+ * What swb adds to an nvim Editor. ctrl-hjkl: between its own windows, and at an edge on into the Deck's panes, which
+ * the Deck's bindings hand ctrl-hjkl to whenever the Editor has the keyboard. swb_show_file: a file at a line, in a
+ * window already showing it or a new tab, so no layout of mine changes under me.
  */
-function nvimNav(): string {
-	const path = join(stateDir(), "nvim-nav.lua");
+function nvimLua(): string {
+	const path = join(stateDir(), "nvim.lua");
 	const lua = `-- Written by swb for its Editors.
 local function maps(buffer)
   for _, k in ipairs({ "h", "j", "k", "l" }) do
@@ -638,6 +715,36 @@ vim.api.nvim_create_autocmd("FocusGained", { callback = function()
     end
   end
 end })
+-- swb_show_file: a window showing the file, this tab's first, else a new tab, or the empty one nvim started on. A tab
+-- with a diff in it, such as a Diffview's, is left as it is.
+local function showing(tab, path)
+  local found
+  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(tab)) do
+    if vim.wo[win].diff then return nil end
+    if not found and vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(win)) == path then found = win end
+  end
+  return found
+end
+function _G.swb_show_file(path, line)
+  vim.cmd("stopinsert")
+  local here = vim.api.nvim_get_current_tabpage()
+  local win = showing(here, path)
+  for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
+    if win then break end
+    if tab ~= here then win = showing(tab, path) end
+  end
+  if win then
+    vim.api.nvim_set_current_win(win)
+  else
+    local blank = #vim.api.nvim_tabpage_list_wins(here) == 1 and vim.api.nvim_buf_get_name(0) == "" and vim.bo.buftype == ""
+      and not vim.bo.modified and vim.api.nvim_buf_line_count(0) == 1 and vim.api.nvim_buf_get_lines(0, 0, 1, true)[1] == ""
+    vim.cmd((blank and "edit " or "tabedit ") .. vim.fn.fnameescape(path))
+    win = vim.api.nvim_get_current_win()
+  end
+  vim.api.nvim_win_set_cursor(win, { math.min(line, vim.api.nvim_buf_line_count(vim.api.nvim_win_get_buf(win))), 0 })
+  vim.cmd("normal! zz")
+  return ""
+end
 `;
 	mkdirSync(stateDir(), { recursive: true, mode: 0o700 });
 	writeFileSync(path, lua);

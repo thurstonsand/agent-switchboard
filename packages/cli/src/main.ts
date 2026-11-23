@@ -4,7 +4,7 @@ import { codexHost } from "./codex/host.ts";
 import { adopt } from "./commands/adopt.ts";
 import { archive } from "./commands/archive.ts";
 import { clock } from "./commands/clock.ts";
-import { launch, list, listSchedules, recall, schedule, search, send, show, unschedule, update } from "./commands/coordinate.ts";
+import { launch, list, listSchedules, recall, schedule, search, send, show, showFile, unschedule, update } from "./commands/coordinate.ts";
 import { deckCommand, deckNotify } from "./commands/deck.ts";
 import { dirs } from "./commands/dirs.ts";
 import { drive } from "./commands/drive.ts";
@@ -70,6 +70,8 @@ const USAGE = `swb: Agent Switchboard
   swb unschedule ID --from ID  cancel a pending schedule
   swb show ID --from ID [--view agent|editor|split]
                                switch the Deck, while it shows the caller, to a session, and start it
+  swb show-file PATH --from ID [--line N]
+                               open a file in the caller's Editor, and switch the Deck, while it shows the caller, to it
   swb update --from ID         swb_update_session as a line calls it; its arguments as JSON on stdin
   swb mcp --harness claude|codex
                                the MCP server a Claude Code or Codex session lists swb's tools from
@@ -98,6 +100,7 @@ const CHECKS_CONFIG = new Set([
 	"list",
 	"wake",
 	"reload",
+	"show-file",
 ]);
 
 async function main(args: string[]): Promise<void> {
@@ -149,6 +152,8 @@ async function main(args: string[]): Promise<void> {
 			return unschedule(rest);
 		case "show":
 			return show(rest);
+		case "show-file":
+			return showFile(rest);
 		case "update":
 			return update(rest);
 		case "launch":

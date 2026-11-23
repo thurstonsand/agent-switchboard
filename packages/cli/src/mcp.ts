@@ -3,7 +3,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { describeTool, launchGuide, linkedWorktree } from "@swb/shared";
-import { readerToolsAsJson, TOOLS, type ToolName, toolParameters, toolsAsJson } from "@swb/shared/tools";
+import { offered, readerToolsAsJson, TOOLS, type ToolName, toolParameters, toolsAsJson } from "@swb/shared/tools";
 import { callTool } from "./codex/tools.ts";
 import { UsageError } from "./errors.ts";
 import { VERSION } from "./version.ts";
@@ -26,14 +26,17 @@ function annotations(name: ToolName, worktree: boolean) {
 
 function listing(harness: McpHarness) {
 	const worktree = linkedWorktree(process.cwd()) !== null;
-	const tools = toolsAsJson().map((tool) => ({
-		...tool,
-		inputSchema: JSON.parse(JSON.stringify(toolParameters(tool.name, worktree))),
-		description: describeTool(tool.name, tool.description, launchGuide()),
-		annotations: annotations(tool.name, worktree),
-		// Upfront rather than behind Claude Code's tool search; Codex's line asks the same through omit_tools_from.
-		...(harness === "claude" ? { _meta: { "anthropic/alwaysLoad": true } } : {}),
-	}));
+	// Codex passes SWB_SHOW_FILE on through env_vars.
+	const tools = toolsAsJson()
+		.filter((tool) => offered(tool.name, process.env))
+		.map((tool) => ({
+			...tool,
+			inputSchema: JSON.parse(JSON.stringify(toolParameters(tool.name, worktree))),
+			description: describeTool(tool.name, tool.description, launchGuide()),
+			annotations: annotations(tool.name, worktree),
+			// Upfront rather than behind Claude Code's tool search; Codex's line asks the same through omit_tools_from.
+			...(harness === "claude" ? { _meta: { "anthropic/alwaysLoad": true } } : {}),
+		}));
 	if (harness === "codex") return tools;
 	// Claude's reader takes its tools from here too, deferred, since only it needs their schemas. Codex's reader gets
 	// them as dynamic tools on its own thread.

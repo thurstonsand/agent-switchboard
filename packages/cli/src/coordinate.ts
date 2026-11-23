@@ -1,11 +1,13 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
+import { relative, resolve } from "node:path";
 import { type Db, type Harness, operatorDir, projectRoot, type ReloadMode, type View } from "@swb/shared";
 import { frame, harnessName, type MessageKind, ring } from "@swb/shared/mailbox";
 import { isArchived, markArchived, recordTx, titleOf } from "@swb/shared/record";
 import type { ToolArgs, ToolResult } from "@swb/shared/tools";
 import { CodexClient } from "./codex/client.ts";
 import { codexSocket } from "./codex/host.ts";
-import { deckShowing, postCommand } from "./deck/deck.ts";
+import { loadConfig } from "./config.ts";
+import { deckShowing, fetchState, postCommand } from "./deck/deck.ts";
 import { displayName, openDescendants, projectName, type SessionState, sessionState, states } from "./derive.ts";
 import { checkBody, SwbError } from "./errors.ts";
 import { requestedGroup } from "./groups.ts";
@@ -18,7 +20,9 @@ import {
 	ensureSessionsServer,
 	lastWords,
 	launch,
+	listeningEditor,
 	markUnarchived,
+	openInEditor,
 	restart,
 	unarchiveInCodex,
 	wake,
@@ -288,6 +292,35 @@ export async function show(db: Db, from: string, id: string, view: View | null):
 	return {
 		text: `Showing "${name}". The user isn't watching this session now, so end your turn with one short line.`,
 		details: { id },
+	};
+}
+
+/** swb_show_file: the file in the caller's Editor, then the Deck, while it shows the caller, on that Editor. */
+export async function showFile(db: Db, from: string, path: string, line: number): Promise<ToolResult> {
+	const { cwd } = db.get("SELECT cwd FROM sessions WHERE session_id = ?", from) as { cwd: string };
+	// The Deck's own word, not the agent's pane: in the Editor's view, that pane is off the Deck.
+	const staged = await fetchState(false).then(
+		(st) => st.staged.id,
+		(error: NodeJS.ErrnoException) => {
+			// No Deck is running: its socket is gone, or a Deck that died left it behind.
+			if (error.code === "ENOENT" || error.code === "ECONNREFUSED") return null;
+			throw error;
+		},
+	);
+	if (staged !== from)
+		throw new SwbError("the Deck isn't showing this session, so the user wouldn't see the file; say where it is instead");
+	const file = resolve(cwd, path);
+	if (!statSync(file, { throwIfNoEntry: false })?.isFile()) throw new SwbError(`no file ${file}`);
+	const { editor } = loadConfig();
+	const socket = await listeningEditor(db, cwd, editor);
+	const where = `${relative(cwd, file).startsWith("..") ? file : relative(cwd, file)}:${line}`;
+	// The Deck shows the Editor before nvim is asked, so whatever a starting nvim waits on, I see it.
+	await postCommand("show-file", [from, where]);
+	await openInEditor(socket, editor, file, line);
+	return {
+		text: `Showing ${where} in the user's Editor. They're looking at it now, so end your turn with one short line.`,
+		summary: "Opened in the Editor",
+		details: { file, line },
 	};
 }
 

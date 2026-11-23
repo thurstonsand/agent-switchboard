@@ -704,12 +704,12 @@ function syncVisit(): void {
 }
 
 /**
- * Says on the Stage's border that `from` switched the Deck to `id`, once the Stage shows it. tmux takes the word away
- * when a key or press says I've seen it: at the hold's end if one came during it, at the first one after otherwise.
+ * Says on the border of the pane `on` names, the agent's or the Editor's, what took the Deck to `id`, once the Stage
+ * shows it. tmux takes the word away when a key or press says I've seen it: at the hold's end if one came during it, at
+ * the first one after otherwise.
  */
-function arrive(id: string, from: Entry): void {
+function arrive(id: string, text: string, on: "agent" | "editor"): void {
 	if (m.stage.arrival) clearTimeout(m.stage.arrival.held);
-	const text = `↪ ${displayName(from)} switched you here`;
 	const held = setTimeout(() => {
 		if (m.stage.arrival?.id === id)
 			arrivalTmux("if", "-F", "-t", DECK_OPTIONS, "#{@swb_arrival_touched}", `set -u -t ${DECK_OPTIONS} @swb_arrival`, ";", ...UNHOLD);
@@ -722,6 +722,12 @@ function arrive(id: string, from: Entry): void {
 			DECK_OPTIONS,
 			"@swb_arrival",
 			text,
+			";",
+			"set",
+			"-t",
+			DECK_OPTIONS,
+			"@swb_arrival_on",
+			on,
 			";",
 			"set",
 			"-t",
@@ -3256,8 +3262,23 @@ export async function handleCommand(cmd: string, argv: string[]): Promise<void> 
 				reveal(id);
 				// Asking to be taken there means as much as clicking its row: a dormant one starts.
 				focusEntry(e);
-				arrive(id, m.entries.get(from) as Entry);
+				arrive(id, `↪ ${displayName(m.entries.get(from) as Entry)} switched you here`, "agent");
 				if (view !== undefined && view !== viewOf(e)) showView(e, view as View);
+			});
+			break;
+		}
+		// The session on view showing me a file in its Editor, which swb_show_file has opened there already: split where
+		// it fits, and the keyboard on the Editor either way.
+		case "show-file": {
+			const [from = "", where = ""] = argv;
+			await caughtUp();
+			dispatch(() => {
+				const e = m.entries.get(from);
+				if (!e) throw new Error(`no session ${from} on this Deck`);
+				if (m.stage.staged !== from) throw new Error("the user has moved off this session; nothing switched");
+				if (panes.applied.view === "agent") showView(e, panes.width >= SPLIT_FROM ? "split" : "editor");
+				else focusOnceShown(() => panes.main.pane);
+				arrive(from, `↪ ${harnessName(e.harness)} opened ${where}`, "editor");
 			});
 			break;
 		}

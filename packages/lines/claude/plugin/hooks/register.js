@@ -25,6 +25,8 @@ function target(name, args) {
 			return args.schedule;
 		case "swb_show_session":
 			return args.view ?? "";
+		case "swb_show_file":
+			return `${args.path}${args.line ? `:${args.line}` : ""}`;
 		case "swb_update_session":
 			return [
 				args.archived === true ? `archive${args.family ? " family" : ""}${args.cancel_turns ? " · cancel turns" : ""}` : "",
@@ -457,6 +459,8 @@ async function useTool($, name, e) {
 			return swb($, ["unschedule", e.schedule, ...from]);
 		case "swb_show_session":
 			return swb($, ["show", e.session, ...from, ...(e.view ? ["--view", e.view] : [])]);
+		case "swb_show_file":
+			return swb($, ["show-file", e.path, ...from, ...(e.line ? ["--line", String(e.line)] : [])]);
 		case "swb_update_session": {
 			// The event carries the call's own fields beside its arguments; swb checks only the arguments.
 			const { properties } = TOOLS.find((t) => t.name === name).inputSchema;

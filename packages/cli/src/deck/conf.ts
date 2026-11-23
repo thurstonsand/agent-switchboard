@@ -42,13 +42,15 @@ const MOUSE_ON = `if -F '${POINTER_AWAY}' { ${LEAVE} } ; send-keys -M`;
 
 /**
  * A session that switched the Deck to another leaves word on the other's agent pane, the one pane that carries
- * @swb_host, in the Deck's @swb_arrival. It holds for ARRIVAL_HOLD_MS, a key or press meanwhile marks it touched, and
+ * @swb_host, in the Deck's @swb_arrival; one that showed me a file leaves it on its Editor's, whose @swb_role says so.
+ * @swb_arrival_on names which. It holds for ARRIVAL_HOLD_MS, a key or press meanwhile marks it touched, and
  * the Deck ends the hold by taking it away if touched; after that, the first key or press takes it away. tmux keeps it
  * all, so no keystroke starts a process.
  */
 export const ARRIVAL_HOLD_MS = 10_000;
 const ARRIVAL_SEEN = "if -F '#{@swb_arrival}' { if -F '#{@swb_arrival_held}' { set @swb_arrival_touched 1 } { set -u @swb_arrival } }";
-const ARRIVAL_LABEL = "#{?#{&&:#{@swb_arrival},#{@swb_host}}, #[fg=black bg=yellow bold] #{@swb_arrival} #[default],}";
+const ARRIVAL_LABEL =
+	"#{?#{&&:#{@swb_arrival},#{==:#{?#{@swb_host},agent,#{@swb_role}},#{@swb_arrival_on}}}, #[fg=black bg=yellow bold] #{@swb_arrival} #[default],}";
 
 /**
  * The pane each of prefix h, j, k, l reaches from the focused one, kept in window options for the border labels. tmux's

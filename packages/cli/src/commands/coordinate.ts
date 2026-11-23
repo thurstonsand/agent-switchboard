@@ -1,7 +1,14 @@
 import { parseArgs } from "node:util";
 import { harness, view as viewNamed } from "@swb/shared";
 import { parsed } from "@swb/shared/tools";
-import { launchSession, list as listSessions, send as sendMessage, show as showSession, update as updateSession } from "../coordinate.ts";
+import {
+	launchSession,
+	list as listSessions,
+	send as sendMessage,
+	showFile as showFileIn,
+	show as showSession,
+	update as updateSession,
+} from "../coordinate.ts";
 import { UsageError } from "../errors.ts";
 import { recallBegin, recallRead, recallSearch } from "../recall/read.ts";
 import { search as searchSessions, syncAll } from "../recall/search.ts";
@@ -192,6 +199,19 @@ export async function show(args: string[]): Promise<void> {
 	const id = positionals[0];
 	if (!id || !values.from) throw new UsageError("show: a session id and --from are required");
 	print(await showSession(openStore(), values.from, id, values.view === undefined ? null : viewNamed(values.view)));
+}
+
+export async function showFile(args: string[]): Promise<void> {
+	const { values, positionals } = parseArgs({
+		args,
+		options: { from: { type: "string" }, line: { type: "string" } },
+		allowPositionals: true,
+	});
+	const path = positionals[0];
+	if (!path || !values.from) throw new UsageError("show-file: a path and --from are required");
+	const line = values.line === undefined ? 1 : Number(values.line);
+	if (!Number.isInteger(line) || line < 1) throw new UsageError(`show-file: --line takes a line number, got ${values.line}`);
+	print(await showFileIn(openStore(), values.from, path, line));
 }
 
 /** swb_update_session as every line calls it: its arguments as JSON on stdin, checked against the tool's schema. */

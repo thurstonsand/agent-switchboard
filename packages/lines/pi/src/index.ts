@@ -22,13 +22,15 @@ import {
 	startTurn,
 	turnErrored,
 } from "@swb/shared/record";
-import { READER_PROMPT, READER_TOOLS, TOOLS, type ToolName, type ToolResult, toolParameters } from "@swb/shared/tools";
+import { offered, READER_PROMPT, READER_TOOLS, TOOLS, type ToolName, type ToolResult, toolParameters } from "@swb/shared/tools";
 import { mark, span } from "@swb/shared/trace";
 
 type Launch = { readonly db: string; readonly tmuxSession: string; readonly bin: string };
 // Outlives /reload, which re-imports this module with a fresh module cache.
 type Process = {
 	launch: Launch;
+	/** The tools this launch offers, read from its environment before that's cleared. */
+	offers: Set<ToolName>;
 	recoveryNotice: string | null;
 	failure?: string;
 	db?: Db;
@@ -51,6 +53,7 @@ function claim(): Process | undefined {
 		const proc: Process = {
 			launch: Object.freeze({ db: env.SWB_DB, tmuxSession: env.SWB_TMUX_SESSION, bin: env.SWB_BIN ?? "" }),
 			recoveryNotice: env.SWB_RECOVERY_NOTICE ?? null,
+			offers: new Set((Object.keys(TOOLS) as ToolName[]).filter((name) => offered(name, env))),
 			attention: new Set(),
 			dying: false,
 			...(env.SWB_BIN ? {} : { failure: "started by an swb older than this line; upgrade swb" }),
@@ -69,6 +72,7 @@ function claim(): Process | undefined {
 	delete env.SWB_TMUX_SESSION;
 	delete env.SWB_BIN;
 	delete env.SWB_RECOVERY_NOTICE;
+	delete env.SWB_SHOW_FILE;
 	return store[KEY];
 }
 
@@ -356,6 +360,7 @@ export default function (pi: ExtensionAPI) {
 		target: (args: Record<string, unknown>) => string,
 		run: (args: never, ctx: ExtensionContext, toolCallId: string, signal?: AbortSignal) => Promise<ToolResult>,
 	) => {
+		if (!proc.offers.has(name)) return;
 		const register = (cwd: string) =>
 			pi.registerTool({
 				name,
@@ -630,6 +635,13 @@ export default function (pi: ExtensionAPI) {
 		(args) => `${titleOf(args.session)}${args.view ? ` · ${args.view}` : ""}`,
 		(args: { session: string; view?: string }, ctx) =>
 			swb(proc.launch.bin, ["show", args.session, "--from", self(ctx), ...(args.view ? ["--view", args.view] : [])]),
+	);
+
+	tool(
+		"swb_show_file",
+		(args) => `${args.path}${args.line ? `:${args.line}` : ""}`,
+		(args: { path: string; line?: number }, ctx) =>
+			swb(proc.launch.bin, ["show-file", args.path, "--from", self(ctx), ...(args.line ? ["--line", String(args.line)] : [])]),
 	);
 
 	type Snooze = string | { until: string };

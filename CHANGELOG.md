@@ -4,7 +4,8 @@
 
 ### Added
 
-- Pi's code mode can discover all ten Switchboard tools in the `switchboard` namespace. Their callable names and direct availability are unchanged.
+- Pi's code mode can discover every Switchboard tool in the `switchboard` namespace. Their callable names and direct availability are unchanged.
+- `swb_show_file`: an agent opens a file at a line in its nvim Editor while you're watching it, starting the Editor if it isn't running, splitting onto it where there's room and putting the keyboard there, with a yellow word on the Editor's border saying it did. It keeps your tabs and splits as they were, opening the file where it's already shown or in a new tab, and leaves Diffview alone.
 
 ### Fixed
 

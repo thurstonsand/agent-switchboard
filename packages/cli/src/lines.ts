@@ -141,8 +141,17 @@ export function codexServerOverrides(swb: string): string[] {
 		enabled: true,
 		command: swb,
 		args: ["mcp", "--harness", "codex"],
-		// Codex starts MCP servers with only a few of its variables; these say which db and tmux servers are swb's.
-		env_vars: ["SWB_INSTANCE", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "TMUX_TMPDIR", "PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR"],
+		// Codex starts MCP servers with only a few of its variables; these say whether the Editor opens files, and which db
+		// and tmux servers are swb's.
+		env_vars: [
+			"SWB_SHOW_FILE",
+			"SWB_INSTANCE",
+			"XDG_STATE_HOME",
+			"XDG_CONFIG_HOME",
+			"TMUX_TMPDIR",
+			"PI_CODING_AGENT_DIR",
+			"PI_CODING_AGENT_SESSION_DIR",
+		],
 		// Straight into the model's tool list, so the agent sees them like its own: not behind tool search, and not
 		// only inside code mode's exec, where a code-mode-only model such as gpt-6-sol reaches for spawn_agent instead.
 		omit_tools_from: ["deferred", "code_mode"],

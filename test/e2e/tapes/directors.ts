@@ -1189,6 +1189,20 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"show-file": {
+		setup: async (s) => {
+			files(s);
+			const lines = Array.from({ length: 240 }, (_, i) => `export const token_${i + 1} = ${i + 1};`);
+			writeFileSync(join(s.project, "src/parser.ts"), `${lines.join("\n")}\n`);
+			config(s, `editor = "${NVIM} --clean"\n`);
+		},
+		run: async (s) => {
+			await waitDeck(s, "split onto the Editor", (x) => x.staged.view === "split" && x.focus === "editor");
+			await waitDeck(s, "back on pi", (x) => x.focus === "stage");
+			await waitDeck(s, "the Editor again", (x) => x.staged.view === "split" && x.focus === "editor");
+		},
+	},
+
 	"split-width": {
 		setup: async (s) => {
 			files(s);

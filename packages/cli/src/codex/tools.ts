@@ -1,6 +1,6 @@
 import type { Db } from "@swb/shared";
 import { parsed, READER_PROMPT, readerToolsAsJson, type ToolName, type ToolResult } from "@swb/shared/tools";
-import { launchSession, list, send, show, update } from "../coordinate.ts";
+import { launchSession, list, send, show, showFile, update } from "../coordinate.ts";
 import { SwbError } from "../errors.ts";
 import { recallBegin, recallRead, recallSearch } from "../recall/read.ts";
 import { search } from "../recall/search.ts";
@@ -95,6 +95,10 @@ export async function callTool(
 		case "swb_show_session": {
 			const a = parsed(name, args);
 			return show(db, from, a.session, a.view ?? null);
+		}
+		case "swb_show_file": {
+			const a = parsed(name, args);
+			return showFile(db, from, a.path, a.line ?? 1);
 		}
 		case "session_search": {
 			const a = parsed(name, args);
