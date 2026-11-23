@@ -8,7 +8,7 @@ lockfile_platforms = ["linux-x64", "linux-x64-musl", "linux-arm64", "linux-arm64
 minimum_release_age = "3d"
 
 [tools]
-bun = "1.4.4"
+bun = "1.4.5"
 node = "26"
 "aqua:biomejs/biome" = "2.6.8"
 "aqua:tmux/tmux-builds" = "3.8"
