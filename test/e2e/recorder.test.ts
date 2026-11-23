@@ -73,7 +73,7 @@ test("the dist:pi bundle, packed and installed with pi install as npm publishes 
 	await firstTurn();
 });
 
-test("Pi discovers eleven tools in the switchboard namespace and calls session_list by its original name", async () => {
+test("Pi discovers twelve tools in the switchboard namespace and calls session_list by its original name", async () => {
 	s = scenario("phase1", "tool-namespace");
 	const file = join(s.home, ".pi/agent/settings.json");
 	const settings = JSON.parse(readFileSync(file, "utf8"));
@@ -90,6 +90,7 @@ const members = ${JSON.stringify([
 		"session_search",
 		"session_send_message",
 		"session_unschedule",
+		"swb_ask_user",
 		"swb_show_file",
 		"swb_show_session",
 		"swb_update_session",
@@ -101,7 +102,7 @@ text("switchboard: " + group.tools.length + " tools; search found session_recall
 text(await tools.session_list({}));`;
 	const since = await prompt(s, `call codemode ${JSON.stringify({ code })}`);
 	await settled(s, runtime.session_id, "namespace discovery turn complete", since);
-	await until(() => s.screen().includes("switchboard: 11 tools; search found session_recall"), budgets.settle, "namespace discovery");
+	await until(() => s.screen().includes("switchboard: 12 tools; search found session_recall"), budgets.settle, "namespace discovery");
 	const list = await prompt(s, "call session_list {}");
 	await settled(s, runtime.session_id, "direct session_list turn complete", list);
 	await until(() => s.screen().includes("Sessions · 0 found"), budgets.settle, "the unchanged list receipt");

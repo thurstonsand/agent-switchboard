@@ -146,6 +146,10 @@ const MIGRATIONS: string[] = [
 	"ALTER TABLE marks ADD COLUMN read_at INTEGER",
 	// The agent's side of split's divider, as I dragged it for the session; null follows agent_width.
 	"ALTER TABLE marks ADD COLUMN agent_cols INTEGER",
+	// How the last turn ended, when it ended on something other than a reply: one turn ends one way.
+	`ALTER TABLE sessions ADD COLUMN ending TEXT CHECK (ending IN ('errored','asked'));
+	UPDATE sessions SET ending = 'errored' WHERE errored_at >= last_prompt_at;
+	ALTER TABLE sessions DROP COLUMN errored_at;`,
 ];
 
 if (MIGRATIONS.length !== SCHEMA_VERSION) throw new Error(`${MIGRATIONS.length} migrations for schema v${SCHEMA_VERSION}`);

@@ -178,7 +178,22 @@ export const TOOLS = {
 		}),
 		readOnly: false,
 	},
+	swb_ask_user: {
+		label: "Ask",
+		description: "Annotate this turn as needing the user's answer to a question.",
+		guidelines: [
+			"Call swb_ask_user when you are blocked and need input from the user in order to proceed. Don't call it if your work is complete and only needs a review, or for a permission you can otherwise request.",
+		],
+		parameters: Type.Object({}),
+		readOnly: false,
+	},
 } satisfies Record<string, ToolSpec>;
+
+/** What swb_ask_user answers, in every line: a person reads the first line, the model all of it. */
+export const ASKED: ToolResult = {
+	text: "Asking: this session is waiting on you\nThis session is now marked as requiring a response from the user. End your turn with a final message starting with a one-sentence paragraph of at most 15 words that asks your question, then add any supporting context, details, and options in the paragraphs after it.",
+	details: {},
+};
 
 /**
  * The tools session_recall's reader gets, and only it: every line runs the reader in its own harness, as a subagent

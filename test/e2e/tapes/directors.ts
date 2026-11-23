@@ -1891,6 +1891,68 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	asking: {
+		setup: async (s) => {
+			await launched(s, "reply drafted", { cwd: s.project, title: "Draft the v3 changelog" });
+			const { out } = await launchTry(s, "fail boom", { cwd: s.project, title: "Bump the provider SDK" });
+			const broken = (JSON.parse(out) as { details: { id: string } }).details.id;
+			await waitLs(s, "the bump errored", (ls) => ls.some((e) => e.id === broken && e.errored && e.activity === "idle"));
+			await launched(s, "reply bisected", { cwd: s.project, title: "Bisect the flaky login test" });
+			await launched(s, "question Rebuild the sessions table, or add a column?", { cwd: s.project, title: "Plan the sessions migration" });
+			s.query("DELETE FROM deck_layout");
+		},
+		run: async (s) => {
+			const row = (x: DeckState, title: string) => sessionRows(x).find((r) => r.title === title);
+			await waitDrive(s, "the Deck up", (x) => x.ready);
+			const plan = row(drive(s), "Plan the sessions migration");
+			expect(plan?.state).toBe("asking");
+			const id = plan?.id as string;
+			// Another session on the Stage, so the Peek's last turn isn't one the Stage already shows.
+			await cursorTo(s, row(drive(s), "Draft the v3 changelog")?.id as string);
+			const [x, y] = await onScreen(s, "Plan the sessions migration", 42, 0);
+			s.swb("drive", "move", String(x), String(y));
+			await waitDrive(
+				s,
+				"its Peek, on the question",
+				// The question alone: not the context after it.
+				(st) =>
+					st.peek?.id === id &&
+					st.peek.lines.some((l) => l.includes("› Rebuild the sessions table, or add a column?")) &&
+					!st.peek.lines.some((l) => l.includes("Rebuilding drops")),
+			);
+			await Bun.sleep(3000);
+			s.swb("drive", "move", "100", "30");
+			s.keys("!");
+			const needs = await waitDrive(s, "!: it needs me, beside the error", (x) => x.lens.needs && sessionRows(x).length === 2);
+			expect(
+				sessionRows(needs)
+					.map((r) => r.state)
+					.sort(),
+			).toEqual(["asking", "errored"]);
+			await Bun.sleep(3000);
+			s.keys("?");
+			await Bun.sleep(3000);
+			s.keys("escape");
+			await waitDrive(s, "help gone", (x) => x.mode === "roster");
+			s.keys("!");
+			await waitDrive(s, "every session again", (x) => !x.lens.needs);
+			await cursorTo(s, id);
+			s.keys("Enter");
+			await waitDrive(s, "its pi, with the keyboard", (x) => x.focus === "stage" && x.staged.id === id && x.staged.kind === "live");
+			await Bun.sleep(1000);
+			s.keys("-l", "reply go with a column", "Enter");
+			await until(() => s.signal("replied.go with a column") !== "", TAPE, "the answer's reply");
+			s.keys("M-a", "h");
+			const answered = await waitDrive(
+				s,
+				"no longer asking",
+				(x) => x.focus === "roster" && row(x, "Plan the sessions migration")?.state !== "asking",
+			);
+			expect(row(answered, "Plan the sessions migration")?.state).toBe("idle");
+			await Bun.sleep(5000);
+		},
+	},
+
 	groups: {
 		setup: async (s) => {
 			const worktree = join(s.root, "project-wt");

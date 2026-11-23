@@ -7,6 +7,12 @@ export const ARCHIVED = "m.archived_at >= s.last_prompt_at";
 /** Not archived, or prompted since. Over `sessions s` LEFT JOINed to `marks m`. */
 export const OPEN = `NOT coalesce(${ARCHIVED}, 0)`;
 
+/** Idle on its provider's error, and no turn started since. Over `sessions s`. */
+export const ERRORED = "s.phase = 'idle' AND s.ending IS 'errored'";
+
+/** Idle on a question for me, and no turn started since. Over `sessions s`. */
+export const ASKING = "s.phase = 'idle' AND s.ending IS 'asked'";
+
 /** A message neither delivered nor cancelled. The `messages_pending` index is on the same condition. */
 export const PENDING_MESSAGE = "delivered_at IS NULL AND cancelled_at IS NULL";
 

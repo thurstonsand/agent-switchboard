@@ -7,6 +7,7 @@
 //   ask <title> :: <question>          find it the same way, then session_recall it the question; answers "asked: <result>"
 //   ask-id <id> :: <question>          session_recall that session directly, archived or not
 //   search <query>                     session_search the query; answers "searched"
+//   question <text>                    swb_ask_user, then answers "<text>", then a paragraph of context
 // session_recall's reader, whose first message is "Question about session <id>:", the question, then a map, searches the
 // session for SWB with recall_search, reads it with recall_read from before its first hit, and answers
 // "reader found: <every SWB- marker it read>", or "reader found nothing".
@@ -54,6 +55,11 @@ export function agentStep(prompt: string, toolOutput: string | null): Step {
 		const markers = [...new Set([...toolOutput.matchAll(/SWB-[A-Za-z0-9-]+/g)].map((m) => m[0]))];
 		return { text: markers.length > 0 ? `reader found: ${markers.join(" ")}` : "reader found nothing" };
 	}
+	const question = /^question (.+)$/s.exec(prompt.trim());
+	if (question)
+		return toolOutput === null
+			? { tool: "swb_ask_user", args: {} }
+			: { text: `${question[1]}\n\nRebuilding drops errored_at in the same migration.` };
 	const searching = /^search (.+)$/s.exec(prompt.trim());
 	if (searching) return toolOutput === null ? { tool: "session_search", args: { query: searching[1] } } : { text: "searched" };
 	const asking = /^(ask|ask-id) (.+?) :: (.+)$/s.exec(prompt.trim());

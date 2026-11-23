@@ -9,6 +9,7 @@ import { Db, describeTool, launchGuide, linkedWorktree, operatorDir } from "@swb
 import { frame, listen, markDelivered, pendingFor, sender, unmarkDelivered } from "@swb/shared/mailbox";
 import {
 	markArchived as archiveMark,
+	asked,
 	endHosting,
 	hostOfTranscript,
 	pendingTitle,
@@ -20,9 +21,8 @@ import {
 	settle,
 	startHosting,
 	startTurn,
-	turnErrored,
 } from "@swb/shared/record";
-import { offered, READER_PROMPT, READER_TOOLS, TOOLS, type ToolName, type ToolResult, toolParameters } from "@swb/shared/tools";
+import { ASKED, offered, READER_PROMPT, READER_TOOLS, TOOLS, type ToolName, type ToolResult, toolParameters } from "@swb/shared/tools";
 import { mark, span } from "@swb/shared/trace";
 
 type Launch = { readonly db: string; readonly tmuxSession: string; readonly bin: string };
@@ -320,12 +320,12 @@ export default function (pi: ExtensionAPI) {
 		// A turn a signal ends was cut off, not stopped: it stays unsettled, so swb wakes it to pick that turn back up.
 		if (event.aborted && proc.dying) return;
 		writeFor(ctx, (db, id) => {
-			if (stopReason === "error" && !event.aborted) turnErrored(db, id);
 			const { quit } = settle(db, {
 				host: proc.launch.tmuxSession,
 				sessionId: id,
 				cwd: ctx.cwd,
 				title: ctx.sessionManager.getSessionName() ?? null,
+				errored: stopReason === "error" && !event.aborted,
 			});
 			// Archived during its own turn, by swb_update_session or `swb archive` from a shell, or reloading: it quits now.
 			if (quit) ctx.shutdown();
@@ -642,6 +642,16 @@ export default function (pi: ExtensionAPI) {
 		(args) => `${args.path}${args.line ? `:${args.line}` : ""}`,
 		(args: { path: string; line?: number }, ctx) =>
 			swb(proc.launch.bin, ["show-file", args.path, "--from", self(ctx), ...(args.line ? ["--line", String(args.line)] : [])]),
+	);
+
+	tool(
+		"swb_ask_user",
+		() => "",
+		// Queued with this turn's other records, so a start still waiting on a busy db can't clear it.
+		async (_args, ctx) => {
+			writeFor(ctx, (db, id) => asked(db, id));
+			return ASKED;
+		},
 	);
 
 	type Snooze = string | { until: string };

@@ -63,7 +63,7 @@ export type Card = {
 	agent: string;
 };
 
-export type State = "loading" | "blocked" | "working" | "unseen" | "idle" | "dormant" | "cut-off" | "errored" | "archived";
+export type State = "loading" | "blocked" | "working" | "unseen" | "idle" | "dormant" | "cut-off" | "errored" | "asking" | "archived";
 
 export type StatSummary = { n: number; lastMs: number; avgMs: number; medianMs: number; maxMs: number };
 

@@ -461,6 +461,8 @@ async function useTool($, name, e) {
 			return swb($, ["show", e.session, ...from, ...(e.view ? ["--view", e.view] : [])]);
 		case "swb_show_file":
 			return swb($, ["show-file", e.path, ...from, ...(e.line ? ["--line", String(e.line)] : [])]);
+		case "swb_ask_user":
+			return swb($, ["ask-user", ...from]);
 		case "swb_update_session": {
 			// The event carries the call's own fields beside its arguments; swb checks only the arguments.
 			const { properties } = TOOLS.find((t) => t.name === name).inputSchema;
@@ -631,9 +633,8 @@ export function register(on) {
 		if (line.managed && !e.agentId) {
 			line.busy = false;
 			line.blocked = false;
-			if (e.reason === "error") void record($, ["errored", "--session", line.session]);
 			// swb stops this session after recording, when it was archived during the turn or is reloading.
-			void record($, ["settled", "--session", line.session, "--cwd", line.cwd]);
+			void record($, ["settled", "--session", line.session, "--cwd", line.cwd, ...(e.reason === "error" ? ["--errored"] : [])]);
 			void submitPending($);
 		}
 		return result;

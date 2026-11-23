@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Asking: an agent that stops on a question for you calls `swb_ask_user`, then opens its reply with the question. The session shows a yellow `?`, its Peek shows that question, and `swb ls` and `session_list` say `asking`, until its next turn starts, whether you or another session start it. It's in the needs-me lens and never folds into Inactive; snooze it to put it off.
+
 ## [0.17.0] - 2026-11-23
 
 ### Added

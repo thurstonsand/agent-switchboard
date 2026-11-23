@@ -1,6 +1,6 @@
 import type { Db } from "@swb/shared";
 import { parsed, READER_PROMPT, readerToolsAsJson, type ToolName, type ToolResult } from "@swb/shared/tools";
-import { launchSession, list, send, show, showFile, update } from "../coordinate.ts";
+import { askUser, launchSession, list, send, show, showFile, update } from "../coordinate.ts";
 import { SwbError } from "../errors.ts";
 import { recallBegin, recallRead, recallSearch } from "../recall/read.ts";
 import { search } from "../recall/search.ts";
@@ -112,6 +112,9 @@ export async function callTool(
 			const a = parsed(name, args);
 			return update(db, from, a.session ?? from, a);
 		}
+		case "swb_ask_user":
+			parsed(name, args);
+			return askUser(db, from);
 	}
 }
 

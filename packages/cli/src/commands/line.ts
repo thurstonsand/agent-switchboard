@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { pidAlive } from "@swb/shared";
 import { frame, listen, markDelivered, pendingFor, sender, unmarkDelivered } from "@swb/shared/mailbox";
-import { endHosting, pendingTitle, recordTx, sawRequest, setPhase, settle, startHosting, startTurn, turnErrored } from "@swb/shared/record";
+import { endHosting, pendingTitle, recordTx, sawRequest, setPhase, settle, startHosting, startTurn } from "@swb/shared/record";
 import { SwbError, UsageError } from "../errors.ts";
 import { openStore } from "../store.ts";
 import { listHosts, SESSIONS, tmuxTry } from "../tmux.ts";
@@ -46,6 +46,7 @@ export function record(args: string[]): void {
 			model: { type: "string" },
 			effort: { type: "string" },
 			"asks-person": { type: "boolean" },
+			errored: { type: "boolean" },
 		},
 		allowPositionals: true,
 	});
@@ -95,7 +96,13 @@ export function record(args: string[]): void {
 			return;
 		}
 		case "settled": {
-			const { quit } = settle(db, { host, sessionId: need("session"), cwd: need("cwd"), title: title(transcript()) });
+			const { quit } = settle(db, {
+				host,
+				sessionId: need("session"),
+				cwd: need("cwd"),
+				title: title(transcript()),
+				errored: Boolean(values.errored),
+			});
 			// Archived or reloading during its turn: stop it now the turn is over, in the background, since Claude Code
 			// waits on this. Quiet, since a failed run-shell draws its status over some other session's harness.
 			if (quit) tmuxTry(SESSIONS, "run-shell", "-b", `kill -TERM ${panePid(host)} 2>/dev/null || :`);
@@ -107,9 +114,6 @@ export function record(args: string[]): void {
 			sawRequest(db, need("session"), values.model, values.effort ?? null);
 			return;
 		}
-		case "errored":
-			turnErrored(db, need("session"));
-			return;
 		case "end":
 			endHosting(db, host);
 			return;

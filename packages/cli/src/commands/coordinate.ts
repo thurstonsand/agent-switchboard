@@ -2,6 +2,7 @@ import { parseArgs } from "node:util";
 import { harness, view as viewNamed } from "@swb/shared";
 import { parsed } from "@swb/shared/tools";
 import {
+	askUser as askUserFrom,
 	launchSession,
 	list as listSessions,
 	send as sendMessage,
@@ -212,6 +213,12 @@ export async function showFile(args: string[]): Promise<void> {
 	const line = values.line === undefined ? 1 : Number(values.line);
 	if (!Number.isInteger(line) || line < 1) throw new UsageError(`show-file: --line takes a line number, got ${values.line}`);
 	print(await showFileIn(openStore(), values.from, path, line));
+}
+
+export function askUser(args: string[]): void {
+	const { values } = parseArgs({ args, options: { from: { type: "string" } } });
+	if (!values.from) throw new UsageError("ask-user: --from is required");
+	print(askUserFrom(openStore(), values.from));
 }
 
 /** swb_update_session as every line calls it: its arguments as JSON on stdin, checked against the tool's schema. */

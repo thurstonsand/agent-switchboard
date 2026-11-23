@@ -297,6 +297,7 @@ export function stateOf(e: Entry): State {
 	if (e.activity === "blocked") return "blocked";
 	if (e.activity === "working") return "working";
 	if (e.errored) return "errored";
+	if (e.asking) return "asking";
 	if (!e.live) return isUnseen(e) ? "unseen" : "dormant";
 	return isUnseen(e) ? "unseen" : "idle";
 }
@@ -326,6 +327,8 @@ function phaseStatus(e: Entry): string {
 			return `${red("cut off")}${gray(` · ${CAUSES[e.cutOff as CutOff]}`)}`;
 		case "errored":
 			return e.live ? red("errored") : `${red("errored")}${gray(" · dormant")}`;
+		case "asking":
+			return e.live ? attention("asking") : `${attention("asking")}${gray(" · dormant")}`;
 		case "archived":
 			return gray("archived");
 	}
@@ -408,12 +411,12 @@ let titleOps = Promise.resolve();
 
 /** The terminal's title counts what needs me, for the times the Deck isn't the tab I'm looking at. */
 function syncTitle(): void {
-	const states = [...m.entries.values()].map(stateOf);
+	const states = [...m.entries.values()].filter((e) => !e.snoozed).map(stateOf);
 	const count = (state: State, mark: string) => {
 		const n = states.filter((s) => s === state).length;
 		return n > 0 ? ` ${mark}${n}` : "";
 	};
-	const want = `swb${count("blocked", "◆")}${count("unseen", "●")}`;
+	const want = `swb${count("blocked", "◆")}${count("asking", "?")}${count("unseen", "●")}`;
 	if (want === titleShown) return;
 	titleShown = want;
 	titleOps = titleOps.then(() =>
@@ -429,7 +432,7 @@ function ending(e: Entry, read: Transcript | null): string | null {
 	const wake = e.open && m.mode.kind === "roster" ? ` · ${bold("⏎")} ${e.cutOff ? "Resume unfinished turn" : "Wake & focus"}` : "";
 	if (e.cutOff) return `${bold(red("↯ cut off"))} · ${CAUSES[e.cutOff]}${wake}`;
 	if (read?.ending?.kind === "stopped") return `– dormant · stopped${wake}`;
-	if (read?.ending?.kind === "error") return `${bold(red("errored"))}${wake}`;
+	if (e.errored) return `${bold(red("errored"))}${wake}`;
 	return null;
 }
 
@@ -1423,9 +1426,9 @@ function selectFirst(): void {
 	if (first) m.selectedKey = first.key;
 }
 
-/** A blocked, cut-off, or errored session: one waiting on a decision or a rescue from me. */
+/** A blocked, cut-off, errored, or asking session: one waiting on a decision or a rescue from me. A snooze puts a question off. */
 export function needsMe(e: Entry): boolean {
-	return ["blocked", "cut-off", "errored"].includes(stateOf(e));
+	return ["blocked", "cut-off", "errored", "asking"].includes(stateOf(e)) && !e.snoozed;
 }
 
 export function lensOn(): boolean {
@@ -3074,13 +3077,15 @@ function rosterKeys(row: Row | undefined): Binding<Command>[] {
 			? "open"
 			: session.cutOff
 				? "resume"
-				: !session.live
-					? "wake"
-					: session.errored
-						? "inspect error"
-						: session.activity === "blocked"
-							? "respond"
-							: "focus";
+				: session.asking
+					? "answer"
+					: !session.live
+						? "wake"
+						: session.errored
+							? "inspect error"
+							: session.activity === "blocked"
+								? "respond"
+								: "focus";
 	if (
 		!panes.narrow &&
 		session?.open &&

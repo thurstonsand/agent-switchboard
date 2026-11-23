@@ -74,6 +74,7 @@ export type LsEntry = {
 	markedUnseen: boolean;
 	cutOff: "shutdown" | "killed" | "restart" | null;
 	errored: boolean;
+	asking: boolean;
 	inactive: boolean;
 	snooze: { until: number | null } | null;
 	reload: "continue" | "idle" | null;

@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckState } from "../../packages/cli/src/deck/protocol.ts";
+import { type } from "./harness/agents.ts";
 import { config, cursorTo, entry, launched, rowIndex, seed, sessionRows, state, title, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 import { liveSession } from "./harness/lifecycle.ts";
@@ -45,6 +46,19 @@ test("Inactive after inactive_after, never while blocked or unseen or working", 
 	release(s, "b1.working");
 	await until(() => entry(s, blocked).inactive, 8000, "the released session goes inactive once seen and quiet");
 	await until(() => title(s) === "swb ●1", budgets.settle, "the title counting only the unseen");
+	s.keys("M-a", "h");
+	await waitState(s, "roster focus", (x) => x.focus === "roster");
+	// Asking, and read, it stays out of Inactive however long it waits, and the title counts it.
+	type(s, blocked, "question Keep going?");
+	await until(() => entry(s, blocked)?.asking, budgets.settle, "asking");
+	await cursorTo(s, blocked);
+	s.keys("Enter");
+	await until(() => !entry(s, blocked).unseen, budgets.settle, "the question read");
+	await Bun.sleep(3000);
+	expect(entry(s, blocked)).toMatchObject({ asking: true, inactive: false });
+	await until(() => title(s) === "swb ?1 ●1", budgets.settle, "the title counting the question");
+	s.keys("-l", "reply carry on", "Enter");
+	await until(() => entry(s, blocked).inactive, 8000, "answered, then inactive");
 	s.keys("M-a", "h");
 	await waitState(s, "roster focus", (x) => x.focus === "roster");
 	await cursorTo(s, unseen);

@@ -150,6 +150,8 @@ function glyph(state: State, now: number): string {
 			return bold(red("↯"));
 		case "errored":
 			return bold(red("×"));
+		case "asking":
+			return bold(yellow("?"));
 		case "archived":
 			return "✓";
 	}
@@ -596,7 +598,7 @@ function verbsLine(width: number): string {
 }
 
 /** States that ask for me, in the order the roster ranks them. */
-const ATTENTION: State[] = ["blocked", "cut-off", "errored", "unseen"];
+const ATTENTION: State[] = ["blocked", "cut-off", "errored", "asking", "unseen"];
 
 /** Each attention mark among `entries`, with how many carry it. */
 function attentionTally(entries: Entry[]): string {
@@ -704,7 +706,7 @@ function list(rows: Row[], index: number, width: number, full: number, now: numb
 function overflowRule(hidden: Row[], arrow: string, width: number, section = "", lead = false): string {
 	const head = lead ? ` ${bold(keyName(model.config.prefix))} ` : "";
 	const states = hidden.flatMap((r) => (r.kind === "session" ? [stateOf(r.entry)] : []));
-	const counts = (["blocked", "cut-off", "errored", "unseen"] as State[]).flatMap((state) => {
+	const counts = ATTENTION.flatMap((state) => {
 		const n = states.filter((s) => s === state).length;
 		return n ? [`${glyph(state, Date.now())}${n}`] : [];
 	});
@@ -1055,11 +1057,7 @@ function sessionLine(
 	const hidden = row.folded ? ` ${foldedTally(row.family.map((p) => p.entry))}` : "";
 	const badge = meta ? ` ${meta}` : "";
 	const titleWidth = width - visibleWidth(lead) - 2 - visibleWidth(hidden) - visibleWidth(right) - visibleWidth(badge);
-	const paint = ["blocked", "unseen", "cut-off", "errored"].includes(state)
-		? bold
-		: e.provisional || state === "archived"
-			? gray
-			: (s: string) => s;
+	const paint = ATTENTION.includes(state) ? bold : e.provisional || state === "archived" ? gray : (s: string) => s;
 	const hovered = model.peek.settled?.source === "pointer" && model.peek.settled.id === e.id;
 	const style = (text: string) => {
 		const name = hovered ? text : matchedText(text);
@@ -1121,6 +1119,7 @@ function familyTally(family: Entry[]): string {
 		[["blocked"], "◆"],
 		[["cut-off"], "↯"],
 		[["errored"], "×"],
+		[["asking"], "?"],
 		[["unseen"], "●"],
 		[["idle"], "○"],
 		[["dormant"], "–"],
@@ -1135,12 +1134,12 @@ function familyTally(family: Entry[]): string {
 
 /** How many sessions a fold hides, and of them, as the terminal's title counts them, those that need me. */
 function foldedTally(hidden: Entry[]): string {
-	const states = hidden.map(stateOf);
+	const states = hidden.filter((e) => !e.snoozed).map(stateOf);
 	const count = (state: State, mark: string) => {
 		const n = states.filter((s) => s === state).length;
 		return n > 0 ? ` ${mark}${n}` : "";
 	};
-	return `${gray(`+${hidden.length}`)}${count("blocked", attention("◆"))}${count("unseen", green("●"))}`;
+	return `${gray(`+${hidden.length}`)}${count("blocked", attention("◆"))}${count("asking", bold(yellow("?")))}${count("unseen", green("●"))}`;
 }
 
 // ── Peek ────────────────────────────────────────────────────────────────
@@ -1478,7 +1477,9 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	) {
 		const label = info.last.who === "you" ? "you " : "  › ";
 		const pad = visibleWidth(label);
-		const text = wrapTextWithAnsi(info.last.text.replace(/\s+/g, " ").trim(), inner - pad);
+		// An asking session's reply opens on its question, the one paragraph worth a glance.
+		const said = stateOf(e) === "asking" && info.last.who === "agent" ? (info.last.text.trim().split(/\n\s*\n/)[0] ?? "") : info.last.text;
+		const text = wrapTextWithAnsi(said.replace(/\s+/g, " ").trim(), inner - pad);
 		const shown = text.length > 3 ? [...text.slice(0, 2), truncateToWidth(text.slice(2).join(" "), inner - pad, "…")] : text;
 		turn.push(rule, ...shown.map((line, i) => `${gray(i === 0 ? label : " ".repeat(pad))}${line}`));
 	}

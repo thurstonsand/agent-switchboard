@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { bootId, type Db, type Harness, operatorDir, type Phase, pidAlive, type ReloadMode, type View } from "@swb/shared";
-import { OPEN } from "@swb/shared/states";
+import { ASKING, ERRORED, OPEN } from "@swb/shared/states";
 import { loadConfig } from "./config.ts";
 import { SwbError } from "./errors.ts";
 import { listHosts } from "./tmux.ts";
@@ -31,6 +31,8 @@ export type SessionState = {
 	cutOff: CutOff | null;
 	/** Its last turn ended on its provider's error, and none has started since. */
 	errored: boolean;
+	/** Its last turn ended on a question for me, by swb_ask_user, and none has started since. A snooze still hides it. */
+	asking: boolean;
 	inactive: boolean;
 	/** Out of the way until a time or its next message; blocked, cut off, or errored, it shows anyway. */
 	snoozed: boolean;
@@ -74,7 +76,10 @@ export type SessionRow = {
 	created_at: number;
 	last_prompt_at: number;
 	last_settled_at: number | null;
-	errored_at: number | null;
+	/** `ERRORED` */
+	errored: boolean;
+	/** `ASKING` */
+	asking: boolean;
 	archived_at: number | null;
 	/** Never archived, or prompted since: `OPEN`. */
 	open: boolean;
@@ -95,9 +100,9 @@ export type SessionRow = {
 export function sessionRows(db: Db): SessionRow[] {
 	return db
 		.all(
-			`SELECT s.session_id, s.harness, s.parent_id, coalesce(m.title, s.title) AS title, s.project_root, s.cwd, s.branch, s.transcript, s.phase, s.created_at, s.last_prompt_at, s.last_settled_at, s.errored_at,
+			`SELECT s.session_id, s.harness, s.parent_id, coalesce(m.title, s.title) AS title, s.project_root, s.cwd, s.branch, s.transcript, s.phase, s.created_at, s.last_prompt_at, s.last_settled_at,
 		        m.archived_at, m.visited_at, m.unseen_at, m.read_at, m.view, m.agent_cols, m.group_name, m.snoozed_at, m.snoozed_until, m.reload, r.tmux_session, r.boot_id, r.pid,
-		        ${OPEN} AS open, (SELECT max(created_at) FROM messages WHERE target_id = s.session_id AND kind = 'message') AS last_message_at
+		        ${OPEN} AS open, ${ERRORED} AS errored, ${ASKING} AS asking, (SELECT max(created_at) FROM messages WHERE target_id = s.session_id AND kind = 'message') AS last_message_at
 		 FROM sessions s LEFT JOIN marks m USING (session_id) LEFT JOIN runtimes r USING (session_id)`,
 		)
 		.map((r) => ({
@@ -113,7 +118,8 @@ export function sessionRows(db: Db): SessionRow[] {
 			created_at: r.created_at as number,
 			last_prompt_at: r.last_prompt_at as number,
 			last_settled_at: r.last_settled_at as number | null,
-			errored_at: r.errored_at as number | null,
+			errored: Boolean(r.errored),
+			asking: Boolean(r.asking),
 			archived_at: r.archived_at as number | null,
 			open: Boolean(r.open),
 			visited_at: r.visited_at as number | null,
@@ -189,7 +195,8 @@ function derive(row: SessionRow, w: World): SessionState {
 		(row.snoozed_until === null
 			? row.snoozed_at >= row.last_prompt_at && (row.last_message_at ?? 0) < row.snoozed_at
 			: row.snoozed_until > w.now);
-	const errored = activity === "idle" && !cutOff && row.errored_at !== null && row.errored_at >= row.last_prompt_at;
+	const { errored } = row;
+	const asking = open && row.asking;
 	const snoozed = open && holds && activity !== "blocked" && !cutOff && !errored;
 	// A timed snooze running out is news: Unseen until I look, and fresh for inactive_after.
 	const woke = row.snoozed_until !== null && row.snoozed_until <= w.now ? row.snoozed_until : 0;
@@ -217,7 +224,8 @@ function derive(row: SessionRow, w: World): SessionState {
 		markedUnseen,
 		cutOff,
 		errored,
-		inactive: open && !operator && !snoozed && quietSince < w.now - w.inactiveAfterMs && activity === "idle" && !unseen,
+		asking,
+		inactive: open && !operator && !snoozed && !asking && quietSince < w.now - w.inactiveAfterMs && activity === "idle" && !unseen,
 		snoozed,
 		snooze: open && holds ? { until: row.snoozed_until } : null,
 		snoozedUntil: snoozed ? row.snoozed_until : null,

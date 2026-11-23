@@ -169,7 +169,8 @@ export function startTurn(db: Db, t: Turn): string | null {
 			`INSERT INTO sessions (session_id, harness, parent_id, cwd, project_root, transcript, title, branch, phase, created_at, last_prompt_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'working', ?, ?)
 			 ON CONFLICT (session_id) DO UPDATE SET phase = 'working',
-			   last_prompt_at = CASE WHEN sessions.phase = 'idle' THEN excluded.last_prompt_at ELSE sessions.last_prompt_at END`,
+			   last_prompt_at = CASE WHEN sessions.phase = 'idle' THEN excluded.last_prompt_at ELSE sessions.last_prompt_at END,
+			   ending = CASE WHEN sessions.phase = 'idle' THEN NULL ELSE sessions.ending END`,
 			t.sessionId,
 			t.harness,
 			parentId,
@@ -208,7 +209,8 @@ export function setPhase(db: Db, sessionId: string, phase: "working" | "blocked"
 	recordTx(db, () => db.run("UPDATE sessions SET phase = ? WHERE session_id = ? AND phase != 'idle'", phase, sessionId));
 }
 
-export type Settle = { host: string; sessionId: string; cwd: string; title: string | null };
+/** `errored`: the turn ended on its provider's error, which outranks a question it asked, since that likely never landed. */
+export type Settle = { host: string; sessionId: string; cwd: string; title: string | null; errored: boolean };
 
 /**
  * The turn finished with nothing queued. Reports whether its line should quit now: the session was archived during it,
@@ -220,9 +222,10 @@ export function settle(db: Db, s: Settle): { quit: boolean } {
 	return recordTx(db, () => {
 		harnessTitled(db, s.sessionId, s.title);
 		db.run(
-			"UPDATE sessions SET phase = 'idle', last_settled_at = ?, title = coalesce(?, title) WHERE session_id = ?",
+			"UPDATE sessions SET phase = 'idle', last_settled_at = ?, title = coalesce(?, title), ending = CASE WHEN ? THEN 'errored' ELSE ending END WHERE session_id = ?",
 			Date.now(),
 			s.title,
+			s.errored ? 1 : 0,
 			s.sessionId,
 		);
 		// An archive-and-delete turn keeps the checkout's last recorded Project and branch.
@@ -235,9 +238,12 @@ export function settle(db: Db, s: Settle): { quit: boolean } {
 	});
 }
 
-/** The turn ended on its provider's error. It stands until the next turn starts from idle. */
-export function turnErrored(db: Db, sessionId: string): void {
-	recordTx(db, () => db.run("UPDATE sessions SET errored_at = ? WHERE session_id = ?", Date.now(), sessionId));
+/** The running turn ends on a question for me, by swb_ask_user. It stands until the next turn starts from idle. */
+export function asked(db: Db, sessionId: string): void {
+	recordTx(db, () => {
+		if (!db.get("SELECT 1 FROM sessions WHERE session_id = ?", sessionId)) throw new Error(`no session ${sessionId} to mark asking`);
+		db.run("UPDATE sessions SET ending = 'asked' WHERE session_id = ?", sessionId);
+	});
 }
 
 export function setTitle(db: Db, sessionId: string, title: string | null): void {

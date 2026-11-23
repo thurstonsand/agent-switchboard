@@ -318,6 +318,7 @@ function snapshot(): Polled {
 			markedUnseen: false,
 			cutOff: null,
 			errored: false,
+			asking: false,
 			inactive: false,
 			snoozed: false,
 			snooze: null,

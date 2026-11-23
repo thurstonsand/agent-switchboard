@@ -14,7 +14,6 @@ import {
 	settle,
 	startHosting,
 	startTurn,
-	turnErrored,
 } from "@swb/shared/record";
 import { mark, now, since } from "@swb/shared/trace";
 import { readTranscript } from "../deck/transcript.ts";
@@ -377,8 +376,13 @@ class CodexLine {
 			this.blocked = false;
 			this.guard(() => {
 				// The live error arrives before the rollout's turn history necessarily records it.
-				if (status.type === "systemError") turnErrored(this.db, thread.id);
-				const { quit } = settle(this.db, { host: this.host, sessionId: thread.id, cwd: thread.cwd, title: thread.name });
+				const { quit } = settle(this.db, {
+					host: this.host,
+					sessionId: thread.id,
+					cwd: thread.cwd,
+					title: thread.name,
+					errored: status.type === "systemError",
+				});
 				if (quit) {
 					this.stopping = true;
 					this.stop();
@@ -452,6 +456,7 @@ class CodexLine {
 		this.seenVersion = -1;
 		const bound = this.bound;
 		mark("codex.bound");
+		const status = this.statuses.get(bound.id);
 		// One write, so a busy db retries all of it: a retry after startTurn alone would find the row and never settle it.
 		this.guard(() =>
 			recordTx(this.db, () => {
@@ -467,11 +472,16 @@ class CodexLine {
 				// A turn that ran before the title named its thread still makes the session's row.
 				if (!this.db.get("SELECT 1 FROM sessions WHERE session_id = ?", bound.id) && bound.path && hasTurns(bound.path)) {
 					this.startTurn(bound);
-					settle(this.db, { host: this.host, sessionId: bound.id, cwd: bound.cwd, title: bound.name });
+					settle(this.db, {
+						host: this.host,
+						sessionId: bound.id,
+						cwd: bound.cwd,
+						title: bound.name,
+						errored: status?.type === "systemError",
+					});
 				}
 			}),
 		);
-		const status = this.statuses.get(bound.id);
 		if (status) this.apply(status);
 	}
 

@@ -180,7 +180,7 @@ session.start          register tools; spawn swb __inbox --host $SWB_TMUX_SESSIO
 session.end            /clear or /resume → swb __record start for the session it moves to
 turn.start (main)      swb __record turn
 tool.check → ask with no host deciding → blocked, unless the transcript last recorded auto mode and the tool isn't AskUserQuestion; turn.step → working again
-turn.complete (main)   reason error → swb __record errored; swb __record settled   archived meanwhile → swb stops the pane
+turn.complete (main)   swb __record settled, with --errored when reason is error   archived meanwhile → swb stops the pane
 UserPromptSubmit       a command hook in hooks.json, swb __claude_hook title: a title set through swb, as sessionTitle. Only a prompt hook titles, and an organization's cc-plugin-sec-default sends a mod's classic hooks on past the line
 SessionStart (resume)  a command hook in hooks.json, swb __claude_hook recovery: SWB_RECOVERY_NOTICE, for the person and as context
 prompt.edit            remember the draft; session.end writes it to drafts/<id>

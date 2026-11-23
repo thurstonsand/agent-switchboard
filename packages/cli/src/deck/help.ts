@@ -1,6 +1,6 @@
 import { decodeKittyPrintable, matchesKey, StdinBuffer, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { loadConfig } from "../config.ts";
-import { blockedMark, blue, bold, cyan, dim, gray, green, keyName, red } from "./style.ts";
+import { blockedMark, blue, bold, cyan, dim, gray, green, keyName, red, yellow } from "./style.ts";
 
 const CLOSES = "any key to close";
 
@@ -59,6 +59,7 @@ function lines(prefix: string, columns = Infinity): string[] {
 		`  ${blockedMark("◆")} blocked · waiting for you`,
 		`  ${bold(red("↯"))} cut off · resume unfinished turn`,
 		`  ${bold(red("×"))} errored · inspect error`,
+		`  ${bold(yellow("?"))} asking · a question for you`,
 		`  ${green("●")} Unseen · finished since last viewed`,
 		`  ${bold(cyan("◐"))} working`,
 		"  ○ idle · running",

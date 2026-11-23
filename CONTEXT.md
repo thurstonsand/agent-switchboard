@@ -31,13 +31,14 @@
 - **Activity**: What a live session's agent is doing right now: **working**, **blocked** on me (e.g. permission prompt), or **idle**.
 - **Visit**: The moment I last looked at a session.
 - **Unseen**: A session whose agent finished a turn and I have not yet **visited**.
+- **Asking**: A session whose agent ended its turn on a question for me. It stays Asking until its next turn starts, whoever starts it.
 
 ### Organization
 
 - **Deck**: What `swb` opens: the **Roster** beside a **Stage**. There is one persistent instance, shared by every terminal that opens it.
 - **Roster**: The Deck's list of sessions, in sections: **Operators**, open sessions by **Project**, **Inactive**, **Snoozed**, then **Archived**.
 - **Stage**: The Deck's live, interactive view of the selected session. Internal term (not in UI).
-- **Lens**: What the **Roster** narrows itself to until I clear it: one **Group** across Projects, or the sessions that need me (blocked, cut off, or errored).
+- **Lens**: What the **Roster** narrows itself to until I clear it: one **Group** across Projects, or the sessions that need me (blocked, cut off, errored, or asking).
 - **Editor**: The text editor for one directory, shared by every session whose working directory it is.
 - **Peek**: A session's particulars and keys, shown beside its Roster row on focus.
 - **Overlay**: A box the Deck shows over its panes without moving them or taking the keyboard: a **Peek**, the picker's launch card, its menu. Internal term (not in UI).
@@ -51,6 +52,6 @@
 
 - A **Session** other than an **Operator** belongs to exactly one **Project**, derived from its working directory, and to at most one **Group** within it
 - A **Session** is open or **Archived**; independently, it is **Live** or **Dormant**
-- **Activity**, **Unseen**, and **Snoozed** apply only to open sessions; a Snoozed session is neither Unseen nor Inactive while it holds
+- **Activity**, **Unseen**, **Asking**, and **Snoozed** apply only to open sessions; a Snoozed session is neither Unseen nor Inactive while it holds, and an Asking one is never Inactive
 - pi-sessions **subagents**, and Claude Code's and Codex's own subagents, are never **Sessions** here; their parent owns them
 - A **Session** started by another records it as its parent; one an **Operator** started is never itself an **Operator**

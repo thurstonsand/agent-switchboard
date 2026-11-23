@@ -2,8 +2,8 @@ import { existsSync, realpathSync, statSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import { type Db, type Harness, operatorDir, projectRoot, type ReloadMode, type View } from "@swb/shared";
 import { frame, harnessName, type MessageKind, ring } from "@swb/shared/mailbox";
-import { isArchived, markArchived, recordTx, titleOf } from "@swb/shared/record";
-import type { ToolArgs, ToolResult } from "@swb/shared/tools";
+import { asked, isArchived, markArchived, recordTx, titleOf } from "@swb/shared/record";
+import { ASKED, type ToolArgs, type ToolResult } from "@swb/shared/tools";
 import { CodexClient } from "./codex/client.ts";
 import { codexSocket } from "./codex/host.ts";
 import { loadConfig } from "./config.ts";
@@ -34,9 +34,9 @@ import { inUse } from "./transcripts/read.ts";
 // The coordination every line's tools run. Each returns the text the model reads, so all three harnesses say the same
 // thing, and the facts a line may render. The sender is always the line's own session, never a tool argument.
 
-/** Working, blocked, idle, or a turn that ended badly; whether its process runs is swb's to handle. */
+/** Working, blocked, idle, a turn that ended badly, or one that asks the user; whether its process runs is swb's to handle. */
 function stateOf(s: SessionState): string {
-	return s.cutOff ? "cut off" : s.errored ? "errored" : s.activity;
+	return s.cutOff ? "cut off" : s.errored ? "errored" : s.asking ? "asking" : s.activity;
 }
 
 function describe(s: SessionState): string {
@@ -276,6 +276,12 @@ async function titled(db: Db, id: string, title: string): Promise<void> {
 		await Bun.sleep(100);
 	}
 	throw new SwbError(`launched ${id}, but its first turn didn't start within 15 s, so it isn't titled "${title}"`);
+}
+
+/** swb_ask_user: the caller's turn ends on a question for the user. */
+export function askUser(db: Db, from: string): ToolResult {
+	asked(db, from);
+	return ASKED;
 }
 
 /** Moves the Deck the user is looking at the caller in onto another session, as picking its row would. */

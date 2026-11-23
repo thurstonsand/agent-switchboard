@@ -229,6 +229,40 @@ test("a turn that starts while the db is busy past busy_timeout is recorded once
 	expect(timedOut).toEqual(expect.arrayContaining(["pi", "__record", "__codex"]));
 });
 
+test("an agent that ends its turn on swb_ask_user stays Asking in every harness, until the next turn starts, typed or messaged", async () => {
+	s = scenario("harnesses", "asking", { packages: [], recorder: true, harnesses: ["claude", "codex"] });
+	const [pi, claude, codex] = await Promise.all([
+		launched(s, "pi", "reply pi-up"),
+		launched(s, "claude", "reply claude up"),
+		launched(s, "codex", "reply codex up"),
+	]);
+	const asking = (id: string) => s.ls().find((e) => e.id === id)?.asking;
+	for (const e of [pi, claude, codex]) expect(asking(e.id)).toBe(false);
+
+	for (const e of [pi, claude, codex]) {
+		const since = type(s, e.id, "question SWB-q Rebuild the table, or add a column?");
+		await answered(s, e.id, "Rebuilding drops errored_at", `${e.harness}'s question`, since);
+		expect(asking(e.id)).toBe(true);
+	}
+	// What the user reads for the call in each harness: the result's first line.
+	expect(pane(s, pi.id)).toContain("Asking: this session is waiting on you");
+	expect(pane(s, claude.id)).toMatch(/Ask\n\s+⎿ {2}Asking: this session is waiting on you/);
+	expect(pane(s, codex.id)).toContain("Asking: this session is waiting on you");
+	const listed = JSON.parse(s.swb("list", "--from", pi.id)) as { text: string };
+	expect(listed.text).toMatch(new RegExp(`${claude.id} · Claude Code · .*asking`));
+	s.save("asked.txt", [pane(s, pi.id), pane(s, claude.id), pane(s, codex.id)].join("\n=====\n"));
+
+	// A turn I type clears pi's; a message from another session clears Claude's; Codex, untouched, still asks.
+	let since = type(s, pi.id, "reply SWB-answered");
+	await replied(s, pi.id, "SWB-answered", "pi's next turn", since);
+	since = Date.now();
+	expect((await send(s, codex.id, claude.id, "SWB-from-codex go ahead")).details.delivered).toBe(true);
+	await answered(s, claude.id, "got SWB-from-codex go ahead", "Claude's turn on the message", since);
+	expect(asking(pi.id)).toBe(false);
+	expect(asking(claude.id)).toBe(false);
+	expect(asking(codex.id)).toBe(true);
+});
+
 test("agents use swb's tools across harnesses: list, message, launch, and cancel, with the caller as the sender", async () => {
 	s = scenario("harnesses", "agents", { packages: [], recorder: true, harnesses: ["claude", "codex"] });
 	const [pi, claude, codex] = await Promise.all([
