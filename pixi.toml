@@ -1,0 +1,13 @@
+[workspace]
+name = "agent-switchboard"
+channels = ["conda-forge"]
+# VHS records evidence through tmux, so the recorder's tools cover only the platforms tmux runs on.
+platforms = ["linux-64", "linux-aarch64", "osx-arm64"]
+# mise's conda backend applies its release-age cutoff only to the package named, so these come from pixi, whose
+# solver holds back every package in the environment, dependencies included, for 3 days.
+exclude-newer = "3d"
+requires-pixi = ">=0.84.2"
+
+[dependencies]
+ffmpeg = "==9.0.2"
+ttyd = "==1.7.7"

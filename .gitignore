@@ -5,3 +5,4 @@ test/e2e/artifacts/
 .amp/portals/*
 test/perf/results/
 test/eval/results/
+/.pixi/

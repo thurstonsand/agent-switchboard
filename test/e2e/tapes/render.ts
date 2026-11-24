@@ -3,8 +3,8 @@
 // released, processes killed, the clock moved) and asserts on `swb deck state`. Either failing fails the render.
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { repo, type Scenario, scenario, which } from "../harness/index.ts";
+import { join } from "node:path";
+import { pixiBin, repo, type Scenario, scenario, which } from "../harness/index.ts";
 import { directors } from "./directors.ts";
 
 const tapes = import.meta.dir;
@@ -13,9 +13,10 @@ const videos = join(repo, "test/e2e/artifacts/phase6/videos");
 const vhs = which("vhs");
 // VHS runs the ttyd it finds on PATH. On macOS, xterm.js in VHS's headless Chrome takes Option for a third-level shift and
 // sends Alt+a as a plain a; this ttyd has it send ESC first, as on every other platform.
+const recorder = pixiBin();
 const ttydDir = mkdtempSync(join(tmpdir(), "swb-vhs-"));
-writeFileSync(join(ttydDir, "ttyd"), `#!/bin/sh\nexec ${which("ttyd")} -t macOptionIsMeta=true "$@"\n`, { mode: 0o755 });
-const toolPath = [ttydDir, dirname(which("ffmpeg"))].join(":");
+writeFileSync(join(ttydDir, "ttyd"), `#!/bin/sh\nexec ${join(recorder, "ttyd")} -t macOptionIsMeta=true "$@"\n`, { mode: 0o755 });
+const toolPath = [ttydDir, recorder].join(":");
 
 /** The Deck as text and ANSI, taken when the director finishes, while the tape still holds the Deck open. */
 function snapshot(s: Scenario): void {

@@ -9,7 +9,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { scenario, which } from "../harness/index.ts";
+import { pixiBin, scenario, which } from "../harness/index.ts";
 import { directors } from "./directors.ts";
 
 const tapes = import.meta.dir;
@@ -71,9 +71,8 @@ function shot(file: string): void {
 			"",
 		].join("\n"),
 	);
-	const tools = [dirname(which("ttyd")), dirname(which("ffmpeg"))].join(":");
 	try {
-		run([which("vhs"), "-q", tape, "-o", join(scratch, "shot.mp4")], { ...env, PATH: `${env.PATH}:${tools}` });
+		run([which("vhs"), "-q", tape, "-o", join(scratch, "shot.mp4")], { ...env, PATH: `${env.PATH}:${pixiBin()}` });
 	} finally {
 		rmSync(scratch, { recursive: true, force: true });
 	}

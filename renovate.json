@@ -57,12 +57,6 @@
 			"enabled": false
 		},
 		{
-			"description": "conda-forge has no lookup Renovate can resolve for these, so every run fails on them. mise pins them by hand.",
-			"matchDatasources": ["conda"],
-			"matchPackageNames": ["ttyd", "ffmpeg"],
-			"enabled": false
-		},
-		{
 			"matchDatasources": ["github-releases"],
 			"matchPackageNames": ["jdx/hk"],
 			"groupName": "hk",

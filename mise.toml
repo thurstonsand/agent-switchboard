@@ -13,8 +13,8 @@ node = "26"
 "aqua:biomejs/biome" = "2.6.8"
 "aqua:tmux/tmux-builds" = "3.8"
 "aqua:charmbracelet/vhs" = "0.12.1"
-"conda:ttyd" = "1.7.7"
-"conda:ffmpeg" = "9.0.2"
+# VHS records with ttyd and ffmpeg, which pixi installs from pixi.lock.
+pixi = "0.84.2"
 "github:thurstonsand/wt" = "1.17.0"
 "aqua:neovim/neovim" = "0.12.6"
 hk = "2.13.0"
@@ -38,6 +38,10 @@ run = "biome check ."
 [tasks."lint:actions"]
 description = "Lint GitHub Actions workflows"
 run = "hk check --all --step jactionlint"
+
+[tasks."lint:pixi"]
+description = "pixi.lock still matches pixi.toml"
+run = "pixi lock --check"
 
 [tasks.fix]
 run = ["biome check --write .", "hk fix --all --step jactionlint"]

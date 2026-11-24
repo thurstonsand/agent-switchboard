@@ -26,6 +26,12 @@ export function which(tool: string): string {
 	return run(["mise", "which", tool]);
 }
 
+/** The directory of pixi's environment, installed from pixi.lock as committed. */
+export function pixiBin(): string {
+	run([which("pixi"), "install", "--locked", "--manifest-path", join(repo, "pixi.toml")]);
+	return join(repo, ".pixi/envs/default/bin");
+}
+
 /**
  * A harness's package for this platform, which its npm package lists as an optional dependency and bun installs
  * beside it. It holds the native binary, not npm's node wrapper, so a pane's pid is the harness itself.
