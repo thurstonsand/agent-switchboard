@@ -13,9 +13,20 @@ import { hostPane, SESSIONS, SWB, tmuxTry } from "../tmux.ts";
 
 const TICK_MS = 250;
 const RECONCILE_MS = 15_000;
-/** A session that won't start is tried again after this, doubling, up to WAKE_RETRY_MAX_MS. */
-const WAKE_RETRY_MS = 30_000;
-const WAKE_RETRY_MAX_MS = 10 * 60_000;
+/**
+ * Every start the clock makes is one try to have a session take what waits on it, a message or a reload; it gets
+ * WAKE_ATTEMPTS, each WAKE_BACKOFF_MS after the last, doubling. Taking what waited starts its tries over: a reload is
+ * taken once the harness its start began registers, a message once its line takes it, so a start that quits before
+ * then used one up. Out of tries, the clock stops starting it and records why: it shows failed to start, and what waited stays
+ * waiting, until a start it didn't make, a person's or a sender's, has it take it.
+ */
+const WAKE_ATTEMPTS = 3;
+const WAKE_BACKOFF_MS = 30_000;
+
+const MAILED = `SELECT DISTINCT target_id AS id FROM messages WHERE ${PENDING_MESSAGE} AND kind = 'message'`;
+
+/** Every session something waits on: an undelivered message, or a reload its line quits for, or that is coming back up. */
+const WAITING = `${MAILED} UNION SELECT session_id FROM marks WHERE reload IS NOT NULL`;
 /** The index syncs at most this often, in its own process, so a search finds little left to catch up on. */
 const SYNC_GAP_MS = 5_000;
 
@@ -25,7 +36,8 @@ function log(text: string): void {
 
 export async function clock(): Promise<void> {
 	const db = openStore();
-	const retries = new Map<string, { at: number; wait: number }>();
+	/** Why the clock's last start of each session failed, when wake itself refused; one that started and quit leaves none. */
+	const refusals = new Map<string, string>();
 	let version = -1;
 	let due: number | null = null;
 	let reconciled = 0;
@@ -34,52 +46,82 @@ export async function clock(): Promise<void> {
 	/**
 	 * A session starts with remain-on-exit on, so a harness that dies before it registers leaves its last words for the
 	 * Deck to show. Once registered, its pane goes when the harness quits, however it was started, unless it's on the
-	 * Deck, whose window keeps it for the roster to swap out; and it's no longer starting.
+	 * Deck, whose window keeps it for the roster to swap out; and it's no longer starting. Up with nothing waiting on it,
+	 * it took what did, so its tries start over now, not when the clock next looks.
 	 */
 	const settleHosts = () => {
-		const hosts = new Set(db.all("SELECT tmux_session FROM runtimes").map((row) => row.tmux_session as string));
+		const hosts = new Map(
+			db.all("SELECT tmux_session, session_id FROM runtimes").map((row) => [row.tmux_session as string, row.session_id as string]),
+		);
 		for (const host of registered) if (!hosts.has(host)) registered.delete(host);
-		for (const host of hosts) {
+		const waiting = new Set(db.all(WAITING).map((row) => row.id as string));
+		for (const [host, id] of hosts) {
 			if (registered.has(host)) continue;
 			registered.add(host);
+			if (!waiting.has(id)) startOver(id);
 			const pane = hostPane(host);
 			if (pane) tmuxTry(SESSIONS, "set", "-p", "-u", "-t", pane, "remain-on-exit", ";", "set", "-p", "-u", "-t", pane, "@swb_starting");
 		}
 	};
 
 	/**
-	 * Every open session with no process and an undelivered message, or a reload whose line has quit for it, gets one,
-	 * unless it's waiting out a failed start. A reload that waited for idle leaves a session cut off meanwhile as it is.
+	 * Every open session with no process and something waiting on it gets a start, unless it's waiting out its last one
+	 * or failed to start. A reload that waited for idle leaves a session cut off meanwhile as it is.
 	 */
 	const wakeWaiting = (now: number) => {
 		reconciled = now;
-		const waiting = new Set(
+		const waiting = new Set(db.all(WAITING).map((row) => row.id as string));
+		const tries = new Map(
 			db
-				.all(
-					`SELECT DISTINCT target_id AS id FROM messages WHERE ${PENDING_MESSAGE} AND kind = 'message'
-					 UNION SELECT session_id FROM marks WHERE reload IS NOT NULL`,
-				)
-				.map((row) => row.id as string),
+				.all("SELECT session_id, wake_attempts, woken_at FROM marks WHERE wake_attempts IS NOT NULL")
+				.map((row) => [row.session_id as string, { n: row.wake_attempts as number, at: row.woken_at as number }]),
 		);
-		for (const id of retries.keys()) if (!waiting.has(id)) retries.delete(id);
+		const took = [...tries.keys()].filter((id) => !waiting.has(id));
+		for (const id of took) {
+			startOver(id);
+			tries.delete(id);
+		}
 		if (waiting.size === 0) return;
+		const mailed = new Set(db.all(MAILED).map((row) => row.id as string));
 		for (const s of states(db)) {
-			if (!waiting.has(s.id) || !s.open || s.live) continue;
+			if (!waiting.has(s.id) || !s.open || s.live || s.failedToStart) continue;
 			if (s.reload === "idle" && s.cutOff) {
 				recordTx(db, () => setReload(db, s.id, null));
 				continue;
 			}
-			const retry = retries.get(s.id);
-			if (retry && now < retry.at) continue;
-			const wait = retry ? Math.min(retry.wait * 2, WAKE_RETRY_MAX_MS) : WAKE_RETRY_MS;
-			retries.set(s.id, { at: now + wait, wait });
+			const tried = tries.get(s.id);
+			if (tried && now < tried.at + WAKE_BACKOFF_MS * 2 ** (tried.n - 1)) continue;
+			if (tried && tried.n >= WAKE_ATTEMPTS) {
+				const why =
+					refusals.get(s.id) ?? (mailed.has(s.id) ? "it stopped before it took its messages" : "it stopped before it came back up");
+				log(`giving up on ${s.id} after ${WAKE_ATTEMPTS} starts: ${why}`);
+				recordTx(db, () => db.run("UPDATE marks SET wake_failure = ? WHERE session_id = ?", why, s.id));
+				refusals.delete(s.id);
+				continue;
+			}
+			recordTx(db, () =>
+				db.run(
+					`INSERT INTO marks (session_id, wake_attempts, woken_at) VALUES (?, 1, ?)
+					 ON CONFLICT (session_id) DO UPDATE SET wake_attempts = coalesce(wake_attempts, 0) + 1, woken_at = excluded.woken_at`,
+					s.id,
+					now,
+				),
+			);
 			try {
 				const host = wake(db, s.id, s.reload ?? "idle");
-				log(`waking ${s.id} for its ${s.reload ? "reload" : "mail"}: ${host}`);
+				refusals.delete(s.id);
+				log(`waking ${s.id} for its ${s.reload ? "reload" : "mail"} (try ${(tried?.n ?? 0) + 1} of ${WAKE_ATTEMPTS}): ${host}`);
 			} catch (error) {
+				refusals.set(s.id, (error as Error).message);
 				log(`waking ${s.id} failed: ${(error as Error).message}`);
 			}
 		}
+	};
+
+	/** A session that took what waited on it, or has nothing waiting any more, starts its tries over. */
+	const startOver = (id: string) => {
+		recordTx(db, () => db.run("UPDATE marks SET wake_attempts = NULL, woken_at = NULL, wake_failure = NULL WHERE session_id = ?", id));
+		refusals.delete(id);
 	};
 
 	/** Whether a reload waits for a session its line has quit, which a data_version change is the first sign of. */

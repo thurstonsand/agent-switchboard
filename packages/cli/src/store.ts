@@ -150,6 +150,12 @@ const MIGRATIONS: string[] = [
 	`ALTER TABLE sessions ADD COLUMN ending TEXT CHECK (ending IN ('errored','asked'));
 	UPDATE sessions SET ending = 'errored' WHERE errored_at >= last_prompt_at;
 	ALTER TABLE sessions DROP COLUMN errored_at;`,
+	// How many times in a row the clock has started the session for what waits on it, when it last did, and why it gave up;
+	// and when a reload's restart started, which the harness it started completes by registering.
+	`ALTER TABLE marks ADD COLUMN reload_started_at INTEGER;
+	ALTER TABLE marks ADD COLUMN wake_attempts INTEGER;
+	ALTER TABLE marks ADD COLUMN woken_at INTEGER;
+	ALTER TABLE marks ADD COLUMN wake_failure TEXT;`,
 ];
 
 if (MIGRATIONS.length !== SCHEMA_VERSION) throw new Error(`${MIGRATIONS.length} migrations for schema v${SCHEMA_VERSION}`);
@@ -193,9 +199,14 @@ export function rename(db: Db, id: string, title: string | null): void {
 	db.run("INSERT INTO marks (session_id, title) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET title = excluded.title", id, title);
 }
 
-/** A reload for the session's line to quit for when its turn ends, and the clock to start it again from; null for none. */
+/** A reload, not started, for the session's line to quit for when its turn ends, and the clock to start it again from; null for none. */
 export function setReload(db: Db, id: string, mode: ReloadMode | null): void {
-	db.run("INSERT INTO marks (session_id, reload) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET reload = excluded.reload", id, mode);
+	db.run(
+		`INSERT INTO marks (session_id, reload) VALUES (?, ?)
+		 ON CONFLICT (session_id) DO UPDATE SET reload = excluded.reload, reload_started_at = NULL`,
+		id,
+		mode,
+	);
 }
 
 /** Moves sessions into a Group, or out of any when `name` is null. */

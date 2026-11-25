@@ -57,7 +57,7 @@ const asking = new Set<string>();
 let schedules = new Map<string, ScheduleView[]>();
 let pending = new Map<string, Pending[]>();
 /** What each launch left for the first session its process records, by tmux session, until that session takes it. */
-let launches = new Map<string, { parentId: string | null; group: string | null }>();
+let launches = new Map<string, { resumeId: string | null; parentId: string | null; group: string | null }>();
 let profile: TerminalProfile | null = null;
 /** The server this Deck last mirrored its terminal's background into, by pid: a new one is mirrored again. */
 let mirroredServer = "";
@@ -177,8 +177,11 @@ function readDb(): void {
 	pending = pendingBySession(db);
 	launches = new Map(
 		db
-			.all("SELECT tmux_session, parent_id, group_name FROM launches")
-			.map((row) => [row.tmux_session as string, { parentId: row.parent_id as string | null, group: row.group_name as string | null }]),
+			.all("SELECT tmux_session, resume_id, parent_id, group_name FROM launches")
+			.map((row) => [
+				row.tmux_session as string,
+				{ resumeId: row.resume_id as string | null, parentId: row.parent_id as string | null, group: row.group_name as string | null },
+			]),
 	);
 	for (const [id, view] of pendingViews) {
 		if (!rows.some((row) => row.session_id === id)) continue;
@@ -284,6 +287,13 @@ function snapshot(): Polled {
 		inactiveAfterMs: config.inactiveAfterMs,
 	};
 	const known = new Set(rows.map((row) => row.session_id));
+	const recorded = new Set(runtimes.map((runtime) => runtime.tmux_session));
+	const resuming = new Map(
+		[...w.hosts].flatMap((host) => {
+			const id = recorded.has(host) ? null : launches.get(host)?.resumeId;
+			return id ? [[id, host] as const] : [];
+		}),
+	);
 	const entries: Entry[] = deriveSessions(rows, w).map((state, i) => {
 		const row = rows[i] as SessionRow;
 		return {
@@ -292,6 +302,7 @@ function snapshot(): Polled {
 			agentCols: row.agent_cols,
 			transcript: row.transcript,
 			host: state.live ? (row.runtime?.tmux_session ?? null) : null,
+			starting: state.live ? null : (resuming.get(row.session_id) ?? null),
 			provisional: false,
 			worktree: worktreeOf(row),
 			schedules: schedules.get(row.session_id) ?? [],
@@ -324,6 +335,7 @@ function snapshot(): Polled {
 			snooze: null,
 			snoozedUntil: null,
 			reload: null,
+			failedToStart: null,
 			createdAt: runtime.started_at,
 			activityAt: runtime.started_at,
 			visitedAt: null,
@@ -332,6 +344,7 @@ function snapshot(): Polled {
 			agentCols: null,
 			transcript: null,
 			host: runtime.tmux_session,
+			starting: null,
 			provisional: true,
 			worktree: null,
 			schedules: [],

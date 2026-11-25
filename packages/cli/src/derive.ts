@@ -40,8 +40,10 @@ export type SessionState = {
 	snooze: { until: number | null } | null;
 	/** When a snoozed session's snooze ends; null while it waits for a message, or isn't snoozed. */
 	snoozedUntil: number | null;
-	/** A reload waiting for its turn to end, or for the clock to start it again, and how it comes back. */
+	/** A reload waiting for its turn to end, or for its restart to come back up, and how it comes back. */
 	reload: ReloadMode | null;
+	/** Why swb gave up starting it, dormant, for the messages or reload still waiting on it; null otherwise. */
+	failedToStart: string | null;
 	createdAt: number;
 	activityAt: number;
 	visitedAt: number | null;
@@ -92,6 +94,7 @@ export type SessionRow = {
 	snoozed_at: number | null;
 	snoozed_until: number | null;
 	reload: ReloadMode | null;
+	wake_failure: string | null;
 	/** The last message sent to it, delivered or not; one after a next_message snooze ends it. */
 	last_message_at: number | null;
 	runtime: RuntimeRow | null;
@@ -101,7 +104,7 @@ export function sessionRows(db: Db): SessionRow[] {
 	return db
 		.all(
 			`SELECT s.session_id, s.harness, s.parent_id, coalesce(m.title, s.title) AS title, s.project_root, s.cwd, s.branch, s.transcript, s.phase, s.created_at, s.last_prompt_at, s.last_settled_at,
-		        m.archived_at, m.visited_at, m.unseen_at, m.read_at, m.view, m.agent_cols, m.group_name, m.snoozed_at, m.snoozed_until, m.reload, r.tmux_session, r.boot_id, r.pid,
+		        m.archived_at, m.visited_at, m.unseen_at, m.read_at, m.view, m.agent_cols, m.group_name, m.snoozed_at, m.snoozed_until, m.reload, m.wake_failure, r.tmux_session, r.boot_id, r.pid,
 		        ${OPEN} AS open, ${ERRORED} AS errored, ${ASKING} AS asking, (SELECT max(created_at) FROM messages WHERE target_id = s.session_id AND kind = 'message') AS last_message_at
 		 FROM sessions s LEFT JOIN marks m USING (session_id) LEFT JOIN runtimes r USING (session_id)`,
 		)
@@ -131,6 +134,7 @@ export function sessionRows(db: Db): SessionRow[] {
 			snoozed_at: r.snoozed_at as number | null,
 			snoozed_until: r.snoozed_until as number | null,
 			reload: r.reload as ReloadMode | null,
+			wake_failure: r.wake_failure as string | null,
 			last_message_at: r.last_message_at as number | null,
 			runtime:
 				r.tmux_session === null ? null : { tmux_session: r.tmux_session as string, boot_id: r.boot_id as string, pid: r.pid as number },
@@ -197,7 +201,8 @@ function derive(row: SessionRow, w: World): SessionState {
 			: row.snoozed_until > w.now);
 	const { errored } = row;
 	const asking = open && row.asking;
-	const snoozed = open && holds && activity !== "blocked" && !cutOff && !errored;
+	const failedToStart = open && !live ? row.wake_failure : null;
+	const snoozed = open && holds && activity !== "blocked" && !cutOff && !errored && !failedToStart;
 	// A timed snooze running out is news: Unseen until I look, and fresh for inactive_after.
 	const woke = row.snoozed_until !== null && row.snoozed_until <= w.now ? row.snoozed_until : 0;
 	const activityAt = Math.max(row.last_prompt_at, row.last_settled_at ?? 0, woke);
@@ -225,11 +230,20 @@ function derive(row: SessionRow, w: World): SessionState {
 		cutOff,
 		errored,
 		asking,
-		inactive: open && !operator && !snoozed && !asking && quietSince < w.now - w.inactiveAfterMs && activity === "idle" && !unseen,
+		inactive:
+			open &&
+			!operator &&
+			!snoozed &&
+			!asking &&
+			!failedToStart &&
+			quietSince < w.now - w.inactiveAfterMs &&
+			activity === "idle" &&
+			!unseen,
 		snoozed,
 		snooze: open && holds ? { until: row.snoozed_until } : null,
 		snoozedUntil: snoozed ? row.snoozed_until : null,
 		reload: open ? row.reload : null,
+		failedToStart,
 		createdAt: row.created_at,
 		activityAt,
 		visitedAt: row.visited_at,

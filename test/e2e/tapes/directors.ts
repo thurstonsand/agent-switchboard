@@ -1080,6 +1080,40 @@ export const directors: Record<string, Director> = {
 		},
 	},
 
+	"failed-to-start": {
+		setup: async (s) => {
+			await seed(s, { title: "Triage the flaky deploy", turns: ["triaged"] }, { title: "Write the release notes", turns: ["drafted"] });
+			writeFileSync(join(s.home, "pi.sh"), readFileSync(join(s.bin, "pi"), "utf8"));
+			writeFileSync(join(s.bin, "pi"), "#!/bin/sh\necho 'pi: broken on purpose' >&2\nexit 1\n");
+		},
+		run: async (s) => {
+			await waitDeck(s, "the roster", (x) => x.ready);
+			const ls = s.ls();
+			const sender = ls.find((e) => e.title === "Triage the flaky deploy") as LsEntry;
+			const target = ls.find((e) => e.title === "Write the release notes") as LsEntry;
+			Bun.spawn([`${s.bin}/swb`, "send", "--from", sender.id, "--to", target.id], {
+				env: s.env,
+				cwd: s.project,
+				stdin: new Blob(["reply queued"]),
+				stdout: "ignore",
+				stderr: "ignore",
+			});
+			const tries = () => s.query<{ n: number | null }>("select wake_attempts as n from marks where session_id = ?", target.id)[0]?.n;
+			// The clock's backoffs, moved past rather than waited out.
+			for (const n of [1, 2, 3]) {
+				if (n > 1) s.query("update marks set woken_at = 0 where session_id = ?", target.id);
+				await until(() => tries() === n, 30_000, `the clock's try ${n}`);
+			}
+			s.query("update marks set woken_at = 0 where session_id = ?", target.id);
+			await waitDeck(s, "failed to start", (x) =>
+				x.rows.some((row) => row.kind === "session" && row.id === target.id && row.state === "failed"),
+			);
+			writeFileSync(join(s.bin, "pi"), readFileSync(join(s.home, "pi.sh"), "utf8"));
+			await until(() => s.signal("replied.queued") !== "", TAPE, "the queued message answered once woken");
+			await waitLs(s, "its tries started over", (all) => all.find((e) => e.id === target.id)?.failedToStart === null);
+		},
+	},
+
 	"dormant-card": {
 		setup: async (s) => {
 			await seed(
@@ -1731,6 +1765,11 @@ export const directors: Record<string, Director> = {
 				(ls) => ls[0]?.live === true && ls[0].activity === "idle" && pid() !== before,
 			);
 			await waitDeck(s, "the Stage on the restarted pi", (x) => x.staged.id === id && x.staged.kind === "live");
+			// Reloading itself, it comes back with the keyboard still on it: the next line typed lands in pi.
+			const second = pid();
+			await waitLs(s, "restarted by its own reload", (ls) => ls[0]?.live === true && pid() !== second);
+			await until(() => s.signal("replied.still typing here") !== "", TAPE, "the reply to what was typed after the reload");
+			await waitDeck(s, "the keyboard still on pi", (x) => x.staged.id === id && x.staged.kind === "live" && x.focus === "stage");
 		},
 	},
 
@@ -2201,15 +2240,15 @@ export const directors: Record<string, Director> = {
 			await until(() => shows("j k ↑ ↓") && shows("Send literal Alt+a"), TAPE, "every key on a tall Deck");
 			await until(() => !shows("any key to close"), TAPE, "the help closed");
 			s.swb("drive", "resize", "140x24");
-			await until(() => shows("↓ 19 more lines · j/k ↑/↓ scroll"), TAPE, "the short Deck's help, its end below");
+			await until(() => shows("↓ 21 more lines · j/k ↑/↓ scroll"), TAPE, "the short Deck's help, its end below");
 			await Bun.sleep(1500);
 			for (const direction of ["down", "down", "down", "down", "up"]) {
 				s.swb("drive", "wheel", direction, "70", "12");
 				await Bun.sleep(700);
 			}
-			await until(() => shows("↑ 3 ↓ 17"), TAPE, "four turns of the wheel down, one up");
-			await until(() => shows("+N folded family") && shows("↑ 19 ·"), TAPE, "j j and space to the end");
-			await until(() => shows("↑ 15 ↓ 5"), TAPE, "k k k and ↑ back up");
+			await until(() => shows("↑ 3 ↓ 18"), TAPE, "four turns of the wheel down, one up");
+			await until(() => shows("+N folded family") && shows("↑ 21 ·"), TAPE, "j j and space to the end");
+			await until(() => shows("↑ 17 ↓ 5"), TAPE, "k k k and ↑ back up");
 			await until(() => !shows("PgUp/PgDn page"), TAPE, "q closes it");
 		},
 	},

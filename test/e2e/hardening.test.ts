@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { VERSION } from "../../packages/cli/src/version.ts";
-import { replied, settled } from "./harness/agents.ts";
+import { host, launched, ready, replied, settled } from "./harness/agents.ts";
 import { cursorTo, entry, piSessions, reply, seed, sessionRows, waitState } from "./harness/deck.ts";
 import { alive, budgets, release, repo, type Scenario, scenario, until } from "./harness/index.ts";
 
@@ -98,6 +98,60 @@ test("a pi that dies before it's ready says failed to start, and w retries once 
 	const remain = () => s.tmux(s.servers.sessions, "show", "-p", "-v", "-t", s.pane(retried.staged.host as string), "remain-on-exit");
 	await until(() => remain() === "", budgets.settle, "remain-on-exit cleared once pi registered");
 	s.save("retried.txt", s.screen());
+});
+
+test("a session that won't start for its message gets three tries from the clock, then shows failed to start, its message waiting until it starts", async () => {
+	s = scenario("phase5", "wake-gives-up", { packages: [], recorder: true });
+	const sender = await launched(s, "pi", "reply sender up");
+	const target = await launched(s, "pi", "reply target up");
+	s.tmux(s.servers.sessions, "kill-pane", "-t", s.pane(host(s, target.id)));
+	await until(() => !entry(s, target.id).live, budgets.settle, "the target dormant");
+	const pi = join(s.bin, "pi");
+	const script = readFileSync(pi, "utf8");
+	writeFileSync(pi, "#!/bin/sh\necho 'pi: broken on purpose' >&2\nexit 1\n");
+
+	// Its sender's own wake dies with pi, and waits on delivery; the clock takes over from there.
+	const sending = Bun.spawn([`${s.bin}/swb`, "send", "--from", sender.id, "--to", target.id], {
+		env: s.env,
+		cwd: s.project,
+		stdin: new Blob(["reply SWB-queued"]),
+		stdout: "ignore",
+		stderr: "ignore",
+	});
+	const marks = () =>
+		s.query<{ n: number | null; failure: string | null }>(
+			"select wake_attempts as n, wake_failure as failure from marks where session_id = ?",
+			target.id,
+		)[0];
+	// Each backoff moved past rather than waited out; a reconcile picks each one up.
+	const pastBackoff = () => s.query("update marks set woken_at = 0 where session_id = ?", target.id);
+	for (const n of [1, 2, 3]) {
+		if (n > 1) pastBackoff();
+		await until(() => marks()?.n === n, 30_000, `the clock's try ${n}`);
+	}
+	pastBackoff();
+	await until(() => entry(s, target.id).failedToStart !== null, 30_000, "the target failed to start");
+	expect(entry(s, target.id).failedToStart).toBe("it stopped before it took its messages");
+	expect(
+		JSON.parse(s.swb("list", "--from", sender.id))
+			.text.split("\n")
+			.find((line: string) => line.includes(target.id)),
+	).toContain(" · failed to start · ");
+	// Its message still waits, and the clock starts it no more.
+	expect(s.query("select delivered_at, cancelled_at from messages where body = 'reply SWB-queued'")).toEqual([
+		{ delivered_at: null, cancelled_at: null },
+	]);
+	pastBackoff();
+	await Bun.sleep(16_000);
+	expect(marks()?.n).toBe(3);
+
+	// Fixed and woken, it takes the message, and starts its tries over.
+	writeFileSync(pi, script);
+	s.swb("wake", target.id);
+	await until(() => s.signal("replied.SWB-queued") !== "", ready, "the queued message answered");
+	await until(() => marks()?.n == null && marks()?.failure == null, 30_000, "the target's tries started over");
+	expect(entry(s, target.id).failedToStart).toBeNull();
+	sending.kill();
 });
 
 test("a newer swb takes over: idle pis stop, a working one keeps its turn, and empty servers restart; an older swb leaves a newer server alone and its Deck says so", async () => {

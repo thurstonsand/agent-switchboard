@@ -5,6 +5,12 @@
 ### Changed
 
 - The Deck uses Pi TUI 1.6.1, and the Pi end-to-end tests run against Pi 1.6.1.
+- The clock starts a dormant session for a waiting message or reload at most three times, 30 s and then 60 s apart, until it takes what waited. Then it stops, and the session shows a red `!` failed to start, with why, in the roster, the needs-me lens, `swb ls`, and `session_list`. Its messages and reload keep waiting until it starts, by your wake or a sender's, and takes them. Before, a session that kept failing to start was retried forever.
+- A reload completes only once the restarted session is back up. A restart that dies before then leaves the reload waiting, and the clock starts it again under the same three tries. A reload soon after another no longer waits out the clock's backoff.
+
+### Fixed
+
+- A session reloading itself, or reloaded from another session or `swb reload`, keeps the keyboard on the Stage while it restarts, instead of handing it to the roster.
 
 ## [0.18.1] - 2026-11-23
 

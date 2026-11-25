@@ -24,12 +24,13 @@ Lists every Session, open and archived, with its derived state.
   markedUnseen open, not snoozed, and I marked it Unseen after my last Visit
   cutOff       how its process ended mid-turn, when not live: "shutdown" (its harness quit), "killed" (it died without quitting), or "restart" (an earlier boot); else null
   errored      its last turn ended on its provider's error, and none has started since
+  failedToStart why swb gave up starting it, dormant, for the messages or reload still waiting on it; else null
   asking       its last turn ended on a question for me, by swb_ask_user, and none has started since
   inactive     open, not an Operator, not snoozed, and its whole Family has had no activity, and none of it been read out of Unseen, within inactive_after, none of it blocked, unseen, or asking
-  snoozed      open and snoozed, neither blocked, cut off, nor errored
+  snoozed      open and snoozed, neither blocked, cut off, failed to start, nor errored
   snooze       held snooze even while attention keeps it visible: {until: epoch ms}, {until: null} for next message, or null
   snoozedUntil epoch ms a snoozed session's snooze ends, or null when it waits for a message
-  reload       "continue" or "idle" while a reload waits for its turn to end, or for its restart; else null
+  reload       "continue" or "idle" while a reload waits for its turn to end, or for its restart to come back up; else null
   createdAt    epoch ms of its first prompt
   activityAt   epoch ms of the last prompt or settle
   visitedAt    epoch ms of my last Visit, or null
@@ -38,7 +39,7 @@ Lists every Session, open and archived, with its derived state.
 function glyph(s: SessionState): string {
 	if (s.activity === "blocked") return "◆";
 	if (s.activity === "working") return "◐";
-	if (s.cutOff || s.errored) return "⚠";
+	if (s.cutOff || s.errored || s.failedToStart) return "⚠";
 	if (s.asking) return "?";
 	if (s.unseen) return "●";
 	return "○";

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, sep } from "node:path";
-import { bootId, type Db, dbPath, type Harness, linkedWorktree, operatorDir, projectRoot, stateDir } from "@swb/shared";
+import { bootId, type Db, dbPath, type Harness, linkedWorktree, operatorDir, projectRoot, type ReloadMode, stateDir } from "@swb/shared";
 import { isArchived, markArchived, recordTx, titleOf } from "@swb/shared/record";
 import { OPEN, PENDING_SCHEDULE } from "@swb/shared/states";
 import { now, since } from "@swb/shared/trace";
@@ -827,8 +827,9 @@ export function wake(db: Db, id: string, then: Wake): string {
 		const harness = session.harness as Harness;
 		// Claude Code resumes on its last model but its own default effort, so the effort its line last saw goes back in.
 		const effort = harness === "claude" ? (session.effort as Effort | null) : null;
-		// Any start reads its configuration afresh, so it takes the place of a reload waiting for one.
-		setReload(db, id, null);
+		// Any start reads its configuration afresh, so it starts a reload waiting for one, which its harness completes
+		// by registering.
+		db.run("UPDATE marks SET reload_started_at = ? WHERE session_id = ? AND reload IS NOT NULL", Date.now(), id);
 		return launch(db, {
 			harness,
 			cwd,
@@ -846,10 +847,12 @@ export function wake(db: Db, id: string, then: Wake): string {
  * Restarts a session's harness on its conversation now, stopping it first if it runs, mid-turn or not, and returns its
  * new tmux session. A reload waiting for its turn to end is taken over by this one.
  */
-export function restart(db: Db, id: string, then: Wake): string {
+export function restart(db: Db, id: string, then: ReloadMode): string {
 	if (isArchived(db, id)) throw new SwbError("archived: unarchive it first");
-	// Taken now, so the clock doesn't start it on the old reload's terms once it stops.
-	recordTx(db, () => setReload(db, id, null));
+	// Taken over now, so the clock doesn't start it on the old reload's terms once it stops, and every Deck sees it
+	// coming back rather than quitting. The clock may start it first; the wake below then finds that start, and
+	// whichever start comes up completes the reload.
+	recordTx(db, () => setReload(db, id, then));
 	const runtime = liveRuntime(db, id, new Set(listHosts().map(([host]) => host as string)));
 	if (runtime) stopPis([runtime]);
 	return wake(db, id, then);

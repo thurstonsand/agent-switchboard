@@ -237,6 +237,11 @@ function launchFor(id: string): Launch | undefined {
 	return m.launches.find((launch) => launch.id === id);
 }
 
+/** A dormant session on its way back up: this Deck started it, a reload waits to, or something else already has. */
+function comingBack(e: Entry): boolean {
+	return !e.live && (launchFor(e.id) !== undefined || e.starting !== null || (e.reload !== null && e.failedToStart === null));
+}
+
 function isUnseen(e: Entry): boolean {
 	return e.unseen && m.stage.watched !== e.id;
 }
@@ -291,8 +296,9 @@ export function origin(e: Entry): "session" | "operator" | null {
 const foldKey = (id: string) => `fold:${id}`;
 
 export function stateOf(e: Entry): State {
-	if (launchFor(e.id) && !e.live) return "loading";
+	if (comingBack(e)) return "loading";
 	if (!e.open) return "archived";
+	if (e.failedToStart) return "failed";
 	if (e.cutOff) return "cut-off";
 	if (e.activity === "blocked") return "blocked";
 	if (e.activity === "working") return "working";
@@ -325,6 +331,8 @@ function phaseStatus(e: Entry): string {
 			return m.transcripts.get(e.id)?.transcript?.ending?.kind === "stopped" ? "dormant · stopped" : "dormant";
 		case "cut-off":
 			return `${red("cut off")}${gray(` · ${CAUSES[e.cutOff as CutOff]}`)}`;
+		case "failed":
+			return red("failed to start");
 		case "errored":
 			return e.live ? red("errored") : `${red("errored")}${gray(" · dormant")}`;
 		case "asking":
@@ -430,6 +438,7 @@ function syncTitle(): void {
 /** Where a conversation stopped short of a reply, when no Peek already explains it. */
 function ending(e: Entry, read: Transcript | null): string | null {
 	const wake = e.open && m.mode.kind === "roster" ? ` · ${bold("⏎")} ${e.cutOff ? "Resume unfinished turn" : "Wake & focus"}` : "";
+	if (e.failedToStart) return `${bold(red("! failed to start"))} · ${e.failedToStart}${wake}`;
 	if (e.cutOff) return `${bold(red("↯ cut off"))} · ${CAUSES[e.cutOff]}${wake}`;
 	if (read?.ending?.kind === "stopped") return `– dormant · stopped${wake}`;
 	if (e.errored) return `${bold(red("errored"))}${wake}`;
@@ -482,8 +491,9 @@ function piStage(): Applied {
 	if (e.live && e.host)
 		return { kind: "live", id: e.id, host: e.host, card: null, view: "agent", target: e.host, side: null, split: null, shell: null };
 	const launch = launchFor(e.id);
-	if (launch?.host) return starting(e.id, launch.host);
-	if (launch) return onCard("loading", e.id, card(e, launch.keyboard && rosterOffScreen() ? [ESC_LINE] : []));
+	const host = launch?.host ?? e.starting;
+	if (host) return starting(e.id, host);
+	if (comingBack(e)) return onCard("loading", e.id, card(e, launch?.keyboard && rosterOffScreen() ? [ESC_LINE] : []));
 	return onCard("dormant", e.id, card(e));
 }
 
@@ -937,7 +947,7 @@ function followHost(): void {
 		return;
 	}
 	// A reload stops it on purpose; its new host takes over the Stage.
-	if (launchFor(id)) return;
+	if (e && comingBack(e)) return;
 	m.stage.ended = { id, failed: false, lines: [] };
 	if (m.focus === "stage") afterCommit(() => void panes.showRoster(true));
 }
@@ -1426,9 +1436,9 @@ function selectFirst(): void {
 	if (first) m.selectedKey = first.key;
 }
 
-/** A blocked, cut-off, errored, or asking session: one waiting on a decision or a rescue from me. A snooze puts a question off. */
+/** A blocked, cut-off, failed, errored, or asking session: one waiting on a decision or a rescue from me. A snooze puts a question off. */
 export function needsMe(e: Entry): boolean {
-	return ["blocked", "cut-off", "errored", "asking"].includes(stateOf(e)) && !e.snoozed;
+	return ["blocked", "cut-off", "failed", "errored", "asking"].includes(stateOf(e)) && !e.snoozed;
 }
 
 export function lensOn(): boolean {

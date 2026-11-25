@@ -15,6 +15,8 @@ export type Entry = SessionState & {
 	transcript: string | null;
 	/** The tmux session hosting it, when live. */
 	host: string | null;
+	/** The tmux session of a harness started on it that hasn't registered yet, whoever started it, while it's dormant. */
+	starting: string | null;
 	provisional: boolean;
 	worktree: string | null;
 	/** What its Peek lists: schedules aimed at it, or launches it set, pending ones and the last that finished. */
@@ -63,7 +65,18 @@ export type Card = {
 	agent: string;
 };
 
-export type State = "loading" | "blocked" | "working" | "unseen" | "idle" | "dormant" | "cut-off" | "errored" | "asking" | "archived";
+export type State =
+	| "loading"
+	| "blocked"
+	| "working"
+	| "unseen"
+	| "idle"
+	| "dormant"
+	| "cut-off"
+	| "failed"
+	| "errored"
+	| "asking"
+	| "archived";
 
 export type StatSummary = { n: number; lastMs: number; avgMs: number; medianMs: number; maxMs: number };
 

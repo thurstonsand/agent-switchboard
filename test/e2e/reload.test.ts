@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
-import { rmSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { answered, host, launched, pane, ready, settled, type } from "./harness/agents.ts";
-import { cursorTo, entry, waitState } from "./harness/deck.ts";
+import { cursorTo, entry, state, waitState } from "./harness/deck.ts";
 import { budgets, release, type Scenario, scenario, until } from "./harness/index.ts";
 
 // A reload restarts a session's harness on the same conversation, so it reads what it reads only at startup afresh.
@@ -38,6 +38,8 @@ test("pi reloading itself restarts when its turn ends and carries on with the AG
 	await waitState(s, "ready", (x) => x.ready);
 	await cursorTo(s, pi.id);
 	await waitState(s, "the Stage on pi", (x) => x.staged.id === pi.id && x.staged.kind === "live");
+	s.keys("Enter");
+	await waitState(s, "the keyboard on pi", (x) => x.focus === "stage");
 
 	type(s, pi.id, `call swb_update_session {"reload":"continue"}`);
 	// The pi it replaced started before AGENTS.md was written.
@@ -45,13 +47,23 @@ test("pi reloading itself restarts when its turn ends and carries on with the AG
 	await restarted(pi.id, first, "pi restarted on its own conversation");
 	expect(pane(s, pi.id)).toContain("This session restarts when this turn ends: end it now");
 	expect(entry(s, pi.id).reload).toBeNull();
-	// The Stage watching it follows it back, rather than staying on the card it showed while pi was down.
+	// The Stage watching it follows it back with the keyboard still on it, rather than handing it to the roster while pi was down.
 	await waitState(s, "the Stage back on the self-reloaded pi", (x) => x.staged.id === pi.id && x.staged.kind === "live");
+	expect(state(s).focus).toBe("stage");
 	s.save("self-reload.txt", pane(s, pi.id));
+
+	// Restarted at once from elsewhere, it keeps the keyboard too.
+	const reloaded = pid(pi.id) as number;
+	expect(s.swb("reload", pi.id)).toContain("Restarted");
+	await restarted(pi.id, reloaded, "pi restarted from the CLI");
+	await waitState(s, "the Stage back on the pi restarted from the CLI", (x) => x.staged.id === pi.id && x.staged.kind === "live");
+	expect(state(s).focus).toBe("stage");
 
 	// R in the Deck restarts it at once, and it carries on from idle too.
 	const second = pid(pi.id) as number;
 	rmSync(join(s.home, "e2e-signals", "reloaded.system"));
+	s.keys("M-a", "Tab");
+	await waitState(s, "the keyboard back on the roster", (x) => x.focus === "roster");
 	s.keys("R");
 	await until(() => s.signal("reloaded.system") !== "", ready, "R's reload carrying on");
 	await restarted(pi.id, second, "pi restarted by R");
@@ -150,4 +162,37 @@ test("Claude Code and Codex told to continue restart mid-turn and pick it back u
 			.requests("claude")
 			.some((r) => String(r.toolOutput).includes("This session restarts when this turn ends: end it now with a brief final message.")),
 	).toBe(true);
+});
+
+test("a reload completes only once the session is back up: a restart that dies gets the clock's three tries, then shows failed to start until a start comes up", async () => {
+	s = scenario("reload", "follow-through", { packages: [], recorder: true });
+	const pi = await launched(s, "pi", "reply up");
+	const bin = join(s.bin, "pi");
+	const script = readFileSync(bin, "utf8");
+	writeFileSync(bin, "#!/bin/sh\necho 'pi: broken on purpose' >&2\nexit 1\n");
+
+	expect(s.swb("reload", pi.id)).toContain("Restarted");
+	const marks = () =>
+		s.query<{ n: number | null; started: number | null }>(
+			"select wake_attempts as n, reload_started_at as started from marks where session_id = ?",
+			pi.id,
+		)[0];
+	// The restart died before it registered, so the reload is still owed: the clock starts it again.
+	await until(() => marks()?.n === 1, 30_000, "the clock's first try");
+	expect(entry(s, pi.id)).toMatchObject({ live: false, reload: "continue" });
+	const pastBackoff = () => s.query("update marks set woken_at = 0 where session_id = ?", pi.id);
+	for (const n of [2, 3]) {
+		pastBackoff();
+		await until(() => marks()?.n === n, 30_000, `the clock's try ${n}`);
+	}
+	pastBackoff();
+	await until(() => entry(s, pi.id).failedToStart !== null, 30_000, "failed to start");
+	expect(entry(s, pi.id)).toMatchObject({ failedToStart: "it stopped before it came back up", reload: "continue" });
+
+	// Fixed and woken, it comes back up, which completes the reload and starts its tries over.
+	writeFileSync(bin, script);
+	s.swb("wake", pi.id);
+	await until(() => entry(s, pi.id).live, ready, "pi back up");
+	await until(() => entry(s, pi.id).reload === null && marks()?.started == null, budgets.settle, "the reload done");
+	await until(() => marks()?.n == null && entry(s, pi.id).failedToStart === null, 30_000, "its tries started over");
 });

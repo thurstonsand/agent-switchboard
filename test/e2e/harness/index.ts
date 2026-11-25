@@ -84,6 +84,7 @@ export type LsEntry = {
 	inactive: boolean;
 	snooze: { until: number | null } | null;
 	reload: "continue" | "idle" | null;
+	failedToStart: string | null;
 	activityAt: number;
 	archivedAt: number | null;
 };

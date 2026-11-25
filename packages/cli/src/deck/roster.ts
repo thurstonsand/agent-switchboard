@@ -148,6 +148,8 @@ function glyph(state: State, now: number): string {
 			return "–";
 		case "cut-off":
 			return bold(red("↯"));
+		case "failed":
+			return bold(red("!"));
 		case "errored":
 			return bold(red("×"));
 		case "asking":
@@ -443,7 +445,7 @@ function snoozeMenu(width: number): Part[] {
 	const e = model.entries.get(snoozing.id);
 	if (e?.activity === "blocked")
 		out.push(...wrapTextWithAnsi("Blocked sessions stay visible until answered.", width - 2).map((line): Part => [` ${line}`, null]));
-	else if (e?.cutOff || e?.errored)
+	else if (e?.cutOff || e?.errored || e?.failedToStart)
 		out.push(...wrapTextWithAnsi("Sessions needing attention stay visible.", width - 2).map((line): Part => [` ${line}`, null]));
 	SNOOZE_CHOICES.forEach((choice, i) => {
 		const until = presetUntil(choice.snooze, now);
@@ -598,7 +600,7 @@ function verbsLine(width: number): string {
 }
 
 /** States that ask for me, in the order the roster ranks them. */
-const ATTENTION: State[] = ["blocked", "cut-off", "errored", "asking", "unseen"];
+const ATTENTION: State[] = ["blocked", "cut-off", "failed", "errored", "asking", "unseen"];
 
 /** Each attention mark among `entries`, with how many carry it. */
 function attentionTally(entries: Entry[]): string {
@@ -1118,6 +1120,7 @@ function familyTally(family: Entry[]): string {
 		[["working", "loading"], "◐"],
 		[["blocked"], "◆"],
 		[["cut-off"], "↯"],
+		[["failed"], "!"],
 		[["errored"], "×"],
 		[["asking"], "?"],
 		[["unseen"], "●"],

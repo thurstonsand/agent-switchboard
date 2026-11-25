@@ -58,6 +58,7 @@ function lines(prefix: string, columns = Infinity): string[] {
 		`  ${cyan("▌")} on the Stage`,
 		`  ${blockedMark("◆")} blocked · waiting for you`,
 		`  ${bold(red("↯"))} cut off · resume unfinished turn`,
+		`  ${bold(red("!"))} failed to start · its messages wait`,
 		`  ${bold(red("×"))} errored · inspect error`,
 		`  ${bold(yellow("?"))} asking · a question for you`,
 		`  ${green("●")} Unseen · finished since last viewed`,

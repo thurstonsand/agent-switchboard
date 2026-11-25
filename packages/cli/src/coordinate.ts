@@ -3,6 +3,7 @@ import { relative, resolve } from "node:path";
 import { type Db, type Harness, operatorDir, projectRoot, type ReloadMode, type View } from "@swb/shared";
 import { frame, harnessName, type MessageKind, ring } from "@swb/shared/mailbox";
 import { asked, isArchived, markArchived, recordTx, titleOf } from "@swb/shared/record";
+import { RELOAD_UNSTARTED } from "@swb/shared/states";
 import { ASKED, type ToolArgs, type ToolResult } from "@swb/shared/tools";
 import { CodexClient } from "./codex/client.ts";
 import { codexSocket } from "./codex/host.ts";
@@ -36,7 +37,7 @@ import { inUse } from "./transcripts/read.ts";
 
 /** Working, blocked, idle, a turn that ended badly, or one that asks the user; whether its process runs is swb's to handle. */
 function stateOf(s: SessionState): string {
-	return s.cutOff ? "cut off" : s.errored ? "errored" : s.asking ? "asking" : s.activity;
+	return s.failedToStart ? "failed to start" : s.cutOff ? "cut off" : s.errored ? "errored" : s.asking ? "asking" : s.activity;
 }
 
 function describe(s: SessionState): string {
@@ -428,7 +429,7 @@ export function reload(db: Db, from: string | null, id: string, mode: ReloadMode
 			const phase = db.get("SELECT phase FROM sessions WHERE session_id = ?", id)?.phase;
 			if (from !== id && (mode === "continue" || phase === "idle")) return false;
 			// A reload waiting to carry on still does when asked again to come back idle.
-			const pending = db.get("SELECT reload FROM marks WHERE session_id = ?", id)?.reload;
+			const pending = db.get(`SELECT reload FROM marks WHERE session_id = ? AND ${RELOAD_UNSTARTED}`, id)?.reload;
 			if (pending !== "continue") setReload(db, id, mode);
 			return true;
 		});

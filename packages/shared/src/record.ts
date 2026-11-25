@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import type { Db, Row } from "./db.ts";
 import { bootId, branch, type Harness, isBusy, pidAlive, projectRoot, SCHEMA_VERSION } from "./index.ts";
-import { ARCHIVED, PENDING_MESSAGE, PENDING_SCHEDULE } from "./states.ts";
+import { ARCHIVED, PENDING_MESSAGE, PENDING_SCHEDULE, RELOAD_UNSTARTED } from "./states.ts";
 
 // Every line records a session's lifecycle through these, so pi, Claude Code, and Codex rows mean the same thing.
 // Each call is one write transaction that first asserts the schema it writes. Git facts are read before it, since every
@@ -117,6 +117,8 @@ export function startHosting(db: Db, h: Hosting): void {
 		const other = hostOfSession(db, h.sessionId, h.host);
 		if (other) throw new Error(`session ${h.sessionId} is already open in another process (${other})`);
 		db.run("DELETE FROM runtimes WHERE session_id = ? AND tmux_session != ?", h.sessionId, h.host);
+		// Back up, it has done the reload its start began.
+		db.run("UPDATE marks SET reload = NULL, reload_started_at = NULL WHERE session_id = ? AND reload_started_at IS NOT NULL", h.sessionId);
 		db.run(
 			`INSERT INTO runtimes (tmux_session, session_id, harness, cwd, project_root, boot_id, pid, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT (tmux_session) DO UPDATE SET session_id = excluded.session_id, harness = excluded.harness, cwd = excluded.cwd,
@@ -233,7 +235,7 @@ export function settle(db: Db, s: Settle): { quit: boolean } {
 			db.run("UPDATE sessions SET cwd = ?, project_root = ?, branch = ? WHERE session_id = ?", s.cwd, project, head, s.sessionId);
 			db.run("UPDATE runtimes SET cwd = ?, project_root = ? WHERE tmux_session = ?", s.cwd, project, s.host);
 		}
-		const reloading = db.get("SELECT 1 FROM marks WHERE session_id = ? AND reload IS NOT NULL", s.sessionId);
+		const reloading = db.get(`SELECT 1 FROM marks WHERE session_id = ? AND ${RELOAD_UNSTARTED}`, s.sessionId);
 		return { quit: isArchived(db, s.sessionId) || Boolean(reloading) };
 	});
 }
@@ -309,7 +311,7 @@ export function markArchived(db: Db, sessionId: string): boolean {
 	const now = Date.now();
 	db.run(
 		`INSERT INTO marks (session_id, archived_at) VALUES (?, ?)
-		 ON CONFLICT (session_id) DO UPDATE SET archived_at = excluded.archived_at, snoozed_at = NULL, snoozed_until = NULL, reload = NULL`,
+		 ON CONFLICT (session_id) DO UPDATE SET archived_at = excluded.archived_at, snoozed_at = NULL, snoozed_until = NULL, reload = NULL, reload_started_at = NULL`,
 		sessionId,
 		now,
 	);
