@@ -2359,7 +2359,7 @@ export const directors: Record<string, Director> = {
 			await waitDrive(s, "the pointer's Peek on the top row", (x) => x.peek?.id === top.id && x.peek.source === "pointer");
 			await Bun.sleep(1500);
 			// Down across the next row, the infra header and its row, Archived, and the empty roster, to the Peek's last button.
-			const button = await onScreen(s, "m Group…", 1000, 43);
+			const button = await onScreen(s, "g Group…", 1000, 43);
 			await glide(s, row, button, 1500);
 			await Bun.sleep(2000);
 			if (drive(s).peek?.id !== top.id) throw new Error("the Peek didn't hold on the way into it");
@@ -2368,6 +2368,23 @@ export const directors: Record<string, Director> = {
 			await Bun.sleep(3000);
 			s.keys("Escape");
 			await waitDrive(s, "the form closed", (x) => x.mode === "roster");
+		},
+	},
+
+	"move-worktree": {
+		setup: async (s) => {
+			gitRepo(s, s.project);
+			await launched(s, "reply ready in main", { cwd: s.project, title: "Worktree demo" });
+		},
+		run: async (s) => {
+			const moved = await waitLs(s, "session moved into feat-ui", (ls) =>
+				ls.some((e) => e.title === "Worktree demo" && e.branch === "feat-ui" && e.live && e.activity === "idle"),
+			);
+			const wt = moved.find((e) => e.title === "Worktree demo")?.cwd as string;
+			writeFileSync(join(wt, "notes.txt"), "uncommitted change\n");
+			await waitLs(s, "session merged back into main", (ls) =>
+				ls.some((e) => e.title === "Worktree demo" && e.branch === "main" && e.live && e.activity === "idle"),
+			);
 		},
 	},
 

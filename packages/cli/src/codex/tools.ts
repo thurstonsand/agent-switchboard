@@ -6,6 +6,7 @@ import { recallBegin, recallRead, recallSearch } from "../recall/read.ts";
 import { search } from "../recall/search.ts";
 import { listSchedules, schedule, unschedule } from "../schedules.ts";
 import { openStore } from "../store.ts";
+import { moveSession, worktreeCheckout, worktreeFork, worktreeList, worktreeMerge, worktreeRebranch, worktreeRemove } from "../worktree.ts";
 import { CodexClient } from "./client.ts";
 import { codexSocket, READER_SOURCE } from "./host.ts";
 
@@ -115,6 +116,22 @@ export async function callTool(
 		case "swb_ask_user":
 			parsed(name, args);
 			return askUser(db, from);
+		case "swb_move_session": {
+			const a = parsed(name, args);
+			return moveSession(db, from, a.cwd);
+		}
+		case "swb_worktree_list":
+			return worktreeList(db, from, parsed(name, args));
+		case "swb_worktree_fork":
+			return worktreeFork(db, from, parsed(name, args));
+		case "swb_worktree_checkout":
+			return worktreeCheckout(db, from, parsed(name, args));
+		case "swb_worktree_merge":
+			return worktreeMerge(db, from, parsed(name, args));
+		case "swb_worktree_remove":
+			return worktreeRemove(db, from, parsed(name, args));
+		case "swb_worktree_rebranch":
+			return worktreeRebranch(db, from, parsed(name, args));
 	}
 }
 

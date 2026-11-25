@@ -44,7 +44,7 @@ test("an Operator in Claude Code or Codex reads the Operator AGENTS.md, not the 
 	] as const) {
 		s.keys("M-a", "h");
 		await waitState(s, "the roster focused", (x) => x.focus === "roster");
-		s.keys("g");
+		s.keys("Home");
 		await waitState(s, "cursor on the Operators section", (x) => x.cursorRow === 0);
 		s.keys("n");
 		await waitState(s, "the picker", (x) => x.picker !== null);

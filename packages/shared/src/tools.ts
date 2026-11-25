@@ -6,10 +6,21 @@ import { HARNESSES, RELOAD_MODES, SNOOZE_PRESETS, VIEWS } from "./index.ts";
 // and Codex take them as JSON Schema. Each tool runs an swb command and returns its text to the model unchanged.
 
 /**
- * `label`: what a call's row in the transcript names it by. `readOnly`: it only reads. The rest change only the user's
- * own sessions, and never destroy one.
+ * `label`: what a call's row in the transcript names it by. `readOnly`: it only reads. `destructive`: it removes a
+ * worktree or branch. `deferred`: loaded on demand behind tool_search / ToolSearch rather than upfront.
  */
-export type ToolSpec = { label: string; description: string; guidelines: string[]; parameters: TSchema; readOnly: boolean };
+export type ToolSpec = {
+	label: string;
+	description: string;
+	guidelines: string[];
+	parameters: TSchema;
+	readOnly: boolean;
+	destructive?: boolean;
+	deferred?: boolean;
+};
+
+/** Namespace / MCP instruction blurb for the deferred worktree tools. */
+export const WORKTREE_NAMESPACE_DESCRIPTION = "Git worktree actions. Use instead of raw git worktree commands.";
 
 const session = Type.String({ description: "The session's id." });
 const reportBack = Type.Boolean({ description: "Whether it should reply to you." });
@@ -187,6 +198,109 @@ export const TOOLS = {
 		parameters: Type.Object({}),
 		readOnly: false,
 	},
+	swb_move_session: {
+		label: "Move session",
+		description: "Move this session to a different directory.",
+		guidelines: ["Move this session when the user asks, or when the conversation's work clearly belongs in another directory."],
+		parameters: Type.Object({
+			cwd: Type.String({ description: "Target directory." }),
+		}),
+		readOnly: false,
+		deferred: true,
+	},
+	swb_worktree_list: {
+		label: "Worktrees",
+		description: "List git worktrees with their branch, parent branch, state, and path.",
+		guidelines: [],
+		parameters: Type.Object({
+			all: Type.Optional(Type.Boolean({ description: "List worktrees across all tracked repositories." })),
+		}),
+		readOnly: true,
+		deferred: true,
+	},
+	swb_worktree_fork: {
+		label: "Worktree fork",
+		description: "Create a new git worktree on a new branch.",
+		guidelines: [],
+		parameters: Type.Object({
+			name: Type.String({ description: "New branch name. Fails if it already exists—use swb_worktree_checkout instead." }),
+			move_session: Type.Boolean({ description: "Move this session into the new worktree." }),
+			clean: Type.Boolean({ description: "Create a clean worktree without copying uncommitted changes." }),
+			base: Type.Optional(Type.String({ description: "Base branch to fork from (implies clean)." })),
+			with: Type.Optional(
+				Type.Array(Type.String(), {
+					description: "Extra .gitignore-style patterns to copy files into the new worktree, beyond .worktreeinclude.",
+				}),
+			),
+		}),
+		readOnly: false,
+		deferred: true,
+	},
+	swb_worktree_checkout: {
+		label: "Worktree checkout",
+		description: "Check out an existing branch into a new git worktree.",
+		guidelines: [],
+		parameters: Type.Object({
+			branch: Type.String({ description: "Existing local or remote branch to check out." }),
+			move_session: Type.Boolean({ description: "Move this session into the new worktree." }),
+			parent: Type.Optional(
+				Type.String({ description: "Parent branch to merge back into. Omit for the repo's default branch (e.g. main)." }),
+			),
+			with: Type.Optional(
+				Type.Array(Type.String(), {
+					description: "Extra .gitignore-style patterns to copy files into the new worktree, beyond .worktreeinclude.",
+				}),
+			),
+		}),
+		readOnly: false,
+		deferred: true,
+	},
+	swb_worktree_merge: {
+		label: "Worktree merge",
+		description: "Merge a worktree back into its parent branch and delete it.",
+		guidelines: [],
+		parameters: Type.Object({
+			name: Type.String({ description: "Worktree to merge." }),
+			mode: Type.Enum(["rebase", "squash", "staged"], {
+				description: "Merge strategy: rebase, squash into one commit, or staged without committing.",
+			}),
+			base: Type.Optional(Type.String({ description: "Parent branch to merge into." })),
+			force: Type.Optional(
+				Type.Boolean({ description: "Discard uncommitted changes and allow non-staged merges into protected branches." }),
+			),
+		}),
+		readOnly: false,
+		destructive: true,
+		deferred: true,
+	},
+	swb_worktree_remove: {
+		label: "Worktree remove",
+		description: "Remove a git worktree and its local branch.",
+		guidelines: [],
+		parameters: Type.Object({
+			name: Type.String({ description: "Worktree to remove." }),
+			preserve_branch: Type.Boolean(),
+			force: Type.Optional(
+				Type.Boolean({ description: "Remove even with uncommitted changes and force-delete an unmerged local branch." }),
+			),
+		}),
+		readOnly: false,
+		destructive: true,
+		deferred: true,
+	},
+	swb_worktree_rebranch: {
+		label: "Worktree rebranch",
+		description:
+			"Re-create a worktree on a fresh baseline branch under a new branch, carrying uncommitted changes forward. The old branch and any commits on it are kept.",
+		guidelines: ["Rebranch a worktree when local work must continue, but its current branch has been merged or deleted on the remote."],
+		parameters: Type.Object({
+			name: Type.String({ description: "Worktree to rebranch." }),
+			branch: Type.String({ description: "New branch name." }),
+			onto: Type.Optional(Type.String({ description: "Baseline branch to rebranch onto. Omit for origin's default branch." })),
+		}),
+		readOnly: false,
+		deferred: true,
+	},
 } satisfies Record<string, ToolSpec>;
 
 /** What swb_ask_user answers, in every line: a person reads the first line, the model all of it. */
@@ -254,9 +368,46 @@ export type ReaderToolName = keyof typeof READER_TOOLS;
 const ALL = { ...TOOLS, ...READER_TOOLS };
 export type ToolArgs<N extends ToolName | ReaderToolName> = Static<(typeof ALL)[N]["parameters"]>;
 
-/** swb sets SWB_SHOW_FILE=1 at launch when the Editor can open files; without it, no line offers swb_show_file. */
-export function offered(name: ToolName, env: Record<string, string | undefined>): boolean {
-	return name !== "swb_show_file" || env.SWB_SHOW_FILE === "1";
+export function isWorktreeTool(name: ToolName): boolean {
+	return name.startsWith("swb_worktree_");
+}
+
+export function isDeferredTool(name: ToolName): boolean {
+	return Boolean((TOOLS[name] as ToolSpec).deferred);
+}
+
+/**
+ * Shared MCP/Pi tool annotations: read-only tools say so, and destructive worktree tools (merge/remove) plus
+ * worktree-deleting swb_update_session set destructiveHint: true.
+ */
+export function toolAnnotations(
+	name: ToolName,
+	worktree: boolean,
+): { readOnlyHint: true } | { readOnlyHint: false; destructiveHint: boolean; openWorldHint: false } {
+	const spec = TOOLS[name] as ToolSpec;
+	return spec.readOnly
+		? { readOnlyHint: true }
+		: {
+				readOnlyHint: false,
+				destructiveHint: Boolean(spec.destructive) || (name === "swb_update_session" && worktree),
+				openWorldHint: false,
+			};
+}
+
+/**
+ * swb sets SWB_SHOW_FILE=1 when the Editor can open files, SWB_OPERATOR=1 for Operators, and SWB_WT=1 when wt is
+ * available. Operators never move or touch worktrees; worktree tools also require a git repository.
+ */
+export function offered(
+	name: ToolName,
+	env: Record<string, string | undefined>,
+	options?: { operator?: boolean; inGit?: boolean },
+): boolean {
+	if (name === "swb_show_file") return env.SWB_SHOW_FILE === "1";
+	const operator = options?.operator ?? env.SWB_OPERATOR === "1";
+	if (name === "swb_move_session") return !operator;
+	if (isWorktreeTool(name)) return !operator && env.SWB_WT === "1" && (options?.inGit ?? true);
+	return true;
 }
 
 /** Main checkouts and plain directories never advertise worktree deletion. */

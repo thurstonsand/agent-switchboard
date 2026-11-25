@@ -168,7 +168,9 @@ test("Codex's reader reads with its own shell under a read-only sandbox, with no
 	);
 	s.save("refused.txt", String(refused.toolOutput));
 	// Linux's sandbox mounts the project read-only; macOS's Seatbelt denies the write.
-	expect(String(refused.toolOutput)).toContain(process.platform === "darwin" ? "operation not permitted" : "Read-only file system");
+	expect(String(refused.toolOutput).toLowerCase()).toContain(
+		process.platform === "darwin" ? "operation not permitted" : "read-only file system",
+	);
 	expect(existsSync(path)).toBe(false);
 	s.save("shell.txt", pane(s, caller.id));
 	await settled(s, caller.id, "the caller idle", since);
@@ -272,7 +274,7 @@ test("A reader whose swb mcp dies is stopped by the host once the caller's turn 
 			for (const [, pid, ppid] of procs) if (tree.has(ppid as string)) tree.add(pid as string);
 		}
 		const mcp = procs
-			.filter(([, pid, , args]) => tree.has(pid as string) && /\/swb mcp --harness codex$/.test(args as string))
+			.filter(([, pid, , args]) => tree.has(pid as string) && /\/swb mcp --harness codex\b/.test(args as string))
 			.map(([, pid]) => pid as string);
 		expect(mcp.length).toBeGreaterThan(0);
 		const killed = Date.now();

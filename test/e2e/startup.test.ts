@@ -46,7 +46,7 @@ test("n then Enter on Operators starts a trusted pi that reads only swb's curren
 
 	s.swb("drive", "start");
 	await waitState(s, "ready", (x) => x.ready);
-	s.keys("g");
+	s.keys("Home");
 	await waitState(s, "cursor on the Operators section", (x) => x.cursorRow === 0);
 	s.keys("n");
 	await waitState(s, "the picker, on pi", (x) => x.picker !== null && x.picker.harness === "pi");
@@ -89,11 +89,11 @@ test("the Deck outlives its terminal; one started afresh restores the last one's
 	const first = await waitState(s, "ready", (x) => x.ready && x.cursor !== null);
 	expect(first.focus).toBe("roster");
 	const archived = first.rows.findIndex((r) => r.kind === "section" && r.label === "Archived");
-	s.keys("G");
+	s.keys("End");
 	await waitState(s, "cursor on Archived", (x) => x.cursorRow === archived);
 	s.keys("Enter");
 	await waitState(s, "Archived open", (x) => x.rows.some((r) => r.kind === "section" && r.label === "Archived" && r.expanded));
-	s.keys("g");
+	s.keys("Home");
 	const target = first.cursor === older ? newer : older;
 	const index = first.rows.findIndex((r) => r.kind === "session" && r.id === target);
 	for (let at = 0; at < index; at++) s.keys("j");

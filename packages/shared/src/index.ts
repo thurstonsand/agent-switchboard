@@ -6,7 +6,18 @@ import { promisify } from "node:util";
 
 export { Db, isBusy, type Param, type Row } from "./db.ts";
 
-export const SCHEMA_VERSION = 16;
+export const SCHEMA_VERSION = 17;
+
+/** A pending directory move (from swb_move_session, swb_worktree_*, /mv, /wt, or the Deck) waiting for wake. */
+export type PendingMove = {
+	cwd: string;
+	/** Prompt to wake the session with when reload='continue' (agent-initiated move). */
+	prompt?: string;
+	/** Passive migration notice when waking idle (human-initiated move). */
+	notice?: string;
+	/** Deferred wt cleanup to run after the old harness exits (merge --defer-removal, rm --validate-only). */
+	postOp?: { args: string[]; cwd: string };
+};
 
 /** How swb exits when its db stayed locked past busy_timeout, EX_TEMPFAIL: a caller may try again. */
 export const BUSY_EXIT = 75;
@@ -175,6 +186,11 @@ export function linkedWorktree(cwd: string): { path: string; common: string } | 
 /** linkedWorktree without blocking, for a caller asking about many directories at once. */
 export async function linkedWorktreeAsync(cwd: string): Promise<{ path: string; common: string } | null> {
 	return worktreeFrom(await gitAsync(cwd, ...WORKTREE_QUERY));
+}
+
+/** Whether cwd is inside a git repository (main checkout or linked worktree). */
+export function inGitRepo(cwd: string): boolean {
+	return git(cwd, "rev-parse", "--git-dir") !== null;
 }
 
 export function branch(cwd: string): string | null {

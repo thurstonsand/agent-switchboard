@@ -7,7 +7,7 @@ Type "swb" Sleep 400ms Enter
 Wait+Screen /▾ \S+ \(3\)/
 Sleep 1s
 # Onto the top session, "Bisect the flaky test".
-Type "g"
+Home
 Sleep 300ms
 Type "jj"
 Sleep 1s

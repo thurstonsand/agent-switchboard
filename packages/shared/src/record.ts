@@ -117,8 +117,15 @@ export function startHosting(db: Db, h: Hosting): void {
 		const other = hostOfSession(db, h.sessionId, h.host);
 		if (other) throw new Error(`session ${h.sessionId} is already open in another process (${other})`);
 		db.run("DELETE FROM runtimes WHERE session_id = ? AND tmux_session != ?", h.sessionId, h.host);
-		// Back up, it has done the reload its start began.
-		db.run("UPDATE marks SET reload = NULL, reload_started_at = NULL WHERE session_id = ? AND reload_started_at IS NOT NULL", h.sessionId);
+		// Back up, it has done the reload or pending move its start began.
+		db.run(
+			`UPDATE marks
+			 SET reload = CASE WHEN reload_started_at IS NOT NULL THEN NULL ELSE reload END,
+			     reload_started_at = NULL,
+			     move_json = NULL
+			 WHERE session_id = ? AND (reload_started_at IS NOT NULL OR (reload IS NULL AND move_json IS NOT NULL))`,
+			h.sessionId,
+		);
 		db.run(
 			`INSERT INTO runtimes (tmux_session, session_id, harness, cwd, project_root, boot_id, pid, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT (tmux_session) DO UPDATE SET session_id = excluded.session_id, harness = excluded.harness, cwd = excluded.cwd,
@@ -311,7 +318,7 @@ export function markArchived(db: Db, sessionId: string): boolean {
 	const now = Date.now();
 	db.run(
 		`INSERT INTO marks (session_id, archived_at) VALUES (?, ?)
-		 ON CONFLICT (session_id) DO UPDATE SET archived_at = excluded.archived_at, snoozed_at = NULL, snoozed_until = NULL, reload = NULL, reload_started_at = NULL`,
+		 ON CONFLICT (session_id) DO UPDATE SET archived_at = excluded.archived_at, snoozed_at = NULL, snoozed_until = NULL, reload = NULL, reload_started_at = NULL, move_json = NULL`,
 		sessionId,
 		now,
 	);

@@ -26,6 +26,7 @@ import { loginShell } from "../sessions.ts";
 import type { DeckLayout, Lens } from "../store.ts";
 import { quote, SESSIONS, tmuxAsync } from "../tmux.ts";
 import { writeConfig } from "../write-config.ts";
+import type { CheckoutBranch, WorktreeContext } from "../wt.ts";
 import { ARRIVAL_HOLD_MS, DECK, PLACEHOLDER } from "./conf.ts";
 import { Control } from "./control.ts";
 import { agentCols, type DeckIntent, HELP_POPUP, rosterCols, SPLIT_FROM } from "./deck.ts";
@@ -48,6 +49,7 @@ import {
 	type LensMode,
 	type Mode,
 	type Model,
+	type MoveMode,
 	type NameMode,
 	type Nest,
 	PEEK_MIN_COLS,
@@ -1169,6 +1171,24 @@ function onWorker(message: FromWorker): void {
 		case "dirty":
 			if (m.mode.kind === "archive" && m.mode.id === message.id) m.mode.dirty = message.dirty;
 			break;
+		case "worktreeContext":
+			if (m.mode.kind === "move" && m.mode.id === message.id) {
+				if (!message.ctx.inGit || !message.ctx.wtInstalled) {
+					const e = m.entries.get(message.id);
+					if (e) openMovePicker(e);
+					else leave();
+				} else {
+					m.mode.ctx = message.ctx;
+				}
+			}
+			break;
+		case "checkoutBranches":
+			if (m.mode.kind === "move" && m.mode.id === message.id && m.mode.step.kind === "checkout") {
+				m.mode.step.branches = message.branches;
+				const shown = checkoutBranchChoices();
+				m.mode.step.choice = Math.max(0, Math.min(m.mode.step.choice, Math.max(0, shown.length - 1)));
+			}
+			break;
 		case "done": {
 			const { req, error } = message;
 			if (m.pin?.req === req) {
@@ -1178,7 +1198,10 @@ function onWorker(message: FromWorker): void {
 					m.lingering = null;
 				}
 			}
-			if (error === null) break;
+			if (error === null) {
+				if (message.message) toast(message.message, "info");
+				break;
+			}
 			for (const [id, local] of m.localViews) if (local.req === req) m.localViews.delete(id);
 			for (const [id, local] of m.localGroups) if (local.req === req) m.localGroups.delete(id);
 			for (const [id, local] of m.localAgentCols) if (local.req === req) m.localAgentCols.delete(id);
@@ -1335,6 +1358,10 @@ export function nameMode(): NameMode | null {
 
 export function snoozeMode(): SnoozeMode | null {
 	return m.mode.kind === "snooze" ? m.mode : null;
+}
+
+export function moveMode(): MoveMode | null {
+	return m.mode.kind === "move" ? m.mode : null;
 }
 
 /** The session whose archive prompt offers its family or linked worktree. */
@@ -1732,7 +1759,11 @@ function input(data: string): void {
 /** Whether the mode has a field that takes the keys its keymap doesn't. */
 function typing(): boolean {
 	const choosing = pickerMode();
-	return filtering() || nameMode() !== null || lensMode() !== null || (choosing !== null && !choosing.confirm);
+	const moving = moveMode();
+	const movingTyping =
+		moving !== null &&
+		((moving.step.kind === "fork" && moving.step.field === "name") || moving.step.kind === "checkout" || moving.step.kind === "rebranch");
+	return filtering() || nameMode() !== null || lensMode() !== null || movingTyping || (choosing !== null && !choosing.confirm);
 }
 
 /** Every key, click, prefix key, and button ends here. */
@@ -1773,6 +1804,18 @@ function run(c: Command): void {
 			break;
 		case "archiveAnswer":
 			finishArchiving(c.all, c.deleteWorktree);
+			break;
+		case "moveAction":
+			runMoveAction(c.action);
+			break;
+		case "moveToggle":
+			toggleMoveField(c.field);
+			break;
+		case "moveField":
+			cycleMoveField(c.by);
+			break;
+		case "moveSubmit":
+			submitMove();
 			break;
 		case "history":
 			goHistory(c.step);
@@ -1891,6 +1934,9 @@ function act(act: RowAct, row: Row | undefined): void {
 		case "group":
 			startNaming(row);
 			break;
+		case "move":
+			startMove(row);
+			break;
 	}
 }
 
@@ -1901,7 +1947,23 @@ function stepMode(by: number): void {
 	else if (mode.kind === "snooze") mode.choice = Math.max(0, Math.min(SNOOZE_CHOICES.length - 1, mode.choice + by));
 	else if (mode.kind === "name") mode.choice = Math.max(0, Math.min(nameChoices().length - 1, mode.choice + by));
 	else if (mode.kind === "lens") mode.choice = Math.max(0, Math.min(lensChoices().length - 1, mode.choice + by));
-	else if (mode.kind === "picker") {
+	else if (mode.kind === "move") {
+		const step = mode.step;
+		if (step.kind === "menu" && mode.ctx) {
+			const count = moveMenuItems(mode.ctx).length;
+			step.choice = Math.max(0, Math.min(count - 1, step.choice + by));
+		} else if (step.kind === "fork") {
+			cycleMoveField(by >= 0 ? 1 : -1);
+		} else if (step.kind === "checkout") {
+			const count = checkoutBranchChoices().length;
+			step.choice = Math.max(0, Math.min(Math.max(0, count - 1), step.choice + by));
+		} else if (step.kind === "merge" && mode.ctx) {
+			const options = mergeOptions(mode.ctx);
+			const enabled = options.flatMap((o, i) => (o.disabled ? [] : [i]));
+			const pos = enabled.indexOf(step.choice);
+			if (pos >= 0) step.choice = enabled[Math.max(0, Math.min(enabled.length - 1, pos + by))] ?? step.choice;
+		}
+	} else if (mode.kind === "picker") {
 		const choosing = mode.picker;
 		if (choosing.confirm) return;
 		if (choosing.menu) {
@@ -1929,6 +1991,23 @@ function choose(index: number | null): void {
 		if (!choice) return;
 		leave();
 		setLens(choice.lens);
+	} else if (mode.kind === "move") {
+		const step = mode.step;
+		if (step.kind === "menu" && mode.ctx) {
+			const item = moveMenuItems(mode.ctx)[index ?? step.choice];
+			if (item) runMoveAction(item.action);
+		} else if (step.kind === "checkout") {
+			if (index !== null) step.choice = index;
+			submitMove();
+		} else if (step.kind === "merge" && mode.ctx) {
+			const opt = mergeOptions(mode.ctx)[index ?? step.choice];
+			if (opt && !opt.disabled) {
+				step.choice = index ?? step.choice;
+				submitMove();
+			}
+		} else {
+			submitMove();
+		}
 	} else if (mode.kind === "picker") {
 		const choosing = mode.picker;
 		if (choosing.confirm) finishRemove(true);
@@ -1951,7 +2030,10 @@ function cancel(): void {
 		leave();
 	} else if (mode.kind === "name" || mode.kind === "snooze" || mode.kind === "lens") leave();
 	else if (mode.kind === "archive") finishArchiving(null);
-	else if (mode.kind === "picker") {
+	else if (mode.kind === "move") {
+		if (mode.step.kind === "menu") leave();
+		else mode.step = { kind: "menu", choice: 0 };
+	} else if (mode.kind === "picker") {
 		const choosing = mode.picker;
 		if (choosing.confirm) finishRemove(false);
 		else if (choosing.menu) choosing.menu = null;
@@ -1967,6 +2049,18 @@ function typeInto(data: string): void {
 	const naming = nameMode();
 	const choosing = pickerMode();
 	const picking = lensMode();
+	const moving = moveMode();
+	if (moving) {
+		if (moving.step.kind === "fork" && moving.step.field === "name") {
+			moving.step.input.handleInput(data);
+		} else if (moving.step.kind === "checkout") {
+			moving.step.input.handleInput(data);
+			moving.step.choice = 0;
+		} else if (moving.step.kind === "rebranch") {
+			moving.step.input.handleInput(data);
+		}
+		return;
+	}
 	if (picking) {
 		picking.input.handleInput(data);
 		picking.choice = 0;
@@ -2057,7 +2151,7 @@ function mouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
 	// Anything but motion, a press among them, is on the row under the pointer, whatever it was on its way to.
 	else if (m.peek.aimRest) endAim();
 	// A prompt answers to its own buttons, never the rows underneath it.
-	if (archiving() !== null || nameMode() || snoozeMode() || lensMode()) {
+	if (archiving() !== null || nameMode() || snoozeMode() || lensMode() || moveMode()) {
 		if (event.type === "move") return { handled: true, render: relit };
 		if (event.type === "wheel" && archiving() === null) run({ kind: "step", by: Math.sign(event.wheelDelta ?? 0) });
 		else if (event.button === "left" && event.type === "press") press(event);
@@ -2525,7 +2619,208 @@ function startNaming(row = selected()): void {
 			0,
 			nameChoices().findIndex((c) => c.name === name),
 		);
-	} else toast("m picks a session's Group, or renames a Group", "info");
+	} else toast("g picks a session's Group, or renames a Group", "info");
+}
+
+// ── move & worktree menu ────────────────────────────────────────────────
+
+export type MoveMenuItem = {
+	action: "dir" | "fork" | "checkout" | "merge" | "rebranch" | "remove";
+	label: string;
+	dividerBefore?: boolean;
+};
+
+export function moveMenuItems(ctx: WorktreeContext): MoveMenuItem[] {
+	const parent = ctx.parentBranch ?? "main";
+	const items: MoveMenuItem[] = [
+		{ action: "dir", label: "Move to directory…" },
+		{ action: "fork", label: "Fork to new worktree…" },
+		{ action: "checkout", label: "Checkout branch…" },
+	];
+	if (ctx.isLinked) {
+		items.push(
+			{ action: "merge", label: `Merge → ${parent}…`, dividerBefore: true },
+			{ action: "rebranch", label: "Rebranch…" },
+			{ action: "remove", label: `Remove worktree → ${parent}` },
+		);
+	}
+	return items;
+}
+
+export type MergeOption = {
+	mode: "staged" | "rebase" | "squash";
+	key: string;
+	label: string;
+	note: string;
+	disabled: boolean;
+};
+
+export function mergeOptions(ctx: WorktreeContext): MergeOption[] {
+	const parent = ctx.parentBranch ?? "main";
+	return [
+		{ mode: "staged", key: "t", label: "Staged", note: "apply without committing", disabled: false },
+		{
+			mode: "rebase",
+			key: "r",
+			label: "Rebase",
+			note: ctx.dirty ? "requires clean tree" : "fast-forward rebased commits",
+			disabled: ctx.dirty,
+		},
+		{
+			mode: "squash",
+			key: "q",
+			label: "Squash",
+			note: ctx.dirty ? "requires clean tree" : `one commit on ${parent}`,
+			disabled: ctx.dirty,
+		},
+	];
+}
+
+export function checkoutBranchChoices(): CheckoutBranch[] {
+	const moving = moveMode();
+	if (moving?.step.kind !== "checkout" || !moving.step.branches) return [];
+	const q = moving.step.input.getValue().trim().toLowerCase();
+	return q === "" ? moving.step.branches : moving.step.branches.filter((b) => b.name.toLowerCase().includes(q));
+}
+
+function startMove(row = selected()): void {
+	if (row?.kind !== "session") {
+		toast("m moves a session or runs git worktree actions", "info");
+		return;
+	}
+	const e = row.entry;
+	if (e.operator) {
+		toast("Operator sessions cannot be moved.", "info");
+		return;
+	}
+	if (e.provisional) {
+		toast("nothing to move before the first prompt", "error");
+		return;
+	}
+	if (e.live && e.activity !== "idle") {
+		toast("turn running: wait for it to complete", "error");
+		return;
+	}
+	enter({ kind: "move", at: promptAnchor(row), id: e.id, ctx: null, step: { kind: "menu", choice: 0 } });
+	post({ type: "worktreeContext", id: e.id, cwd: e.cwd });
+}
+
+function openMovePicker(e: Entry): void {
+	openPicker("pick", e.cwd, null, { id: e.id, cwd: e.cwd });
+}
+
+function runMoveAction(action: MoveMenuItem["action"]): void {
+	const moving = moveMode();
+	if (!moving) return;
+	const e = m.entries.get(moving.id);
+	if (!e) {
+		leave();
+		return;
+	}
+	switch (action) {
+		case "dir":
+			openMovePicker(e);
+			return;
+		case "fork": {
+			const input = new Input({ prompt: "", placeholder: "new branch name", placeholderStyle: gray });
+			input.focused = true;
+			moving.step = { kind: "fork", input, clean: false, moveSession: true, field: "name" };
+			return;
+		}
+		case "checkout": {
+			const input = new Input({ prompt: "/ ", placeholder: "filter branches", placeholderStyle: gray });
+			input.focused = true;
+			moving.step = { kind: "checkout", input, choice: 0, moveSession: true, branches: null };
+			post({ type: "checkoutBranches", id: e.id, cwd: e.cwd });
+			return;
+		}
+		case "merge":
+			moving.step = { kind: "merge", choice: 0 };
+			return;
+		case "rebranch": {
+			const input = new Input({ prompt: "", placeholder: "new branch name", placeholderStyle: gray });
+			input.focused = true;
+			moving.step = { kind: "rebranch", input };
+			return;
+		}
+		case "remove":
+			moving.step = { kind: "remove", preserveBranch: false, force: false };
+			return;
+	}
+}
+
+function cycleMoveField(by: 1 | -1): void {
+	const moving = moveMode();
+	if (moving?.step.kind !== "fork") return;
+	const fields = ["name", "clean", "session"] as const;
+	const next = fields[(fields.indexOf(moving.step.field) + by + fields.length) % fields.length] as "name" | "clean" | "session";
+	moving.step.field = next;
+	moving.step.input.focused = next === "name";
+}
+
+function toggleMoveField(field: "clean" | "session" | "preserveBranch" | "force"): void {
+	const moving = moveMode();
+	if (!moving) return;
+	if (moving.step.kind === "fork") {
+		if (field === "clean") moving.step.clean = !moving.step.clean;
+		else if (field === "session") moving.step.moveSession = !moving.step.moveSession;
+	} else if (moving.step.kind === "checkout" && field === "session") {
+		moving.step.moveSession = !moving.step.moveSession;
+	} else if (moving.step.kind === "remove") {
+		if (field === "preserveBranch") moving.step.preserveBranch = !moving.step.preserveBranch;
+		else if (field === "force") moving.step.force = !moving.step.force;
+	}
+}
+
+function submitMove(): void {
+	const moving = moveMode();
+	if (!moving) return;
+	const { id, step, ctx } = moving;
+	if (step.kind === "fork") {
+		const name = step.input.getValue().trim();
+		if (!name) {
+			toast("Enter a branch name.", "info");
+			return;
+		}
+		leave();
+		post({ type: "wtFork", req: nextReq(), id, name, clean: step.clean, moveSession: step.moveSession });
+		return;
+	}
+	if (step.kind === "checkout") {
+		const branch = checkoutBranchChoices()[step.choice];
+		if (!branch) {
+			toast("No branch selected.", "info");
+			return;
+		}
+		leave();
+		post({ type: "wtCheckout", req: nextReq(), id, branch: branch.name, moveSession: step.moveSession });
+		return;
+	}
+	if (step.kind === "merge" && ctx) {
+		const opt = mergeOptions(ctx)[step.choice];
+		if (!opt || opt.disabled) return;
+		leave();
+		post({ type: "wtMerge", req: nextReq(), id, mode: opt.mode });
+		return;
+	}
+	if (step.kind === "rebranch") {
+		const branch = step.input.getValue().trim();
+		if (!branch) {
+			toast("Enter a new branch name.", "info");
+			return;
+		}
+		leave();
+		post({ type: "wtRebranch", req: nextReq(), id, branch });
+		return;
+	}
+	if (step.kind === "remove") {
+		if (ctx?.dirty && !step.force) {
+			toast("Uncommitted changes: toggle force (f) to remove.", "info");
+			return;
+		}
+		leave();
+		post({ type: "wtRemove", req: nextReq(), id, preserveBranch: step.preserveBranch, force: step.force });
+	}
 }
 
 /** No Group when nothing is typed, then the Project's Groups matching what is, then a new one unless one matches exactly. */
@@ -2589,8 +2884,13 @@ function setExpanded(row: Row, expanded: boolean): void {
 	}
 }
 
-/** Opens the directory picker: on the directory `from`, or straight into adding one. */
-function openPicker(mode: "pick" | "add", from: string | null, group: string | null): void {
+/** Opens the directory picker: on the directory `from`, straight into adding one, or to move an existing session. */
+function openPicker(
+	mode: "pick" | "add",
+	from: string | null,
+	group: string | null,
+	moveTarget: { id: string; cwd: string } | null = null,
+): void {
 	m.search.setValue("");
 	m.path.setValue("");
 	frame.pickerTop = 0;
@@ -2607,6 +2907,7 @@ function openPicker(mode: "pick" | "add", from: string | null, group: string | n
 			confirm: null,
 			preset: null,
 			menu: null,
+			moveTarget,
 		},
 	});
 	// The last list shows at once; the worker's fresh one replaces it when its scan lands.
@@ -2691,6 +2992,16 @@ export function listedDirs(): Set<string> {
 
 function start(path: string): void {
 	const choosing = pickerMode() as Choosing;
+	if (choosing.moveTarget) {
+		if (path === choosing.moveTarget.cwd) {
+			toast(`Already in ${shortPath(path)}.`, "info");
+			return;
+		}
+		const id = choosing.moveTarget.id;
+		closePicker();
+		post({ type: "move", req: nextReq(), id, cwd: path });
+		return;
+	}
 	const target = pickerTarget(choosing);
 	closePicker();
 	newSession(path, path === choosing.from ? choosing.group : null, typeof target === "string" ? null : target);
@@ -3044,12 +3355,74 @@ export function keymap(): Binding<Command>[] {
 		}
 		case "picker":
 			return pickerKeys(mode.picker);
+		case "move":
+			return moveKeys(mode);
 		case "roster":
 			return rosterKeys(m.peek.settled ? rosterRows().find((row) => row.key === m.peek.settled?.id) : selected());
 	}
 }
 
+function moveKeys(mode: MoveMode): Binding<Command>[] {
+	const step = mode.step;
+	if (step.kind === "menu") {
+		const items = mode.ctx ? moveMenuItems(mode.ctx) : [];
+		return [
+			bind(["up", "k"], "↑", null, { kind: "step", by: -1 }),
+			bind(["down", "j"], "↓", null, { kind: "step", by: 1 }),
+			...items.map((item, i) => bind([String(i + 1)], String(i + 1), null, { kind: "moveAction", action: item.action })),
+			bind(["enter"], "⏎", "choose", CHOOSE),
+			bind(["escape", "q", "m"], "esc", "cancel", CANCEL),
+		];
+	}
+	if (step.kind === "fork") {
+		const toggle =
+			step.field === "clean"
+				? [bind([" ", "left", "right"], "space", "toggle", { kind: "moveToggle", field: "clean" })]
+				: step.field === "session"
+					? [bind([" ", "left", "right"], "space", "toggle", { kind: "moveToggle", field: "session" })]
+					: [];
+		return [
+			bind(["tab", "down"], "⇥", "field", { kind: "moveField", by: 1 }),
+			bind(["shift+tab", "up"], "⇧⇥", null, { kind: "moveField", by: -1 }),
+			...toggle,
+			bind(["enter"], "⏎", step.moveSession ? "fork & move" : "fork", { kind: "moveSubmit" }),
+			bind(["escape"], "esc", "back", CANCEL),
+		];
+	}
+	if (step.kind === "checkout") {
+		return [
+			...ARROWS,
+			bind(["tab"], "⇥", step.moveSession ? "stay" : "move", { kind: "moveToggle", field: "session" }),
+			bind(["enter"], "⏎", step.moveSession ? "checkout & move" : "checkout", CHOOSE),
+			bind(["escape"], "esc", "back", CANCEL),
+		];
+	}
+	if (step.kind === "merge") {
+		const options = mode.ctx ? mergeOptions(mode.ctx) : [];
+		return [
+			bind(["up", "k"], "↑", null, { kind: "step", by: -1 }),
+			bind(["down", "j"], "↓", null, { kind: "step", by: 1 }),
+			...options.flatMap((opt, i) => (opt.disabled ? [] : [bind([opt.key], opt.key, null, { kind: "choose", index: i })])),
+			bind(["enter"], "⏎", "merge", CHOOSE),
+			bind(["escape"], "esc", "back", CANCEL),
+		];
+	}
+	if (step.kind === "rebranch") {
+		return [bind(["enter"], "⏎", "rebranch", { kind: "moveSubmit" }), bind(["escape"], "esc", "back", CANCEL)];
+	}
+	// remove
+	const dirty = Boolean(mode.ctx?.dirty);
+	const canSubmit = !dirty || step.force;
+	return [
+		bind(["p"], "p", "keep branch", { kind: "moveToggle", field: "preserveBranch" }),
+		...(dirty ? [bind(["f"], "f", "force", { kind: "moveToggle", field: "force" })] : []),
+		...(canSubmit ? [bind(["d", "enter"], "d", "remove", { kind: "moveSubmit" })] : []),
+		bind(["escape"], "esc", "back", CANCEL),
+	];
+}
+
 function pickerKeys(choosing: Choosing): Binding<Command>[] {
+	const moving = Boolean(choosing.moveTarget);
 	if (choosing.confirm) return [bind(["y", "enter"], "y", "remove", CHOOSE), bind(["n", "escape"], "n", "keep", CANCEL)];
 	if (choosing.menu) {
 		// A number picks what the menu shows by its place, until something's typed: model names have numbers in them.
@@ -3066,15 +3439,15 @@ function pickerKeys(choosing: Choosing): Binding<Command>[] {
 	if (choosing.mode === "add")
 		return [
 			bind(["tab"], "⇥", "complete", { kind: "complete" }),
-			bind(["enter"], "⏎", "start", CHOOSE),
+			bind(["enter"], "⏎", moving ? "move" : "start", CHOOSE),
 			bind(["escape"], "esc", choosing.opened === "pick" ? "back" : "cancel", CANCEL),
 			...ARROWS,
 		];
 	return [
-		bind(["enter"], "⏎", "start", CHOOSE),
-		...(pickerPresets().length > 0 ? [bind(["tab", "shift+tab"], "⇥", null, { kind: "menu" })] : []),
+		bind(["enter"], "⏎", moving ? "move" : "start", CHOOSE),
+		...(!moving && pickerPresets().length > 0 ? [bind(["tab", "shift+tab"], "⇥", null, { kind: "menu" })] : []),
 		// The launch card's corner says it.
-		bind(["escape"], "esc", null, CANCEL),
+		bind(["escape"], "esc", moving ? "cancel" : null, CANCEL),
 		// The prefix key, which reaches the roster through tmux.
 		bind([], `${keyName(m.config.prefix)} d`, "remove", { kind: "remove" }),
 		...ARROWS,
@@ -3113,10 +3486,11 @@ function rosterKeys(row: Row | undefined): Binding<Command>[] {
 	// Help and Settings are the roster's own, so its top bar offers them, not the cursor's legend. Group and Archive are
 	// the row's, said here only while no Peek or expanded details already say them.
 	const elsewhere = m.peek.settled !== null || (panes.narrow && m.details.expanded);
-	const groups = !elsewhere && ((session !== null && session.open && !session.operator) || (row?.kind === "header" && row.group !== null));
+	const groups = !elsewhere && ((session?.open && !session.operator) || (row?.kind === "header" && row.group !== null));
 	return [
 		bind(["enter"], "⏎", enter, { kind: "activate", enter: true }),
-		bind(["m"], "m", groups ? "group" : null, onRow("group")),
+		bind(["g"], "g", groups ? "group" : null, onRow("group")),
+		bind(["m"], "m", null, onRow("move")),
 		bind(["s"], "s", null, onRow("snooze")),
 		bind(["a"], "a", session && !elsewhere ? (session.open ? "archive" : "unarchive") : null, onRow("archive")),
 		bind(["n"], "n", "new", onRow("new")),
@@ -3135,8 +3509,8 @@ function rosterKeys(row: Row | undefined): Binding<Command>[] {
 			: []),
 		bind(["down", "j"], "j", null, step(1)),
 		bind(["up", "k"], "k", null, step(-1)),
-		bind(["g"], "g", null, step(Number.NEGATIVE_INFINITY)),
-		bind(["G"], "G", null, step(Number.POSITIVE_INFINITY)),
+		bind(["home"], "Home", null, step(Number.NEGATIVE_INFINITY)),
+		bind(["end"], "End", null, step(Number.POSITIVE_INFINITY)),
 		bind([" "], "space", null, { kind: "activate", enter: false }),
 		bind(["right", "l"], "l", null, { kind: "unfold", open: true }),
 		bind(["left", "h"], "h", null, { kind: "unfold", open: false }),
@@ -3192,7 +3566,8 @@ function prefixKeymap(row: string | null): Binding<Command>[] {
 		bind(["/"], "/", null, { kind: "filter" }),
 		bind(["f"], "f", null, { kind: "openLens" }),
 		bind(["!"], "!", null, { kind: "needsLens" }),
-		bind(["m"], "m", null, onRow("group")),
+		bind(["g"], "g", null, onRow("group")),
+		bind(["m"], "m", null, onRow("move")),
 		bind(["J"], "J", null, { kind: "moveSession", by: 1 }),
 		bind(["K"], "K", null, { kind: "moveSession", by: -1 }),
 		bind(["n"], "n", null, onRow("new")),
@@ -3269,7 +3644,7 @@ export function peekButtons(row: Row): [label: string, key: string, act: RowAct]
 	if (row.kind === "section") return row.key === "operators" ? [["New Operator", "n", "new"]] : [];
 	if (row.kind === "header") {
 		const items: [string, string, RowAct][] = [["New session here", "n", "new"]];
-		if (row.group !== null) items.push(["Rename Group…", "m", "group"]);
+		if (row.group !== null) items.push(["Rename Group…", "g", "group"]);
 		return items;
 	}
 	const e = row.entry;
@@ -3277,10 +3652,11 @@ export function peekButtons(row: Row): [label: string, key: string, act: RowAct]
 	if (!e.open) items.push(["Unarchive", "a", "archive"]);
 	else {
 		items.push(e.live ? ["Shut down", "x", "stop"] : ["Wake in background", "w", "wake"]);
+		if (!e.provisional && !e.operator) items.push(["Move…", "m", "move"]);
 		if (!e.provisional && !e.snoozed)
 			items.push([e.markedUnseen ? "Unmark Unseen" : isUnseen(e) ? "Keep Unseen" : "Mark Unseen", "u", "unseen"]);
 		if (!e.provisional) items.push(e.snooze ? ["Unsnooze", "s", "snooze"] : ["Snooze…", "s", "snooze"], ["Archive", "a", "archive"]);
-		if (!e.operator) items.push(["Group…", "m", "group"]);
+		if (!e.operator) items.push(["Group…", "g", "group"]);
 	}
 	if (parentOf(e)) items.push(["Parent", "p", "parent"]);
 	return items;

@@ -117,16 +117,16 @@ test("the mouse reaches everything the keys do: a row's Peek, the hidden or narr
 	await until(() => !entry(s, b).live, budgets.settle, "bravo stopped from its Peek");
 	expect(state(s).cursor).toBe(a);
 
-	await peekButton("alpha", a, "m Group…");
+	await peekButton("alpha", a, "g Group…");
 	await waitState(s, "the Group picker", (x) => x.mode === "name");
 	await onScreen("╭─ Group ", "the Group form drawn");
 	expect(menuUnder("Group")).toContain("alpha");
 	s.save("group-picker.txt", s.screen());
 	await click(" esc ");
 	await waitState(s, "the Group picker closed by its esc", (x) => x.mode === "roster");
-	s.keys("m", "-l", "review2", "Enter");
+	s.keys("g", "-l", "review2", "Enter");
 	await until(() => entry(s, a).group === "review2", budgets.settle, "a new Group typed into the form");
-	s.keys("m");
+	s.keys("g");
 	await onScreen("1 (no Group)", "numbered Group choices");
 	s.keys("1");
 	await until(() => entry(s, a).group === null, budgets.settle, "the number removes its Group");
@@ -230,7 +230,7 @@ test("Escape followed by mouse motion clears the filter without typing the repor
 	}
 	s.keys("Escape");
 	await cursorTo(s, a);
-	s.keys("m");
+	s.keys("g");
 	await waitState(s, "the Group form", (x) => x.mode === "name");
 	await onScreen("╭─ Group ", "the Group form drawn");
 	const [x, y] = find("bravo");
@@ -424,10 +424,10 @@ test("a pointer on its way into a Peek keeps it across rows, headers, and empty 
 	// The top row's Peek hangs down past the other rows, the Archived section, and the empty roster under it: the
 	// straight line to its last button crosses all of them, and none takes the Peek away.
 	await peekOn(top.id);
-	await glide(s, cell(find(titleOf(top.id))), cell(findRight("m Group…")), 300);
+	await glide(s, cell(find(titleOf(top.id))), cell(findRight("g Group…")), 300);
 	await Bun.sleep(600);
 	expect(state(s).peek?.id).toBe(top.id);
-	deckClick(s, "m Group…", cell(findRight("m Group…")));
+	deckClick(s, "g Group…", cell(findRight("g Group…")));
 	await waitState(s, "the top row's Group form, from its Peek", (x) => x.mode === "name");
 	expect(menuUnder("Group")).toContain(titleOf(top.id));
 	s.keys("Escape");
@@ -491,8 +491,8 @@ esac
 		writeFileSync(join(s.root, "release"), "");
 	}
 	await waitState(s, "alpha's Peek", (x) => x.peek?.id === id);
-	await onScreen("m Group…", "the Group button drawn");
-	deckClick(s, "m Group…", cell(findRight("m Group…")));
+	await onScreen("g Group…", "the Group button drawn");
+	deckClick(s, "g Group…", cell(findRight("g Group…")));
 	await waitState(s, "alpha's Group form", (x) => x.mode === "name");
 	expect(menuUnder("Group")).toContain("alpha");
 });
@@ -552,7 +552,7 @@ test("Archive and Snooze open under their row at any width, and the Stage's last
 			.some((line) => /long: a title that runs well past the roster's width\s.*│/.test(line));
 	await cursorTo(s, long);
 	await until(intoPeek, budgets.settle, "the long title running on into its Peek");
-	s.keys("m");
+	s.keys("g");
 	await onScreen("╭─ Group ", "the Group menu under the long title");
 	const roster = s
 		.screen()
@@ -571,7 +571,7 @@ test("Archive and Snooze open under their row at any width, and the Stage's last
 	await waitState(s, "narrow roster", (st) => st.layout.rosterOnly);
 	for (const [key, title] of [
 		["s", "╭─ Snooze "],
-		["m", "╭─ Group "],
+		["g", "╭─ Group "],
 		["a", "╭─ Archive "],
 	] as const) {
 		s.keys(key);
@@ -613,7 +613,7 @@ test("narrow details expand by key and click, scroll, follow the selection, and 
 	const below = footer.find((line) => line.includes("a archive")) as string;
 	expect([views.indexOf("e editor"), views.indexOf("v split"), views.indexOf("s shell")]).toEqual([
 		below.indexOf("n new"),
-		below.indexOf("m group"),
+		below.indexOf("g group"),
 		below.indexOf("a archive"),
 	]);
 	s.keys("i");
@@ -651,7 +651,7 @@ test("narrow details expand by key and click, scroll, follow the selection, and 
 	await onScreen("a Archive", "actions after scrolling details");
 	expect(s.screen()).toMatch(/╭[^\n]*↑ \d+[^\n]*╮/);
 	expect(s.screen()).toMatch(/╰[^\n]*╯/);
-	await click("m Group…", 60);
+	await click("g Group…", 60);
 	await onScreen("╭─ Group ", "the Group menu");
 	expect(menuUnder("Group")).toContain("child");
 	s.keys("Escape", "PPage");

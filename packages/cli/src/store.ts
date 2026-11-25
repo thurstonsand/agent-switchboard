@@ -1,4 +1,4 @@
-import { Db, dbPath, type ReloadMode, SCHEMA_VERSION, type View } from "@swb/shared";
+import { Db, dbPath, type PendingMove, type ReloadMode, SCHEMA_VERSION, type View } from "@swb/shared";
 import { SwbError } from "./errors.ts";
 
 const MIGRATIONS: string[] = [
@@ -156,6 +156,8 @@ const MIGRATIONS: string[] = [
 	ALTER TABLE marks ADD COLUMN wake_attempts INTEGER;
 	ALTER TABLE marks ADD COLUMN woken_at INTEGER;
 	ALTER TABLE marks ADD COLUMN wake_failure TEXT;`,
+	// A pending directory move (target cwd, wake prompt or passive notice, optional post-quit wt cleanup).
+	"ALTER TABLE marks ADD COLUMN move_json TEXT",
 ];
 
 if (MIGRATIONS.length !== SCHEMA_VERSION) throw new Error(`${MIGRATIONS.length} migrations for schema v${SCHEMA_VERSION}`);
@@ -203,10 +205,37 @@ export function rename(db: Db, id: string, title: string | null): void {
 export function setReload(db: Db, id: string, mode: ReloadMode | null): void {
 	db.run(
 		`INSERT INTO marks (session_id, reload) VALUES (?, ?)
-		 ON CONFLICT (session_id) DO UPDATE SET reload = excluded.reload, reload_started_at = NULL`,
+		 ON CONFLICT (session_id) DO UPDATE SET reload = excluded.reload, reload_started_at = NULL,
+		   move_json = CASE WHEN excluded.reload IS NULL THEN NULL ELSE move_json END`,
 		id,
 		mode,
 	);
+}
+
+/** A pending directory move, optionally paired with a reload mode to trigger a restart; null clears it. */
+export function setPendingMove(db: Db, id: string, move: PendingMove | null, reloadMode?: ReloadMode | null): void {
+	const json = move ? JSON.stringify(move) : null;
+	if (reloadMode === undefined) {
+		db.run(
+			`INSERT INTO marks (session_id, move_json) VALUES (?, ?)
+			 ON CONFLICT (session_id) DO UPDATE SET move_json = excluded.move_json`,
+			id,
+			json,
+		);
+	} else {
+		db.run(
+			`INSERT INTO marks (session_id, reload, move_json) VALUES (?, ?, ?)
+			 ON CONFLICT (session_id) DO UPDATE SET reload = excluded.reload, reload_started_at = NULL, move_json = excluded.move_json`,
+			id,
+			reloadMode,
+			json,
+		);
+	}
+}
+
+export function pendingMove(db: Db, id: string): PendingMove | null {
+	const row = db.get("SELECT move_json FROM marks WHERE session_id = ?", id);
+	return row?.move_json ? (JSON.parse(row.move_json as string) as PendingMove) : null;
 }
 
 /** Moves sessions into a Group, or out of any when `name` is null. */

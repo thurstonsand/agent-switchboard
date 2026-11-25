@@ -91,6 +91,7 @@ const members = ${JSON.stringify([
 		"session_send_message",
 		"session_unschedule",
 		"swb_ask_user",
+		"swb_move_session",
 		"swb_show_file",
 		"swb_show_session",
 		"swb_update_session",
@@ -102,7 +103,7 @@ text("switchboard: " + group.tools.length + " tools; search found session_recall
 text(await tools.session_list({}));`;
 	const since = await prompt(s, `call codemode ${JSON.stringify({ code })}`);
 	await settled(s, runtime.session_id, "namespace discovery turn complete", since);
-	await until(() => s.screen().includes("switchboard: 12 tools; search found session_recall"), budgets.settle, "namespace discovery");
+	await until(() => s.screen().includes("switchboard: 13 tools; search found session_recall"), budgets.settle, "namespace discovery");
 	const list = await prompt(s, "call session_list {}");
 	await settled(s, runtime.session_id, "direct session_list turn complete", list);
 	await until(() => s.screen().includes("Sessions · 0 found"), budgets.settle, "the unchanged list receipt");

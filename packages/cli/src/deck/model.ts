@@ -4,6 +4,7 @@ import type { Config, ConfigError, Loaded } from "../config.ts";
 import type { Target, TargetTree } from "../dirs.ts";
 import type { Catalog } from "../harnesses.ts";
 import type { Lens } from "../store.ts";
+import type { CheckoutBranch, WorktreeContext } from "../wt.ts";
 import type { DeckIntent } from "./deck.ts";
 import type { Overlay } from "./overlay.ts";
 import type { Aim, Entry, PeekInfo, Snapshot, TerminalProfile, Transcript } from "./protocol.ts";
@@ -42,7 +43,9 @@ type Whole =
 	| ConfigError
 	| Catalog
 	| TargetTree
-	| TerminalProfile;
+	| TerminalProfile
+	| WorktreeContext
+	| CheckoutBranch;
 
 /** What a row can be asked to do: by its key on the cursor's row, by its Peek's buttons, or by a prefix key from anywhere. */
 export type RowAct =
@@ -57,7 +60,8 @@ export type RowAct =
 	| "copyOpen"
 	| "copyMention"
 	| "new"
-	| "group";
+	| "group"
+	| "move";
 
 /**
  * What a key, a click, a prefix key, or a button asks the roster to do. Keys find theirs in the mode's keymap, and every
@@ -86,6 +90,11 @@ export type Command =
 	| { kind: "row"; act: RowAct; row: string | null }
 	/** The archive prompt's answers; esc is cancel. */
 	| { kind: "archiveAnswer"; all: boolean; deleteWorktree: boolean }
+	/** The Move menu's actions and form switches. */
+	| { kind: "moveAction"; action: "dir" | "fork" | "checkout" | "merge" | "rebranch" | "remove" }
+	| { kind: "moveToggle"; field: "clean" | "session" | "preserveBranch" | "force" }
+	| { kind: "moveField"; by: 1 | -1 }
+	| { kind: "moveSubmit" }
 	| { kind: "history"; step: -1 | 1 }
 	/** The cursor onto a session, wherever it is, opening what hides it. */
 	| { kind: "reveal"; id: string }
@@ -372,6 +381,23 @@ export type LensMode = { kind: "lens"; choice: number; input: Input };
 /** `s`'s menu for a session: how long to snooze it. */
 export type SnoozeMode = { kind: "snooze"; at: { x: number; y: number; row: string }; id: string; title: string; choice: number };
 
+/** `m`'s menu and worktree sub-forms for a session. */
+export type MoveStep =
+	| { kind: "menu"; choice: number }
+	| { kind: "fork"; input: Input; clean: boolean; moveSession: boolean; field: "name" | "clean" | "session" }
+	| { kind: "checkout"; input: Input; choice: number; moveSession: boolean; branches: CheckoutBranch[] | null }
+	| { kind: "merge"; choice: number }
+	| { kind: "rebranch"; input: Input }
+	| { kind: "remove"; preserveBranch: boolean; force: boolean };
+
+export type MoveMode = {
+	kind: "move";
+	at: { x: number; y: number; row: string };
+	id: string;
+	ctx: WorktreeContext | null;
+	step: MoveStep;
+};
+
 /** Named as `deck state` reports them. */
 export type Mode =
 	| { kind: "roster" }
@@ -379,6 +405,7 @@ export type Mode =
 	| NameMode
 	| LensMode
 	| SnoozeMode
+	| MoveMode
 	/**
 	 * `a`'s prompt: first whether its family or worktree goes too, then, once `chosen` holds that answer, the
 	 * schedules archiving cancels. A session with schedules but neither family nor worktree starts at the second.
@@ -444,6 +471,8 @@ export type Choosing = {
 	 */
 	preset: string | null;
 	menu: Menu | null;
+	/** When set, the picker moves this session to the chosen directory instead of starting a new session. */
+	moveTarget?: { id: string; cwd: string } | null;
 };
 
 /** The launch card's menu, while it's open: what's typed to narrow it, and its highlight, an index into what it shows. */

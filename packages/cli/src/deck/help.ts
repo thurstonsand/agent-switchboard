@@ -23,7 +23,7 @@ function lines(prefix: string, columns = Infinity): string[] {
 	];
 	const move = [
 		bold("  In the roster · Move"),
-		row("g G", "First / last"),
+		row("Home End", "First / last"),
 		row("l →", "Focus session / expand"),
 		row("h ←", "Fold family / collapse header"),
 		row("space", "Toggle header or family fold"),
@@ -44,11 +44,12 @@ function lines(prefix: string, columns = Infinity): string[] {
 		bold("  Session lifecycle"),
 		row("w / x", "Wake in background / shut down"),
 		row("R", "Reload agent on fresh config"),
+		row("m", "Move session / git worktree actions"),
 		row("n / N", "New in known / added directory"),
 		row("Tab", "Choose preset in directory picker"),
 		row("a", "Archive family or session / unarchive"),
 	];
-	const organize = [bold("  Organize"), row("s", "Snooze / unsnooze"), row("u", "Mark / unmark Unseen"), row("m", "Pick or rename Group")];
+	const organize = [bold("  Organize"), row("s", "Snooze / unsnooze"), row("u", "Mark / unmark Unseen"), row("g", "Pick or rename Group")];
 	const settings = [bold("  Copy & settings"), row("y / Y", "Copy swb open <id> / @session:<id>"), row(",", "Settings")];
 	const left = [...start, "", ...move, "", ...relationships, "", ...lifecycle, "", ...organize, "", ...settings].flatMap((s) =>
 		s.split("\n"),

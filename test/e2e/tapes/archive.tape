@@ -20,7 +20,7 @@ Screenshot ../artifacts/phase6/videos/archive-at-once.png
 Wait+Screen /didn't quit/
 Screenshot ../artifacts/phase6/videos/archive-hung.png
 Sleep 2s
-Type "G"
+End
 Sleep 500ms
 Type "l"
 Sleep 1s

@@ -1,6 +1,37 @@
-import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, join, resolve } from "node:path";
 import { SwbError } from "../errors.ts";
 import { type Conversation, type Ending, type Entry, lines, type Part, type Subagent, textOf } from "./conversation.ts";
+
+const piAgentDir = (): string => process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi/agent");
+
+function settingsSessionDir(file: string): string | undefined {
+	if (!existsSync(file)) return undefined;
+	try {
+		return (JSON.parse(readFileSync(file, "utf8")) as { sessionDir?: string }).sessionDir;
+	} catch {
+		return undefined;
+	}
+}
+
+/** The directory pi stores sessions for cwd in; mirrors pi's SessionManager resolution chain. */
+export function piSessionDir(cwd: string): string {
+	const custom =
+		process.env.PI_CODING_AGENT_SESSION_DIR ??
+		settingsSessionDir(join(cwd, ".pi/settings.json")) ??
+		settingsSessionDir(join(piAgentDir(), "settings.json"));
+	const expand = (dir: string) => resolve(dir.replace(/^~(?=$|\/)/, homedir()));
+	return custom
+		? expand(custom)
+		: join(
+				piAgentDir(),
+				"sessions",
+				`--${resolve(cwd)
+					.replace(/^[/\\]/, "")
+					.replace(/[/\\:]/g, "-")}--`,
+			);
+}
 
 /**
  * Pi resolves its cwd from the header before loading extensions, and stops at a prompt when that directory is gone;
@@ -17,6 +48,27 @@ export function relocatePi(path: string, cwd: string): void {
 	const temporary = `${path}.${process.pid}.tmp`;
 	writeFileSync(temporary, JSON.stringify({ ...header, cwd }) + text.slice(end), { mode: 0o600 });
 	renameSync(temporary, path);
+}
+
+/**
+ * Moves a pi session transcript to newCwd: unconditionally rewrites line 1's header cwd, places the file in
+ * piSessionDir(newCwd), removes the old file if moved across folders, and returns the new transcript path.
+ */
+export function movePiTranscript(path: string, newCwd: string): string {
+	if (!existsSync(path)) return path;
+	const text = readFileSync(path, "utf8");
+	const end = text.indexOf("\n");
+	const header = JSON.parse(end < 0 ? text : text.slice(0, end));
+	if (header.type !== "session" || header.version !== 3) throw new SwbError(`${path}: expected a pi v3 session header`);
+	const destDir = piSessionDir(newCwd);
+	const newPath = resolve(destDir, basename(path));
+	mkdirSync(destDir, { recursive: true });
+	const temporary = `${newPath}.${process.pid}.tmp`;
+	const body = end < 0 ? "" : text.slice(end);
+	writeFileSync(temporary, JSON.stringify({ ...header, cwd: newCwd }) + body, { mode: 0o600 });
+	renameSync(temporary, newPath);
+	if (resolve(path) !== newPath) rmSync(path, { force: true });
+	return newPath;
 }
 
 type PiBlock = { type?: string; text?: string; id?: string; name?: string; arguments?: unknown };

@@ -8,6 +8,11 @@ import { LABELS, READER_PROMPT, READER_TOOLS, TOOLS } from "./tools.js";
 // What Claude calls the tools of this plugin's swb mcp server, every swb tool among them.
 const PREFIX = "mcp__plugin_swb_swb__";
 
+function shorten(path) {
+	if (!path || !line.home) return path ?? "";
+	return path === line.home || path.startsWith(`${line.home}/`) ? `~${path.slice(line.home.length)}` : path;
+}
+
 /** What a call's row names after its label, from its arguments alone: drawing can't wait on swb for a title. */
 function target(name, args) {
 	switch (name) {
@@ -27,6 +32,20 @@ function target(name, args) {
 			return args.view ?? "";
 		case "swb_show_file":
 			return `${args.path}${args.line ? `:${args.line}` : ""}`;
+		case "swb_move_session":
+			return shorten(args.cwd);
+		case "swb_worktree_list":
+			return args.all ? "all" : "";
+		case "swb_worktree_fork":
+			return [args.name, args.clean ? "clean" : "", args.move_session ? "move" : ""].filter(Boolean).join(" · ");
+		case "swb_worktree_checkout":
+			return [args.branch, args.move_session ? "move" : ""].filter(Boolean).join(" · ");
+		case "swb_worktree_merge":
+			return [args.name, args.mode, args.force ? "force" : ""].filter(Boolean).join(" · ");
+		case "swb_worktree_remove":
+			return [args.name, args.preserve_branch ? "keep branch" : "", args.force ? "force" : ""].filter(Boolean).join(" · ");
+		case "swb_worktree_rebranch":
+			return `${args.name} → ${args.branch}`;
 		case "swb_update_session":
 			return [
 				args.archived === true ? `archive${args.family ? " family" : ""}${args.cancel_turns ? " · cancel turns" : ""}` : "",
@@ -50,6 +69,20 @@ function target(name, args) {
  * last as long as this process; a row drawn again after a restart shows the first line.
  */
 const summaries = new Map();
+/** Worktree list rows by tool_use_id, so swb_worktree_list renders up to 3 inline rows when collapsed. */
+const worktreeLists = new Map();
+
+function formatWorktreeLines(entries) {
+	if (entries.length === 0) return ["No worktrees"];
+	const shown = entries.slice(0, 3).map((w) => {
+		const head = `${w.repo ? `${w.repo}/` : ""}${w.name}${w.current ? " *" : ""}`;
+		const rel = w.parent ? `${w.branch} → ${w.parent}` : w.branch;
+		const st = w.state && w.state !== "clean" ? ` · ${w.state}` : "";
+		return `${head}  ${rel}${st}`;
+	});
+	if (entries.length > 3) shown.push(`… ${entries.length - 3} more (ctrl+o to expand)`);
+	return shown;
+}
 
 /**
  * Claude Code folds MCP calls into one `Called plugin:swb:swb` line, which only ctrl+o opens. A run of nothing but swb
@@ -66,13 +99,33 @@ function drawCalls($, e) {
 			const { required = [] } = TOOLS.find((tool) => tool.name === name).inputSchema;
 			// Each row shows one line of the transcript's width, and Claude Code notes any text past 100,000 characters.
 			const what = required.every((key) => key in call.input) ? target(name, call.input).replace(/\s+/g, " ").slice(0, 500) : "";
-			const answer = (
-				call.isInterrupted
-					? "Interrupted"
-					: call.output === undefined
-						? "Running…"
-						: ((call.isErrored ? undefined : summaries.get(call.tool_use_id)) ?? String(call.output).trim().split("\n")[0])
-			).slice(0, 500);
+			let answerLines = [];
+			if (call.isInterrupted) answerLines = ["Interrupted"];
+			else if (call.output === undefined) answerLines = ["Running…"];
+			else if (!call.isErrored && name === "swb_worktree_list") {
+				const cached = worktreeLists.get(call.tool_use_id);
+				if (cached) {
+					answerLines = formatWorktreeLines(cached);
+				} else {
+					const rawLines = String(call.output)
+						.trim()
+						.split("\n")
+						.filter((l) => l.startsWith("- "))
+						.map((l) => l.slice(2));
+					if (rawLines.length > 0) {
+						answerLines = rawLines.slice(0, 3);
+						if (rawLines.length > 3) answerLines.push(`… ${rawLines.length - 3} more (ctrl+o to expand)`);
+					} else {
+						answerLines = [String(call.output).trim().split("\n")[0]];
+					}
+				}
+			} else {
+				const single = ((call.isErrored ? undefined : summaries.get(call.tool_use_id)) ?? String(call.output).trim().split("\n")[0]).slice(
+					0,
+					500,
+				);
+				if (single) answerLines = [single];
+			}
 			return Box({
 				key: call.tool_use_id,
 				flexDirection: "column",
@@ -85,13 +138,14 @@ function drawCalls($, e) {
 							what ? Text({ dimColor: true, children: [` · ${what}`] }) : "",
 						],
 					}),
-					answer
-						? Text({
-								wrap: "truncate-end",
-								...(call.isErrored ? { color: "error" } : { dimColor: true }),
-								children: [`  ⎿  ${answer}`],
-							})
-						: "",
+					...answerLines.map((lineText, idx) =>
+						Text({
+							key: String(idx),
+							wrap: "truncate-end",
+							...(call.isErrored ? { color: "error" } : { dimColor: true }),
+							children: [`${idx === 0 ? "  ⎿  " : "     "}${lineText.slice(0, 500)}`],
+						}),
+					),
 				],
 			});
 		}),
@@ -150,6 +204,7 @@ const line = {
 	started: false,
 	bin: "",
 	host: "",
+	home: "",
 	session: "",
 	cwd: "",
 	/** The session whose start swb has recorded, so a late environment records it once. */
@@ -173,6 +228,8 @@ async function env($, name) {
 	if (name === "SWB_BIN") return (await $.env.get("SWB_BIN")) ?? "";
 	if (name === "SWB_TMUX_SESSION") return (await $.env.get("SWB_TMUX_SESSION")) ?? "";
 	if (name === "SWB_OPERATOR") return (await $.env.get("SWB_OPERATOR")) ?? "";
+	if (name === "SWB_WT") return (await $.env.get("SWB_WT")) ?? "";
+	if (name === "HOME") return (await $.env.get("HOME")) ?? "";
 	return (await $.env.get("SWB_DB")) ?? "";
 }
 
@@ -463,6 +520,19 @@ async function useTool($, name, e) {
 			return swb($, ["show-file", e.path, ...from, ...(e.line ? ["--line", String(e.line)] : [])]);
 		case "swb_ask_user":
 			return swb($, ["ask-user", ...from]);
+		case "swb_move_session":
+			return swb($, ["move", "--agent", ...from, e.cwd]);
+		case "swb_worktree_list":
+		case "swb_worktree_fork":
+		case "swb_worktree_checkout":
+		case "swb_worktree_merge":
+		case "swb_worktree_remove":
+		case "swb_worktree_rebranch": {
+			const op = name.slice("swb_worktree_".length);
+			const { properties } = TOOLS.find((t) => t.name === name).inputSchema;
+			const args = Object.fromEntries(Object.keys(properties).flatMap((key) => (e[key] === undefined ? [] : [[key, e[key]]])));
+			return swb($, ["worktree", op, ...from], JSON.stringify(args));
+		}
 		case "swb_update_session": {
 			// The event carries the call's own fields beside its arguments; swb checks only the arguments.
 			const { properties } = TOOLS.find((t) => t.name === name).inputSchema;
@@ -482,6 +552,7 @@ async function init($) {
 	if (!line.managed) {
 		line.bin = await env($, "SWB_BIN");
 		line.host = await env($, "SWB_TMUX_SESSION");
+		line.home = await env($, "HOME");
 		line.managed = Boolean(line.bin && line.host);
 		if (line.managed && !line.started) {
 			line.started = true;
@@ -491,6 +562,60 @@ async function init($) {
 	if (!line.managed) return;
 	await follow($);
 	await begin($);
+}
+
+/** Registers native unprefixed /mv and /wt commands for non-Operator sessions (0 LLM tokens). */
+async function registerCommands($) {
+	if (await env($, "SWB_OPERATOR")) return;
+	await $.command.register({
+		name: "mv",
+		description: "Move this session to another directory",
+		argumentHint: "<dir>",
+	});
+	if (await env($, "SWB_WT")) {
+		await $.command.register({
+			name: "wt",
+			description: "Run a session-aware wt worktree command",
+			argumentHint: "fork|checkout|merge|rm|rebranch|list ...",
+		});
+	}
+}
+
+function unquoteSingleArg(raw) {
+	const trimmed = (raw ?? "").trim();
+	if (!trimmed) return "";
+	if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+		return trimmed.slice(1, -1);
+	}
+	return trimmed;
+}
+
+async function runMv($, e) {
+	await init($);
+	if (!line.managed) return { text: "swb: this Claude Code session isn't on the switchboard." };
+	if (line.busy) return { text: "swb: turn running: wait for it to complete." };
+	const dir = unquoteSingleArg(e.args);
+	if (!dir) return { text: "Usage: /mv <dir>" };
+	try {
+		const self = await $.session.id();
+		const res = JSON.parse(await swb($, ["move", "--from", self, "--defer", "--stop-host", dir]));
+		return { text: res.text };
+	} catch (error) {
+		return { text: `swb: ${error.message}` };
+	}
+}
+
+async function runWt($, e) {
+	await init($);
+	if (!line.managed) return { text: "swb: this Claude Code session isn't on the switchboard." };
+	if (line.busy) return { text: "swb: turn running: wait for it to complete." };
+	try {
+		const self = await $.session.id();
+		const res = JSON.parse(await swb($, ["wt", "--from", self, "--defer", "--stop-host"], e.args ?? ""));
+		return { text: res.text };
+	} catch (error) {
+		return { text: `swb: ${error.message}` };
+	}
 }
 
 /** Moves to the session Claude Code shows now; /clear and /resume change it. */
@@ -554,9 +679,13 @@ export function register(on) {
 		const result = await next(e);
 		await connectTools($);
 		await registerReader($);
+		await registerCommands($);
 		await init($);
 		return result;
 	});
+
+	on("command.run", { command: "mv" }, ($, e) => runMv($, e));
+	on("command.run", { command: "wt" }, ($, e) => runWt($, e));
 
 	on("agent.offer", { agent: "swb:reader" }, () => ({ isOffered: false }));
 	// An Operator's model starts no subagents, which the Deck can't see; the Agent tool stays, for session_recall's reader.
@@ -657,9 +786,12 @@ export function register(on) {
 			if (!line.managed) return { deny: "this Claude Code session isn't on the switchboard: swb didn't start it" };
 			try {
 				if (tool.name === "session_recall") return { result: await ask($, e) };
-				const { text, summary } = JSON.parse(await useTool($, tool.name, e));
-				if (summary !== undefined) summaries.set(e.tool_use_id, summary);
-				return { result: text };
+				const parsedResult = JSON.parse(await useTool($, tool.name, e));
+				if (parsedResult.summary !== undefined) summaries.set(e.tool_use_id, parsedResult.summary);
+				if (tool.name === "swb_worktree_list" && Array.isArray(parsedResult.details?.worktrees)) {
+					worktreeLists.set(e.tool_use_id, parsedResult.details.worktrees);
+				}
+				return { result: parsedResult.text };
 			} catch (error) {
 				return { deny: error.message };
 			}

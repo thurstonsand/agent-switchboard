@@ -2,8 +2,18 @@
 
 ## [Unreleased]
 
+Schema v17: update swb and the pi line together.
+
+### Added
+
+- First-class session mobility and git worktree management across pi, Claude Code, and Codex:
+  - Agent tools: deferred `swb_move_session` and six deferred `swb_worktree_*` tools (`list`, `fork`, `checkout`, `merge`, `remove`, `rebranch`) discovered via `tool_search` / `ToolSearch` in non-Operator sessions (worktree tools require a git repo with `wt` installed). Destructive worktree operations refuse when another open session uses the target worktree.
+  - Native zero-token `/mv` and `/wt` slash commands in pi (yielding cleanly if `@thurstonsand/pi-wt` is installed) and Claude Code, plus `swb move ID DIR` on the CLI.
+  - Deck `m` Move menu (`Move · ⎇ <branch>` with Fork, Checkout, Merge with dirty-tree guard disabling Rebase/Squash, Rebranch, Remove, and Move to directory…; skips straight to the directory picker outside git; works on live idle and dormant sessions; hidden for Operators; available via `M-a m` and Peek).
+
 ### Changed
 
+- Remapped Group in the Deck from `m` to `g` (`M-a g` from the Stage), freed `m` for Move, and replaced vim `g`/`G` top/bottom jumps with `Home`/`End`.
 - The Deck uses Pi TUI 1.6.1, and the Pi end-to-end tests run against Pi 1.6.1.
 - The clock starts a dormant session for a waiting message or reload at most three times, 30 s and then 60 s apart, until it takes what waited. Then it stops, and the session shows a red `!` failed to start, with why, in the roster, the needs-me lens, `swb ls`, and `session_list`. Its messages and reload keep waiting until it starts, by your wake or a sender's, and takes them. Before, a session that kept failing to start was retried forever.
 - A reload completes only once the restarted session is back up. A restart that dies before then leaves the reload waiting, and the clock starts it again under the same three tries. A reload soon after another no longer waits out the clock's backoff.

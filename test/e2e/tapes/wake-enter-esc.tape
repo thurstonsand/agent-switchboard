@@ -19,7 +19,7 @@ Sleep 1.5s
 Alt+a
 Type "h"
 Sleep 1s
-Type "G"
+End
 Type "k"
 Sleep 1.5s
 Enter

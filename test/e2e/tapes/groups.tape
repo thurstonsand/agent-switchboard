@@ -10,7 +10,7 @@ Sleep 2s
 Screenshot ../artifacts/phase6/videos/groups-project.png
 Type "/alpha" Sleep 400ms Enter
 Sleep 800ms
-Type "m"
+Type "g"
 Sleep 600ms
 Type "review" Sleep 600ms
 Type ";"
@@ -48,7 +48,7 @@ Wait+Screen /review \(3\)/
 Sleep 1.5s
 Screenshot ../artifacts/phase6/videos/groups-joined.png
 Sleep 1s
-Type "m"
+Type "g"
 Wait+Screen /\(no Group\)/
 Sleep 1.5s
 Screenshot ../artifacts/phase6/videos/groups-picker.png

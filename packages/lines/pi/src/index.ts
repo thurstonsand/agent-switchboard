@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process";
 import type { FSWatcher } from "node:fs";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext, ToolNamespace } from "@earendil-works/pi-coding-agent";
-import { Text, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { Db, describeTool, launchGuide, linkedWorktree, operatorDir } from "@swb/shared";
+import { type AutocompleteItem, Text, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { Db, describeTool, inGitRepo, launchGuide, linkedWorktree, operatorDir } from "@swb/shared";
 import { frame, listen, markDelivered, pendingFor, sender, unmarkDelivered } from "@swb/shared/mailbox";
 import {
 	markArchived as archiveMark,
@@ -22,7 +22,21 @@ import {
 	startHosting,
 	startTurn,
 } from "@swb/shared/record";
-import { ASKED, offered, READER_PROMPT, READER_TOOLS, TOOLS, type ToolName, type ToolResult, toolParameters } from "@swb/shared/tools";
+import {
+	ASKED,
+	isDeferredTool,
+	isWorktreeTool,
+	offered,
+	READER_PROMPT,
+	READER_TOOLS,
+	TOOLS,
+	type ToolName,
+	type ToolResult,
+	type ToolSpec,
+	toolAnnotations,
+	toolParameters,
+	WORKTREE_NAMESPACE_DESCRIPTION,
+} from "@swb/shared/tools";
 import { mark, span } from "@swb/shared/trace";
 
 type Launch = { readonly db: string; readonly tmuxSession: string; readonly bin: string };
@@ -31,6 +45,8 @@ type Process = {
 	launch: Launch;
 	/** The tools this launch offers, read from its environment before that's cleared. */
 	offers: Set<ToolName>;
+	operator: boolean;
+	wt: boolean;
 	recoveryNotice: string | null;
 	failure?: string;
 	db?: Db;
@@ -50,10 +66,15 @@ const LINEAGE = "pi-sessions.lineage";
 function claim(): Process | undefined {
 	const env = process.env;
 	if (env.SWB_MANAGED === "1" && env.SWB_DB && env.SWB_TMUX_SESSION) {
+		const operator = env.SWB_OPERATOR === "1" || process.cwd() === operatorDir();
+		const wt = env.SWB_WT === "1";
+		const inGit = inGitRepo(process.cwd());
 		const proc: Process = {
 			launch: Object.freeze({ db: env.SWB_DB, tmuxSession: env.SWB_TMUX_SESSION, bin: env.SWB_BIN ?? "" }),
 			recoveryNotice: env.SWB_RECOVERY_NOTICE ?? null,
-			offers: new Set((Object.keys(TOOLS) as ToolName[]).filter((name) => offered(name, env))),
+			operator,
+			wt,
+			offers: new Set((Object.keys(TOOLS) as ToolName[]).filter((name) => offered(name, env, { operator, inGit }))),
 			attention: new Set(),
 			dying: false,
 			...(env.SWB_BIN ? {} : { failure: "started by an swb older than this line; upgrade swb" }),
@@ -73,7 +94,91 @@ function claim(): Process | undefined {
 	delete env.SWB_BIN;
 	delete env.SWB_RECOVERY_NOTICE;
 	delete env.SWB_SHOW_FILE;
+	delete env.SWB_OPERATOR;
+	delete env.SWB_WT;
 	return store[KEY];
+}
+
+function shortenHome(path: string): string {
+	const home = homedir();
+	return path === home || path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
+}
+
+const WT_SUBCOMMANDS: { name: string; description: string }[] = [
+	{ name: "fork", description: "Fork current work to a worktree" },
+	{ name: "checkout", description: "Check out a branch into a worktree" },
+	{ name: "co", description: "Alias for checkout" },
+	{ name: "merge", description: "Merge a worktree into its parent branch" },
+	{ name: "rm", description: "Remove a worktree and its local branch" },
+	{ name: "rebranch", description: "Re-seat and rename a landed worktree" },
+	{ name: "list", description: "List worktrees" },
+	{ name: "ls", description: "Alias for list" },
+];
+
+function directoryCompletions(prefix: string, cwd: string): AutocompleteItem[] | null {
+	const home = homedir();
+	const trimmed = prefix.trimStart();
+	const useTilde = trimmed === "~" || trimmed.startsWith("~/");
+	const expanded = trimmed === "~" ? home : trimmed.startsWith("~/") ? join(home, trimmed.slice(2)) : resolve(cwd, trimmed || ".");
+	const trailingSlash = trimmed.endsWith("/") || trimmed === "";
+	const searchDir = trailingSlash ? expanded : dirname(expanded);
+	const stem = trailingSlash ? "" : expanded.slice(searchDir.length).replace(/^\//, "");
+	try {
+		const entries = readdirSync(searchDir, { withFileTypes: true })
+			.filter((d) => d.isDirectory() && d.name.startsWith(stem) && (stem.startsWith(".") || !d.name.startsWith(".")))
+			.sort((a, b) => a.name.localeCompare(b.name))
+			.slice(0, 20)
+			.map((d) => {
+				const full = join(searchDir, d.name);
+				const shown =
+					useTilde && full.startsWith(`${home}/`)
+						? `~${full.slice(home.length)}/`
+						: `${trimmed ? trimmed.slice(0, trimmed.length - stem.length) : ""}${d.name}/`;
+				return { value: shown, label: `${d.name}/` };
+			});
+		return entries.length > 0 ? entries : null;
+	} catch {
+		return null;
+	}
+}
+
+function wtCompletions(prefix: string, cwd: string): Promise<AutocompleteItem[] | null> {
+	const parts = prefix.trimStart().split(/\s+/).filter(Boolean);
+	const trailing = /\s$/.test(prefix);
+	const words = trailing ? parts : parts.slice(0, -1);
+	const partial = trailing ? "" : (parts.at(-1) ?? "");
+	if (words.length === 0) {
+		const items = WT_SUBCOMMANDS.filter((c) => c.name.startsWith(partial)).map((c) => ({
+			value: c.name,
+			label: c.name,
+			description: c.description,
+		}));
+		return Promise.resolve(items.length > 0 ? items : null);
+	}
+	const sub = words[0] ?? "";
+	if (!WT_SUBCOMMANDS.some((c) => c.name === sub)) return Promise.resolve(null);
+	const bin = process.platform === "win32" ? "git-wt" : "wt";
+	return new Promise((done) => {
+		const child = spawn(bin, ["__complete", ...words, partial], { cwd, stdio: ["ignore", "pipe", "ignore"] });
+		let out = "";
+		child.stdout.on("data", (chunk: Buffer) => {
+			out += chunk.toString("utf8");
+		});
+		child.on("error", () => done(null));
+		child.on("close", (code) => {
+			if (code !== 0) return done(null);
+			const lines = out.split("\n").filter(Boolean);
+			const directive = lines.at(-1)?.match(/^:(\d+)$/);
+			if (!directive) return done(null);
+			lines.pop();
+			if ((Number(directive[1]) & 1) !== 0) return done(null);
+			const items = lines.map((line) => {
+				const [candidate = "", description] = line.split("\t", 2);
+				return { value: [...words, candidate].join(" "), label: candidate, ...(description ? { description } : {}) };
+			});
+			done(items.length > 0 ? items : null);
+		});
+	});
 }
 
 /** A launch's Group as swb's flags take it: omitted, named, or none. */
@@ -241,10 +346,81 @@ export default function (pi: ExtensionAPI) {
 		};
 	});
 
+	let registeredMv = false;
+	let registeredWt = false;
+	const registerMoveCommands = () => {
+		const existing = new Set(
+			pi
+				.getCommands()
+				.filter((c) => c.source === "extension")
+				.map((c) => c.name),
+		);
+		if (!proc.operator && !registeredMv && !existing.has("mv")) {
+			registeredMv = true;
+			pi.registerCommand("mv", {
+				description: "Move this session to another directory",
+				getArgumentCompletions: (prefix) => directoryCompletions(prefix, ctxNow?.cwd ?? process.cwd()),
+				handler: async (args, ctx) => {
+					await ctx.waitForIdle();
+					const trimmed = args.trim();
+					const dir =
+						(trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))
+							? trimmed.slice(1, -1)
+							: trimmed;
+					if (!dir) {
+						ctx.ui.notify("Usage: /mv <dir>", "error");
+						return;
+					}
+					try {
+						const result = (await swb(proc.launch.bin, [
+							"move",
+							"--from",
+							ctx.sessionManager.getSessionId(),
+							"--defer",
+							dir,
+						])) as unknown as {
+							text: string;
+							moved: boolean;
+						};
+						if (result.moved) ctx.shutdown();
+						else ctx.ui.notify(result.text, "info");
+					} catch (error) {
+						ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+					}
+				},
+			});
+		}
+		if (!proc.operator && proc.wt && !registeredWt && !existing.has("wt")) {
+			registeredWt = true;
+			pi.registerCommand("wt", {
+				description: "Run a session-aware wt worktree command",
+				getArgumentCompletions: (prefix) => wtCompletions(prefix, ctxNow?.cwd ?? process.cwd()),
+				handler: async (args, ctx) => {
+					await ctx.waitForIdle();
+					try {
+						const result = (await swb(
+							proc.launch.bin,
+							["wt", "--from", ctx.sessionManager.getSessionId(), "--defer"],
+							args,
+						)) as unknown as {
+							text: string;
+							moved: boolean;
+						};
+						if (result.moved) ctx.shutdown();
+						else ctx.ui.notify(result.text, "info");
+					} catch (error) {
+						ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+					}
+				},
+			});
+		}
+	};
+
 	pi.on("session_start", (event, ctx) => {
 		current = ctx.sessionManager.getSessionId();
 		ctxNow = ctx;
 		seenVersion = -1;
+		registerMoveCommands();
 		if (event.reason !== "reload") restoreDraft(ctx, current);
 		proc.attention.clear();
 		span("pi-line.start-hosting", () =>
@@ -274,6 +450,13 @@ export default function (pi: ExtensionAPI) {
 		if (proc.recoveryNotice) {
 			pi.sendMessage({ customType: "swb.recovery", content: proc.recoveryNotice, display: true }, { triggerTurn: false });
 			proc.recoveryNotice = null;
+		}
+		// Ensure pi's native tool_search is active whenever any deferred swb tools are offered.
+		if ([...proc.offers].some((name) => isDeferredTool(name))) {
+			const active = pi.getActiveTools();
+			if (!active.includes("tool_search") && pi.getAllTools().some((t) => t.name === "tool_search")) {
+				pi.setActiveTools([...active, "tool_search"]);
+			}
 		}
 	});
 
@@ -355,27 +538,31 @@ export default function (pi: ExtensionAPI) {
 		name: "switchboard",
 		description: "Find, coordinate, launch, and schedule agent sessions across projects and harnesses.",
 	};
+	const worktreeNamespace: ToolNamespace = {
+		name: "worktree",
+		description: WORKTREE_NAMESPACE_DESCRIPTION,
+	};
 	const tool = (
 		name: ToolName,
 		target: (args: Record<string, unknown>) => string,
 		run: (args: never, ctx: ExtensionContext, toolCallId: string, signal?: AbortSignal) => Promise<ToolResult>,
 	) => {
 		if (!proc.offers.has(name)) return;
+		const spec = TOOLS[name] as ToolSpec;
+		const deferred = isDeferredTool(name);
 		const register = (cwd: string) =>
 			pi.registerTool({
 				name,
-				namespace,
-				label: TOOLS[name].label,
-				description: describeTool(name, TOOLS[name].description, guide),
-				promptGuidelines: TOOLS[name].guidelines,
+				namespace: isWorktreeTool(name) ? worktreeNamespace : namespace,
+				...(deferred ? { exposure: "deferred" as const } : {}),
+				label: spec.label,
+				description: describeTool(name, spec.description, guide),
+				promptGuidelines: spec.guidelines,
 				parameters: toolParameters(name, name === "swb_update_session" && linkedWorktree(cwd) !== null),
+				annotations: toolAnnotations(name, linkedWorktree(cwd) !== null),
 				renderCall(args, theme, context) {
 					const what = target(args as Record<string, unknown>);
-					const call = new Text(
-						`${theme.fg("toolTitle", theme.bold(TOOLS[name].label))}${what ? ` · ${theme.fg("accent", what)}` : ""}`,
-						0,
-						0,
-					);
+					const call = new Text(`${theme.fg("toolTitle", theme.bold(spec.label))}${what ? ` · ${theme.fg("accent", what)}` : ""}`, 0, 0);
 					return name === "session_send_message" || name === "session_list"
 						? { invalidate() {}, render: (width: number) => (context.state.receipt ? [] : call.render(width)) }
 						: call;
@@ -398,8 +585,7 @@ export default function (pi: ExtensionAPI) {
 						context.state.receipt = true;
 						const heading = `${theme.bold("Sessions")} · ${sessions.length} found`;
 						const entries = sessions.map((s) => {
-							const home = homedir();
-							const cwd = s.cwd === home || s.cwd.startsWith(`${home}/`) ? `~${s.cwd.slice(home.length)}` : s.cwd;
+							const cwd = shortenHome(s.cwd);
 							return `${theme.bold(s.title ?? s.id.slice(0, 8))}\n  ${s.harness} · ${s.state} · ${theme.fg("dim", s.id)}\n  ${cwd}${s.group ? ` · Group ${s.group}` : ""}`;
 						});
 						return new Text(
@@ -407,6 +593,26 @@ export default function (pi: ExtensionAPI) {
 							0,
 							0,
 						);
+					}
+					if (name === "swb_worktree_list" && !options.expanded) {
+						const { worktrees } = (result.details ?? {}) as {
+							worktrees?: { repo?: string; name: string; current: boolean; branch: string; parent: string | null; state: string }[];
+						};
+						if (Array.isArray(worktrees)) {
+							if (worktrees.length === 0) return new Text(theme.fg("dim", "No worktrees"), 0, 0);
+							const shown = worktrees.slice(0, 3).map((w) => {
+								const head = `${w.repo ? `${w.repo}/` : ""}${w.name}${w.current ? " *" : ""}`;
+								const rel = w.parent ? `${w.branch} → ${w.parent}` : w.branch;
+								const st = w.state && w.state !== "clean" ? ` · ${w.state}` : "";
+								return theme.fg("dim", `${head}  ${rel}${st}`);
+							});
+							if (worktrees.length > 3) {
+								shown.push(
+									`${theme.fg("muted", `… ${worktrees.length - 3} more (`)}${context.keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`,
+								);
+							}
+							return new Text(shown.join("\n"), 0, 0);
+						}
 					}
 					if (options.expanded) return new Text(theme.fg("dim", output), 0, 0);
 					const lines = output.split("\n");
@@ -652,6 +858,48 @@ export default function (pi: ExtensionAPI) {
 			writeFor(ctx, (db, id) => asked(db, id));
 			return ASKED;
 		},
+	);
+
+	tool(
+		"swb_move_session",
+		(args) => shortenHome(String(args.cwd ?? "")),
+		(args: { cwd: string }, ctx) => swb(proc.launch.bin, ["move", "--agent", "--from", self(ctx), args.cwd]),
+	);
+
+	tool(
+		"swb_worktree_list",
+		(args) => (args.all ? "all" : ""),
+		(args: Record<string, unknown>, ctx) => swb(proc.launch.bin, ["worktree", "list", "--from", self(ctx)], JSON.stringify(args)),
+	);
+
+	tool(
+		"swb_worktree_fork",
+		(args) => [String(args.name ?? ""), args.clean ? "clean" : "", args.move_session ? "move" : ""].filter(Boolean).join(" · "),
+		(args: Record<string, unknown>, ctx) => swb(proc.launch.bin, ["worktree", "fork", "--from", self(ctx)], JSON.stringify(args)),
+	);
+
+	tool(
+		"swb_worktree_checkout",
+		(args) => [String(args.branch ?? ""), args.move_session ? "move" : ""].filter(Boolean).join(" · "),
+		(args: Record<string, unknown>, ctx) => swb(proc.launch.bin, ["worktree", "checkout", "--from", self(ctx)], JSON.stringify(args)),
+	);
+
+	tool(
+		"swb_worktree_merge",
+		(args) => [String(args.name ?? ""), String(args.mode ?? ""), args.force ? "force" : ""].filter(Boolean).join(" · "),
+		(args: Record<string, unknown>, ctx) => swb(proc.launch.bin, ["worktree", "merge", "--from", self(ctx)], JSON.stringify(args)),
+	);
+
+	tool(
+		"swb_worktree_remove",
+		(args) => [String(args.name ?? ""), args.preserve_branch ? "keep branch" : "", args.force ? "force" : ""].filter(Boolean).join(" · "),
+		(args: Record<string, unknown>, ctx) => swb(proc.launch.bin, ["worktree", "remove", "--from", self(ctx)], JSON.stringify(args)),
+	);
+
+	tool(
+		"swb_worktree_rebranch",
+		(args) => `${String(args.name ?? "")} → ${String(args.branch ?? "")}`,
+		(args: Record<string, unknown>, ctx) => swb(proc.launch.bin, ["worktree", "rebranch", "--from", self(ctx)], JSON.stringify(args)),
 	);
 
 	type Snooze = string | { until: string };

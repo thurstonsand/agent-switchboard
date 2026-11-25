@@ -114,7 +114,7 @@ test("a session an agent started nests under it; its Peek's Parent action and p 
 	s.keys("Escape");
 	await waitState(s, "all families again", (x) => x.filter === "" && sessionRows(x).length === 7);
 	expect(s.screen()).not.toContain("esc clears");
-	s.keys("g");
+	s.keys("Home");
 
 	const peekOf = async (id: string) => {
 		await cursorTo(s, id);
@@ -185,7 +185,7 @@ test("a session an agent started nests under it; its Peek's Parent action and p 
 
 	// A Group is a session's own: root's children stay under the Project, marked, until one is dragged after it.
 	await cursorTo(s, root);
-	s.keys("m");
+	s.keys("g");
 	await waitState(s, "naming", (x) => x.mode === "name");
 	s.keys("-l", "lab");
 	s.keys("\\;");

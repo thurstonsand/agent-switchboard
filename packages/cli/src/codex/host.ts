@@ -100,6 +100,7 @@ export async function codexHost(args: string[], updated = false): Promise<void> 
 			host: { type: "string" },
 			resume: { type: "string" },
 			"recovery-notice": { type: "string" },
+			moved: { type: "boolean" },
 			model: { type: "string" },
 			effort: { type: "string" },
 			prompt: { type: "string" },
@@ -119,6 +120,7 @@ export async function codexHost(args: string[], updated = false): Promise<void> 
 	// Codex keys trust by the project root, where it looks for the project's own .codex config: the checkout's root.
 	const trust = values.trust ? ["-c", `projects={${JSON.stringify(checkoutRoot(process.cwd()))}={trust_level="trusted"}}`] : [];
 	const operator = values.operator ? codexOperatorConfig().flatMap((value) => ["-c", value]) : [];
+	const deferred = !values.operator;
 	const db = openStore();
 	const transcript = values.resume
 		? (db.get("SELECT transcript FROM sessions WHERE session_id = ?", values.resume)?.transcript as string)
@@ -141,7 +143,7 @@ export async function codexHost(args: string[], updated = false): Promise<void> 
 			"app-server",
 			"--listen",
 			`unix://${socket}`,
-			...codexServerOverrides(SWB),
+			...codexServerOverrides(SWB, { deferred }),
 			...trust,
 			...operator,
 			...(provider ? ["-c", `model_provider=${JSON.stringify(provider)}`] : []),
@@ -168,19 +170,21 @@ export async function codexHost(args: string[], updated = false): Promise<void> 
 		);
 	// Archived in Codex behind swb's back, by `codex archive` or another client: swb opening it means it's open.
 	if (values.resume && transcript && archivedInCodex(transcript)) await client.request("thread/unarchive", { threadId: values.resume });
-	if (values.resume && values["recovery-notice"]) {
+	if (values.resume && (values.moved || values["recovery-notice"])) {
 		await client.request("thread/resume", { threadId: values.resume, cwd: process.cwd() });
-		await client.request("thread/inject_items", {
-			threadId: values.resume,
-			items: [{ type: "message", role: "developer", content: [{ type: "input_text", text: values["recovery-notice"] }] }],
-		});
+		if (values["recovery-notice"]) {
+			await client.request("thread/inject_items", {
+				threadId: values.resume,
+				items: [{ type: "message", role: "developer", content: [{ type: "input_text", text: values["recovery-notice"] }] }],
+			});
+		}
 	}
 
 	const tui = Bun.spawn(
 		[
 			codex,
 			...(values.resume ? ["resume", values.resume] : []),
-			...(values["recovery-notice"] ? ["--cd", process.cwd()] : []),
+			...(values.moved || values["recovery-notice"] ? ["--cd", process.cwd()] : []),
 			"--remote",
 			`unix://${socket}`,
 			"-c",

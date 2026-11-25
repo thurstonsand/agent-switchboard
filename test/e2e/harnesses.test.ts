@@ -431,7 +431,8 @@ test("swb declares its MCP server in Codex's config.toml once, switched off, and
 	const declared = readFileSync(path, "utf8");
 	expect(declared.startsWith(mine)).toBe(true);
 	expect((Bun.TOML.parse(declared) as { mcp_servers: unknown }).mcp_servers).toEqual({
-		swb: { command: "swb", args: ["mcp", "--harness", "codex"], enabled: false },
+		swb: { command: "swb", args: ["mcp", "--harness", "codex", "--tools", "core"], enabled: false },
+		swb_workspace: { command: "swb", args: ["mcp", "--harness", "codex", "--tools", "deferred"], enabled: false },
 	});
 	const session = await launched(s, "codex", "reply up");
 	// Codex writes its own settings in as it runs; swb's declaration stays the one it added.

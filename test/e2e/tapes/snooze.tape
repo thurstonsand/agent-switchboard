@@ -18,7 +18,7 @@ Enter
 Sleep 800ms
 Escape
 Sleep 800ms
-Type "G"
+End
 Sleep 300ms
 Type "k"
 Sleep 300ms

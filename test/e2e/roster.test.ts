@@ -157,7 +157,7 @@ test("M-a / from the Group picker leaves it for the filter: what's typed filters
 	s.swb("drive", "start");
 	await waitState(s, "the Deck up", (x) => x.ready);
 	await cursorTo(s, a);
-	s.keys("m");
+	s.keys("g");
 	await waitState(s, "the Group picker", (x) => x.mode === "name");
 	s.keys("M-a", "/");
 	await waitState(s, "the filter", (x) => x.mode === "filter");
@@ -339,7 +339,7 @@ test("m names a session's Group, n joins it; dragging moves it between Groups, a
 	s.save("project.ansi", s.swb("drive", "capture", "--ansi"));
 
 	await cursorTo(s, a);
-	s.keys("m");
+	s.keys("g");
 	await waitState(s, "naming", (x) => x.mode === "name");
 	// The form sits in the roster under its row, so it uses the terminal cursor rather than drawing a caret.
 	s.keys("-l", "review");
@@ -397,7 +397,7 @@ test("m names a session's Group, n joins it; dragging moves it between Groups, a
 
 	// The picker narrows to the Project's Groups as I type, offering a new one until a name matches exactly.
 	await cursorTo(s, b);
-	s.keys("m");
+	s.keys("g");
 	await waitState(s, "picking", (x) => x.mode === "name");
 	await until(() => s.screen().includes("(no Group)"), budgets.settle, "the picker, no Group first");
 	s.keys("-l", "rev");
@@ -407,7 +407,7 @@ test("m names a session's Group, n joins it; dragging moves it between Groups, a
 	st = await waitState(s, "bravo picked into review", (x) => groups(x).review?.length === 2 && x.mode === "roster");
 	await until(() => entry(s, b).group === "review", budgets.settle, "b's Group review in the db");
 	await cursorTo(s, b);
-	s.keys("m");
+	s.keys("g");
 	await waitState(s, "picking again", (x) => x.mode === "name");
 	await until(() => s.screen().includes("(no Group)"), budgets.settle, "the Group choices drawn");
 	click(s, "(no Group)");
@@ -426,7 +426,7 @@ test("m names a session's Group, n joins it; dragging moves it between Groups, a
 	await cursorTo(s, a);
 	s.keys("k");
 	await waitState(s, "on the review header", (x) => x.rows[x.cursorRow]?.kind === "header");
-	s.keys("m");
+	s.keys("g");
 	await waitState(s, "renaming", (x) => x.mode === "name");
 	s.keys("C-u", "-l", "triage", "Enter");
 	st = await waitState(s, "review renamed triage", (x) => groups(x).triage?.join() === a);

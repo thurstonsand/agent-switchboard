@@ -5,7 +5,7 @@ Type "# n on Operators: a Claude Code Operator, dispatching to Codex" Sleep 1s E
 Type "swb" Sleep 400ms Enter
 Wait+Screen /Docs writer/
 Sleep 1.5s
-Type "g"
+Home
 Sleep 600ms
 Type "n"
 Wait+Screen /opus/

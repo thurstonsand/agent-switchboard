@@ -119,7 +119,7 @@ test("a archives an idle live session at once: it lingers on view, dormant, unti
 	expect(rowIndex(left, b)).toBe(-1);
 	s.save("archived-b.txt", s.screen());
 
-	s.keys("G", "Enter");
+	s.keys("End", "Enter");
 	await waitState(s, "Archived expanded", (x) => x.rows.some((r) => r.kind === "section" && r.label === "Archived" && r.expanded));
 	await cursorTo(s, d);
 	const onD = await waitState(s, "archived d on the Stage", (x) => x.cursor === d && x.staged.kind === "dormant");

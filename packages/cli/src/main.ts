@@ -9,6 +9,7 @@ import {
 	launch,
 	list,
 	listSchedules,
+	move,
 	recall,
 	schedule,
 	search,
@@ -17,6 +18,8 @@ import {
 	showFile,
 	unschedule,
 	update,
+	worktree,
+	wtSlash,
 } from "./commands/coordinate.ts";
 import { deckCommand, deckNotify } from "./commands/deck.ts";
 import { dirs } from "./commands/dirs.ts";
@@ -58,6 +61,7 @@ const USAGE = `swb: Agent Switchboard
                                hide a session in Snoozed until then, or its next message; TIME is ISO 8601, local unless it has an offset
   swb quit [--force]           stop every session, the Deck, and the clock; sessions stay open, dormant
   swb wake ID                  start a dormant session in the background
+  swb move ID DIR              move a session to another directory
   swb reload ID [--idle]       restart a session's agent on fresh config and have it carry on; --idle waits for its turn to end
                                and leaves it waiting for a prompt
   swb launch [--harness H] [--model M] [--effort E] [--agent A] [--cwd DIR] [--from ID] [--title T]
@@ -86,6 +90,8 @@ const USAGE = `swb: Agent Switchboard
   swb show-file PATH --from ID [--line N]
                                open a file in the caller's Editor, and switch the Deck, while it shows the caller, to it
   swb update --from ID         swb_update_session as a line calls it; its arguments as JSON on stdin
+  swb worktree OP --from ID    swb_worktree_* as a line calls it; its arguments as JSON on stdin
+  swb wt --from ID             /wt slash command; raw arguments on stdin
   swb ask-user --from ID       swb_ask_user as a line calls it: the caller's turn ends on a question for the user
   swb mcp --harness claude|codex
                                the MCP server a Claude Code or Codex session lists swb's tools from
@@ -170,6 +176,12 @@ async function main(args: string[]): Promise<void> {
 			return showFile(rest);
 		case "update":
 			return update(rest);
+		case "move":
+			return move(rest);
+		case "worktree":
+			return worktree(rest);
+		case "wt":
+			return wtSlash(rest);
 		case "ask-user":
 			return askUser(rest);
 		case "launch":

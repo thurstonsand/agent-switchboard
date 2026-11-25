@@ -16,7 +16,7 @@ Sleep 1.2s
 Screenshot ../artifacts/phase6/videos/modes-snooze.png
 Escape
 Sleep 1s
-Type "m"
+Type "g"
 Sleep 1s
 Alt+a
 Type "/"

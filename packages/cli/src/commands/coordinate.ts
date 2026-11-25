@@ -16,6 +16,17 @@ import { search as searchSessions, syncAll } from "../recall/search.ts";
 import { unschedule as cancelSchedule, schedule as scheduleMessage, listSchedules as schedulesOf } from "../schedules.ts";
 import { ensureSessionsServer } from "../sessions.ts";
 import { openStore } from "../store.ts";
+import {
+	humanMove,
+	humanWt,
+	moveSession,
+	worktreeCheckout,
+	worktreeFork,
+	worktreeList,
+	worktreeMerge,
+	worktreeRebranch,
+	worktreeRemove,
+} from "../worktree.ts";
 
 // The lines' commands: each prints { text, details } as JSON, the text being what the calling model reads.
 
@@ -235,4 +246,86 @@ export function unschedule(args: string[]): void {
 	const id = positionals[0];
 	if (!id || !values.from) throw new UsageError("unschedule: a schedule id and --from are required");
 	print(cancelSchedule(openStore(), values.from, id));
+}
+
+/**
+ * Moves a session to another directory:
+ * - Agent tool (`--from ID --agent DIR`): schedules a mid-turn move and prints ToolResult JSON.
+ * - Slash command (`--from ID --defer [--stop-host] DIR`): schedules an idle move and prints JSON.
+ * - CLI (`swb move ID DIR`): moves immediately and prints a plain message.
+ */
+export async function move(args: string[]): Promise<void> {
+	const { values, positionals } = parseArgs({
+		args,
+		options: {
+			from: { type: "string" },
+			agent: { type: "boolean", default: false },
+			defer: { type: "boolean", default: false },
+			"stop-host": { type: "boolean", default: false },
+		},
+		allowPositionals: true,
+	});
+	const db = openStore();
+	if (values.agent) {
+		const dir = positionals[0];
+		if (!values.from || !dir) throw new UsageError("move --agent: --from ID and DIR are required");
+		print(await moveSession(db, values.from, dir));
+		return;
+	}
+	if (values.from) {
+		const dir = positionals[0];
+		if (!dir) throw new UsageError("move: DIR is required");
+		print(await humanMove(db, values.from, dir, { defer: values.defer, stopHost: values["stop-host"] }));
+		return;
+	}
+	const [id, dir] = positionals;
+	if (!id || !dir) throw new UsageError("move: ID and DIR are required");
+	const result = await humanMove(db, id, dir);
+	console.log(result.text);
+}
+
+/** Agent worktree tools as every line calls them: `swb worktree <op> --from ID`, JSON args on stdin. */
+export async function worktree(args: string[]): Promise<void> {
+	const [op, ...rest] = args;
+	const { values } = parseArgs({ args: rest, options: { from: { type: "string" } } });
+	if (!op || !values.from) throw new UsageError("worktree: list|fork|checkout|merge|remove|rebranch and --from ID are required");
+	const input = JSON.parse((await Bun.stdin.text()) || "{}") as unknown;
+	const db = openStore();
+	switch (op) {
+		case "list":
+			print(await worktreeList(db, values.from, parsed("swb_worktree_list", input)));
+			return;
+		case "fork":
+			print(await worktreeFork(db, values.from, parsed("swb_worktree_fork", input)));
+			return;
+		case "checkout":
+			print(await worktreeCheckout(db, values.from, parsed("swb_worktree_checkout", input)));
+			return;
+		case "merge":
+			print(await worktreeMerge(db, values.from, parsed("swb_worktree_merge", input)));
+			return;
+		case "remove":
+			print(await worktreeRemove(db, values.from, parsed("swb_worktree_remove", input)));
+			return;
+		case "rebranch":
+			print(await worktreeRebranch(db, values.from, parsed("swb_worktree_rebranch", input)));
+			return;
+		default:
+			throw new UsageError(`worktree: unknown op ${op}`);
+	}
+}
+
+/** Human /wt slash command: `swb wt --from ID [--defer] [--stop-host]`, raw argument string on stdin. */
+export async function wtSlash(args: string[]): Promise<void> {
+	const { values } = parseArgs({
+		args,
+		options: {
+			from: { type: "string" },
+			defer: { type: "boolean", default: false },
+			"stop-host": { type: "boolean", default: false },
+		},
+	});
+	if (!values.from) throw new UsageError("wt: --from ID is required");
+	const rawInput = await Bun.stdin.text();
+	print(await humanWt(openStore(), values.from, rawInput, { defer: values.defer, stopHost: values["stop-host"] }));
 }

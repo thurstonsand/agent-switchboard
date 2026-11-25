@@ -45,7 +45,7 @@ test("roster navigation: h l space and a header click fold projects; g G jump; M
 	const b = s.ls().find((e) => e.cwd === other)?.id as string;
 
 	const header = (project: string) => (x: DeckState) => headerRows(x).find((r) => r.project.endsWith(project));
-	s.keys("g");
+	s.keys("Home");
 	const top = await waitState(s, "cursor on the Operators section", (x) => x.cursorRow === 0);
 	expect(top.rows[0]).toMatchObject({ kind: "section", label: "Operators", count: 0 });
 	s.keys("j");
@@ -60,7 +60,7 @@ test("roster navigation: h l space and a header click fold projects; g G jump; M
 	s.keys("Space");
 	await waitState(s, "open by space", (x) => header(first.project)(x)?.expanded === true);
 
-	s.keys("G");
+	s.keys("End");
 	const bottom = await waitState(s, "cursor on the Archived section", (x) => x.cursor === null && x.rows.at(-1)?.kind === "section");
 	s.keys("k");
 	await waitState(s, "cursor on the last session", (x) => x.cursor === sessionRows(bottom).at(-1)?.id);
@@ -169,8 +169,8 @@ test("? fits every key in a tall Deck, and in a short one scrolls them by wheel 
 	await until(() => s.screen().includes("↑ 2 ↓"), budgets.settle, "one back up");
 	s.keys(" ", " ");
 	await until(() => s.screen().includes(last) && /↑ \d+ ·/.test(s.screen()), budgets.settle, "space pages to the end");
-	s.keys("k", "k", "k", "Up");
-	await until(() => s.screen().includes("↑ 17 ↓ 5"), budgets.settle, "k and ↑ back up, keeping the next heading with its entry");
+	s.keys("k", "k", "Up");
+	await until(() => s.screen().includes("↑ 18 ↓ 4"), budgets.settle, "k and ↑ back up, keeping the next heading with its entry");
 	expect(s.screen()).not.toContain("Copy & settings");
 	s.keys("j");
 	await until(() => s.screen().includes("Copy & settings"), budgets.settle, "the heading with its first entry");

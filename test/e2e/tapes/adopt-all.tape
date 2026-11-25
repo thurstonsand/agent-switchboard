@@ -8,7 +8,7 @@ Sleep 2.5s
 Type "swb" Sleep 400ms Enter
 Wait+Screen /Archived \(4\)/
 Sleep 1.5s
-Type "G"
+End
 Sleep 600ms
 Type "l"
 Sleep 1s

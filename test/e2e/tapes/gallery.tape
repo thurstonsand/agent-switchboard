@@ -102,7 +102,7 @@ Sleep 1.5s
 Enter
 Escape
 Sleep 3s
-Type "m"
+Type "g"
 Sleep 1.5s
 Screenshot ../artifacts/phase6/videos/gallery-09-group-picker.png
 Escape

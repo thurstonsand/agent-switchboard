@@ -27,7 +27,7 @@ Sleep 300ms
 Screenshot ../artifacts/phase6/videos/lineage-folded.png
 Type "l"
 Sleep 1s
-Type "m"
+Type "g"
 Sleep 600ms
 Type "lab"
 Sleep 600ms

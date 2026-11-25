@@ -26,6 +26,15 @@ import { loadLayout, markUnseen, markVisited, openStore, saveLayout, setAgentCol
 import { hostPane, killHome, listPanes, SESSIONS, tmux, tmuxTry } from "../tmux.ts";
 import type { Ending } from "../transcripts/conversation.ts";
 import { locateTranscript } from "../transcripts/read.ts";
+import {
+	deckWorktreeCheckout,
+	deckWorktreeFork,
+	deckWorktreeMerge,
+	deckWorktreeRebranch,
+	deckWorktreeRemove,
+	humanMove,
+} from "../worktree.ts";
+import { availableCheckoutBranches, worktreeContext } from "../wt.ts";
 import { applyPrefix, DECK, PLACEHOLDER } from "./conf.ts";
 import { ensurePlaceholder } from "./deck.ts";
 import type { Diff, Entry, FromWorker, NewSession, Snapshot, TerminalProfile, ToWorker, Transcript, Turn } from "./protocol.ts";
@@ -82,8 +91,8 @@ const { promise: found, resolve: foundNow } = Promise.withResolvers<void>();
 /** Settles once the roster has its first snapshot. */
 const { promise: posted, resolve: postedNow } = Promise.withResolvers<void>();
 
-function done(req: number, error: string | null): void {
-	post({ type: "done", req, error });
+function done(req: number, error: string | null, message?: string): void {
+	post({ type: "done", req, error, ...(message ? { message } : {}) });
 }
 
 /** Tells the roster, and every line's session_launch, what the shortlist now holds. */
@@ -745,6 +754,84 @@ async function handle(message: ToWorker): Promise<void> {
 				post({ type: "error", text: `directories: ${(error as Error).message}` });
 			}
 			return;
+		case "worktreeContext":
+			void worktreeContext(message.cwd)
+				.then((ctx) => post({ type: "worktreeContext", id: message.id, ctx }))
+				.catch(() =>
+					post({
+						type: "worktreeContext",
+						id: message.id,
+						ctx: { inGit: false, wtInstalled: false, isLinked: false, branch: null, worktreeName: null, parentBranch: null, dirty: false },
+					}),
+				);
+			return;
+		case "checkoutBranches":
+			post({ type: "checkoutBranches", id: message.id, branches: availableCheckoutBranches(message.cwd) });
+			return;
+		case "move":
+			try {
+				const res = await humanMove(db, message.id, message.cwd);
+				worktrees.clear();
+				done(message.req, null, res.text);
+			} catch (error) {
+				done(message.req, (error as Error).message);
+			}
+			break;
+		case "wtFork":
+			try {
+				const text = await deckWorktreeFork(db, message.id, {
+					name: message.name,
+					clean: message.clean,
+					moveSession: message.moveSession,
+				});
+				worktrees.clear();
+				done(message.req, null, text);
+			} catch (error) {
+				done(message.req, (error as Error).message);
+			}
+			break;
+		case "wtCheckout":
+			try {
+				const text = await deckWorktreeCheckout(db, message.id, {
+					branch: message.branch,
+					moveSession: message.moveSession,
+				});
+				worktrees.clear();
+				done(message.req, null, text);
+			} catch (error) {
+				done(message.req, (error as Error).message);
+			}
+			break;
+		case "wtMerge":
+			try {
+				const text = await deckWorktreeMerge(db, message.id, { mode: message.mode });
+				worktrees.clear();
+				done(message.req, null, text);
+			} catch (error) {
+				done(message.req, (error as Error).message);
+			}
+			break;
+		case "wtRemove":
+			try {
+				const text = await deckWorktreeRemove(db, message.id, {
+					preserveBranch: message.preserveBranch,
+					force: message.force,
+				});
+				worktrees.clear();
+				done(message.req, null, text);
+			} catch (error) {
+				done(message.req, (error as Error).message);
+			}
+			break;
+		case "wtRebranch":
+			try {
+				const text = await deckWorktreeRebranch(db, message.id, { branch: message.branch });
+				worktrees.clear();
+				done(message.req, null, text);
+			} catch (error) {
+				done(message.req, (error as Error).message);
+			}
+			break;
 		case "shell": {
 			let name: string;
 			try {

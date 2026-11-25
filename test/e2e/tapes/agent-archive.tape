@@ -11,5 +11,5 @@ Sleep 1.5s
 Type "archive this, we're done" Sleep 400ms Enter
 Wait+Screen /Archived \(1\)/
 Sleep 3s
-Type "G"
+End
 Sleep 3s

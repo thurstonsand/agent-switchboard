@@ -5,7 +5,7 @@ Type "# n and Enter on Operators start an Operator" Sleep 1s Enter
 Type "swb" Sleep 400ms Enter
 Wait+Screen /bravo/
 Sleep 1.5s
-Type "g"
+Home
 Sleep 600ms
 Type "n"
 Wait+Screen /Preset/

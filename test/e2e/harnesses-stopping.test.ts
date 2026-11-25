@@ -124,7 +124,7 @@ test("Codex's own /archive archives in swb, and a Claude session archiving itsel
 	// Codex moved its rollout to archived_sessions/; the card still reads it.
 	s.swb("drive", "start", "--size", "160x40");
 	await waitState(s, "ready", (x) => x.ready);
-	s.keys("G", "l", "j");
+	s.keys("End", "l", "j");
 	await waitState(s, "the archived card", (x) => x.staged.id === codex.id && x.staged.kind === "dormant");
 	await until(() => /codex\s+codex up/.test(s.screen()), budgets.settle, "Codex's reply on the archived card");
 	s.save("codex-archived-card.txt", s.screen());

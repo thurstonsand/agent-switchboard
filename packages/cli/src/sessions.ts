@@ -1,6 +1,18 @@
 import { existsSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, sep } from "node:path";
-import { bootId, type Db, dbPath, type Harness, linkedWorktree, operatorDir, projectRoot, type ReloadMode, stateDir } from "@swb/shared";
+import {
+	bootId,
+	branch,
+	type Db,
+	dbPath,
+	type Harness,
+	linkedWorktree,
+	operatorDir,
+	type PendingMove,
+	projectRoot,
+	type ReloadMode,
+	stateDir,
+} from "@swb/shared";
 import { isArchived, markArchived, recordTx, titleOf } from "@swb/shared/record";
 import { OPEN, PENDING_SCHEDULE } from "@swb/shared/states";
 import { now, since } from "@swb/shared/trace";
@@ -8,9 +20,9 @@ import { type Effort, HARNESS_EFFORTS, loadConfig } from "./config.ts";
 import { DECK, deckConf } from "./deck/conf.ts";
 import { displayName, type RuntimeRow, runtimeLive, states } from "./derive.ts";
 import { SwbError } from "./errors.ts";
-import { writeClaudeLine } from "./lines.ts";
+import { trustClaudeFolder, writeClaudeLine } from "./lines.ts";
 import { claudeOperatorSettings } from "./operator.ts";
-import { openStore, setReload } from "./store.ts";
+import { openStore, pendingMove, setPendingMove, setReload } from "./store.ts";
 import {
 	CLIENT_CWD,
 	cleanEnv,
@@ -30,8 +42,9 @@ import {
 	tmuxTry,
 } from "./tmux.ts";
 import { archivedInCodex } from "./transcripts/codex.ts";
-import { relocatePi } from "./transcripts/pi.ts";
+import { movePiTranscript, relocatePi } from "./transcripts/pi.ts";
 import { VERSION } from "./version.ts";
+import { execWtSync, isWtInstalled, pathContains } from "./wt.ts";
 
 /** The whole config of swb's server, the Deck's included: the user's tmux config never loads here. */
 function serverConf(): string {
@@ -360,7 +373,7 @@ export type LaunchSpec = {
 	harness: Harness;
 	cwd: string;
 	/** The session to resume, when it has run before, its recorded transcript, and whether to continue a cut-off turn. */
-	resume: { id: string; transcript: string; continueTurn: boolean; notice: string | null } | null;
+	resume: { id: string; transcript: string; continueTurn: boolean; notice: string | null; moved?: boolean } | null;
 	/** A new session's id, for the harnesses that take one up front (pi, Claude Code). */
 	sessionId?: string;
 	/** The first turn's prompt. */
@@ -428,6 +441,7 @@ function harnessCommand(spec: LaunchSpec, host: string): string[] {
 				host,
 				...(spec.resume ? ["--resume", spec.resume.id] : []),
 				...(spec.resume?.notice ? ["--recovery-notice", spec.resume.notice] : []),
+				...(spec.resume?.moved ? ["--moved"] : []),
 				// Codex picks a cut-off turn back up from its own history, with no prompt from swb.
 				...(spec.resume?.continueTurn ? ["--continue"] : []),
 				...(spec.trust ? ["--trust"] : []),
@@ -486,7 +500,9 @@ export function launch(db: Db, spec: LaunchSpec): string {
 		"PI_CLIPBOARD_OSC52=1",
 		// Claude Code's own scheduler dies with its process; swb's schedules are the ones that last.
 		...(spec.harness === "claude" ? ["-e", "CLAUDE_CODE_DISABLE_CRON=1"] : []),
-		...(spec.harness === "claude" && spec.cwd === operatorDir() ? ["-e", "SWB_OPERATOR=1"] : []),
+		...(spec.cwd === operatorDir() ? ["-e", "SWB_OPERATOR=1"] : []),
+		// Every line offers worktree tools only when wt is available.
+		...(isWtInstalled(cwd) ? ["-e", "SWB_WT=1"] : []),
 		// Every line offers swb_show_file only when the Editor can open a file.
 		...(nvimEditor(loadConfig().editor) ? ["-e", "SWB_SHOW_FILE=1"] : []),
 		`exec env -u TMUX -u TMUX_PANE SHELL=${shell} ${shell} -lic ${quote(command)}`,
@@ -790,6 +806,29 @@ export function wake(db: Db, id: string, then: Wake): string {
 	ensureSessionsServer();
 	// Outside the tx: the harness's shutdown writes the db.
 	awaitStop(db, id);
+	// Run any deferred post-quit wt cleanup (merge --defer-removal / rm --validate-only) once the old harness is gone.
+	const initialHosts = new Set(
+		listHosts("#{pane_dead}")
+			.filter(([, dead]) => dead !== "1")
+			.map(([name]) => name as string),
+	);
+	if (!liveHost(db, id, initialHosts)) {
+		const pending = pendingMove(db, id);
+		if (pending?.postOp) {
+			if (existsSync(pending.postOp.cwd)) {
+				if (pathContains(pending.postOp.cwd, process.cwd())) process.chdir(pending.cwd);
+				const res = execWtSync(pending.postOp.args, pending.postOp.cwd);
+				if (res.code !== 0) throw new SwbError(res.stderr.trim() || `wt ${pending.postOp.args[0] ?? ""} exited ${res.code}`);
+			}
+			// Clear postOp once applied so a retry never re-runs it.
+			const remaining: PendingMove = {
+				cwd: pending.cwd,
+				...(pending.prompt ? { prompt: pending.prompt } : {}),
+				...(pending.notice ? { notice: pending.notice } : {}),
+			};
+			recordTx(db, () => setPendingMove(db, id, remaining));
+		}
+	}
 	return db.tx(() => {
 		const listed = listHosts("#{pane_dead}");
 		const resuming = new Set(db.all("SELECT tmux_session FROM launches WHERE resume_id = ?", id).map((row) => row.tmux_session as string));
@@ -808,20 +847,46 @@ export function wake(db: Db, id: string, then: Wake): string {
 			id,
 		);
 		if (!session) throw new SwbError(`no session ${id}`);
+		const pending = pendingMove(db, id);
+		let sessionCwd = session.cwd as string;
+		let transcript = session.transcript as string;
+		let moved = false;
+		if (pending) {
+			if (!statSync(pending.cwd, { throwIfNoEntry: false })?.isDirectory())
+				throw new SwbError(`target directory ${pending.cwd} is no longer available`);
+			const targetCwd = realpathSync(pending.cwd);
+			if (sessionCwd !== targetCwd) {
+				if (session.harness === "pi") transcript = movePiTranscript(transcript, targetCwd);
+				const newProject = projectRoot(targetCwd);
+				const newBranch = branch(targetCwd);
+				db.run(
+					"UPDATE sessions SET cwd = ?, project_root = ?, branch = ?, transcript = ? WHERE session_id = ?",
+					targetCwd,
+					newProject,
+					newBranch,
+					transcript,
+					id,
+				);
+				if (newProject !== (session.project_root as string)) {
+					db.run("UPDATE marks SET group_name = NULL WHERE session_id = ?", id);
+				}
+				sessionCwd = targetCwd;
+			}
+			moved = true;
+		}
 		// tmux starts a missing directory in $HOME, away from the session's Project.
-		const cwd = statSync(session.cwd as string, { throwIfNoEntry: false })?.isDirectory()
-			? (session.cwd as string)
-			: (session.project_root as string);
+		const cwd = statSync(sessionCwd, { throwIfNoEntry: false })?.isDirectory() ? sessionCwd : (session.project_root as string);
 		if (!statSync(cwd, { throwIfNoEntry: false })?.isDirectory())
 			throw new SwbError(
-				`session directory ${session.cwd} and Project root ${session.project_root} are unavailable; restore a directory before waking this conversation`,
+				`session directory ${sessionCwd} and Project root ${session.project_root} are unavailable; restore a directory before waking this conversation`,
 			);
 		const notice =
-			cwd === session.cwd
+			pending?.notice ??
+			(cwd === sessionCwd
 				? null
-				: `swb: This conversation moved from ${session.cwd} to ${cwd} because its directory no longer exists. The files and branch here may differ; check them before continuing.`;
+				: `swb: This conversation moved from ${sessionCwd} to ${cwd} because its directory no longer exists. The files and branch here may differ; check them before continuing.`);
 		// Not only when swb moves it: a session continued from pi's own prompt in another directory keeps its gone one.
-		if (session.harness === "pi") relocatePi(session.transcript as string, cwd);
+		if (session.harness === "pi") relocatePi(transcript, cwd);
 		// Not live, so a phase other than idle means its process died mid-turn.
 		const cutOff = session.phase !== "idle" && !isArchived(db, id);
 		const harness = session.harness as Harness;
@@ -830,17 +895,121 @@ export function wake(db: Db, id: string, then: Wake): string {
 		// Any start reads its configuration afresh, so it starts a reload waiting for one, which its harness completes
 		// by registering.
 		db.run("UPDATE marks SET reload_started_at = ? WHERE session_id = ? AND reload IS NOT NULL", Date.now(), id);
+		const prompt = pending?.prompt ?? (then === "continue" && !cutOff ? RELOADED : undefined);
 		return launch(db, {
 			harness,
 			cwd,
-			resume: { id, transcript: session.transcript as string, continueTurn: then !== "idle" && cutOff, notice },
-			// No one may be at a trust prompt: an agent started it, or it moved to its Project root. A session you started in
-			// place keeps whatever you answered there.
-			trust: session.parent_id !== null || notice !== null,
-			...(then === "continue" && !cutOff ? { prompt: RELOADED } : {}),
+			resume: { id, transcript, continueTurn: then !== "idle" && cutOff, notice, ...(moved ? { moved: true } : {}) },
+			// No one may be at a trust prompt: an agent started it, it moved to its Project root, or it was explicitly moved.
+			trust: session.parent_id !== null || notice !== null || moved,
+			...(prompt ? { prompt } : {}),
 			...(effort && HARNESS_EFFORTS.claude.includes(effort) ? { effort } : {}),
 		});
 	});
+}
+
+/**
+ * Checks whether a worktree can be safely removed or renamed without disturbing any other session, starting launch,
+ * scheduled launch, or stored transcript. `selfId` (if given) is allowed to be inside `targetPath` because it will move out.
+ */
+export function assertWorktreeSafeToModify(db: Db, targetPath: string, selfId: string | null): void {
+	const root = existsSync(targetPath) ? realpathSync(targetPath) : targetPath;
+	const inside = (path: string) => {
+		const canonical = existsSync(path) ? realpathSync(path) : path;
+		return canonical === root || canonical.startsWith(root + sep);
+	};
+	for (const s of states(db)) {
+		if (s.id !== selfId && (s.open || s.live) && inside(s.cwd))
+			throw new SwbError(`worktree is still used by "${displayName(s)}"; move or archive that session first`);
+	}
+	const listedHosts = listHosts("#{pane_start_path}", "#{pane_dead}");
+	const hosts = new Set(listedHosts.map(([name]) => name as string));
+	const starting = new Set(
+		db
+			.all("SELECT tmux_session FROM launches WHERE tmux_session NOT IN (SELECT tmux_session FROM runtimes)")
+			.map((row) => row.tmux_session as string),
+	);
+	for (const [host, cwd, dead] of listedHosts) {
+		if (starting.has(host as string) && dead !== "1" && inside(cwd as string))
+			throw new SwbError(`worktree has a session starting (${host}); wait for it to register first`);
+	}
+	for (const r of db.all("SELECT session_id, cwd FROM runtimes")) {
+		if (r.session_id !== selfId && inside(r.cwd as string) && liveRuntime(db, r.session_id as string, hosts))
+			throw new SwbError(`worktree is still used by session ${r.session_id}; stop it first`);
+	}
+	for (const schedule of db.all(
+		`SELECT id, source_id, schedule_label, launch FROM schedules WHERE ${PENDING_SCHEDULE} AND launch IS NOT NULL`,
+	)) {
+		const launch = JSON.parse(schedule.launch as string) as { cwd: string };
+		if (inside(launch.cwd))
+			throw new SwbError(`worktree is used by schedule "${schedule.schedule_label}" (${schedule.id}); unschedule it first`);
+	}
+	for (const s of db.all("SELECT transcript FROM sessions WHERE transcript IS NOT NULL")) {
+		if (inside(s.transcript as string)) throw new SwbError("worktree contains a session transcript; move it before modifying the worktree");
+	}
+}
+
+/**
+ * Moves a session immediately for a human action (Deck or CLI). Live idle sessions restart in `targetCwd`; dormant
+ * sessions update in place without waking, holding `notice` for their next wake.
+ */
+export async function applyMoveNow(
+	db: Db,
+	id: string,
+	targetCwd: string,
+	options: { notice?: string; postOp?: { args: string[]; cwd: string } } = {},
+): Promise<{ live: boolean; cwd: string }> {
+	const target = states(db).find((s) => s.id === id);
+	if (!target) throw new SwbError(`no session ${id}`);
+	if (target.operator) throw new SwbError("Operator sessions cannot be moved.");
+	if (target.live && target.activity !== "idle") throw new SwbError("turn running: wait for it to complete");
+	const dir = realpathSync(targetCwd);
+	if (target.harness === "claude") await trustClaudeFolder(dir);
+	const move: PendingMove = {
+		cwd: dir,
+		...(options.notice ? { notice: options.notice } : {}),
+		...(options.postOp ? { postOp: options.postOp } : {}),
+	};
+	if (target.live) {
+		recordTx(db, () => setPendingMove(db, id, move, "idle"));
+		const runtime = liveRuntime(db, id, new Set(listHosts().map(([host]) => host as string)));
+		if (runtime) stopPis([runtime]);
+		wake(db, id, "idle");
+		gc(db);
+		return { live: true, cwd: dir };
+	}
+	// Dormant session: run any deferred wt cleanup right away, relocate transcript + DB in place, and keep notice for next wake.
+	if (options.postOp && existsSync(options.postOp.cwd)) {
+		if (pathContains(options.postOp.cwd, process.cwd())) process.chdir(dir);
+		const res = execWtSync(options.postOp.args, options.postOp.cwd);
+		if (res.code !== 0) throw new SwbError(res.stderr.trim() || `wt ${options.postOp.args[0] ?? ""} exited ${res.code}`);
+	}
+	const row = db.get("SELECT harness, project_root, transcript FROM sessions WHERE session_id = ?", id);
+	if (!row) throw new SwbError(`no session ${id}`);
+	const transcript = row.harness === "pi" ? movePiTranscript(row.transcript as string, dir) : (row.transcript as string);
+	const newProject = projectRoot(dir);
+	const newBranch = branch(dir);
+	recordTx(db, () => {
+		db.run(
+			"UPDATE sessions SET cwd = ?, project_root = ?, branch = ?, transcript = ? WHERE session_id = ?",
+			dir,
+			newProject,
+			newBranch,
+			transcript,
+			id,
+		);
+		if (newProject !== (row.project_root as string)) {
+			db.run("UPDATE marks SET group_name = NULL WHERE session_id = ?", id);
+		}
+		setPendingMove(db, id, { cwd: dir, ...(options.notice ? { notice: options.notice } : {}) });
+	});
+	gc(db);
+	return { live: false, cwd: dir };
+}
+
+/** The live runtime hosting a session, if any. */
+export function liveRuntimeOf(db: Db, id: string): RuntimeRow | null {
+	return liveRuntime(db, id, new Set(listHosts().map(([host]) => host as string)));
 }
 
 /**

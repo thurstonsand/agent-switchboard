@@ -106,7 +106,7 @@ const server = Bun.serve({
 		// A code-mode-only model, like gpt-6-sol, gets its tools as an input item instead.
 		const tools = toolNames([
 			...(body.tools ?? []),
-			...input.flatMap((item) => (item.type === "additional_tools" ? (item.tools ?? []) : [])),
+			...input.flatMap((item) => (item.type === "additional_tools" || item.type === "tool_search_output" ? (item.tools ?? []) : [])),
 		]);
 		const names = tools.map((tool) => tool.name);
 		const id = `resp_${++n}`;
@@ -162,6 +162,21 @@ const server = Bun.serve({
 			const [tool, ...json] = rest;
 			const found = tools.find((candidate) => candidate.name === tool) ?? { name: tool as string };
 			output = { type: "function_call", call_id: `call_${n}`, ...found, arguments: json.join(" ") || "{}" };
+		} else if (verb === "discover" && (answering || last?.type === "function_call_output" || last?.type === "tool_search_output")) {
+			const [tool, ...json] = rest;
+			const found = tools.find((candidate) => candidate.name === tool);
+			const lastUserIdx = input.findLastIndex((item) => item.type === "message" && item.role === "user");
+			const turnItems = lastUserIdx >= 0 ? input.slice(lastUserIdx) : input;
+			if (answering) {
+				const searchTool = (body.tools ?? []).find((t) => t.type === "tool_search");
+				output = searchTool
+					? { type: "tool_search_call", call_id: `call_${n}`, execution: "client", arguments: { query: tool } }
+					: { type: "function_call", call_id: `call_${n}`, name: "tool_search", arguments: JSON.stringify({ query: tool }) };
+			} else if (found && !turnItems.some((item) => item.type === "function_call" && item.name === tool)) {
+				output = { type: "function_call", call_id: `call_${n}`, ...found, arguments: json.join(" ") || "{}" };
+			} else {
+				output = { type: "message", role: "assistant", id: `msg_${n}`, content: [{ type: "output_text", text: "tool done" }] };
+			}
 		} else if (
 			verb === "call" &&
 			rest[0] === "spawn_agent" &&

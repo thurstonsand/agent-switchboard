@@ -6,6 +6,7 @@ import type { Catalog, LaunchTarget } from "../harnesses.ts";
 import type { Pending, ScheduleView } from "../schedules.ts";
 import type { DeckLayout } from "../store.ts";
 import type { Ending } from "../transcripts/conversation.ts";
+import type { CheckoutBranch, WorktreeContext } from "../wt.ts";
 
 /** One roster entry: a Session, or a live pi that has had no prompt yet (provisional, titled by its id). */
 export type Entry = SessionState & {
@@ -157,8 +158,10 @@ export type DeckState = {
 	cursor: string | null;
 	/** The cursor's index in `rows`, headers included. */
 	cursorRow: number;
-	mode: "filter" | "name" | "lens" | "picker" | "snooze" | "archive" | "roster" | "settings";
+	mode: "filter" | "name" | "lens" | "picker" | "snooze" | "archive" | "move" | "roster" | "settings";
 	picker: PickerState | null;
+	/** The move / worktree prompt, while open. */
+	move: { id: string; step: string; ctx: WorktreeContext | null; clean?: boolean; moveSession?: boolean } | null;
 	/** The archive prompt: whose, its counts line, and how many `all` would archive. */
 	/** `cancels`: on the prompt's second step, the labels of the schedules archiving cancels. */
 	archive: { id: string; counts: string; all: number; cancels: string[] | null } | null;
@@ -245,6 +248,14 @@ export type ToWorker =
 	| { type: "dirs" }
 	| { type: "addDir"; path: string }
 	| { type: "removeDir"; path: string }
+	| { type: "worktreeContext"; id: string; cwd: string }
+	| { type: "checkoutBranches"; id: string; cwd: string }
+	| { type: "move"; req: number; id: string; cwd: string }
+	| { type: "wtFork"; req: number; id: string; name: string; clean: boolean; moveSession: boolean }
+	| { type: "wtCheckout"; req: number; id: string; branch: string; moveSession: boolean }
+	| { type: "wtMerge"; req: number; id: string; mode: "rebase" | "squash" | "staged" }
+	| { type: "wtRemove"; req: number; id: string; preserveBranch: boolean; force: boolean }
+	| { type: "wtRebranch"; req: number; id: string; branch: string }
 	| { type: "sync"; req: number };
 
 /**
@@ -257,12 +268,14 @@ export type FromWorker =
 	| { type: "snapshot"; snapshot: Snapshot }
 	| { type: "launched"; req: number; host: string }
 	| { type: "launchFailed"; req: number; text: string }
-	| { type: "done"; req: number; error: string | null }
+	| { type: "done"; req: number; error: string | null; message?: string }
 	/** An archive's stop, which runs on after its `done`, failed. */
 	| { type: "stopFailed"; text: string }
 	| { type: "transcript"; id: string; transcript: Transcript | null; error: string | null }
 	| { type: "peek"; id: string; info: PeekInfo }
 	| { type: "dirty"; id: string; dirty: boolean }
+	| { type: "worktreeContext"; id: string; ctx: WorktreeContext }
+	| { type: "checkoutBranches"; id: string; branches: CheckoutBranch[] }
 	| { type: "editor"; dir: string; name: string | null; text: string | null }
 	| { type: "shell"; req: number; dir: string; name: string | null; text: string | null }
 	| { type: "dirs"; trees: TargetTree[] }

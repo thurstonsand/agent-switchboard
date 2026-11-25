@@ -5,7 +5,7 @@ Type "# a new prompt in an archived session reopens it" Sleep 1s Enter
 Type "swb" Sleep 400ms Enter
 Wait+Screen /Archived \(1\)/
 Sleep 1.5s
-Type "G"
+End
 Sleep 500ms
 Type "l"
 Sleep 1s

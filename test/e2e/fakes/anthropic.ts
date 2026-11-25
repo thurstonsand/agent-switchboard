@@ -27,7 +27,13 @@ const blocks = (m: Msg): Block[] => (typeof m.content === "string" ? [{ type: "t
 function typed(m: Msg): string | undefined {
 	if (m.role !== "user") return undefined;
 	const texts = blocks(m)
-		.filter((b) => b.type === "text" && !(b.text ?? "").startsWith("<system-reminder>") && !(b.text ?? "").startsWith("<local-command"))
+		.filter(
+			(b) =>
+				b.type === "text" &&
+				b.text !== "Tool loaded." &&
+				!(b.text ?? "").startsWith("<system-reminder>") &&
+				!(b.text ?? "").startsWith("<local-command"),
+		)
 		.map((b) => b.text ?? "");
 	return texts.length > 0 ? texts.join("\n") : undefined;
 }
@@ -138,6 +144,18 @@ const server = Bun.serve({
 			const [tool, ...json] = rest;
 			const name = tools.find((candidate) => candidate === tool || candidate.endsWith(`__${tool}`)) ?? (tool as string);
 			content = [{ type: "tool_use", id: `toolu_${requestN}`, name, input: JSON.parse(json.join(" ") || "{}") }];
+		} else if (tools.length > 0 && (toolResult || !answered) && verb === "discover") {
+			const [tool, ...json] = rest;
+			const resolved = tools.find((candidate) => candidate === tool || candidate.endsWith(`__${tool}`));
+			const lastUserIdx = messages.findLastIndex((m) => typed(m) !== undefined);
+			const turnMessages = lastUserIdx >= 0 ? messages.slice(lastUserIdx) : messages;
+			if (!toolResult) {
+				content = [{ type: "tool_use", id: `toolu_${requestN}`, name: "ToolSearch", input: { query: tool } }];
+			} else if (resolved && !turnMessages.some((m) => m.role === "assistant" && blocks(m).some((b) => b.name === resolved))) {
+				content = [{ type: "tool_use", id: `toolu_${requestN}`, name: resolved, input: JSON.parse(json.join(" ") || "{}") }];
+			} else {
+				content = [{ type: "text", text: "tool done" }];
+			}
 		} else {
 			const header = 'Message from session "';
 			const recall = [lastTyped, lastText].find((t) => t.includes("session_recall's reader (agent") || t.includes("[Subagent hand-back]"));

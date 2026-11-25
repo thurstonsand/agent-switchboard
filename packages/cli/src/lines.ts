@@ -99,18 +99,26 @@ export async function trustClaudeFolder(dir: string): Promise<void> {
 
 const codexConfig = (): string => join(process.env.CODEX_HOME || join(homedir(), ".codex"), "config.toml");
 
-/** What `declareCodexServer` adds: enough of swb's MCP server to keep it whole through Codex's title requests. */
+/** What `declareCodexServer` adds: enough of swb's MCP servers to keep them whole through Codex's title requests. */
 const CODEX_STUB = `
 # Agent Switchboard's tools, switched on only in the Codex sessions swb hosts, which pass the rest of it.
 [mcp_servers.swb]
 command = "swb"
-args = ["mcp", "--harness", "codex"]
+args = ["mcp", "--harness", "codex", "--tools", "core"]
+enabled = false
+`;
+
+const CODEX_WORKSPACE_STUB = `
+# Agent Switchboard's deferred move and worktree tools, switched on only in non-Operator Codex sessions swb hosts.
+[mcp_servers.swb_workspace]
+command = "swb"
+args = ["mcp", "--harness", "codex", "--tools", "deferred"]
 enabled = false
 `;
 
 /**
- * Declares swb's MCP server in Codex's config.toml, switched off, unless it's declared there already. swb's own
- * app-servers switch it on with -c, so only they offer its tools. The declaration has to be in a file: Codex's title
+ * Declares swb's MCP servers in Codex's config.toml, switched off, unless declared there already. swb's own
+ * app-servers switch them on with -c, so only they offer its tools. The declaration has to be in a file: Codex's title
  * generator replaces the whole mcp_servers table from -c to switch servers off, which leaves a server declared only
  * with -c no command, and its title request fails unseen.
  */
@@ -127,31 +135,40 @@ export async function declareCodexServer(): Promise<void> {
 		} catch (error) {
 			throw new SwbError(`${path}: ${(error as Error).message}`);
 		}
-		if (config.mcp_servers?.swb) return;
+		const stubs = [
+			...(!config.mcp_servers?.swb ? [CODEX_STUB] : []),
+			...(!config.mcp_servers?.swb_workspace ? [CODEX_WORKSPACE_STUB] : []),
+		];
+		if (stubs.length === 0) return;
 		mkdirSync(dirname(path), { recursive: true });
-		appendFileSync(path, text === "" || text.endsWith("\n") ? CODEX_STUB : `\n${CODEX_STUB}`);
+		const prefix = text === "" || text.endsWith("\n") ? "" : "\n";
+		appendFileSync(path, `${prefix}${stubs.join("")}`);
 	} finally {
 		release();
 	}
 }
 
-/** The -c overrides that switch the declared server on, as swb runs it, for one of swb's own app-servers. */
-export function codexServerOverrides(swb: string): string[] {
+const CODEX_ENV_VARS = [
+	"SWB_SHOW_FILE",
+	"SWB_OPERATOR",
+	"SWB_WT",
+	"SWB_INSTANCE",
+	"XDG_STATE_HOME",
+	"XDG_CONFIG_HOME",
+	"TMUX_TMPDIR",
+	"PI_CODING_AGENT_DIR",
+	"PI_CODING_AGENT_SESSION_DIR",
+];
+
+/** The -c overrides that switch the declared servers on, as swb runs them, for one of swb's own app-servers. */
+export function codexServerOverrides(swb: string, options: { deferred?: boolean } = {}): string[] {
 	const server = {
 		enabled: true,
 		command: swb,
-		args: ["mcp", "--harness", "codex"],
-		// Codex starts MCP servers with only a few of its variables; these say whether the Editor opens files, and which db
-		// and tmux servers are swb's.
-		env_vars: [
-			"SWB_SHOW_FILE",
-			"SWB_INSTANCE",
-			"XDG_STATE_HOME",
-			"XDG_CONFIG_HOME",
-			"TMUX_TMPDIR",
-			"PI_CODING_AGENT_DIR",
-			"PI_CODING_AGENT_SESSION_DIR",
-		],
+		args: ["mcp", "--harness", "codex", "--tools", "core"],
+		// Codex starts MCP servers with only a few of its variables; these say whether the Editor opens files, whether
+		// this session is an Operator or has wt, and which db and tmux servers are swb's.
+		env_vars: CODEX_ENV_VARS,
 		// Straight into the model's tool list, so the agent sees them like its own: not behind tool search, and not
 		// only inside code mode's exec, where a code-mode-only model such as gpt-6-sol reaches for spawn_agent instead.
 		omit_tools_from: ["deferred", "code_mode"],
@@ -160,6 +177,21 @@ export function codexServerOverrides(swb: string): string[] {
 		// swb mcp answers each call independently, so several session_recall readers can work at once.
 		supports_parallel_tool_calls: true,
 	};
-	// Each value as JSON, which is TOML too.
-	return Object.entries(server).flatMap(([key, value]) => ["-c", `mcp_servers.swb.${key}=${JSON.stringify(value)}`]);
+	const overrides = Object.entries(server).flatMap(([key, value]) => ["-c", `mcp_servers.swb.${key}=${JSON.stringify(value)}`]);
+	if (options.deferred) {
+		const deferredServer = {
+			enabled: true,
+			command: swb,
+			args: ["mcp", "--harness", "codex", "--tools", "deferred"],
+			env_vars: CODEX_ENV_VARS,
+			// Keep "deferred" active so Codex places move and worktree tools behind native tool_search.
+			omit_tools_from: ["code_mode"],
+			tool_timeout_sec: 300,
+			supports_parallel_tool_calls: true,
+		};
+		overrides.push(
+			...Object.entries(deferredServer).flatMap(([key, value]) => ["-c", `mcp_servers.swb_workspace.${key}=${JSON.stringify(value)}`]),
+		);
+	}
+	return overrides;
 }

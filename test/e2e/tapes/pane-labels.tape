@@ -6,7 +6,7 @@ Type "swb" Sleep 400ms Enter
 Wait+Screen /▾ \S+ \(2\)/
 Sleep 1s
 # Onto the top session, whichever one the cursor started on, so M-a j has one below it.
-Type "g"
+Home
 Sleep 300ms
 Type "jj"
 Sleep 1s
@@ -38,7 +38,7 @@ Sleep 1s
 Type "h"
 Sleep 1.5s
 # A Group's name, typed in the sidebar: its cursor is the terminal's, so it goes when the sidebar loses the keyboard.
-Type "m"
+Type "g"
 Sleep 800ms
 Type "review"
 Sleep 1.5s

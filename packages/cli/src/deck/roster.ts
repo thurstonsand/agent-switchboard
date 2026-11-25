@@ -30,6 +30,7 @@ import {
 	archiving,
 	boot,
 	caughtUp,
+	checkoutBranchChoices,
 	chosenPreset,
 	commit,
 	completedRows,
@@ -58,7 +59,10 @@ import {
 	marked,
 	matches,
 	menuPresets,
+	mergeOptions,
 	model,
+	moveMenuItems,
+	moveMode,
 	nameChoices,
 	nameMode,
 	onColors,
@@ -352,9 +356,10 @@ function drawOver(lines: string[], o: Overlay, width: number): void {
 	);
 }
 
-/** Shared contents of the row-anchored Archive, Group, and Snooze forms. */
+/** Shared contents of the row-anchored Archive, Group, Snooze, and Move forms. */
 function pickerParts(width: number, height: number): Part[] {
 	if (snoozeMode()) return snoozeMenu(width);
+	if (moveMode()) return moveMenu(width, height);
 	if (model.mode.kind === "archive") {
 		const e = model.entries.get(model.mode.id);
 		if (!e) return [];
@@ -404,7 +409,7 @@ function closeButton(title: string, width: number, command: Command): OverlayBut
 
 function promptOverlay(width: number, height: number): Overlay[] {
 	const mode = model.mode;
-	if (mode.kind !== "archive" && mode.kind !== "name" && mode.kind !== "snooze" && mode.kind !== "lens") return [];
+	if (mode.kind !== "archive" && mode.kind !== "name" && mode.kind !== "snooze" && mode.kind !== "lens" && mode.kind !== "move") return [];
 	const at = mode.kind === "lens" ? null : mode.at;
 	const rosterWidth = width;
 	const insert = at === null || menuRow(width) !== null;
@@ -457,9 +462,140 @@ function snoozeMenu(width: number): Part[] {
 	return out;
 }
 
+function togglePill(label: string, on: boolean): string {
+	return on ? bold(cyan(`[● ${label}]`)) : dim(`[ ${label} ]`);
+}
+
+function moveMenu(width: number, height: number): Part[] {
+	const moving = moveMode();
+	if (!moving) return [];
+	const { ctx, step } = moving;
+	if (step.kind === "menu") {
+		const title = ctx?.branch ? `Move · ⎇ ${ctx.branch}` : "Move";
+		if (!ctx)
+			return [
+				[title, null],
+				[` ${dim("loading…")}`, null],
+			];
+		const out: Part[] = [[title, null]];
+		const items = moveMenuItems(ctx);
+		items.forEach((item, i) => {
+			if (item.dividerBefore) out.push([` ${gray("─".repeat(Math.max(1, width - 2)))}`, null]);
+			const label = item.action === "remove" ? ` ${bold(String(i + 1))} ${red(item.label)}` : ` ${bold(String(i + 1))} ${item.label}`;
+			const line = truncateToWidth(label, width, "…", true);
+			out.push([i === step.choice ? cursorLine(line, true) : line, { kind: "moveAction", action: item.action }]);
+		});
+		return out;
+	}
+	if (step.kind === "fork") {
+		const title = `Fork · from ${ctx?.branch ?? "HEAD"}`;
+		const input = step.input.render(Math.max(10, width - 10))[0] ?? "";
+		const nameRow = truncateToWidth(` ${step.field === "name" ? bold("Branch") : dim("Branch")}  ${input}`, width, "…", true);
+		const changesRow = truncateToWidth(
+			` ${step.field === "clean" ? bold("Changes") : dim("Changes")} ${togglePill("carry", !step.clean)} ${togglePill("clean", step.clean)}`,
+			width,
+			"…",
+			true,
+		);
+		const sessionRow = truncateToWidth(
+			` ${step.field === "session" ? bold("Session") : dim("Session")} ${togglePill("move", step.moveSession)} ${togglePill("stay", !step.moveSession)}`,
+			width,
+			"…",
+			true,
+		);
+		const submitLabel = step.moveSession ? "⏎ Fork & move session" : "⏎ Fork (keep session here)";
+		return [
+			[title, null],
+			[nameRow, null],
+			[step.field === "clean" ? cursorLine(changesRow, true) : changesRow, { kind: "moveToggle", field: "clean" }],
+			[step.field === "session" ? cursorLine(sessionRow, true) : sessionRow, { kind: "moveToggle", field: "session" }],
+			[` ${gray("─".repeat(Math.max(1, width - 2)))}`, null],
+			[` ${bold(green(submitLabel))}`, { kind: "moveSubmit" }],
+		];
+	}
+	if (step.kind === "checkout") {
+		const input = step.input.render(Math.max(10, width - 2))[0] ?? "";
+		const sessionRow = truncateToWidth(
+			` ${dim("Session")} ${togglePill("move", step.moveSession)} ${togglePill("stay", !step.moveSession)} ${dim("⇥")}`,
+			width,
+			"…",
+			true,
+		);
+		const out: Part[] = [
+			["Checkout branch", null],
+			[` ${input}`, null],
+			[sessionRow, { kind: "moveToggle", field: "session" }],
+		];
+		if (step.branches === null) {
+			out.push([` ${dim("loading branches…")}`, null]);
+			return out;
+		}
+		const choices = checkoutBranchChoices();
+		if (choices.length === 0) {
+			out.push([` ${dim("(no available branches)")}`, null]);
+			return out;
+		}
+		const shown = Math.max(1, Math.min(choices.length, height - 6));
+		const from = Math.max(0, Math.min(step.choice - shown + 1, choices.length - shown));
+		for (let i = from; i < from + shown; i++) {
+			const b = choices[i] as { name: string; remote: boolean };
+			const line = truncateToWidth(`  ${b.name}${b.remote ? dim(" (remote)") : ""}`, width, "…", true);
+			out.push([i === step.choice ? cursorLine(line, true) : line, { kind: "choose", index: i }]);
+		}
+		return out;
+	}
+	if (step.kind === "merge") {
+		const parent = ctx?.parentBranch ?? "main";
+		const out: Part[] = [[`Merge → ${parent}`, null]];
+		const options = ctx ? mergeOptions(ctx) : [];
+		options.forEach((opt, i) => {
+			if (opt.disabled) {
+				out.push([truncateToWidth(` ${dim(`${opt.key} ${opt.label.padEnd(7)} ${opt.note}`)}`, width, "…", true), null]);
+			} else {
+				const line = truncateToWidth(` ${bold(opt.key)} ${opt.label.padEnd(7)} ${dim(opt.note)}`, width, "…", true);
+				out.push([i === step.choice ? cursorLine(line, true) : line, { kind: "choose", index: i }]);
+			}
+		});
+		return out;
+	}
+	if (step.kind === "rebranch") {
+		const input = step.input.render(Math.max(10, width - 14))[0] ?? "";
+		return [
+			[`Rebranch · ${ctx?.branch ?? "worktree"}`, null],
+			[truncateToWidth(` ${bold("New branch")} ${input}`, width, "…", true), null],
+			[` ${gray("─".repeat(Math.max(1, width - 2)))}`, null],
+			[` ${bold(green("⏎ Rebranch & move session"))}`, { kind: "moveSubmit" }],
+		];
+	}
+	// remove
+	const parent = ctx?.parentBranch ?? "main";
+	const dirty = Boolean(ctx?.dirty);
+	const canSubmit = !dirty || step.force;
+	const out: Part[] = [[`Remove worktree → ${parent}`, null]];
+	if (dirty) out.push([` ${attention("⚠ Uncommitted changes")}`, null]);
+	out.push([
+		truncateToWidth(` ${bold("p")} Keep local branch ${step.preserveBranch ? green("[✓]") : dim("[ ]")}`, width, "…", true),
+		{ kind: "moveToggle", field: "preserveBranch" },
+	]);
+	if (dirty) {
+		out.push([
+			truncateToWidth(` ${bold("f")} Force remove ${step.force ? red("[✓]") : dim("[ ]")}`, width, "…", true),
+			{ kind: "moveToggle", field: "force" },
+		]);
+	}
+	out.push([` ${gray("─".repeat(Math.max(1, width - 2)))}`, null]);
+	out.push(
+		canSubmit
+			? [` ${bold("d")} ${bold(red("Remove worktree"))}`, { kind: "moveSubmit" }]
+			: [` ${dim("d Remove worktree · requires force")}`, null],
+	);
+	return out;
+}
+
 function renderPicker(width: number, height: number): string[] {
 	const choosing = pickerMode() as Choosing;
 	const adding = choosing.mode === "add";
+	const moving = choosing.moveTarget ?? null;
 	frame.targets = [];
 	const typed = model.path.getValue();
 	const absolute = typed.startsWith("/") || typed.startsWith("~");
@@ -469,13 +605,14 @@ function renderPicker(width: number, height: number): string[] {
 		: (model.search.render(Math.max(10, width - 2))[0] ?? "");
 	// The launch card goes on the Stage; with no room there, as on a narrow Deck, the roster draws it under its title.
 	const noteRows = Math.max(0, height - 13 - (adding ? completedRows().length : pickRows().length));
-	const card = launchOnStage(width) || width < PEEK_MIN_COLS ? null : launchCard(choosing, Math.min(LAUNCH_COLS, width), noteRows);
+	const card =
+		moving !== null || launchOnStage(width) || width < PEEK_MIN_COLS ? null : launchCard(choosing, Math.min(LAUNCH_COLS, width), noteRows);
 	for (const b of card?.buttons ?? []) frame.targets.push({ y: 1 + b.y, from: b.from, to: b.to, command: b.command });
 	frame.card = card ? card.lines.map((line) => stripTerminalSequences(line)) : null;
 	// While the menu is open, the rest of the picker waits behind it.
 	const muted = (line: string) => (choosing.menu ? gray(stripTerminalSequences(line)) : line);
 	const lines = [
-		muted(` ${bold(adding ? "add a directory" : "new session in")}`),
+		muted(` ${bold(adding ? "add a directory" : moving ? "move session to" : "new session in")}`),
 		...(card?.lines ?? []),
 		muted(` ${input}`),
 		gray("─".repeat(width)),
@@ -903,7 +1040,7 @@ function messageLine(now: number, y: number | null = null, withConfigError = tru
 
 /** The legend line: a field being typed into, where a drag would land, or the keys the mode takes. */
 function hints(y: number, cols: number, keys: FooterKeys): string {
-	if (archiving() !== null || nameMode() || snoozeMode() || lensMode()) return "";
+	if (archiving() !== null || nameMode() || snoozeMode() || lensMode() || moveMode()) return "";
 	if (filtering()) {
 		return legend(y, [{ keys: ["enter"], name: "⏎", label: "keep filter", command: { kind: "choose", index: null } }], cols);
 	}
@@ -933,7 +1070,7 @@ function legendKeys(cols: number): { cells: Part[]; lead: Binding<Command>[]; ri
 	const bindings = keymap();
 	const fixed: [name: string, label: string][] = [
 		["n", "new"],
-		["m", "group"],
+		["g", "group"],
 		["a", "archive"],
 	];
 	const shown = cols < 38 ? fixed.slice(0, 2) : fixed;
@@ -952,9 +1089,14 @@ function legend(y: number, bindings: Binding<Command>[], cols: number): string {
 
 function pickLine(row: PickRow, width: number, cursor: boolean): string {
 	if (row.kind === "add") return ` ${green("+ add a directory…")}`;
+	const currentCwd = pickerMode()?.moveTarget?.cwd;
+	const isCurrent = currentCwd !== undefined && row.target.path === currentCwd;
 	const name = marked(targetName(row.target), row.at);
-	const label = row.target.repo ? `   ${name}` : ` ${row.context ? dim(name) : bold(name)}`;
-	if (!cursor || row.context) return label;
+	const suffix = isCurrent ? dim(" (current)") : "";
+	const label = row.target.repo
+		? `   ${isCurrent ? dim(name) : name}${suffix}`
+		: ` ${row.context || isCurrent ? dim(name) : bold(name)}${suffix}`;
+	if (!cursor || row.context || isCurrent) return label;
 	return `${truncateToWidth(label, width - 3, "…", true)} ✕ `;
 }
 
@@ -1009,7 +1151,7 @@ function rowLine(row: Row, width: number, now: number): string {
 /** Where a row-anchored menu sits in the roster, under its row's: that row's key, or null while the menu floats beside it. */
 function menuRow(width: number): string | null {
 	const mode = model.mode;
-	if (mode.kind !== "archive" && mode.kind !== "name" && mode.kind !== "snooze") return null;
+	if (mode.kind !== "archive" && mode.kind !== "name" && mode.kind !== "snooze" && mode.kind !== "move") return null;
 	return panes.narrow || width >= PEEK_MIN_COLS ? mode.at.row : null;
 }
 
@@ -1235,7 +1377,7 @@ function toastOverlay(now: number, width: number, y: number): Overlay[] {
  * Both stay while the roster has the keyboard.
  */
 function launchOverlays(choosing: Choosing, width: number, height: number): Overlay[] {
-	if (model.focus !== "roster") return [];
+	if (model.focus !== "roster" || choosing.moveTarget) return [];
 	const want: Overlay[] = [];
 	const onStage = launchOnStage(width);
 	if (onStage) {
@@ -1489,7 +1631,7 @@ function peekView(row: SessionRow, width: number, maxHeight: number, open: "left
 	const buttons: { y: number; from: number; to: number; command: Command; text: string }[] = [];
 	const buttonLines: string[] = [];
 	const actions = peekButtons(row);
-	const session = actions.filter(([, , act]) => ["stop", "wake", "reload", "new", "parent"].includes(act));
+	const session = actions.filter(([, , act]) => ["stop", "wake", "reload", "move", "new", "parent"].includes(act));
 	const organize = actions.filter(([, , act]) => ["snooze", "archive", "group", "unseen"].includes(act));
 	for (const [heading, group] of [
 		["Session", session],
@@ -1649,6 +1791,17 @@ function viewState(): DeckState {
 		cursorRow: index,
 		mode: model.mode.kind,
 		picker: pickerState(),
+		move: (() => {
+			const moving = moveMode();
+			if (!moving) return null;
+			return {
+				id: moving.id,
+				step: moving.step.kind,
+				ctx: moving.ctx,
+				...(moving.step.kind === "fork" ? { clean: moving.step.clean, moveSession: moving.step.moveSession } : {}),
+				...(moving.step.kind === "checkout" ? { moveSession: moving.step.moveSession } : {}),
+			};
+		})(),
 		archive: (() => {
 			const e = model.mode.kind === "archive" ? model.entries.get(model.mode.id) : undefined;
 			if (!e) return null;

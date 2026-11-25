@@ -22,8 +22,8 @@ export function quit(args: string[]): void {
 		);
 	const hosts = new Set(listHosts().map(([host]) => host as string));
 	const live = (db.all("SELECT tmux_session, boot_id, pid FROM runtimes") as RuntimeRow[]).filter((r) => runtimeLive(r, bootId(), hosts));
-	// A reload left waiting would have the next clock start its session, which quitting everything says not to.
-	recordTx(db, () => db.run("UPDATE marks SET reload = NULL, reload_started_at = NULL WHERE reload IS NOT NULL"));
+	// A reload (or queued live move) left waiting would have the next clock start its session, which quitting says not to.
+	recordTx(db, () => db.run("UPDATE marks SET reload = NULL, reload_started_at = NULL, move_json = NULL WHERE reload IS NOT NULL"));
 	db.close();
 	// The clock first, so it can't wake a session this is stopping.
 	tmuxTry(SESSIONS, "kill-session", "-t", "=swb-ctl");

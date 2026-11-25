@@ -96,7 +96,7 @@ export default function (pi: ExtensionAPI) {
 	const script: FauxResponseFactory = async (context, options, _state, model) => {
 		const last = context.messages.at(-1);
 		if (!last) throw new Error("scenario: empty context");
-		const typed = context.messages.findLast((message) => message.role === "user");
+		const typed = context.messages.findLast((message) => message.role === "user" && text(message).trim() !== "");
 		const promptText = typed ? text(typed).trim() : "";
 		if (/^(Question about session |ask(?:-id)? |search )/.test(promptText)) {
 			mkdirSync(signals, { recursive: true });
@@ -116,14 +116,26 @@ export default function (pi: ExtensionAPI) {
 				}
 			}
 		}
-		const step = typed ? agentStep(text(typed).trim(), last.role === "toolResult" ? text(last) : null) : null;
+		const toolRes =
+			last.role === "toolResult"
+				? last
+				: text(last).trim() === "" && context.messages.at(-2)?.role === "toolResult"
+					? context.messages.at(-2)
+					: undefined;
+		const step = typed ? agentStep(promptText, toolRes ? text(toolRes) : null) : null;
 		if (step && "tool" in step) return fauxAssistantMessage(fauxToolCall(step.tool, step.args as never), { stopReason: "toolUse" });
 		if (step) return fauxAssistantMessage(step.text);
-		if (last.role === "toolResult") {
-			const prompt = text(context.messages.findLast((message) => message.role === "user") as Message);
-			if (prompt.startsWith("reach ") && (last as { toolName?: string }).toolName === "session_list") {
-				const first = /^- (\S+) · /m.exec(text(last))?.[1];
-				if (!first) throw new Error(`scenario: nothing to reach in ${text(last)}`);
+		if (toolRes) {
+			const prompt = promptText;
+			const discover = /^discover (\S+)(?: (\{.*\}))?$/s.exec(prompt.trim());
+			if (discover && (toolRes as { toolName?: string }).toolName === "tool_search") {
+				return fauxAssistantMessage(fauxToolCall(discover[1] as string, JSON.parse(discover[2] || "{}")), {
+					stopReason: "toolUse",
+				});
+			}
+			if (prompt.startsWith("reach ") && (toolRes as { toolName?: string }).toolName === "session_list") {
+				const first = /^- (\S+) · /m.exec(text(toolRes))?.[1];
+				if (!first) throw new Error(`scenario: nothing to reach in ${text(toolRes)}`);
 				return fauxAssistantMessage(
 					fauxToolCall("session_send_message", {
 						session: first,
@@ -142,6 +154,11 @@ export default function (pi: ExtensionAPI) {
 		const prompt = text(last).trim();
 		if (prompt === "Continue where you left off.") return fauxAssistantMessage("continued");
 		if (prompt.startsWith("This session was restarted to reload")) return fauxAssistantMessage("reloaded");
+		if (prompt.startsWith("Session moved to ")) {
+			mkdirSync(signals, { recursive: true });
+			writeFileSync(join(signals, "moved.prompt"), prompt);
+			return fauxAssistantMessage(`moved ok: ${prompt}`);
+		}
 		if (prompt.includes("<handoff-briefing>")) {
 			return fauxAssistantMessage(fauxToolCall("create_handoff_context", { summary: "e2e", relevant_files: [] }), {
 				stopReason: "toolUse",
@@ -200,6 +217,10 @@ export default function (pi: ExtensionAPI) {
 				);
 			case "call":
 				return fauxAssistantMessage(fauxToolCall(rest[0] as string, JSON.parse(rest.slice(1).join(" ") || "{}")), {
+					stopReason: "toolUse",
+				});
+			case "discover":
+				return fauxAssistantMessage(fauxToolCall("tool_search", { query: rest[0] as string }), {
 					stopReason: "toolUse",
 				});
 			case "tools":
