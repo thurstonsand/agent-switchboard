@@ -9,5 +9,5 @@ exclude-newer = "3d"
 requires-pixi = ">=0.84.2"
 
 [dependencies]
-ffmpeg = "==9.0.2"
+ffmpeg = "==9.1.0"
 ttyd = "==1.7.7"
