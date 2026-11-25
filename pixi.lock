@@ -29,7 +29,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/bzip2-1.0.8-hda65f42_10.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/cairo-1.18.6-h3c89d7e_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/dbus-1.16.2-he8c428d_2.conda
-      - conda: https://conda.anaconda.org/conda-forge/linux-64/ffmpeg-9.0.2-gpl_hac98dcb_908.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/ffmpeg-9.1.0-gpl_hac98dcb_900.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/fontconfig-2.18.4-h4db4eae_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/freetype-2.14.3-ha770c72_2.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/fribidi-1.0.18-h7cc23a3_0.conda
@@ -173,7 +173,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/bzip2-1.0.8-h4777abc_10.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/cairo-1.18.6-hca320e2_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/dbus-1.16.2-h5208175_2.conda
-      - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/ffmpeg-9.0.2-gpl_hc5ff13c_908.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/ffmpeg-9.1.0-gpl_hc5ff13c_900.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/fontconfig-2.18.4-ha4b22b4_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/freetype-2.14.3-h8af1aa0_2.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/fribidi-1.0.18-h5bc82ec_0.conda
@@ -312,7 +312,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/bzip2-1.0.8-h4e30115_10.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/cairo-1.18.6-h580cee5_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/dbus-1.16.2-hf049998_2.conda
-      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/ffmpeg-9.0.2-gpl_h3900d2c_108.conda
+      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/ffmpeg-9.1.0-gpl_h3900d2c_100.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/fontconfig-2.18.4-he47a414_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/freetype-2.14.3-hce30654_2.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/fribidi-1.0.18-hb001647_0.conda
@@ -499,20 +499,20 @@ packages:
     - dbus >=1.16.2,<2.0a0
   size: 449564
   timestamp: 1788197922783
-- conda: https://conda.anaconda.org/conda-forge/linux-64/ffmpeg-9.0.2-gpl_hac98dcb_908.conda
-  sha256: 73ed93688e099e16de63dcf144274e067d38ef6a99c4327e18cde0c65f9a2102
-  md5: 4050bfe5ca8b37209c6f6ccb5c265c8f
+- conda: https://conda.anaconda.org/conda-forge/linux-64/ffmpeg-9.1.0-gpl_hac98dcb_900.conda
+  sha256: e3a957ad108bddfd78bd2b03f7bd67c581520d8a92de1bf48fba4f047de40400
+  md5: c767293cccf2ec13f0a0281540da6a06
   depends:
   - __glibc >=2.17,<3.0.a0
   - alsa-lib >=1.2.16.1,<1.3.0a0
   - aom >=3.15.3,<3.16.0a0
   - bzip2 >=1.0.8,<2.0a0
-  - fontconfig >=2.18.3,<3.0a0
+  - fontconfig >=2.18.4,<3.0a0
   - fonts-conda-ecosystem
   - gmp >=6.3.0,<7.0a0
   - lame >=4.0,<4.1.0a0
   - libass >=0.17.5,<0.17.6.0a0
-  - libdav1d7 >=1.5.4
+  - libdav1d7 >=1.5.5
   - libexpat >=2.9.0,<3.0a0
   - libfreetype >=2.14.3
   - libfreetype6 >=2.14.3
@@ -563,9 +563,9 @@ packages:
   license_family: GPL
   run_exports:
     weak:
-    - ffmpeg >=9.0.2,<10.0a0
-  size: 13750274
-  timestamp: 1794633401203
+    - ffmpeg >=9.1.0,<10.0a0
+  size: 14728634
+  timestamp: 1795372637866
 - conda: https://conda.anaconda.org/conda-forge/linux-64/fontconfig-2.18.4-h4db4eae_0.conda
   sha256: 0bc4c652727b3f9002d6a04c58823a3afc48ecd8c09b1ce5b2760bb5978d192e
   md5: 794ed3b23b32d04f9cb91e4e0df140dd
@@ -2582,19 +2582,19 @@ packages:
     - dbus >=1.16.2,<2.0a0
   size: 481940
   timestamp: 1793030678317
-- conda: https://conda.anaconda.org/conda-forge/linux-aarch64/ffmpeg-9.0.2-gpl_hc5ff13c_908.conda
-  sha256: 36fd2c96ef1790d34408926feddd70efb94bac1ebbe42d6e0fc47d71046e3780
-  md5: a16d320e6206ce47cc114e9a031c77c1
+- conda: https://conda.anaconda.org/conda-forge/linux-aarch64/ffmpeg-9.1.0-gpl_hc5ff13c_900.conda
+  sha256: cd5158ba467954675fef7d6f8b19e8b6c9ca782e9dc80aa572e5f3785395c0c9
+  md5: 3503c983da7bbeb1b092509e7d47a730
   depends:
   - alsa-lib >=1.2.16.1,<1.3.0a0
   - aom >=3.15.3,<3.16.0a0
   - bzip2 >=1.0.8,<2.0a0
-  - fontconfig >=2.18.3,<3.0a0
+  - fontconfig >=2.18.4,<3.0a0
   - fonts-conda-ecosystem
   - gmp >=6.3.0,<7.0a0
   - lame >=4.0,<4.1.0a0
   - libass >=0.17.5,<0.17.6.0a0
-  - libdav1d7 >=1.5.4
+  - libdav1d7 >=1.5.5
   - libexpat >=2.9.0,<3.0a0
   - libfreetype >=2.14.3
   - libfreetype6 >=2.14.3
@@ -2641,9 +2641,9 @@ packages:
   license_family: GPL
   run_exports:
     weak:
-    - ffmpeg >=9.0.2,<10.0a0
-  size: 13236440
-  timestamp: 1794633371532
+    - ffmpeg >=9.1.0,<10.0a0
+  size: 14113607
+  timestamp: 1795372445060
 - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/fontconfig-2.18.4-ha4b22b4_0.conda
   sha256: 8453f5225903af2468ae479c1ba421dc6de64a22f9d67a2771dfd8536ce44d1d
   md5: a3b73d12e1c8f9b6b55d496b9a146f3e
@@ -4440,20 +4440,20 @@ packages:
     - dbus >=1.16.2,<2.0a0
   size: 398252
   timestamp: 1788197996006
-- conda: https://conda.anaconda.org/conda-forge/osx-arm64/ffmpeg-9.0.2-gpl_h3900d2c_108.conda
-  sha256: 91eff7ba49e099c483a98ae086034db59b25abc48e985b7b71591905156553fd
-  md5: 9ca9c42bdf40bf010cd4fd7b898e5129
+- conda: https://conda.anaconda.org/conda-forge/osx-arm64/ffmpeg-9.1.0-gpl_h3900d2c_100.conda
+  sha256: 4cf2f9b7098ad4980d800d75e054a0ae1df47fa81673c5d6c88bde90d8a25257
+  md5: 37232f23e43e6c2a93b0e8d2eb2404f9
   depends:
   - __osx >=11.0
   - aom >=3.15.3,<3.16.0a0
   - bzip2 >=1.0.8,<2.0a0
-  - fontconfig >=2.18.3,<3.0a0
+  - fontconfig >=2.18.4,<3.0a0
   - fonts-conda-ecosystem
   - gmp >=6.3.0,<7.0a0
   - lame >=4.0,<4.1.0a0
   - libass >=0.17.5,<0.17.6.0a0
   - libcxx >=21
-  - libdav1d7 >=1.5.4
+  - libdav1d7 >=1.5.5
   - libexpat >=2.9.0,<3.0a0
   - libfreetype >=2.14.3
   - libfreetype6 >=2.14.3
@@ -4493,9 +4493,9 @@ packages:
   license_family: GPL
   run_exports:
     weak:
-    - ffmpeg >=9.0.2,<10.0a0
-  size: 10724679
-  timestamp: 1794633189853
+    - ffmpeg >=9.1.0,<10.0a0
+  size: 11605704
+  timestamp: 1795372254144
 - conda: https://conda.anaconda.org/conda-forge/osx-arm64/fontconfig-2.18.4-he47a414_0.conda
   sha256: 4c2f527e28e0e43d3963f4c702ec386cd29b7b3bbe9d48e9cf125ed0e4ebaf28
   md5: 8d02085c5086137b24a01d454eb14ee4
