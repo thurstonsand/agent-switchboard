@@ -3,7 +3,7 @@
 	"extends": ["config:recommended", "customManagers:biomeVersions", ":maintainLockFilesWeekly"],
 	"minimumReleaseAge": "3 days",
 	"internalChecksFilter": "strict",
-	"ignorePaths": ["docs/wayfinding/**"],
+	"ignorePaths": ["docs/wayfinding/**", ".mise/locks/**"],
 	"customManagers": [
 		{
 			"customType": "regex",

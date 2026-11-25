@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The Deck uses Pi TUI 1.6.1, and the Pi end-to-end tests run against Pi 1.6.1.
+
 ## [0.18.1] - 2026-11-23
 
 ### Changed
