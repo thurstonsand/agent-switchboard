@@ -51,6 +51,7 @@ jobs:
         with:
           cache: false
           minimum_release_age: 3d
+          auto_update: true
       - run: bun install --frozen-lockfile
 
       - name: Release notes from the changelog

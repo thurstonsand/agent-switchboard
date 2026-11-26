@@ -26,7 +26,7 @@ install_packages() {
 }
 
 install_mise() {
-  command -v mise >/dev/null || curl -fsSL https://mise.run | sh
+  command -v mise >/dev/null || curl -fsSL https://mise.run | MISE_SELF_UPDATE_MINIMUM_RELEASE_AGE=3d sh
   mise --version
 }
 
