@@ -2,7 +2,7 @@
 [tools]
 node = "26"
 # mise safe mode ignores the root [settings] when Renovate updates this lock.
-"npm:renovate" = { version = "44.257.9", minimum_release_age = "3d", allow_builds = [
+"npm:renovate" = { version = "44.262.1", minimum_release_age = "3d", allow_builds = [
   "re2",
 ], trust_policy_excludes = [
   "@yarnpkg/libzip@3.2.2",
