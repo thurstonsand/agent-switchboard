@@ -10,7 +10,7 @@ minimum_release_age = "3d"
 [tools]
 bun = "1.4.5"
 node = "26"
-"aqua:biomejs/biome" = "2.6.8"
+"aqua:biomejs/biome" = "2.6.9"
 "aqua:tmux/tmux-builds" = { version = "3.8", os = ["linux", "macos"] }
 "aqua:charmbracelet/vhs" = "0.12.1"
 # VHS records with ttyd and ffmpeg, which pixi installs from pixi.lock.
