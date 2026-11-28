@@ -9,7 +9,7 @@
 	"devDependencies": {
 		"@anthropic-ai/claude-code": "2.1.330",
 		"@earendil-works/pi-ai": "^1.6.1",
-		"@earendil-works/pi-coding-agent": "1.6.1",
+		"@earendil-works/pi-coding-agent": "1.7.0",
 		"@openai/codex": "0.171.0",
 		"@thurstonsand/pi-wt": "^1.17.0",
 		"@types/bun": "1.4.5",
